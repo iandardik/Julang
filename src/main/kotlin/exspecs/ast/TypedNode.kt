@@ -11,6 +11,7 @@ interface TypedNode {}
 interface TypedExprNode : TypedNode {
     fun toZ3Expr(ctx : Context, symbolTypeTable : Map<String,Type>) : Expr<*>
     fun toProgramExpr(symbolTypeTable : Map<String,Type>) : ProgramExpr
+    fun getType(symbolTypeTable : Map<String,Type>) : Type
 }
 
 class TypedProgramNode(
@@ -166,6 +167,13 @@ class TypedUnaryOpExprNode(
         }
     }
 
+    override fun getType(symbolTypeTable: Map<String, Type>): Type {
+        return when (op) {
+            "~" -> boolType
+            else -> throw RuntimeException("Invalid unary op: $op")
+        }
+    }
+
     override fun toString(): String {
         return "$op $operand"
     }
@@ -178,6 +186,42 @@ class TypedBinaryOpExprNode(
 ) : TypedExprNode {
     override fun toZ3Expr(ctx: Context, symbolTypeTable : Map<String,Type>) : Expr<*> {
         return when (op) {
+            "+" -> {
+                // we overload the + operator across types
+                val lhsType = lhsOperand.getType(symbolTypeTable)
+                val rhsType = rhsOperand.getType(symbolTypeTable)
+                val toStrType = { operand : TypedExprNode, type : Type ->
+                    // TODO support variables / args too
+                    when (type) {
+                        is BoolType -> ctx.mkStringConst(
+                            "" + operand
+                                .toProgramExpr(symbolTypeTable)
+                                .eval(emptyState(), emptyConcreteAction())
+                                .value as String
+                        )
+
+                        is IntType -> ctx.mkStringConst(
+                            "" + operand
+                                .toProgramExpr(symbolTypeTable)
+                                .eval(emptyState(), emptyConcreteAction())
+                                .value as String
+                        )
+
+                        is StringType -> operand.toZ3Expr(ctx, symbolTypeTable) as Expr<SeqSort<CharSort>>
+                        else -> throw RuntimeException("Unsupported type: $type")
+                    }
+                }
+                when {
+                    lhsType is IntType && rhsType is IntType ->
+                        ctx.mkAdd(lhsOperand.toZ3Expr(ctx,symbolTypeTable) as ArithExpr, rhsOperand.toZ3Expr(ctx,symbolTypeTable) as ArithExpr)
+                    lhsType is StringType || rhsType is StringType -> {
+                        val lhsStrVal = toStrType(lhsOperand, lhsType)
+                        val rhsStrVal = toStrType(rhsOperand, rhsType)
+                        ctx.mkConcat(lhsStrVal, rhsStrVal)
+                    }
+                    else -> throw RuntimeException("Cannot call + on arguments with types $lhsType and $rhsType")
+                }
+            }
             "=" -> ctx.mkEq(lhsOperand.toZ3Expr(ctx,symbolTypeTable), rhsOperand.toZ3Expr(ctx,symbolTypeTable))
             "<" -> ctx.mkLt(lhsOperand.toZ3Expr(ctx,symbolTypeTable) as ArithExpr, rhsOperand.toZ3Expr(ctx,symbolTypeTable) as ArithExpr)
             "<=" -> ctx.mkLe(lhsOperand.toZ3Expr(ctx,symbolTypeTable) as ArithExpr, rhsOperand.toZ3Expr(ctx,symbolTypeTable) as ArithExpr)
@@ -185,7 +229,6 @@ class TypedBinaryOpExprNode(
             ">=" -> ctx.mkGe(lhsOperand.toZ3Expr(ctx,symbolTypeTable) as ArithExpr, rhsOperand.toZ3Expr(ctx,symbolTypeTable) as ArithExpr)
             "&" -> ctx.mkAnd(lhsOperand.toZ3Expr(ctx,symbolTypeTable) as BoolExpr, rhsOperand.toZ3Expr(ctx,symbolTypeTable) as BoolExpr)
             "|" -> ctx.mkOr(lhsOperand.toZ3Expr(ctx,symbolTypeTable) as BoolExpr, rhsOperand.toZ3Expr(ctx,symbolTypeTable) as BoolExpr)
-            "+" -> ctx.mkAdd(lhsOperand.toZ3Expr(ctx,symbolTypeTable) as ArithExpr, rhsOperand.toZ3Expr(ctx,symbolTypeTable) as ArithExpr)
             "-" -> ctx.mkSub(lhsOperand.toZ3Expr(ctx,symbolTypeTable) as ArithExpr, rhsOperand.toZ3Expr(ctx,symbolTypeTable) as ArithExpr)
             else -> throw RuntimeException("Invalid binary op: $op")
         }
@@ -194,8 +237,39 @@ class TypedBinaryOpExprNode(
     override fun toProgramExpr(symbolTypeTable: Map<String, Type>): ProgramExpr {
         return when (op) {
             "+" -> PlusProgramExpr(lhsOperand.toProgramExpr(symbolTypeTable), rhsOperand.toProgramExpr(symbolTypeTable))
-            "-" -> MinusProgramExpr(lhsOperand.toProgramExpr(symbolTypeTable), rhsOperand.toProgramExpr(symbolTypeTable))
             "=" -> EqProgramExpr(lhsOperand.toProgramExpr(symbolTypeTable), rhsOperand.toProgramExpr(symbolTypeTable))
+            "<" -> LtProgramExpr(lhsOperand.toProgramExpr(symbolTypeTable), rhsOperand.toProgramExpr(symbolTypeTable))
+            "<=" -> LeProgramExpr(lhsOperand.toProgramExpr(symbolTypeTable), rhsOperand.toProgramExpr(symbolTypeTable))
+            ">" -> GtProgramExpr(lhsOperand.toProgramExpr(symbolTypeTable), rhsOperand.toProgramExpr(symbolTypeTable))
+            ">=" -> GeProgramExpr(lhsOperand.toProgramExpr(symbolTypeTable), rhsOperand.toProgramExpr(symbolTypeTable))
+            "&" -> AndProgramExpr(lhsOperand.toProgramExpr(symbolTypeTable), rhsOperand.toProgramExpr(symbolTypeTable))
+            "|" -> OrProgramExpr(lhsOperand.toProgramExpr(symbolTypeTable), rhsOperand.toProgramExpr(symbolTypeTable))
+            "-" -> MinusProgramExpr(lhsOperand.toProgramExpr(symbolTypeTable), rhsOperand.toProgramExpr(symbolTypeTable))
+            else -> throw RuntimeException("Unsupported or invalid binary op: $op")
+        }
+    }
+
+    override fun getType(symbolTypeTable: Map<String, Type>): Type {
+        return when (op) {
+            "+" -> {
+                val lhsType = lhsOperand.getType(symbolTypeTable)
+                val rhsType = rhsOperand.getType(symbolTypeTable)
+                if (lhsType == intType && rhsType == intType) {
+                    intType
+                } else if (lhsType == stringType || rhsType == stringType) {
+                    stringType
+                } else {
+                    throw RuntimeException("Cannot call + on arguments with types $lhsType and $rhsType")
+                }
+            }
+            "=" -> boolType
+            "<" -> boolType
+            "<=" -> boolType
+            ">" -> boolType
+            ">=" -> boolType
+            "&" -> boolType
+            "|" -> boolType
+            "-" -> intType
             else -> throw RuntimeException("Unsupported or invalid binary op: $op")
         }
     }
@@ -230,6 +304,10 @@ class TypedLiteralValueExprNode(
         }
     }
 
+    override fun getType(symbolTypeTable: Map<String, Type>): Type {
+        return type
+    }
+
     override fun toString(): String {
         return value
     }
@@ -249,6 +327,10 @@ class TypedSymbolValueExprNode(
 
     override fun toProgramExpr(symbolTypeTable: Map<String,Type>) : ProgramExpr {
         return SymbolProgramExpr(Variable(name,symbolTypeTable[name]!!))
+    }
+
+    override fun getType(symbolTypeTable: Map<String, Type>): Type {
+        return symbolTypeTable[name]!!
     }
 
     override fun toString(): String {

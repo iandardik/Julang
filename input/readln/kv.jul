@@ -23,7 +23,7 @@ p-class FrontEnd {
             (state = "C") & (key = keyReq)
         update:
             state := "D"
-            valReq := val
+            valReq := "val: " + val
     }
 
     action Println(msg : String) {
