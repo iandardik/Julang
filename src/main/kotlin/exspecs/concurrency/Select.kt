@@ -90,10 +90,9 @@ class Select(private vararg val cases : Case) : Runnable {
             var done = false
             while (!done) {
                 val ret = chan.sync(constraint, selectRef)
-                done = ret.isPresent || select.winner.isPresent || chan.isClosed()
-                if (ret.isPresent) {
+                done = ret.isPresent || ret.isAborted || select.winner.isPresent || chan.isClosed()
+                if (ret.isPresent && ret.isSAT) {
                     exspecs.tools.assert(select.winner.get() == chan.hashCode())
-                    exspecs.tools.assert(done)
                     callback.invoke(ret.result.get())
                 }
                 select.lock.lock()

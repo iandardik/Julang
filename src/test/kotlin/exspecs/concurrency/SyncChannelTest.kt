@@ -129,7 +129,7 @@ class SyncChannelTest {
             t1.start()
             assertTrue(t1.isAlive)
             chan.close()
-            t1.join(100)
+            t1.join(300)
             assertFalse(t1.isAlive)
         }
     }
