@@ -83,7 +83,7 @@ class SyncChannel<V : Any, C : Any>(
             // waiting in the "lobby" to get in
             while (participants.size == syncSize || (retryOnUNSAT && !satisfiableWithCurrentLobby(me))) {
                 lobbyCond.await()
-                if (isClosed(lobbyLock)) {
+                if (isClosed()) {
                     return Triple(false, emptySet(), emptySet())
                 }
             }
@@ -94,7 +94,7 @@ class SyncChannel<V : Any, C : Any>(
                 lobbyCond.signalAll()
             } else {
                 lobbyCond.await()
-                if (isClosed(lobbyLock)) {
+                if (isClosed()) {
                     return Triple(false, emptySet(), emptySet())
                 }
             }
@@ -143,7 +143,7 @@ class SyncChannel<V : Any, C : Any>(
                 // at this point, this thread is attempting to commit but doesn't have the votes yet to commit.
                 // wait for the other threads to decide if they want to commit or abort.
                 comCond.await()
-                if (isClosed(comLock)) {
+                if (isClosed()) {
                     return SyncChannelResult.abort()
                 }
             }
@@ -260,28 +260,8 @@ class SyncChannel<V : Any, C : Any>(
         }
     }
 
-    /**
-     * lock is assumed to already be locked
-     */
-    private fun isClosed(lock : Lock) : Boolean {
-        try {
-            lock.unlock()
-            closedLock.lock()
-            try {
-                if (closed) {
-                    return true
-                }
-            }
-            finally {
-                closedLock.unlock()
-            }
-            return false
-        }
-        finally {
-            lock.lock()
-        }
-    }
-
+    // this function is called internally when the lobbyLock / comLock is already acquired, which is safe because we
+    // don't do anything with conditions (i.e. await() / signal()) with the closedLock.
     fun isClosed() : Boolean {
         closedLock.lock()
         try {
