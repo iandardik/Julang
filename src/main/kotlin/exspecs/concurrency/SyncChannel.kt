@@ -12,12 +12,10 @@ class SyncChannel<V : Any, C : Any>(
     private val syncSize : Int,
     private val compute : (Set<C>)->Optional<V>
 ) {
-    // the shared variables used in the lobby
+    // the shared variable used in the lobby
     private val lobbyLock = ReentrantLock()
     private val lobbyCond = lobbyLock.newCondition()
-    private var size = 0
-    private var constraints = emptySet<C>()
-    private var selects : Set<Select> = emptySet()
+    private var participants = mutableSetOf<Participant<C>>()
 
     // the shared variables used for communication while attempting to sync
     private val comLock = ReentrantLock()
@@ -43,31 +41,67 @@ class SyncChannel<V : Any, C : Any>(
      * This method will not check each constraint to see if it is satisfiable--that is up to the caller.
      */
     fun sync(constraint : Optional<C>, select : Optional<Select> = Optional.empty(), retryOnUNSAT : Boolean = true) : SyncChannelResult<V> {
-        // TODO catch all exceptions in this method (instead of enterThroughLobby() and syncAttempt()) because an
-        // TODO interruption can happen here too. Either way, we need to add more book keeping to our data structures
-        // TODO so the exiting/interrupted thread can always exit safely.
-        var attemptingSync = true
-        var syncResult = SyncChannelResult.none<V>()
-        while (attemptingSync) {
-            // not the fairest policy to have each thread reenter the lobby on each retry
-            val enter = enterThroughLobby(constraint, select, retryOnUNSAT)
-            if (!enter) {
-                return SyncChannelResult.abort()
+        val me = Participant(constraint, select, Thread.currentThread())
+        try {
+            var attemptingSync = true
+            var syncResult = SyncChannelResult.none<V>()
+            while (attemptingSync) {
+                // not the fairest policy to have each thread reenter the lobby on each retry
+                val (enter, constraints, selects) = enterThroughLobby(me, retryOnUNSAT)
+                if (!enter) {
+                    return SyncChannelResult.abort()
+                }
+
+                // once we've made it here, attempt to sync
+                val result = syncAttempt(select.isPresent, constraints, selects)
+
+                // retry syncing under the following two conditions:
+                // 1. the result is a retry
+                // 2. the result is UNSAT and we're in retryOnUNSAT mode
+                val retry = result.isRetry || (result.isUNSAT && retryOnUNSAT)
+                if (!retry) {
+                    attemptingSync = false
+                    syncResult = result
+                }
             }
+            return syncResult
+        }
+        catch (e : InterruptedException) {
+            handleGeneralInterrupt(me)
+            return SyncChannelResult.abort()
+        }
+    }
 
-            // once we've made it here, attempt to sync
-            val result = syncAttempt(select.isPresent)
+    private fun handleGeneralInterrupt(me : Participant<C>) {
+        var issueAbort = false
 
-            // retry syncing under the following two conditions:
-            // 1. the result is a retry
-            // 2. the result is UNSAT and we're in retryOnUNSAT mode
-            val retry = result.isRetry || (result.isUNSAT && retryOnUNSAT)
-            if (!retry) {
-                attemptingSync = false
-                syncResult = result
+        // remove me from the participant list if its in there
+        lobbyLock.lock()
+        try {
+            if (me in participants) {
+                if (participants.size < syncSize) {
+                    // the sync attempt has not begun yet so it is safe to leave the participant list
+                    participants.remove(me)
+                } else if (participants.size == syncSize) {
+                    // the sync attempt has begun, so simply removing me from the participant list will not stop the
+                    // sync attempt. instead, we issue an abort.
+                    issueAbort = true
+                } else {
+                    throw RuntimeException("This case is impossible")
+                }
             }
         }
-        return syncResult
+        finally {
+            lobbyLock.unlock()
+        }
+
+        // issue an abort. essentially, this thread should have made it into a sync attempt but was interrupted, so we
+        // exit the same way a sync attempt would.
+        if (issueAbort) {
+            comLock.lock()
+            aborted = true
+            exitThroughTheLobby()
+        }
     }
 
     /**
@@ -76,47 +110,53 @@ class SyncChannel<V : Any, C : Any>(
      * on the assumption that each individual constraint is satisfiable, which we rely on for efficiency (to reduce the
      * number of calls to the SMT solver).
      */
-    private fun satisfiableWithCurrentLobby(constraint : Optional<C>) : Boolean {
-        if (constraint.isEmpty || constraints.isEmpty()) {
+    private fun satisfiableWithCurrentLobby(me : Participant<C>) : Boolean {
+        val myConstraint = me.constraint
+        val currentConstraints = participants
+            .filter { it.constraint.isPresent }
+            .map { it.constraint.get() }
+            .toSet()
+        if (myConstraint.isEmpty || currentConstraints.isEmpty()) {
             return true
         }
-        return compute.invoke(constraints.plus(constraint.get())).isPresent
+        return compute.invoke(currentConstraints.plus(myConstraint.get())).isPresent
     }
 
-    private fun enterThroughLobby(constraint : Optional<C>, select : Optional<Select>, retryOnUNSAT : Boolean) : Boolean {
-        if (checkIsClosed()) {
-            return false
+    private fun enterThroughLobby(me : Participant<C>, retryOnUNSAT : Boolean) : Triple<Boolean,Set<C>,Set<Select>> {
+        if (isClosed()) {
+            return Triple(false, emptySet(), emptySet())
         }
 
         // wait to enter the channel
         lobbyLock.lock()
         try {
             // waiting in the "lobby" to get in
-            while (size == syncSize || (retryOnUNSAT && !satisfiableWithCurrentLobby(constraint))) {
+            while (participants.size == syncSize || (retryOnUNSAT && !satisfiableWithCurrentLobby(me))) {
                 lobbyCond.await()
-                if (checkIsClosed(lobbyLock)) {
-                    return false
+                if (isClosed(lobbyLock)) {
+                    return Triple(false, emptySet(), emptySet())
                 }
             }
 
             // the thread has gotten "in", now wait until enough threads have also gotten in
-            ++size
-            if (constraint.isPresent) {
-                // add the thread's value to the set of constraints
-                constraints = constraints.plus(constraint.get())
-            }
-            if (select.isPresent) {
-                selects = selects.plus(select.get())
-            }
-            if (size == syncSize) {
+            participants.add(me)
+            if (participants.size == syncSize) {
                 lobbyCond.signalAll()
             } else {
                 lobbyCond.await()
-                if (checkIsClosed(lobbyLock)) {
-                    return false
+                if (isClosed(lobbyLock)) {
+                    return Triple(false, emptySet(), emptySet())
                 }
             }
-            return true
+            val constraints = participants
+                .filter { it.constraint.isPresent }
+                .map { it.constraint.get() }
+                .toSet()
+            val selects = participants
+                .filter { it.select.isPresent }
+                .map { it.select.get() }
+                .toSet()
+            return Triple(true, constraints, selects)
         }
         catch (e : InterruptedException) {
             // there are two await() calls in this try, so two possible places where an interrupt can happen.
@@ -124,29 +164,46 @@ class SyncChannel<V : Any, C : Any>(
             // TODO to clean up after the second await(), we need to add more book keeping to size, constraints, and
             // TODO selects to keep track of each thread in the lobby, and we can remove them here so they correctly
             // TODO exit the lobby.
-            return false
+            return Triple(false, emptySet(), emptySet())
         }
         finally {
             lobbyLock.unlock()
         }
     }
 
-    private fun exitThroughLobby() {
-        lobbyLock.lock()
+    /**
+     * Assumes that the comLock is held and must be released
+     */
+    private fun exitThroughTheLobby() {
+        var cleanup = false
         try {
-            size = 0
-            constraints = emptySet()
-            selects = emptySet()
-
-            // tell everyone in the lobby that we're done
-            lobbyCond.signalAll()
+            ++numExited
+            if (numExited == syncSize) {
+                // the last one out cleans up
+                commitVotes = 0
+                aborted = false
+                syncValue = SyncChannelResult.none()
+                numExited = 0
+                cleanup = true
+            }
+        } finally {
+            comLock.unlock()
         }
-        finally {
-            lobbyLock.unlock()
+
+        // also clean up the participants data structure, which involves acquiring the lobbyLock
+        if (cleanup) {
+            lobbyLock.lock()
+            try {
+                participants = mutableSetOf()
+                lobbyCond.signalAll() // tell everyone in the lobby that we're done
+            }
+            finally {
+                lobbyLock.unlock()
+            }
         }
     }
 
-    private fun selectsCommit() : Boolean {
+    private fun selectsCommit(selects : Set<Select>) : Boolean {
         // request a commit from all parties--only commit if all are able to
         // 2PL on all selects
         val allLocks = selects.map { it.getPublicLock() }.sorted()
@@ -167,7 +224,7 @@ class SyncChannel<V : Any, C : Any>(
         }
     }
 
-    private fun syncAttempt(hasSelect : Boolean) : SyncChannelResult<V> {
+    private fun syncAttempt(hasSelect : Boolean, constraints : Set<C>, selects : Set<Select>) : SyncChannelResult<V> {
         // the channel has been entered
         comLock.lock()
         try {
@@ -182,7 +239,7 @@ class SyncChannel<V : Any, C : Any>(
             }
 
             // attempt to commit to the value
-            val commit = selectsCommit()
+            val commit = selectsCommit(selects)
             if (commit) {
                 ++commitVotes
             }
@@ -192,7 +249,7 @@ class SyncChannel<V : Any, C : Any>(
                 // at this point, this thread is attempting to commit but doesn't have the votes yet to commit.
                 // wait for the other threads to decide if they want to commit or abort.
                 comCond.await()
-                if (checkIsClosed(comLock)) {
+                if (isClosed(comLock)) {
                     return SyncChannelResult.abort()
                 }
             }
@@ -213,16 +270,7 @@ class SyncChannel<V : Any, C : Any>(
             return SyncChannelResult.abort()
         }
         finally {
-            ++numExited
-            if (numExited == syncSize) {
-                // the last one out cleans up
-                commitVotes = 0
-                aborted = false
-                syncValue = SyncChannelResult.none()
-                numExited = 0
-                exitThroughLobby()
-            }
-            comLock.unlock()
+            exitThroughTheLobby()
         }
     }
 
@@ -250,7 +298,7 @@ class SyncChannel<V : Any, C : Any>(
     /**
      * lock is assumed to already be locked
      */
-    private fun checkIsClosed(lock : Lock) : Boolean {
+    private fun isClosed(lock : Lock) : Boolean {
         try {
             lock.unlock()
             closedLock.lock()
@@ -269,7 +317,7 @@ class SyncChannel<V : Any, C : Any>(
         }
     }
 
-    private fun checkIsClosed() : Boolean {
+    fun isClosed() : Boolean {
         closedLock.lock()
         try {
             if (closed) {
@@ -281,6 +329,12 @@ class SyncChannel<V : Any, C : Any>(
         }
         return false
     }
+
+    private data class Participant<C : Any>(
+        val constraint : Optional<C>,
+        val select : Optional<Select>,
+        val thread : Thread,
+    ) {}
 }
 
 data class SyncChannelResult<V : Any>(
