@@ -1,6 +1,7 @@
 package exspecs.concurrency
 
 import java.util.*
+import java.util.concurrent.locks.Lock
 import java.util.concurrent.locks.ReentrantLock
 
 /**
@@ -83,10 +84,9 @@ class SyncChannel<V : Any, C : Any>(
     }
 
     private fun enterThroughLobby(constraint : Optional<C>, select : Optional<Select>, retryOnUNSAT : Boolean) : Boolean {
-        // TODO figure out the reason this causes programs to hang, then put this back in to pass the "testClose1" test case
-        /*if (checkIsClosed()) {
+        if (checkIsClosed()) {
             return false
-        }*/
+        }
 
         // wait to enter the channel
         lobbyLock.lock()
@@ -94,7 +94,7 @@ class SyncChannel<V : Any, C : Any>(
             // waiting in the "lobby" to get in
             while (size == syncSize || (retryOnUNSAT && !satisfiableWithCurrentLobby(constraint))) {
                 lobbyCond.await()
-                if (checkIsClosed()) {
+                if (checkIsClosed(lobbyLock)) {
                     return false
                 }
             }
@@ -112,7 +112,7 @@ class SyncChannel<V : Any, C : Any>(
                 lobbyCond.signalAll()
             } else {
                 lobbyCond.await()
-                if (checkIsClosed()) {
+                if (checkIsClosed(lobbyLock)) {
                     return false
                 }
             }
@@ -192,7 +192,7 @@ class SyncChannel<V : Any, C : Any>(
                 // at this point, this thread is attempting to commit but doesn't have the votes yet to commit.
                 // wait for the other threads to decide if they want to commit or abort.
                 comCond.await()
-                if (checkIsClosed()) {
+                if (checkIsClosed(comLock)) {
                     return SyncChannelResult.abort()
                 }
             }
@@ -244,6 +244,28 @@ class SyncChannel<V : Any, C : Any>(
             comCond.signalAll()
         } finally {
             comLock.unlock()
+        }
+    }
+
+    /**
+     * lock is assumed to already be locked
+     */
+    private fun checkIsClosed(lock : Lock) : Boolean {
+        try {
+            lock.unlock()
+            closedLock.lock()
+            try {
+                if (closed) {
+                    return true
+                }
+            }
+            finally {
+                closedLock.unlock()
+            }
+            return false
+        }
+        finally {
+            lock.lock()
         }
     }
 
