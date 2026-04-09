@@ -1,29 +1,28 @@
 package exspecs.ast
 
-import exspecs.parser.JulayLexer
 import exspecs.parser.JulayParser
 import exspecs.parser.JulayParserBaseVisitor
 import exspecs.program.boolType
 import exspecs.program.intType
 import exspecs.program.stringType
-import org.antlr.v4.runtime.CharStream
-import org.antlr.v4.runtime.CommonTokenStream
+import org.antlr.v4.runtime.ParserRuleContext
 
-fun buildAST(input : CharStream) : ASTNode {
-    val lexer = JulayLexer(input)
-    val tokens = CommonTokenStream(lexer)
-    val parser = JulayParser(tokens)
-    return ASTBuilder().visit(parser.program())
+fun oneChoice(vararg choices : ParserRuleContext?) : ParserRuleContext {
+    val nonNullChoices = choices.filterNotNull()
+    exspecs.tools.assert(nonNullChoices.size == 1, "Expected one choice but got: ${nonNullChoices.size}")
+    return nonNullChoices[0]
 }
 
 class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
 
-    /**
-     * A program is a collection of processes.
-     */
-    override fun visitProgram(ctx: JulayParser.ProgramContext?): ASTNode {
-        val procNodes = ctx!!.pclass().map { visit(it) }
-        return ProgramNode(procNodes)
+    override fun visitRoot(ctx: JulayParser.RootContext?): ASTNode {
+        val declNodes = ctx!!.decl().map { visit(it) }
+        return RootNode(declNodes)
+    }
+
+    override fun visitDecl(ctx: JulayParser.DeclContext?): ASTNode {
+        val decl = oneChoice(ctx!!.pclass(), ctx.proc(), ctx.program(), ctx.spec())
+        return DeclNode(visit(decl))
     }
 
     override fun visitPclass(ctx: JulayParser.PclassContext?): ASTNode {
@@ -32,40 +31,64 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
         return ProcClassNode(name, localDecls)
     }
 
-    override fun visitPclass_body(ctx: JulayParser.Pclass_bodyContext?): ASTNode {
-        return if (ctx!!.var_decl() != null) {
-            visit(ctx.var_decl())
-        } else if (ctx.action_decl() != null) {
-            visit(ctx.action_decl())
-        } else {
-            throw RuntimeException("Invalid visitPclass_body: no var_decl or action_decl found")
-        }
-    }
-
-    override fun visitVar_decl(ctx: JulayParser.Var_declContext?): ASTNode {
-        val name = ctx!!.ID(0).text
-        val type = ctx.ID(1).text
-        val value = visit(ctx.expr())
-        return VarDeclNode(name, type, value)
-    }
-
-    override fun visitAction_decl(ctx: JulayParser.Action_declContext?): ASTNode {
+    override fun visitProc(ctx: JulayParser.ProcContext?): ASTNode {
         val name = ctx!!.ID().text
-        val args = visit(ctx.action_args())
-        val guards = ctx.guard().map { visit(it) }
-        val updates = ctx.update().map { visit(it) }
-        return ActionDeclNode(name, args, guards, updates)
+        val value = visit(ctx.proc_expr())
+        return ProcNode(name, value)
     }
 
-    override fun visitAction_args(ctx: JulayParser.Action_argsContext?): ASTNode {
-        val args = ctx!!.action_arg().map { visit(it) }
-        return ActionArgsNode(args)
+    override fun visitProgram(ctx: JulayParser.ProgramContext?): ASTNode {
+        val name = ctx!!.ID().text
+        val value = visit(ctx.proc_expr())
+        return ProgramNode(name, value)
     }
 
-    override fun visitAction_arg(ctx: JulayParser.Action_argContext?): ASTNode {
+    override fun visitSpec(ctx: JulayParser.SpecContext?): ASTNode {
+        val name = ctx!!.ID().text
+        val value = visit(ctx.proc_expr())
+        return SpecNode(name, value)
+    }
+
+    override fun visitPclass_body(ctx: JulayParser.Pclass_bodyContext?): ASTNode {
+        val body = oneChoice(ctx!!.`var`(), ctx.constructor(), ctx.transition())
+        return ProcClassBodyNode(visit(body))
+    }
+
+    override fun visitVar(ctx: JulayParser.VarContext?): ASTNode {
         val name = ctx!!.ID(0).text
         val type = ctx!!.ID(1).text
-        return ActionArgNode(name, type)
+        return VarNode(name, type)
+    }
+
+    override fun visitConstructor(ctx: JulayParser.ConstructorContext?): ASTNode {
+        val name = ctx!!.ID().text
+        val args = visit(ctx.args())
+        val body = ctx.action_body().map { visit(it) }
+        return ConstructorNode(name, args, body)
+    }
+
+    override fun visitTransition(ctx: JulayParser.TransitionContext?): ASTNode {
+        val name = ctx!!.ID().text
+        val args = visit(ctx.args())
+        val body = ctx.action_body().map { visit(it) }
+        val loc = Pair(ctx.getStart().line, ctx.getStart().line)
+        return TransitionNode(name, args, body, loc)
+    }
+
+    override fun visitArgs(ctx: JulayParser.ArgsContext?): ASTNode {
+        val args = ctx!!.arg().map { visit(it) }
+        return ArgsNode(args)
+    }
+
+    override fun visitArg(ctx: JulayParser.ArgContext?): ASTNode {
+        val name = ctx!!.ID(0).text
+        val type = ctx!!.ID(1).text
+        return ArgNode(name, type)
+    }
+
+    override fun visitAction_body(ctx: JulayParser.Action_bodyContext?): ASTNode {
+        val body = oneChoice(ctx!!.guard(), ctx.transit(), ctx.error())
+        return ActionBodyNode(visit(body))
     }
 
     override fun visitGuard(ctx: JulayParser.GuardContext?): ASTNode {
@@ -73,20 +96,27 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
         return GuardNode(guardExpr)
     }
 
-    override fun visitUpdate(ctx: JulayParser.UpdateContext?): ASTNode {
-        val updates = ctx!!.var_update().map { visit(it) }
-        return UpdateNode(updates)
+    override fun visitTransit(ctx: JulayParser.TransitContext?): ASTNode {
+        val transits = ctx!!.var_transit().map { visit(it) }
+        return TransitNode(transits)
     }
 
-    override fun visitVar_update(ctx: JulayParser.Var_updateContext?): ASTNode {
+    override fun visitError(ctx: JulayParser.ErrorContext?): ASTNode {
+        val errExpr = visit(ctx!!.expr())
+        return ErrorNode(errExpr)
+    }
+
+    override fun visitVar_transit(ctx: JulayParser.Var_transitContext?): ASTNode {
         val varName = ctx!!.ID().text
-        val update = visit(ctx.expr())
-        return VarUpdateNode(varName, update)
+        val transit = visit(ctx.expr())
+        return VarTransitNode(varName, transit)
     }
 
     override fun visitExpr(ctx: JulayParser.ExprContext?): ASTNode {
        return if (ctx!!.EQ() != null) {
            BinaryOpExprNode("=", visit(ctx.expr(0)), visit(ctx.expr(1)))
+       } else if (ctx.NEQ() != null || ctx.BANG_NEQ() != null) {
+           BinaryOpExprNode("#", visit(ctx.expr(0)), visit(ctx.expr(1)))
        } else if (ctx.LT() != null) {
            BinaryOpExprNode("<", visit(ctx.expr(0)), visit(ctx.expr(1)))
        } else if (ctx.LTE() != null) {
@@ -99,7 +129,7 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
            BinaryOpExprNode("&", visit(ctx.expr(0)), visit(ctx.expr(1)))
        } else if (ctx.OR() != null) {
            BinaryOpExprNode("|", visit(ctx.expr(0)), visit(ctx.expr(1)))
-       } else if (ctx.NOT() != null) {
+       } else if (ctx.NOT() != null || ctx.BANG() != null) {
            UnaryOpExprNode("~", visit(ctx.expr(0)))
        } else if (ctx.PLUS() != null) {
            BinaryOpExprNode("+", visit(ctx.expr(0)), visit(ctx.expr(1)))
@@ -112,6 +142,15 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
        } else {
            throw RuntimeException("Invalid visitExpr: invalid expression found: ${ctx.text}")
        }
+    }
+
+    override fun visitProc_expr(ctx: JulayParser.Proc_exprContext?): ASTNode {
+        return if (ctx!!.ID() != null) {
+            ValueProcExprNode(ctx.ID().text)
+        } else {
+            val compositeProcs = ctx.proc_expr().map { visit(it) }
+            CompositeProcExprNode(compositeProcs)
+        }
     }
 
     override fun visitValue(ctx: JulayParser.ValueContext?): ASTNode {

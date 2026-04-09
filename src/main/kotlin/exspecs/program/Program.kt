@@ -4,40 +4,36 @@ import com.microsoft.z3.BoolExpr
 import com.microsoft.z3.Context
 import com.microsoft.z3.Status
 import exspecs.concurrency.SyncChannel
-import exspecs.program.library.makePrintln
-import exspecs.program.library.makePrintlnInt
-import exspecs.program.library.makeReadln
-import exspecs.program.library.makeReadlnInt
 import java.util.*
-
-// TODO this can be done much better
-val library = setOf(makePrintln(), makePrintlnInt(), makeReadln(), makeReadlnInt())
 
 /**
  * A program represents one or more processes that interact together on a single computer.
  */
 class Program : Runnable {
-    private val procs : Set<Proc>
-    private val channels : Set<SyncChannel<ConcreteAction,BoolExpr>>
+    private val constructorProc : Proc
 
     /**
      * The constructor sets up a channel for each SymbolicAction so that each process that engages in the action can
      * communicate (synchronize on args) over the channel.
      */
-    constructor(components : Set<TransitionSystem>) {
+    constructor(componentInfo : Set<TransitionSystemStaticInfo>) {
         // all action signatures that have the same name should have the same param
         // TODO add a sanity check for the above requirement
+        // no transition should be for initially (only constructors)
+        // TODO add a sanity check for the above requirement
 
-        // add library dependencies (which are components)
-        val allSigs = components.flatMap { it.alphabet() }.map { it.signature }
-        val libraryDependencies = library
-            .filter { lib -> lib.alphabet().any { act -> allSigs.contains(act.signature) } }
-            .toSet()
-        val allComponents = components union libraryDependencies
+        val constructorCtx = Context()
+        val initiallySig = ActionSignature("initially", listOf())
+        val initiallyAction = SymbolicAction(initiallySig, constructorCtx.mkTrue(), emptyMap(), Optional.empty())
 
         // create a SyncChannel for each action
-        val actionBag = allComponents.flatMap { it.alphabet().map { act -> act.signature } }
-        val actionCounts = actionBag.toSet().associateWith { setAct -> actionBag.count { bagAct -> bagAct == setAct } }
+        val actionBag = componentInfo.flatMap { it.alphabet union it.constructors }
+        val actionCounts = actionBag.toSet()
+            .associateWith { setAct -> actionBag.count { bagAct -> bagAct == setAct } }
+            .toMutableMap()
+        // the initially action is a self-sync for the constructor proc
+        actionCounts[initiallySig] = 1
+
         val channelTable = actionCounts.keys.associateWith { act ->
             val syncSize = actionCounts[act]!!
             val ctx = Context() // one Context per channel
@@ -53,15 +49,15 @@ class Program : Runnable {
                 }
             }
         }
-        procs = allComponents.map { Proc(it,channelTable) }.toSet()
-        channels = channelTable.values.toSet()
+
+        val constructors = componentInfo
+            .flatMap { c -> c.constructors.map { act -> Pair(act, c) } }
+            .toSet()
+        constructorProc = Proc(ConstructorTransitionSystem(initiallyAction, constructors, channelTable, constructorCtx), channelTable)
     }
 
     override fun run() {
-        val threads = procs.map { Pair(it,Thread(it)) }
-        threads.forEach { (_,thread) -> thread.start() }
-        val selfTerminatingThreads = threads.filter { (proc,_) -> proc.selfTerminate() }
-        selfTerminatingThreads.forEach { (_,thread) -> thread.join() }
-        channels.forEach { it.close() }
+        // the constructor proc is responsible for terminating the program when all 'self terminating' procs are done
+        constructorProc.run()
     }
 }

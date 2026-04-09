@@ -23,7 +23,7 @@ p-class FrontEnd {
             (state = "C") & (key = keyReq)
         update:
             state := "D"
-            valReq := "val: " + val
+            valReq := "val: " + val // just to test string concatenation
     }
 
     action Println(msg : String) {

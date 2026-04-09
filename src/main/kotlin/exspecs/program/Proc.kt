@@ -10,13 +10,12 @@ class Proc(
     private val transitionSystem : TransitionSystem,
     private val channelTable : Map<ActionSignature, SyncChannel<ConcreteAction, BoolExpr>>
 ) : Runnable {
-    private val name = transitionSystem.getName()
     private val ctx = transitionSystem.getContext()
 
     override fun run() {
         while (true) {
             var nextAct = Optional.empty<ConcreteAction>()
-            val enabledActions = transitionSystem.alphabet().filter {
+            val enabledActions = transitionSystem.actions().filter {
                 val enabled = ctx.mkAnd(it.guard, transitionSystem.currentStateToZ3Expr())
                 val solver = ctx.mkSolver()
                 solver.add(enabled)
@@ -33,18 +32,11 @@ class Proc(
 
             // check for deadlocks
             if (nextAct.isEmpty) {
-                //println("$name deadlock")
                 return
             }
 
             // transit to the next state
             transitionSystem.transit(nextAct.get())
         }
-    }
-
-    fun selfTerminate() = transitionSystem.selfTerminate()
-
-    override fun toString() : String {
-        return "Proc($name)"
     }
 }

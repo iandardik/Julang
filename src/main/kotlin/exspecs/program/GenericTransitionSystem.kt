@@ -12,10 +12,8 @@ class GenericTransitionSystem(
 ) : TransitionSystem {
     private var state = initState
 
-    override fun getName() = name
     override fun getContext() = ctx
-    override fun alphabet() = alphabet
-    override fun selfTerminate() = selfTerminate
+    override fun actions() = alphabet
 
     override fun currentStateToZ3Expr() : BoolExpr {
         return state.toZ3Expr(ctx)

@@ -19,7 +19,8 @@ class TypedProgramNode(
 ) : TypedNode {
     fun toProgram() : Program {
         val transitionSystems = procNodes.map { it.toTransitionSystem() }.toSet()
-        return Program(transitionSystems)
+        //return Program(transitionSystems)
+        TODO()
     }
     override fun toString(): String {
         return procNodes.joinToString("\n\n") { it.toString() }

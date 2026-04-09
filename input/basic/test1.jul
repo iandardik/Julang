@@ -1,30 +1,43 @@
 p-class S {
-    var x : Int = 0
-    var p : String = "true"
+    var x : Int
+    var print : Bool
+
+    constructor initially() {
+        transit:
+            x := 0
+            print := true
+    }
     
-    action I(inc : Int) {
+    transition increment(inc : Int) {
         guard:
-            (x <= 10) & (inc > 0) & (p = "false")
-        update:
+            (x <= 10) & (inc > 0) & (print = false)
+        transit:
             x := x + inc
-            p := "true"
+            print := true
     }
 
-    action PrintlnInt(msg : Int) {
+    transition printlnInt(msg : Int) {
         guard:
-            (p = "true") & (msg = x)
-        update:
-            p := "false"
+            (print = true) & (msg = x)
+        transit:
+            print := false
     }
 }
 
 p-class T {
-    var y : Int = 0
+    var x : Int
 
-    action I(inc : Int) {
+    constructor initially() {
+        transit:
+            x := 0
+    }
+
+    transition increment(inc : Int) {
         guard:
-            inc > 3 & y <= 10
-        update:
-            y := y + inc
+            inc > 3 & x <= 10
+        transit:
+            x := x + inc
     }
 }
+
+program main := S || T || PrintlnInt
