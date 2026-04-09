@@ -3,78 +3,37 @@ package exspecs.program.library
 import com.microsoft.z3.Context
 import exspecs.program.*
 import exspecs.tools.mkStringConst
-import java.util.*
 
-fun makeReadln() : TransitionSystem {
-    val ctx = Context()
-    val initState = State(mapOf<Variable,Value>(
-        Pair(Variable("input",stringType),Value("", stringType)),
-        Pair(Variable("read", boolType),Value(true, boolType)),
-    ))
-    val alphabet = setOf(
+class ReadlnTS : TransitionSystem {
+    private val ctx = Context()
+    private var prompt = true
+    private var msg = ""
+
+    override fun actions() = setOf(
         SymbolicAction(
-            ActionSignature("PromptUser", listOf(Variable("msg", stringType))),
-            ctx.mkAnd(
-                ctx.mkEq(ctx.mkBoolConst("read"), ctx.mkBool(true)),
-            ),
-            mapOf(),
-            Optional.of { state, act ->
-                println(act.lookup(Variable("msg", stringType)))
-                val input = readln()
-                State(
-                    mapOf(
-                        Pair(Variable("input", stringType), Value(input, stringType)),
-                        Pair(Variable("read", boolType), Value(false, boolType)),
-                    )
-                )
-            }
+            ActionSignature("prompt", listOf()),
+            ctx.mkEq(ctx.mkBoolConst("prompt"), ctx.mkBool(true))
         ),
         SymbolicAction(
-            ActionSignature("Readln", listOf(Variable("msg", stringType))),
+            ActionSignature("readln", listOf(Variable("msg",stringType))),
             ctx.mkAnd(
-                ctx.mkEq(ctx.mkBoolConst("read"), ctx.mkBool(false)),
-                ctx.mkEq(ctx.mkStringConst("msg"), ctx.mkStringConst("input")),
-            ),
-            mapOf(Pair(Variable("read", boolType), BoolLiteralProgramExpr(true)))
+                ctx.mkEq(ctx.mkBoolConst("prompt"), ctx.mkBool(false)),
+                ctx.mkEq(ctx.mkStringConst("msg"), ctx.mkString(msg))
+            )
         ),
     )
-    // set selfTerminate to false because this is a library function
-    return GenericTransitionSystem(initState, alphabet, "ReadProc", ctx, false)
+    override fun currentStateToZ3Expr() = ctx.mkAnd(
+        ctx.mkEq(ctx.mkBoolConst("prompt"), ctx.mkBool(prompt))
+    )
+    override fun transit(act: ConcreteAction) {
+        if (act.signature.name == "prompt") {
+            prompt = false
+            msg = readln()
+        }
+        else {
+            prompt = true
+        }
+    }
+    override fun getContext() = ctx
 }
 
-fun makeReadlnInt() : TransitionSystem {
-    val ctx = Context()
-    val initState = State(mapOf(
-        Pair(Variable("input", intType),Value(0, intType)),
-        Pair(Variable("read", boolType),Value(true, boolType)),
-    ))
-    val alphabet = setOf(
-        SymbolicAction(
-            ActionSignature("PromptUserInt", listOf()),
-            ctx.mkAnd(
-                ctx.mkEq(ctx.mkBoolConst("read"), ctx.mkBool(true)),
-            ),
-            mapOf(),
-            Optional.of { state, act ->
-                println("Enter an Int:")
-                val input = readln()
-                State(
-                    mapOf(
-                        Pair(Variable("input", intType), Value(Integer.parseInt(input), intType)),
-                        Pair(Variable("read", boolType), Value(false, boolType)),
-                    )
-                )
-            }
-        ),
-        SymbolicAction(
-            ActionSignature("ReadlnInt", listOf(Variable("msg", intType))),
-            ctx.mkAnd(
-                ctx.mkEq(ctx.mkBoolConst("read"), ctx.mkBool(false)),
-                ctx.mkEq(ctx.mkIntConst("msg"), ctx.mkIntConst("input")),
-            ),
-            mapOf(Pair(Variable("read", boolType), BoolLiteralProgramExpr(true)))
-        ),
-    )
-    // set selfTerminate to false because this is a library function
-    return GenericTransitionSystem(initState, alphabet, "ReadProcInt", ctx, false)
-}

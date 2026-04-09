@@ -1,20 +1,14 @@
 package exspecs.program
 
 import com.microsoft.z3.BoolExpr
-import java.util.*
 
 /**
  * Represents a symbolic action for a given transition system / proc.
- * This class is particular to a transition system / proc because it dictates when it's enabled (via the guard) and how
- * the transition system transits to a new state (via the var updates).
+ * This class is particular to a transition system / proc because it dictates when it's enabled (via the guard). Usually
+ * a symbolic action also describes how the transition system transits to a new state, but we do not include this here
+ * (each TransitionSystem class decides how the transit should happen).
  */
 data class SymbolicAction(
     val signature : ActionSignature,
     val guard : BoolExpr,
-    val varUpdates : Map<Variable,ProgramExpr>,
-
-    /**
-     * All side effects take place before executing the ConcreteAction.
-     */
-    val sideEffect : Optional<(State,ConcreteAction)->State> = Optional.empty(),
 ) {}

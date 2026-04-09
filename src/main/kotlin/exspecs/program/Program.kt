@@ -24,7 +24,7 @@ class Program : Runnable {
 
         val constructorCtx = Context()
         val initiallySig = ActionSignature("initially", listOf())
-        val initiallyAction = SymbolicAction(initiallySig, constructorCtx.mkTrue(), emptyMap(), Optional.empty())
+        val initiallyAction = SymbolicAction(initiallySig, constructorCtx.mkTrue())
 
         // create a SyncChannel for each action
         val actionBag = componentInfo.flatMap { it.alphabet union it.constructors }

@@ -27,8 +27,6 @@ class TestTS : TransitionSystem {
                     ctx.mkLe(ctx.mkIntConst("counter"), ctx.mkInt(10)),
                     ctx.mkEq(ctx.mkBoolConst("print"), ctx.mkFalse()),
                 ),
-                mapOf(),
-                Optional.empty()
             ),
             SymbolicAction(
                 ActionSignature("println", listOf(Variable("msg",stringType))),
@@ -36,8 +34,6 @@ class TestTS : TransitionSystem {
                     ctx.mkEq(ctx.mkStringConst("msg"), ctx.mkString("$counter")),
                     ctx.mkEq(ctx.mkBoolConst("print"), ctx.mkTrue()),
                 ),
-                mapOf(),
-                Optional.empty()
             ),
         )
     }

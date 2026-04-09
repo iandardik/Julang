@@ -85,7 +85,8 @@ class TypedActionDeclNode(
         }
         val varUpdates = updates // TODO need to make sure variables are not updated multiple times
             .fold(emptyMap<Variable,ProgramExpr>()) { acc,u -> acc + u.toStateVarUpdate(symbolTypeTableWithActs) }
-        return SymbolicAction(sig, guard, varUpdates)
+        //return SymbolicAction(sig, guard, varUpdates)
+        TODO()
     }
     override fun toString(): String {
         val body = guards + updates

@@ -16,7 +16,7 @@ class ConstructorTransitionSystem(
     private val z3True = ctx.mkTrue()
     private val nonInitiallyConstructorActions = constructors
         .filter { (sig,_) -> sig != initiallyAction.signature }
-        .map { SymbolicAction(it.first, z3True, emptyMap(), Optional.empty()) }
+        .map { SymbolicAction(it.first, z3True) }
         .toSet()
     private val liveProcsLock = ReentrantLock()
     private val liveSelfTerminatingProcs = mutableSetOf<Thread>()

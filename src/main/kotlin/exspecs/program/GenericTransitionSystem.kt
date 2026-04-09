@@ -23,6 +23,7 @@ class GenericTransitionSystem(
      * Adds an implicit frame condition for variables to remain the same if they are not mentioned in <updates>
      */
     override fun transit(concAct : ConcreteAction) {
+        /*
         val symAct = correspondingSymbolicAction(concAct)
         symAct.sideEffect.ifPresent { state = it.invoke(state,concAct) }
         val updatedAssignments = state.assignments.map { (k,v) ->
@@ -33,6 +34,8 @@ class GenericTransitionSystem(
             }
         }.associate { it }
         state = State(updatedAssignments)
+         */
+        TODO()
     }
 
     private fun correspondingSymbolicAction(concAct : ConcreteAction) : SymbolicAction {
