@@ -4,6 +4,7 @@ import exspecs.parser.JulayParser
 import exspecs.parser.JulayParserBaseVisitor
 import exspecs.program.boolType
 import exspecs.program.intType
+import exspecs.program.parseType
 import exspecs.program.stringType
 import org.antlr.v4.runtime.ParserRuleContext
 
@@ -57,7 +58,7 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
     override fun visitVar(ctx: JulayParser.VarContext?): ASTNode {
         val name = ctx!!.ID(0).text
         val type = ctx!!.ID(1).text
-        return VarNode(name, type)
+        return VarNode(name, parseType(type))
     }
 
     override fun visitConstructor(ctx: JulayParser.ConstructorContext?): ASTNode {
@@ -83,7 +84,7 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
     override fun visitArg(ctx: JulayParser.ArgContext?): ASTNode {
         val name = ctx!!.ID(0).text
         val type = ctx!!.ID(1).text
-        return ArgNode(name, type)
+        return ArgNode(name, parseType(type))
     }
 
     override fun visitAction_body(ctx: JulayParser.Action_bodyContext?): ASTNode {

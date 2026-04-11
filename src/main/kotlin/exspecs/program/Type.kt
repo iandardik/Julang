@@ -76,7 +76,7 @@ class BoolType : Type {
     }
 
     override fun toString(): String {
-        return "Bool"
+        return "Boolean"
     }
 
     override fun equals(other: Any?): Boolean {

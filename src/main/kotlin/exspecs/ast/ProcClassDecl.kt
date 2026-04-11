@@ -1,0 +1,110 @@
+package exspecs.ast
+
+import exspecs.program.*
+
+data class ProcClassDecl(
+    val name : String,
+    val stateVars : List<Variable>,
+    val constructors : List<ActionDecl>,
+    val transitions : List<ActionDecl>,
+) {
+
+    fun toKotlinClassString(): String {
+        val stateVarTypes = stateVars.associate { Pair(it.name,it.type) }
+        val stateVarsStr = stateVars.joinToString(",\n") { "private var $it" }
+        val actionsStr = "override fun actions(): Set<SymbolicAction> = setOf(\n" +
+                transitions.joinToString(",\n") { it.toActionString(stateVarTypes).prependIndent() } +
+                "\n)"
+        val currentStateStr = "override fun currentStateToZ3Expr(): BoolExpr {\n" +
+                "return ctx.mkTrue()".prependIndent() + // TODO update Proc's pattern
+                "\n}"
+        val transitStr = "override fun transit(act: ConcreteAction) {" +
+                "\nreturn when (act.signature.name) {".prependIndent() +
+                transitions.joinToString("") {
+                    "\n\"${it.action.name}\" -> {" + "\n${it.toTransitString(stateVarTypes)}".prependIndent() + "\n}"
+                }.prependIndent().prependIndent() +
+                "\nelse -> throw RuntimeException(\"Action is outside my alphabet: \${act.signature}\")".prependIndent().prependIndent() +
+                "\n}".prependIndent() +
+                "\n}"
+        return "class $name(" +
+                "\n$stateVarsStr".prependIndent() +
+                "\n) : TransitionSystem {" +
+                "\nprivate val ctx = Context()".prependIndent() +
+                "\n$actionsStr".prependIndent() +
+                "\n$currentStateStr".prependIndent() +
+                "\n$transitStr".prependIndent() +
+                "\noverride fun getContext() = ctx".prependIndent() +
+                "\n}"
+    }
+
+    fun toKotlinStaticInfoString(): String {
+        val transitionInfo = transitions.joinToString(",\n") { it.toStaticInfoString().prependIndent() }
+        val constructorInfo = constructors.joinToString(",\n") { it.toStaticInfoString().prependIndent() }
+        val constructorArgs = constructors // TODO handle multiple ctors
+            .map { it.transits.values.map { v -> v.toString() } }[0]
+            .joinToString(", ") { it }
+        val constructor = "$name($constructorArgs)"
+        return "TransitionSystemStaticInfo(" +
+                ("\nsetOf(" +
+                "\n$transitionInfo" +
+                "\n)," +
+                "\nsetOf(" +
+                "\n$constructorInfo" +
+                "\n)," +
+                "\ntrue) { $constructor }").prependIndent()
+    }
+}
+
+data class ActionDecl(
+    val action : ActionSignature,
+    val guards : List<ASTNode>,
+    val transits : Map<String,ASTNode>
+) {
+    fun toActionString(stateVarTypes : Map<String,Type>) : String {
+        val argTypes = action.args.associate { Pair(it.name,it.type) }
+        val symbolTypes = stateVarTypes + argTypes // action args are more tightly scoped than state vars
+        val argSymbols = action.args.map { it.name }.toSet()
+
+        val actionArgsStr = action.args.joinToString(", ") {
+            val typeStr = when (it.type) {
+                boolType -> "boolType"
+                intType -> "intType"
+                stringType -> "stringType"
+                else -> throw RuntimeException("Invalid type: ${it.type}")
+            }
+            "Variable(\"${it.name}\", $typeStr)"
+        }
+        val actionSigStr = "ActionSignature(\"${action.name}\", listOf($actionArgsStr))"
+        val guardStr = if (guards.size == 1) {
+            val guard = guards[0]
+            guard.toZ3GuardString(symbolTypes, argSymbols)
+        } else {
+            val body = guards.joinToString(", ") { it.toZ3GuardString(symbolTypes, argSymbols) }
+            "ctx.mkAnd($body)"
+        }
+        return "SymbolicAction(" +
+                "\n$actionSigStr,".prependIndent() +
+                "\n$guardStr".prependIndent() +
+                "\n)"
+    }
+
+    fun toTransitString(stateVarTypes : Map<String,Type>) : String {
+        val argTypes = action.args.associate { Pair(it.name,it.type) }
+        val symbolTypes = stateVarTypes + argTypes // action args are more tightly scoped than state vars
+        val argSymbols = action.args.map { it.name }.toSet()
+        return transits.map { (v,e) -> "$v = ${e.toTransitString(symbolTypes,argSymbols)}" }.joinToString("\n")
+    }
+
+    fun toStaticInfoString(): String {
+        val actionArgsStr = action.args.joinToString(", ") {
+            val typeStr = when (it.type) {
+                boolType -> "boolType"
+                intType -> "intType"
+                stringType -> "stringType"
+                else -> throw RuntimeException("Invalid type: ${it.type}")
+            }
+            "Variable(\"${it.name}\", $typeStr)"
+        }
+        return "ActionSignature(\"${action.name}\", listOf($actionArgsStr))"
+    }
+}

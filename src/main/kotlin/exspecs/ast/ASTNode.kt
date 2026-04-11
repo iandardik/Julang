@@ -2,19 +2,31 @@ package exspecs.ast
 
 import exspecs.program.*
 
-interface ASTNode {
-    fun errorPass() : List<CompileError>
-    fun toKotlin() : String {
-        return this.toString()
+abstract class ASTNode(
+    val children : List<ASTNode>
+) {
+    open fun errorPass() : List<CompileError> = children.flatMap { it.errorPass() }
+    open fun procPass() : List<ProcDecl> = children.flatMap { it.procPass() }
+    open fun procClassPass(pclassName : String) : List<ProcClassDecl> = children.flatMap { it.procClassPass(pclassName) }
+    open fun constructors() : List<ActionDecl> = children.flatMap { it.constructors() }
+    open fun transitions() : List<ActionDecl> = children.flatMap { it.transitions() }
+    open fun actionArgs() : List<Variable> = children.flatMap { it.actionArgs() }
+    open fun guards() : List<ASTNode> = children.flatMap { it.guards() }
+    open fun transits() : Map<String,ASTNode> = children.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() }
+    open fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>) : String {
+        throw RuntimeException("Unsupported")
+    }
+    open fun toTransitString(symbolTypes : Map<String,Type>, argSymbols : Set<String>) : String {
+        throw RuntimeException("Unsupported")
+    }
+    open fun type(symbolTypes : Map<String,Type>) : Type {
+        throw RuntimeException("type() is unsupported for: ${this.javaClass}")
     }
 }
 
 class RootNode(
     private val declNodes : List<ASTNode>
-) : ASTNode {
-    override fun errorPass(): List<CompileError> {
-        return declNodes.flatMap { it.errorPass() }
-    }
+) : ASTNode(declNodes) {
     override fun toString(): String {
         return declNodes.joinToString("\n\n") { it.toString() }
     }
@@ -22,8 +34,9 @@ class RootNode(
 
 class DeclNode(
     private val declNode : ASTNode
-) : ASTNode {
+) : ASTNode(listOf(declNode)) {
     override fun errorPass(): List<CompileError> {
+        // TODO make sure the name of each decl is unique
         return declNode.errorPass()
     }
     override fun toString(): String {
@@ -34,17 +47,17 @@ class DeclNode(
 class ProcClassNode(
     private val name : String,
     private val localDecls : List<ASTNode>
-) : ASTNode {
-    /*fun toTypedAST() : TypedProcClassNode {
-        val varDecls = localDecls.filterIsInstance<VarDeclNode>()
-        val actionDecls = localDecls.filterIsInstance<ActionDeclNode>()
-        localDecls
-            .filter { it !in varDecls && it !in actionDecls }
-            .forEach { throw RuntimeException("Unexpected p-class declaration: $it") }
-        return TypedProcClassNode(name, varDecls.map { it.toTypedAST() }, actionDecls.map { it.toTypedAST() })
-    }*/
-    override fun errorPass(): List<CompileError> {
-        return localDecls.flatMap { it.errorPass() }
+) : ASTNode(localDecls) {
+    override fun procClassPass(pclassName: String): List<ProcClassDecl> {
+        if (pclassName != name) {
+            return listOf()
+        }
+        val stateVars = localDecls.flatMap { it.children }
+            .filterIsInstance<VarNode>().map { Variable(it.name,it.type) }
+        val constructors = localDecls.flatMap { it.constructors() }
+        val transitions = localDecls.flatMap { it.transitions() }
+        val decl = ProcClassDecl(name, stateVars, constructors, transitions)
+        return listOf(decl)
     }
     override fun toString(): String {
         val body = localDecls.joinToString("\n") { "$it".prependIndent() }
@@ -55,9 +68,9 @@ class ProcClassNode(
 class ProcNode(
     private val name : String,
     private val value : ASTNode
-) : ASTNode {
-    override fun errorPass(): List<CompileError> {
-        return value.errorPass()
+) : ASTNode(listOf(value)) {
+    override fun procPass(): List<ProcDecl> {
+        return listOf(ProcDecl(name, value.procPass(), ProcDeclType.Proc))
     }
     override fun toString(): String {
         return "proc $name := $value"
@@ -67,9 +80,9 @@ class ProcNode(
 class ProgramNode(
     private val name : String,
     private val value : ASTNode
-) : ASTNode {
-    override fun errorPass(): List<CompileError> {
-        return value.errorPass()
+) : ASTNode(listOf(value)) {
+    override fun procPass(): List<ProcDecl> {
+        return listOf(ProcDecl(name, value.procPass(), ProcDeclType.Program))
     }
     override fun toString(): String {
         return "program $name := $value"
@@ -79,9 +92,9 @@ class ProgramNode(
 class SpecNode(
     private val name : String,
     private val value : ASTNode
-) : ASTNode {
-    override fun errorPass(): List<CompileError> {
-        return value.errorPass()
+) : ASTNode(listOf(value)) {
+    override fun procPass(): List<ProcDecl> {
+        return listOf(ProcDecl(name, value.procPass(), ProcDeclType.Spec))
     }
     override fun toString(): String {
         return "spec $name := $value"
@@ -90,22 +103,16 @@ class SpecNode(
 
 class ProcClassBodyNode(
     private val body : ASTNode
-) : ASTNode {
-    override fun errorPass(): List<CompileError> {
-        return body.errorPass()
-    }
+) : ASTNode(listOf(body)) {
     override fun toString(): String {
         return body.toString()
     }
 }
 
 class VarNode(
-    private val name : String,
-    private val type : String
-) : ASTNode {
-    override fun errorPass(): List<CompileError> {
-        return listOf()
-    }
+    val name : String,
+    val type : Type
+) : ASTNode(listOf()) {
     override fun toString(): String {
         return "$name : $type"
     }
@@ -115,7 +122,7 @@ class ConstructorNode(
     private val name : String,
     private val args : ASTNode,
     private val body : List<ASTNode>
-) : ASTNode {
+) : ASTNode(body) {
     override fun errorPass(): List<CompileError> {
         val errors = mutableListOf<CompileError>()
         errors.addAll(args.errorPass())
@@ -123,6 +130,15 @@ class ConstructorNode(
         // TODO ensure that each transit includes each state var exactly once
         // TODO ensure that there is no guard, since it will not be followed by the ConstructorTS
         return errors
+    }
+    override fun constructors(): List<ActionDecl> {
+        return listOf(
+            ActionDecl(
+                ActionSignature(name,args.actionArgs()),
+                super.guards(),
+                super.transits()
+            )
+        )
     }
     override fun toString(): String {
         val bodyStr = body.joinToString("\n") { "$it".prependIndent() }
@@ -135,7 +151,7 @@ class TransitionNode(
     private val args : ASTNode,
     private val body : List<ASTNode>,
     private val loc : Pair<Int,Int>
-) : ASTNode {
+) : ASTNode(listOf(args) + body) {
     override fun errorPass(): List<CompileError> {
         val errors = mutableListOf<CompileError>()
         errors.addAll(args.errorPass())
@@ -146,6 +162,15 @@ class TransitionNode(
         // TODO ensure that each transit has a unique state var
         return errors
     }
+    override fun transitions(): List<ActionDecl> {
+        return listOf(
+            ActionDecl(
+                ActionSignature(name,args.actionArgs()),
+                super.guards(),
+                super.transits()
+            )
+        )
+    }
     override fun toString(): String {
         val bodyStr = body.joinToString("\n") { "$it".prependIndent() }
         return "transition $name($args) {\n$bodyStr\n}"
@@ -154,19 +179,7 @@ class TransitionNode(
 
 class ArgsNode(
     private val args : List<ASTNode>
-) : ASTNode {
-    fun toTypedAST() : TypedActionArgsNode {
-        val typedArgs = args.map { arg ->
-            if (arg !is ArgNode) {
-                throw RuntimeException("Expected ActionArgNode")
-            }
-            arg.toTypedAST()
-        }
-        return TypedActionArgsNode(typedArgs)
-    }
-    override fun errorPass(): List<CompileError> {
-        return args.flatMap { it.errorPass() }
-    }
+) : ASTNode(args) {
     override fun toString(): String {
         return args.joinToString(", ") { it.toString() }
     }
@@ -174,13 +187,10 @@ class ArgsNode(
 
 class ArgNode(
     private val name : String,
-    private val type : String
-) : ASTNode {
-    fun toTypedAST() : TypedActionArgNode {
-        return TypedActionArgNode(name, parseType(type))
-    }
-    override fun errorPass(): List<CompileError> {
-        return listOf()
+    private val type : Type
+) : ASTNode(listOf()) {
+    override fun actionArgs(): List<Variable> {
+        return listOf(Variable(name,type))
     }
     override fun toString(): String {
         return "$name : $type"
@@ -189,27 +199,17 @@ class ArgNode(
 
 class ActionBodyNode(
     private val body : ASTNode
-) : ASTNode {
-    override fun errorPass(): List<CompileError> {
-        return body.errorPass()
-    }
+) : ASTNode(listOf(body)) {
     override fun toString(): String {
         return body.toString()
     }
 }
 
 class GuardNode(
-    private val expr : ASTNode
-) : ASTNode {
-    fun toTypedAST() : TypedGuardNode {
-        if (expr !is ExprNode) {
-            throw RuntimeException("Expected TypedExprNode")
-        }
-        val typedGuardExpr = expr.toTypedAST()
-        return TypedGuardNode(typedGuardExpr)
-    }
-    override fun errorPass(): List<CompileError> {
-        return expr.errorPass()
+    val expr : ASTNode
+) : ASTNode(listOf(expr)) {
+    override fun guards(): List<ASTNode> {
+        return listOf(expr)
     }
     override fun toString(): String {
         val exprStr = "$expr".prependIndent()
@@ -219,19 +219,7 @@ class GuardNode(
 
 class TransitNode(
     private val transits : List<ASTNode>
-) : ASTNode {
-    /*fun toTypedAST() : TypedUpdateNode {
-        val typedUpdates = transits.map { transit ->
-            if (transit !is VarUpdateNode) {
-                throw RuntimeException("Expected UpdateNode") // TODO
-            }
-            transit.toTypedAST()
-        }
-        return TypedUpdateNode(typedUpdates)
-    }*/
-    override fun errorPass(): List<CompileError> {
-        return transits.flatMap { it.errorPass() }
-    }
+) : ASTNode(transits) {
     override fun toString(): String {
         return "transit:\n${transits.joinToString("\n") { "$it".prependIndent() }}"
     }
@@ -239,10 +227,7 @@ class TransitNode(
 
 class ErrorNode(
     private val expr : ASTNode
-) : ASTNode {
-    override fun errorPass(): List<CompileError> {
-        return expr.errorPass()
-    }
+) : ASTNode(listOf(expr)) {
     override fun toString(): String {
         val exprStr = "$expr".prependIndent()
         return "error:\n$exprStr"
@@ -250,36 +235,39 @@ class ErrorNode(
 }
 
 class VarTransitNode(
-    private val varName : String,
-    private val expr : ASTNode
-) : ASTNode {
-    override fun errorPass(): List<CompileError> {
-        return expr.errorPass()
+    val varName : String,
+    val expr : ASTNode
+) : ASTNode(listOf(expr)) {
+    override fun transits(): Map<String, ASTNode> {
+        return mapOf(Pair(varName,expr))
     }
     override fun toString(): String {
         return "$varName := $expr"
     }
 }
 
-interface ExprNode : ASTNode {
-    fun toTypedAST() : TypedExprNode
-}
-
 class UnaryOpExprNode(
     private val op : String,
     private val operand : ASTNode
-) : ExprNode {
-    override fun toTypedAST(): TypedExprNode {
-        if (operand !is ExprNode) {
-            throw RuntimeException("Expected ExprNode")
+) : ASTNode(listOf(operand)) {
+    override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>): String {
+        return when (op) {
+            "~" -> "ctx.mkNot(${operand.toZ3GuardString(symbolTypes, argSymbols)})"
+            else -> throw RuntimeException("Invalid unary op: $op")
         }
-        return TypedUnaryOpExprNode(op, operand.toTypedAST())
     }
-    override fun errorPass(): List<CompileError> {
-        return operand.errorPass()
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        val transitStr = operand.toTransitString(symbolTypes, argSymbols)
+        return "($op $transitStr)"
+    }
+    override fun type(symbolTypes: Map<String, Type>): Type {
+        return when (op) {
+            "~" -> boolType
+            else -> throw RuntimeException("Invalid unary op: $op")
+        }
     }
     override fun toString(): String {
-        return "$op $operand"
+        return "($op $operand)"
     }
 }
 
@@ -287,34 +275,96 @@ class BinaryOpExprNode(
     private val op : String,
     private val lhsOperand : ASTNode,
     private val rhsOperand : ASTNode
-) : ExprNode {
-    override fun toTypedAST(): TypedExprNode {
-        if (lhsOperand !is ExprNode || rhsOperand !is ExprNode) {
-            throw RuntimeException("Expected ExprNode")
+) : ASTNode(listOf(lhsOperand,rhsOperand)) {
+    override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>): String {
+        val lhsGuardStr = lhsOperand.toZ3GuardString(symbolTypes,argSymbols)
+        val rhsGuardStr = rhsOperand.toZ3GuardString(symbolTypes,argSymbols)
+        return when (op) {
+            "=" -> "ctx.mkEq($lhsGuardStr,$rhsGuardStr)"
+            "#" -> "ctx.mkNot(ctx.mkEq($lhsGuardStr,$rhsGuardStr))"
+            "<" -> "ctx.mkLt($lhsGuardStr,$rhsGuardStr)"
+            "<=" -> "ctx.mkLe($lhsGuardStr,$rhsGuardStr)"
+            ">" -> "ctx.mkGt($lhsGuardStr,$rhsGuardStr)"
+            ">=" -> "ctx.mkGe($lhsGuardStr,$rhsGuardStr)"
+            "&" -> "ctx.mkAnd($lhsGuardStr,$rhsGuardStr)"
+            "|" -> "ctx.mkOr($lhsGuardStr,$rhsGuardStr)"
+            "+" -> {
+                val lhsType = lhsOperand.type(symbolTypes)
+                val rhsType = rhsOperand.type(symbolTypes)
+                when {
+                    lhsType is IntType && rhsType is IntType -> "ctx.mkAdd($lhsGuardStr,$rhsGuardStr)"
+                    lhsType is StringType || rhsType is StringType -> {
+                        //val lhsEvalToStr = "ctx.mkString(${lhsOperand}.toString())"
+                        //val rhsEvalToStr = "ctx.mkString(${rhsOperand}.toString())"
+                        //"ctx.mkConcat($lhsEvalToStr,$rhsEvalToStr)"
+                        val lhsEvalToStr = "($lhsOperand).toString()"
+                        val rhsEvalToStr = "($rhsOperand).toString()"
+                        "ctx.mkString($lhsEvalToStr + $rhsEvalToStr)"
+                    }
+                    else -> throw RuntimeException("Cannot add types: $lhsType and $rhsType")
+                }
+            }
+            "-" -> "ctx.mkMinus($lhsGuardStr,$rhsGuardStr)"
+            else -> throw RuntimeException("Invalid binary op: $op")
         }
-        return TypedBinaryOpExprNode(op, lhsOperand.toTypedAST(), rhsOperand.toTypedAST())
     }
-    override fun errorPass(): List<CompileError> {
-        return lhsOperand.errorPass() + rhsOperand.errorPass()
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        // for readability
+        val lhs = lhsOperand.toTransitString(symbolTypes, argSymbols)
+        val rhs = rhsOperand.toTransitString(symbolTypes, argSymbols)
+        return "($lhs $op $rhs)"
+    }
+    override fun type(symbolTypes: Map<String, Type>): Type {
+        return when (op) {
+            "=" -> boolType
+            "#" -> boolType
+            "<" -> boolType
+            "<=" -> boolType
+            ">" -> boolType
+            ">=" -> boolType
+            "&" -> boolType
+            "|" -> boolType
+            "+" -> {
+                val lhsType = lhsOperand.type(symbolTypes)
+                val rhsType = rhsOperand.type(symbolTypes)
+                when {
+                    lhsType is IntType && rhsType is IntType -> intType
+                    lhsType is StringType || rhsType is StringType -> stringType
+                    else -> throw RuntimeException("Cannot add types: $lhsType and $rhsType")
+                }
+            }
+            "-" -> intType
+            else -> throw RuntimeException("Invalid binary op: $op")
+        }
     }
     override fun toString(): String {
         // for readability
-        val lhs = if (lhsOperand is BinaryOpExprNode && lhsOperand.op != "=") "($lhsOperand)" else "$lhsOperand"
-        val rhs = if (rhsOperand is BinaryOpExprNode && rhsOperand.op != "=") "($rhsOperand)" else "$rhsOperand"
-        return "$lhs $op $rhs"
+        val lhs = "$lhsOperand"
+        val rhs = "$rhsOperand"
+        return "($lhs $op $rhs)"
     }
 }
 
 class LiteralValueExprNode(
     private val value : String,
     private val type : Type
-) : ExprNode {
-    override fun toTypedAST(): TypedExprNode {
-        return TypedLiteralValueExprNode(value,type)
+) : ASTNode(listOf()) {
+    override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>): String {
+        return when (type) {
+            is BoolType -> "ctx.mkBool($value)"
+            is IntType -> "ctx.mkInt($value)"
+            is StringType -> "ctx.mkString(\"$value\")"
+            else -> throw RuntimeException("Invalid type: $type")
+        }
     }
-    override fun errorPass(): List<CompileError> {
-        return listOf()
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        return if (type is StringType) {
+            "\"$value\""
+        } else {
+            value
+        }
     }
+    override fun type(symbolTypes: Map<String, Type>) = type
     override fun toString(): String {
         return if (type == stringType) "\"$value\"" else value
     }
@@ -322,25 +372,51 @@ class LiteralValueExprNode(
 
 class SymbolValueExprNode(
     private val symbol : String
-) : ExprNode {
-    override fun toTypedAST(): TypedExprNode {
-        return TypedSymbolValueExprNode(symbol)
+) : ASTNode(listOf()) {
+    override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>): String {
+        val type = symbolTypes[symbol]
+        if (symbol in argSymbols) {
+            return when (type) {
+                is BoolType -> "ctx.mkBoolConst(\"$symbol\")"
+                is IntType -> "ctx.mkIntConst(\"$symbol\")"
+                is StringType -> "ctx.mkStringConst(\"$symbol\")"
+                else -> throw RuntimeException("Invalid type: $type")
+            }
+        }
+        return when (type) {
+            is BoolType -> "ctx.mkBool($symbol)"
+            is IntType -> "ctx.mkInt($symbol)"
+            is StringType -> "ctx.mkString($symbol)"
+            else -> throw RuntimeException("Invalid type: $type")
+        }
     }
-    override fun errorPass(): List<CompileError> {
-        return listOf()
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        return if (symbol in argSymbols) {
+            val type = symbolTypes[symbol]
+            val typeStr = when (type) {
+                is BoolType -> "boolType"
+                is IntType -> "intType"
+                is StringType -> "stringType"
+                else -> throw RuntimeException("Invalid type: $type (symbol: $symbol)")
+            }
+            "act.lookup(Variable(\"$symbol\", $typeStr)).value as $type"
+        } else {
+            symbol
+        }
+    }
+    override fun type(symbolTypes: Map<String, Type>): Type {
+        return symbolTypes[symbol]!!
     }
     override fun toString(): String {
         return symbol
     }
 }
 
-interface ProcExprNode : ASTNode {}
-
 class ValueProcExprNode(
     private val name : String
-) : ProcExprNode {
-    override fun errorPass(): List<CompileError> {
-        return listOf()
+) : ASTNode(listOf()) {
+    override fun procPass(): List<ProcDecl> {
+        return listOf(ProcDecl(name, listOf(), ProcDeclType.Proc))
     }
     override fun toString(): String {
         return name
@@ -349,10 +425,7 @@ class ValueProcExprNode(
 
 class CompositeProcExprNode(
     private val compositeProcs : List<ASTNode>
-) : ProcExprNode {
-    override fun errorPass(): List<CompileError> {
-        return compositeProcs.flatMap { it.errorPass() }
-    }
+) : ASTNode(compositeProcs) {
     override fun toString(): String {
         return compositeProcs.joinToString(" || ") { it.toString() }
     }
