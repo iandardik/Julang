@@ -1,16 +1,31 @@
 p-class EchoHandler {
     var req : String
+    var resp : String
+    var responded : Boolean
+    var done : Boolean
 
     constructor handleHttpReq(reqBody : String) {
         transit:
             req := reqBody
+            resp := reqBody + " is a good point!"
+            responded := false
+            done := false
+    }
+
+    transition httpResp(respBody : String) {
+        guard:
+            ~responded & respBody = resp
+        transit:
+            responded := true
     }
 
     transition println(msg : String) {
         guard:
-            req # "" & msg = req
+              responded
+            & ~done
+            & msg = "Req: '" + req + "', I responded: '" + resp + "'"
         transit:
-            req := ""
+            done := true
     }
 }
 

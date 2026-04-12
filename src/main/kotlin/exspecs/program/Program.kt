@@ -10,6 +10,9 @@ import java.util.*
  * A program represents one or more processes that interact together on a single computer.
  */
 class Program : Runnable {
+    companion object {
+        var channelTable : Map<ActionSignature, SyncChannel<ConcreteAction, BoolExpr>> = emptyMap()
+    }
     private val constructorProc : Proc
 
     /**
@@ -34,7 +37,7 @@ class Program : Runnable {
         // the initially action is a self-sync for the constructor proc
         actionCounts[initiallySig] = 1
 
-        val channelTable = actionCounts.keys.associateWith { act ->
+        channelTable = actionCounts.keys.associateWith { act ->
             val syncSize = actionCounts[act]!!
             val ctx = Context() // one Context per channel
             SyncChannel<ConcreteAction,BoolExpr>(syncSize) { constraints ->
