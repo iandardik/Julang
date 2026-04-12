@@ -1,41 +1,50 @@
 p-class FrontEnd {
-    var state : String = "A"
-    var keyReq : String = ""
-    var valReq : String = ""
+    var state : String
+    var keyReq : String
+    var valReq : String
 
-    action PromptUser(msg : String) {
+    constructor initially() {
+        transit:
+            state := "A"
+            keyReq := ""
+            valReq := ""
+    }
+
+    transition prompt() {
         guard:
-            state = "A" & msg = "Enter a key:"
-        update:
+            state = "A"
+        transit:
             state := "B"
     }
     
-    action Readln(msg : String) {
+    transition readln(msg : String) {
         guard:
             state = "B"
-        update:
+        transit:
             keyReq := msg
             state := "C"
     }
 
-    action ReadDB(key : String, val : String) {
+    transition readDB(key : String, val : String) {
         guard:
             (state = "C") & (key = keyReq)
-        update:
+        transit:
             state := "D"
             valReq := "val: " + val // just to test string concatenation
     }
 
-    action Println(msg : String) {
+    transition println(msg : String) {
         guard:
             (state = "D") & (msg = valReq)
-        update:
+        transit:
             state := "A"
     }
 }
 
 p-class DB {
-    action ReadDB(key : String, val : String) {
+    constructor initially() {}
+
+    transition readDB(key : String, val : String) {
         guard:
               (key = "A" & val = "apple")
             | (key = "B" & val = "banana")
@@ -43,3 +52,6 @@ p-class DB {
             | (~(key = "A" | key = "B" | key = "C") & val = "N/A")
     }
 }
+
+program main := FrontEnd || DB || Println || Readln
+program na := FrontEnd || Println || Readln

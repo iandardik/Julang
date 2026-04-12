@@ -40,8 +40,14 @@ data class ProcClassDecl(
     fun toKotlinStaticInfoString(): String {
         val transitionInfo = transitions.joinToString(",\n") { it.toStaticInfoString().prependIndent() }
         val constructorInfo = constructors.joinToString(",\n") { it.toStaticInfoString().prependIndent() }
-        val constructorArgs = constructors // TODO handle multiple ctors
-            .map { it.transits.values.map { v -> v.toString() } }[0]
+        val ctor = constructors[0] // TODO handle multiple ctors, handle no ctors
+        val constructorArgs = ctor.transits.values
+            .map { v ->
+                val argTypes = ctor.action.args.associate { Pair(it.name,it.type) }
+                val symbolTypes = argTypes // no state vars are available during construction
+                val argSymbols = ctor.action.args.map { it.name }.toSet()
+                v.toTransitString(symbolTypes, argSymbols)
+            }
             .joinToString(", ") { it }
         val constructor = "$name($constructorArgs)"
         return "TransitionSystemStaticInfo(" +
@@ -51,7 +57,7 @@ data class ProcClassDecl(
                 "\nsetOf(" +
                 "\n$constructorInfo" +
                 "\n)," +
-                "\ntrue) { $constructor }").prependIndent()
+                "\ntrue) { act -> $constructor }").prependIndent()
     }
 }
 

@@ -38,7 +38,7 @@ class ConstructorTransitionSystem(
         constructors
             .filter { (sig,_) -> sig == act.signature }
             .forEach { (_,tsInfo) ->
-                val t = Thread(Proc(tsInfo.construct.invoke(),channelTable))
+                val t = Thread(Proc(tsInfo.construct.invoke(act),channelTable))
                 if (tsInfo.selfTerminate) {
                     liveProcsLock.lock()
                     try {

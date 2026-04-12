@@ -7,5 +7,5 @@ data class TransitionSystemStaticInfo(
     val alphabet : Set<ActionSignature>,
     val constructors : Set<ActionSignature>,
     val selfTerminate : Boolean,
-    val construct : ()->TransitionSystem
+    val construct : (ConcreteAction)->TransitionSystem
 ) {}

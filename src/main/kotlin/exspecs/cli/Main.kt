@@ -1,22 +1,20 @@
 package exspecs.cli
 
 import exspecs.ast.ASTBuilder
+import exspecs.ast.ProcDecl
 import exspecs.ast.ProcDeclType
 import exspecs.ast.RootNode
 import exspecs.parser.JulayLexer
 import exspecs.parser.JulayParser
+import exspecs.program.library.httpServerTSStaticInfoStr
 import exspecs.program.library.printlnTSStaticInfoStr
+import exspecs.program.library.readlnTSStaticInfoStr
 import org.antlr.v4.runtime.CharStreams
 import org.antlr.v4.runtime.CommonTokenStream
 import java.io.File
+import kotlin.system.exitProcess
 
 fun main(args : Array<String>) {
-    val buildDir = "jul-build"
-    if (!File(buildDir).exists() && !File(buildDir).mkdir()) {
-        println("Could not create $buildDir dir")
-        return
-    }
-
     if (args.size != 1) {
         println("usage: Exspec <.jul file>")
         return
@@ -38,14 +36,25 @@ fun main(args : Array<String>) {
         return
     }
 
-    val libPClassNames = setOf("Println")
-    val libStaticInfoMap = mapOf(Pair("Println", printlnTSStaticInfoStr)) // TODO don't use strings
-
     val procDecls = ast.procPass()
     val programs = procDecls.filter { it.type == ProcDeclType.Program }
-    exspecs.tools.assert(programs.size == 1, "Expected exactly one program decl, got: ${programs.size}")
+    programs.forEach { compileProgram(it, ast, it.name) }
+}
 
-    val program = programs[0]
+fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
+    val buildDir = "jul-build"
+    if (!File(buildDir).exists() && !File(buildDir).mkdir()) {
+        println("Could not create $buildDir dir")
+        exitProcess(1)
+    }
+
+    val libPClassNames = setOf("Println", "Readln", "HttpServer")
+    val libStaticInfoMap = mapOf( // TODO don't use strings
+        Pair("Println", printlnTSStaticInfoStr),
+        Pair("Readln", readlnTSStaticInfoStr),
+        Pair("HttpServer", httpServerTSStaticInfoStr),
+    )
+
     val procsToCompile = program.allProcNames().filter { it !in libPClassNames }
     val compiledProcs = procsToCompile.flatMap {
         val compiled = ast.procClassPass(it)
@@ -74,17 +83,17 @@ fun main(args : Array<String>) {
             "\n\n" +
             mainFunction
 
-    val woExt = args[0].replace(Regex("\\..*$"),"") // remove the file extension
-    val name = woExt.replaceFirstChar { it.uppercase() }
-    val fileName = "${name}.kt"
+    //val name = File(inputFile).nameWithoutExtension.replaceFirstChar { it.uppercase() }
+    val mainClassName = progName.replaceFirstChar { it.uppercase() }
+    val fileName = "${mainClassName}.kt"
     File("$buildDir/$fileName").writeText(programText)
 
     File("$buildDir/settings.gradle.kts").delete()
     File("$buildDir/build.gradle.kts").delete()
 
-    File("$buildDir/settings.gradle.kts").writeText(gradleSettingsFileContents(name))
+    File("$buildDir/settings.gradle.kts").writeText(gradleSettingsFileContents(progName))
     Runtime.getRuntime().exec(arrayOf("bash", "-c", "cd $buildDir; gradle wrapper --gradle-version 8.5")).waitFor()
-    File("$buildDir/build.gradle.kts").writeText(gradleBuildFileContents(name))
+    File("$buildDir/build.gradle.kts").writeText(gradleBuildFileContents(progName, mainClassName))
     Runtime.getRuntime().exec(arrayOf("bash", "-c", "cd $buildDir; ./gradlew shadowJar")).waitFor()
     deleteDirectory(File(buildDir))
 }
@@ -107,7 +116,7 @@ fun gradleSettingsFileContents(name : String) : String {
     return "rootProject.name = \"$name\""
 }
 
-fun gradleBuildFileContents(name : String) : String {
+fun gradleBuildFileContents(name : String, mainClassName : String) : String {
     return "plugins {\n" +
             "    kotlin(\"jvm\") version \"1.9.24\"\n" +
             "    application\n" +
@@ -124,7 +133,7 @@ fun gradleBuildFileContents(name : String) : String {
             "}\n" +
             "\n" +
             "application {\n" +
-            "    mainClass.set(\"${name}Kt\")\n" +
+            "    mainClass.set(\"${mainClassName}Kt\")\n" +
             "}\n" +
             "\n" +
             "kotlin {\n" +

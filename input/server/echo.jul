@@ -1,0 +1,17 @@
+p-class EchoHandler {
+    var req : String
+
+    constructor handleHttpReq(reqBody : String) {
+        transit:
+            req := reqBody
+    }
+
+    transition println(msg : String) {
+        guard:
+            req # "" & msg = req
+        transit:
+            req := ""
+    }
+}
+
+program EchoServer := EchoHandler || Println || HttpServer

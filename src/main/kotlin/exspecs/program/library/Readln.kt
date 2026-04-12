@@ -37,3 +37,19 @@ class ReadlnTS : TransitionSystem {
     override fun getContext() = ctx
 }
 
+val readlnTSStaticInfo = TransitionSystemStaticInfo(
+    setOf(
+        ActionSignature("prompt", listOf()),
+        ActionSignature("readln", listOf(Variable("msg", stringType)))
+    ),
+    setOf(ActionSignature("initially", listOf()),),
+    false) { ReadlnTS() }
+
+// TODO this is ugly af
+val readlnTSStaticInfoStr = "TransitionSystemStaticInfo(" +
+    "setOf(" +
+        "ActionSignature(\"prompt\", listOf())," +
+        "ActionSignature(\"readln\", listOf(Variable(\"msg\", stringType)))" +
+    ")," +
+    "setOf(ActionSignature(\"initially\", listOf()),)," +
+    "false) { ReadlnTS() }"

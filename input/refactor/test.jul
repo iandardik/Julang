@@ -1,0 +1,27 @@
+p-class Inc {
+    var print : Boolean
+    var counter : Int
+
+    constructor initially() {
+        transit:
+            print := true
+            counter := 0
+    }
+    
+    transition increment(inc : Int) {
+        guard:
+            (inc > 3) & (counter <= 10) & ~print
+        transit:
+            counter := counter + inc
+            print := true
+    }
+
+    transition println(msg : String) {
+        guard:
+            (msg = "" + counter) & print
+        transit:
+            print := false
+    }
+}
+
+program main := Inc || Println
