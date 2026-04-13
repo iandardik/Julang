@@ -16,15 +16,14 @@ class Proc(
         while (true) {
             var nextAct = Optional.empty<ConcreteAction>()
             val enabledActions = transitionSystem.actions().filter {
-                val enabled = it.guard
                 val solver = ctx.mkSolver()
-                solver.add(enabled)
+                solver.add(it.guard)
                 solver.check() == Status.SATISFIABLE
             }
             val cases = enabledActions.map { symAct ->
                 val channel = channelTable[symAct.signature]!!
-                val guard = symAct.guard
-                Select.SyncCase(channel, guard) { concAct : ConcreteAction ->
+                val anticonstraint = ctx.mkFalse()
+                Select.SyncCase(channel, symAct.guard, anticonstraint) { concAct : ConcreteAction ->
                     nextAct = Optional.of(concAct)
                 }
             }

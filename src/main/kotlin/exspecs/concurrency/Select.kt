@@ -73,13 +73,14 @@ class Select(private vararg val cases : Case) : Runnable {
     class SyncCase<V : Any, C : Any>(
         private val chan : SyncChannel<V, C>,
         private val constraint : Optional<C>,
+        private val anticonstraint : Optional<C>,
         private val callback : (V)->Unit = {}
     ) : Case {
         private var selectRef = Optional.empty<Select>()
         constructor(chan : SyncChannel<V, C>, callback : (V)->Unit = {})
-            : this(chan, Optional.empty(), callback) {}
-        constructor(chan : SyncChannel<V, C>, constraint : C, callback : (V)->Unit = {})
-                : this(chan, Optional.of(constraint), callback) {}
+            : this(chan, Optional.empty(), Optional.empty(), callback) {}
+        constructor(chan : SyncChannel<V, C>, constraint : C, anticonstraint : C, callback : (V)->Unit = {})
+                : this(chan, Optional.of(constraint), Optional.of(anticonstraint), callback) {}
         override fun setSelect(s : Select) {
             selectRef = Optional.of(s)
         }
@@ -89,7 +90,7 @@ class Select(private vararg val cases : Case) : Runnable {
             val select = selectRef.get()
             var done = false
             while (!done) {
-                val ret = chan.sync(constraint, selectRef)
+                val ret = chan.sync(constraint, anticonstraint, selectRef)
                 done = ret.isPresent || ret.isAborted || select.winner.isPresent || chan.isClosed()
                 if (ret.isPresent && ret.isSAT) {
                     exspecs.tools.assert(select.winner.get() == chan.hashCode())

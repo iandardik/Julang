@@ -1,7 +1,6 @@
 package exspecs.concurrency
 
 import java.util.*
-import java.util.concurrent.locks.Lock
 import java.util.concurrent.locks.ReentrantLock
 
 /**
@@ -30,18 +29,22 @@ class SyncChannel<V : Any, C : Any>(
     private var closed = false
 
     fun sync(select : Optional<Select> = Optional.empty(), retryOnUNSAT : Boolean = true) : SyncChannelResult<V> {
-        return sync(Optional.empty(), select, retryOnUNSAT)
+        return sync(Optional.empty(), Optional.empty(), select, retryOnUNSAT)
     }
 
     fun sync(constraint : C, select : Optional<Select> = Optional.empty(), retryOnUNSAT : Boolean = true) : SyncChannelResult<V> {
-        return sync(Optional.of(constraint), select, retryOnUNSAT)
+        return sync(Optional.of(constraint), Optional.empty(), select, retryOnUNSAT)
     }
 
     /**
      * This method will not check each constraint to see if it is satisfiable--that is up to the caller.
      */
-    fun sync(constraint : Optional<C>, select : Optional<Select> = Optional.empty(), retryOnUNSAT : Boolean = true) : SyncChannelResult<V> {
-        val me = Participant(constraint, select, Thread.currentThread())
+    fun sync(constraint : Optional<C>,
+             anticonstraint : Optional<C>,
+             select : Optional<Select> = Optional.empty(),
+             retryOnUNSAT : Boolean = true
+    ) : SyncChannelResult<V> {
+        val me = Participant(constraint, anticonstraint, select, Thread.currentThread())
         try {
             var attemptingSync = true
             var syncResult = SyncChannelResult.none<V>()
@@ -81,7 +84,7 @@ class SyncChannel<V : Any, C : Any>(
         lobbyLock.lock()
         try {
             // waiting in the "lobby" to get in
-            while (participants.size == syncSize || (retryOnUNSAT && !satisfiableWithCurrentLobby(me))) {
+            while (participants.size == syncSize || (retryOnUNSAT && !compatibleWithCurrentLobby(me))) {
                 lobbyCond.await()
                 if (isClosed()) {
                     return Triple(false, emptySet(), emptySet())
@@ -170,11 +173,11 @@ class SyncChannel<V : Any, C : Any>(
 
     /**
      * Returns whether the given constraint is mutually satisfiable with the current constraints in the lobby. Note that
-     * we do not perform a check (and simply return true) if the current set of constraints is empty; this is safe based
+     * we do not perform a check (we simply return true) if the current set of constraints is empty; this is safe based
      * on the assumption that each individual constraint is satisfiable, which we rely on for efficiency (to reduce the
      * number of calls to the SMT solver).
      */
-    private fun satisfiableWithCurrentLobby(me : Participant<C>) : Boolean {
+    private fun satisfiableConstraintsWithCurrentLobby(me : Participant<C>) : Boolean {
         val myConstraint = me.constraint
         val currentConstraints = participants
             .filter { it.constraint.isPresent }
@@ -184,6 +187,29 @@ class SyncChannel<V : Any, C : Any>(
             return true
         }
         return compute.invoke(currentConstraints.plus(myConstraint.get())).isPresent
+    }
+
+    /**
+     * check the anticonstraints in a pairwise fashion
+     * it suffices to only check myAnticonstraint against all the others, since the invariant of the participants
+     * set is that each are pairwise mutually unsat
+     */
+    private fun unsatisfiableAnticonstraintsWithCurrentLobby(me : Participant<C>) : Boolean {
+        val myAnticonstraint = me.anticonstraint
+        val currentAnticonstraints = participants
+            .filter { it.anticonstraint.isPresent }
+            .map { it.anticonstraint.get() }
+            .toSet()
+        if (myAnticonstraint.isEmpty || currentAnticonstraints.isEmpty()) {
+            return true
+        }
+        return currentAnticonstraints.all { c ->
+            compute.invoke(setOf(myAnticonstraint.get(),c)).isEmpty
+        }
+    }
+
+    private fun compatibleWithCurrentLobby(me : Participant<C>) : Boolean {
+        return satisfiableConstraintsWithCurrentLobby(me) && unsatisfiableAnticonstraintsWithCurrentLobby(me)
     }
 
     /**
@@ -309,6 +335,7 @@ class SyncChannel<V : Any, C : Any>(
 
     private data class Participant<C : Any>(
         val constraint : Optional<C>,
+        val anticonstraint : Optional<C>,
         val select : Optional<Select>,
         val thread : Thread,
     ) {}
