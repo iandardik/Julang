@@ -13,7 +13,7 @@ abstract class ASTNode(
     open fun actionArgs() : List<Variable> = children.flatMap { it.actionArgs() }
     open fun guards() : List<ASTNode> = children.flatMap { it.guards() }
     open fun transits() : Map<String,ASTNode> = children.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() }
-    open fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>) : String {
+    open fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean = false) : String {
         throw RuntimeException("Unsupported")
     }
     open fun toTransitString(symbolTypes : Map<String,Type>, argSymbols : Set<String>) : String {
@@ -250,7 +250,8 @@ class UnaryOpExprNode(
     private val op : String,
     private val operand : ASTNode
 ) : ASTNode(listOf(operand)) {
-    override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>): String {
+    override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
+        exspecs.tools.assert(!forceString, "Cannot force a unary boolean operator to a string")
         return when (op) {
             "~" -> "ctx.mkNot(${operand.toZ3GuardString(symbolTypes, argSymbols)})"
             else -> throw RuntimeException("Invalid unary op: $op")
@@ -276,9 +277,16 @@ class BinaryOpExprNode(
     private val lhsOperand : ASTNode,
     private val rhsOperand : ASTNode
 ) : ASTNode(listOf(lhsOperand,rhsOperand)) {
-    override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>): String {
-        val lhsGuardStr = lhsOperand.toZ3GuardString(symbolTypes,argSymbols)
-        val rhsGuardStr = rhsOperand.toZ3GuardString(symbolTypes,argSymbols)
+    override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
+        val lhsType = lhsOperand.type(symbolTypes)
+        val rhsType = rhsOperand.type(symbolTypes)
+        val isStringConcat = op == "+" && (lhsType is StringType || rhsType is StringType)
+        exspecs.tools.assert(!forceString || isStringConcat, "Cannot force a binary boolean operator to a string")
+
+        val forceStringOperands = forceString || isStringConcat
+        val lhsGuardStr = lhsOperand.toZ3GuardString(symbolTypes,argSymbols, forceStringOperands)
+        val rhsGuardStr = rhsOperand.toZ3GuardString(symbolTypes,argSymbols, forceStringOperands)
+
         return when (op) {
             "=" -> "ctx.mkEq($lhsGuardStr,$rhsGuardStr)"
             "#" -> "ctx.mkNot(ctx.mkEq($lhsGuardStr,$rhsGuardStr))"
@@ -289,18 +297,9 @@ class BinaryOpExprNode(
             "&" -> "ctx.mkAnd($lhsGuardStr,$rhsGuardStr)"
             "|" -> "ctx.mkOr($lhsGuardStr,$rhsGuardStr)"
             "+" -> {
-                val lhsType = lhsOperand.type(symbolTypes)
-                val rhsType = rhsOperand.type(symbolTypes)
                 when {
                     lhsType is IntType && rhsType is IntType -> "ctx.mkAdd($lhsGuardStr,$rhsGuardStr)"
-                    lhsType is StringType || rhsType is StringType -> {
-                        //val lhsEvalToStr = "ctx.mkString(${lhsOperand}.toString())"
-                        //val rhsEvalToStr = "ctx.mkString(${rhsOperand}.toString())"
-                        //"ctx.mkConcat($lhsEvalToStr,$rhsEvalToStr)"
-                        val lhsEvalToStr = "($lhsOperand).toString()"
-                        val rhsEvalToStr = "($rhsOperand).toString()"
-                        "ctx.mkString($lhsEvalToStr + $rhsEvalToStr)"
-                    }
+                    lhsType is StringType || rhsType is StringType -> "ctx.mkConcat($lhsGuardStr,$rhsGuardStr)"
                     else -> throw RuntimeException("Cannot add types: $lhsType and $rhsType")
                 }
             }
@@ -349,7 +348,10 @@ class LiteralValueExprNode(
     private val value : String,
     private val type : Type
 ) : ASTNode(listOf()) {
-    override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>): String {
+    override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
+        if (forceString) {
+            return "ctx.mkString(\"$value\")"
+        }
         return when (type) {
             is BoolType -> "ctx.mkBool($value)"
             is IntType -> "ctx.mkInt($value)"
@@ -373,8 +375,29 @@ class LiteralValueExprNode(
 class SymbolValueExprNode(
     private val symbol : String
 ) : ASTNode(listOf()) {
-    override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>): String {
+    override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         val type = symbolTypes[symbol]
+        if (forceString) {
+            return when (type) {
+                is BoolType -> throw RuntimeException("Cannot convert a Bool to a string")
+                is IntType -> {
+                    if (symbol in argSymbols) {
+                        "ctx.intToString(ctx.mkIntConst(\"$symbol\"))"
+                    } else {
+                        "ctx.ctx.mkString(${symbol}.toString())"
+                    }
+                }
+                is StringType -> {
+                    if (symbol in argSymbols) {
+                        "ctx.mkStringConst(\"$symbol\")"
+                    } else {
+                        "ctx.mkString($symbol)"
+                    }
+                }
+                else -> throw RuntimeException("Invalid type: $type")
+            }
+
+        }
         if (symbol in argSymbols) {
             return when (type) {
                 is BoolType -> "ctx.mkBoolConst(\"$symbol\")"
