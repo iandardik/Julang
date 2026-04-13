@@ -17,30 +17,13 @@ interface TransitionSystem {
     fun actions() : Set<SymbolicAction>
 
     /**
-     * The current state of the transition system, expressed as a Z3 BoolExpr.
-     */
-    fun currentStateToZ3Expr() : BoolExpr
-
-    /**
      * The transition system transits to a (potentially new) state based on the given concrete action.
      */
     fun transit(act : ConcreteAction)
-
-    /**
-     * The name of the transition system, used for logging purposes.
-     */
-    //fun getName() : String
 
     /**
      * Exactly one Context should be used, and should be available here for public use. Using just one Context is
      * important for thread safety, see: https://stackoverflow.com/questions/25542200/multi-threaded-z3
      */
     fun getContext() : Context
-
-    /**
-     * Returns whether the transition system will terminate itself. If true (default) then the program will not end
-     * before the process terminates; otherwise, the process may be terminated early (this is desirable e.g., for
-     * library processes).
-     */
-    //fun selfTerminate() : Boolean = true
 }

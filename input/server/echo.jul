@@ -14,7 +14,7 @@ p-class EchoHandler {
 
     transition httpResp(respBody : String) {
         guard:
-            ~responded & (respBody + "") = resp // respBody + "" is just for testing
+            ~responded & respBody = resp
         transit:
             responded := true
     }

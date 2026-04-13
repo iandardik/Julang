@@ -35,7 +35,7 @@ p-class FrontEnd {
 
     transition println(msg : String) {
         guard:
-            (state = "D") & (msg = valReq)
+            (state = "D") & ((msg + "") = valReq) // (msg + "") to test string concatenation with action args
         transit:
             state := "A"
     }
@@ -53,5 +53,5 @@ p-class DB {
     }
 }
 
-program main := FrontEnd || DB || Println || Readln
-program na := FrontEnd || Println || Readln
+program KVMain := FrontEnd || DB || Println || Readln
+program KVTest := FrontEnd || Println || Readln

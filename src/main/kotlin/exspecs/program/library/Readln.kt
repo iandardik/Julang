@@ -12,18 +12,15 @@ class ReadlnTS : TransitionSystem {
     override fun actions() = setOf(
         SymbolicAction(
             ActionSignature("prompt", listOf()),
-            ctx.mkEq(ctx.mkBoolConst("prompt"), ctx.mkBool(true))
+            ctx.mkEq(ctx.mkBool(prompt), ctx.mkBool(true))
         ),
         SymbolicAction(
             ActionSignature("readln", listOf(Variable("msg",stringType))),
             ctx.mkAnd(
-                ctx.mkEq(ctx.mkBoolConst("prompt"), ctx.mkBool(false)),
+                ctx.mkEq(ctx.mkBool(prompt), ctx.mkBool(false)),
                 ctx.mkEq(ctx.mkStringConst("msg"), ctx.mkString(msg))
             )
         ),
-    )
-    override fun currentStateToZ3Expr() = ctx.mkAnd(
-        ctx.mkEq(ctx.mkBoolConst("prompt"), ctx.mkBool(prompt))
     )
     override fun transit(act: ConcreteAction) {
         if (act.signature.name == "prompt") {

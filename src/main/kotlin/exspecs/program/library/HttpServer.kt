@@ -19,7 +19,7 @@ class JulHttpServer : TransitionSystem, HttpHandler {
         server.start()
     }
     override fun actions(): Set<SymbolicAction> {
-        Thread.sleep(9999999L) // TODO this is temporary because no on calls close, so it happens immediately
+        Thread.sleep(9999999L) // TODO this is temporary because no one calls close, so a deadlock happens immediately
         return setOf(
             SymbolicAction(
                 ActionSignature("closeHttpServer", listOf()),
@@ -27,7 +27,6 @@ class JulHttpServer : TransitionSystem, HttpHandler {
             ),
         )
     }
-    override fun currentStateToZ3Expr() = ctx.mkTrue()
     override fun transit(act: ConcreteAction) {}
     override fun getContext() = ctx
     override fun handle(exchange: HttpExchange?) {
@@ -83,7 +82,6 @@ class HttpResource(
             return setOf()
         }
     }
-    override fun currentStateToZ3Expr() = ctx.mkTrue()
     override fun transit(act: ConcreteAction) {
         if (act.signature.name == "httpResp") {
             val respBody = act.lookup(Variable("respBody", stringType)).value as String

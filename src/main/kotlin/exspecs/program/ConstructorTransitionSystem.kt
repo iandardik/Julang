@@ -32,8 +32,6 @@ class ConstructorTransitionSystem(
         }
     }
 
-    override fun currentStateToZ3Expr() = z3True
-
     override fun transit(act: ConcreteAction) {
         constructors
             .filter { (sig,_) -> sig == act.signature }

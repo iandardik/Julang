@@ -15,9 +15,6 @@ data class ProcClassDecl(
         val actionsStr = "override fun actions(): Set<SymbolicAction> = setOf(\n" +
                 transitions.joinToString(",\n") { it.toActionString(stateVarTypes).prependIndent() } +
                 "\n)"
-        val currentStateStr = "override fun currentStateToZ3Expr(): BoolExpr {\n" +
-                "return ctx.mkTrue()".prependIndent() + // TODO update Proc's pattern
-                "\n}"
         val transitStr = "override fun transit(act: ConcreteAction) {" +
                 "\nreturn when (act.signature.name) {".prependIndent() +
                 transitions.joinToString("") {
@@ -31,7 +28,6 @@ data class ProcClassDecl(
                 "\n) : TransitionSystem {" +
                 "\nprivate val ctx = Context()".prependIndent() +
                 "\n$actionsStr".prependIndent() +
-                "\n$currentStateStr".prependIndent() +
                 "\n$transitStr".prependIndent() +
                 "\noverride fun getContext() = ctx".prependIndent() +
                 "\n}"

@@ -14,7 +14,6 @@ class PrintlnTS : TransitionSystem {
     )
 
     override fun actions() = alphabet
-    override fun currentStateToZ3Expr() = z3True
     override fun transit(act: ConcreteAction) {
         val msg = act.lookup(Variable("msg", stringType))
         println(msg)

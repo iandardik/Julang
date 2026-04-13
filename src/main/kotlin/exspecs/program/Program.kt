@@ -11,6 +11,8 @@ import java.util.*
  */
 class Program : Runnable {
     companion object {
+        // a static channel table is ugly, but necessary for library processes that break the typical pattern where
+        // procs cannot share resources (e.g. with HttpServer)
         var channelTable : Map<ActionSignature, SyncChannel<ConcreteAction, BoolExpr>> = emptyMap()
     }
     private val constructorProc : Proc
@@ -37,6 +39,8 @@ class Program : Runnable {
         // the initially action is a self-sync for the constructor proc
         actionCounts[initiallySig] = 1
 
+        exspecs.tools.assert(channelTable == emptyMap<ActionSignature, SyncChannel<ConcreteAction, BoolExpr>>(),
+            "Expected an empty channel table when running a program")
         channelTable = actionCounts.keys.associateWith { act ->
             val syncSize = actionCounts[act]!!
             val ctx = Context() // one Context per channel
