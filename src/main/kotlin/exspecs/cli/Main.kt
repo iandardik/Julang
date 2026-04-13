@@ -47,9 +47,9 @@ fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
 
     val libPClassNames = setOf("Println", "Readln", "HttpServer")
     val libStaticInfoMap = mapOf(
-        Pair("Println", "printlnTSStaticInfo"),
-        Pair("Readln", "readlnTSStaticInfo"),
-        Pair("HttpServer", "httpServerTSStaticInfo"),
+        Pair("Println", "PrintlnTS"),
+        Pair("Readln", "ReadlnTS"),
+        Pair("HttpServer", "JulHttpServer"),
     )
 
     val procsToCompile = program.allProcNames().filter { it !in libPClassNames }
@@ -60,7 +60,7 @@ fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
     }
 
     val libProcs = program.allProcNames().filter { it in libPClassNames }
-    val staticInfoLib = libProcs.map { libStaticInfoMap[it]!! }
+    val staticInfoLib = libProcs.map { "${libStaticInfoMap[it]!!}.staticInfo()" }
 
     val staticInfoCompiledProcs = compiledProcs.map { it.toKotlinStaticInfoString() }
     val staticInfoBody = (staticInfoCompiledProcs + staticInfoLib).joinToString(",\n") { it }

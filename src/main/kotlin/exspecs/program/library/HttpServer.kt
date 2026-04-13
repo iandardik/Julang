@@ -9,6 +9,16 @@ import exspecs.tools.mkStringConst
 import java.net.InetSocketAddress
 
 class JulHttpServer : TransitionSystem, HttpHandler {
+    companion object: StaticInfo {
+        val reqBodyArg = Variable("reqBody", stringType)
+        val respBodyArg = Variable("respBody", stringType)
+        val receiveRequestAct = ActionSignature("receiveRequest", listOf(reqBodyArg))
+        val sendResponseAct = ActionSignature("sendResponse", listOf(respBodyArg))
+        val closeAct = ActionSignature("close", listOf()) // TODO mark this (and others) as 'service' or something so syncNum = 2
+        val initiallyCtor = Pair(ActionSignature("initially", listOf())) { act : ConcreteAction -> JulHttpServer() }
+        override fun staticInfo() = TransitionSystemStaticInfo(setOf(receiveRequestAct, sendResponseAct), mapOf(initiallyCtor), true)
+    }
+
     private val ctx = Context()
     init {
         val server = HttpServer.create(InetSocketAddress(8000), 0)
@@ -30,65 +40,49 @@ class JulHttpServer : TransitionSystem, HttpHandler {
         val resource = HttpResource(exchange!!)
         Thread(Proc(resource, Program.channelTable)).start()
     }
-}
 
-class HttpResource(
-    private val exchange : HttpExchange
-) : TransitionSystem {
-    private val ctx = Context()
-    private val reqBody : String
-    private var initHttpReq = true
-    private var finishHttpReq = true
-    init {
-        // first half of a typical HttpExchange life cycle:
-        // https://docs.oracle.com/en/java/javase/22/docs/api/jdk.httpserver/com/sun/net/httpserver/HttpExchange.html
-        val reqMethod = exchange!!.requestMethod
-        val reqHeaders = exchange.requestHeaders
-        reqBody = exchange.requestBody.bufferedReader().use { it.readText() }
-    }
-    override fun actions(): Set<SymbolicAction> {
-        if (initHttpReq) {
-            initHttpReq = false
-            return setOf(
-                SymbolicAction(
-                    ActionSignature("receiveRequest", listOf(Variable("reqBody", stringType))),
-                    ctx.mkEq(ctx.mkStringConst("reqBody"), ctx.mkString(reqBody))
-                ),
-            )
+    class HttpResource(
+        private val exchange : HttpExchange
+    ) : TransitionSystem {
+        private val ctx = Context()
+        private val reqBody : String
+        private var initHttpReq = true
+        private var finishHttpReq = true
+        init {
+            // first half of a typical HttpExchange life cycle:
+            // https://docs.oracle.com/en/java/javase/22/docs/api/jdk.httpserver/com/sun/net/httpserver/HttpExchange.html
+            val reqMethod = exchange!!.requestMethod
+            val reqHeaders = exchange.requestHeaders
+            reqBody = exchange.requestBody.bufferedReader().use { it.readText() }
         }
-        else if (finishHttpReq) {
-            finishHttpReq = false
-            return setOf(
-                SymbolicAction(
-                    ActionSignature("sendResponse", listOf(Variable("respBody", stringType))),
-                    ctx.mkTrue()
-                ),
-            )
-        }
-        else {
-            return setOf()
-        }
-    }
-    override fun transit(act: ConcreteAction) {
-        if (act.signature.name == "sendResponse") {
-            val respBody = act.lookup(Variable("respBody", stringType)).value as String
-            exchange.responseHeaders
-            exchange.sendResponseHeaders(200, respBody.length.toLong())
-            exchange.responseBody.writer().use { writer ->
-                writer.write(respBody)
+        override fun actions(): Set<SymbolicAction> {
+            if (initHttpReq) {
+                initHttpReq = false
+                return setOf(
+                    SymbolicAction(
+                        receiveRequestAct,
+                        ctx.mkEq(ctx.mkStringConst("reqBody"), ctx.mkString(reqBody))
+                    ),
+                )
+            }
+            else if (finishHttpReq) {
+                finishHttpReq = false
+                return setOf(SymbolicAction(sendResponseAct, ctx.mkTrue()))
+            }
+            else {
+                return setOf()
             }
         }
+        override fun transit(act: ConcreteAction) {
+            if (act.signature == sendResponseAct) {
+                val respBody = act.lookup(respBodyArg).value as String
+                exchange.responseHeaders
+                exchange.sendResponseHeaders(200, respBody.length.toLong())
+                exchange.responseBody.writer().use { writer ->
+                    writer.write(respBody)
+                }
+            }
+        }
+        override fun getContext() = ctx
     }
-    override fun getContext() = ctx
 }
-
-val httpServerTSStaticInfo = TransitionSystemStaticInfo(
-    setOf(
-        ActionSignature("receiveRequest", listOf(Variable("reqBody", stringType))),
-        ActionSignature("sendResponse", listOf(Variable("respBody", stringType))),
-        //ActionSignature("close", listOf()), // TODO mark this (and others) as 'service' or something so syncNum = 2
-    ),
-    mapOf(
-        Pair(ActionSignature("initially", listOf())) { JulHttpServer() },
-    ),
-    true)

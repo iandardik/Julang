@@ -18,3 +18,7 @@ data class TransitionSystemStaticInfo(
      */
     val selfTerminate : Boolean,
 ) {}
+
+interface StaticInfo {
+    fun staticInfo() : TransitionSystemStaticInfo
+}

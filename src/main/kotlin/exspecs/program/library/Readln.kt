@@ -5,17 +5,25 @@ import exspecs.program.*
 import exspecs.tools.mkStringConst
 
 class ReadlnTS : TransitionSystem {
+    companion object: StaticInfo {
+        val msgArg = Variable("msg", stringType)
+        val promptAct = ActionSignature("prompt", listOf())
+        val readlnAct = ActionSignature("readln", listOf(msgArg))
+        val initiallyCtor = Pair(ActionSignature("initially", listOf())) { act : ConcreteAction -> ReadlnTS() }
+        override fun staticInfo() = TransitionSystemStaticInfo(setOf(promptAct, readlnAct), mapOf(initiallyCtor), false)
+    }
+
     private val ctx = Context()
     private var prompt = true
     private var msg = ""
 
     override fun actions() = setOf(
         SymbolicAction(
-            ActionSignature("prompt", listOf()),
+            promptAct,
             ctx.mkEq(ctx.mkBool(prompt), ctx.mkBool(true))
         ),
         SymbolicAction(
-            ActionSignature("readln", listOf(Variable("msg",stringType))),
+            readlnAct,
             ctx.mkAnd(
                 ctx.mkEq(ctx.mkBool(prompt), ctx.mkBool(false)),
                 ctx.mkEq(ctx.mkStringConst("msg"), ctx.mkString(msg))
@@ -23,7 +31,7 @@ class ReadlnTS : TransitionSystem {
         ),
     )
     override fun transit(act: ConcreteAction) {
-        if (act.signature.name == "prompt") {
+        if (act.signature == promptAct) {
             prompt = false
             msg = readln()
         }
@@ -33,13 +41,3 @@ class ReadlnTS : TransitionSystem {
     }
     override fun getContext() = ctx
 }
-
-val readlnTSStaticInfo = TransitionSystemStaticInfo(
-    setOf(
-        ActionSignature("prompt", listOf()),
-        ActionSignature("readln", listOf(Variable("msg", stringType)))
-    ),
-    mapOf(
-        Pair(ActionSignature("initially", listOf())) { ReadlnTS() },
-    ),
-    false)
