@@ -6,7 +6,10 @@ data class TransitionSystemStaticInfo(
      */
     val alphabet : Set<ActionSignature>,
 
-    val constructors : Set<ActionSignature>,
+    /**
+     * For each constructor action, a function that constructs a new TransitionSystem.
+     */
+    val constructors : Map<ActionSignature, (ConcreteAction)->TransitionSystem>,
 
     /**
      * Whether the transition system will terminate itself. If true (default) then the program will not end before the
@@ -14,6 +17,4 @@ data class TransitionSystemStaticInfo(
      * processes).
      */
     val selfTerminate : Boolean,
-
-    val construct : (ConcreteAction)->TransitionSystem
 ) {}

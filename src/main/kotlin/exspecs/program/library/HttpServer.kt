@@ -1,6 +1,5 @@
 package exspecs.program.library
 
-import com.microsoft.z3.BoolExpr
 import com.microsoft.z3.Context
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpHandler
@@ -8,8 +7,6 @@ import com.sun.net.httpserver.HttpServer
 import exspecs.program.*
 import exspecs.tools.mkStringConst
 import java.net.InetSocketAddress
-import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.locks.ReentrantLock
 
 class JulHttpServer : TransitionSystem, HttpHandler {
     private val ctx = Context()
@@ -35,16 +32,6 @@ class JulHttpServer : TransitionSystem, HttpHandler {
     }
 }
 
-// TODO this is ugly af
-val httpServerTSStaticInfoStr = "TransitionSystemStaticInfo(" +
-        "\nsetOf(" +
-        "\nActionSignature(\"handleHttpReq\", listOf(Variable(\"reqBody\", stringType)))," +
-        "\nActionSignature(\"httpResp\", listOf(Variable(\"respBody\", stringType)))," +
-        //"\nActionSignature(\"closeHttpServer\", listOf())," +
-        "\n)," +
-        "\nsetOf(ActionSignature(\"initially\", listOf()),)," +
-        "\ntrue) { JulHttpServer() }"
-
 class HttpResource(
     private val exchange : HttpExchange
 ) : TransitionSystem {
@@ -64,7 +51,7 @@ class HttpResource(
             initHttpReq = false
             return setOf(
                 SymbolicAction(
-                    ActionSignature("handleHttpReq", listOf(Variable("reqBody", stringType))),
+                    ActionSignature("receiveRequest", listOf(Variable("reqBody", stringType))),
                     ctx.mkEq(ctx.mkStringConst("reqBody"), ctx.mkString(reqBody))
                 ),
             )
@@ -73,7 +60,7 @@ class HttpResource(
             finishHttpReq = false
             return setOf(
                 SymbolicAction(
-                    ActionSignature("httpResp", listOf(Variable("respBody", stringType))),
+                    ActionSignature("sendResponse", listOf(Variable("respBody", stringType))),
                     ctx.mkTrue()
                 ),
             )
@@ -83,7 +70,7 @@ class HttpResource(
         }
     }
     override fun transit(act: ConcreteAction) {
-        if (act.signature.name == "httpResp") {
+        if (act.signature.name == "sendResponse") {
             val respBody = act.lookup(Variable("respBody", stringType)).value as String
             exchange.responseHeaders
             exchange.sendResponseHeaders(200, respBody.length.toLong())
@@ -94,3 +81,14 @@ class HttpResource(
     }
     override fun getContext() = ctx
 }
+
+val httpServerTSStaticInfo = TransitionSystemStaticInfo(
+    setOf(
+        ActionSignature("receiveRequest", listOf(Variable("reqBody", stringType))),
+        ActionSignature("sendResponse", listOf(Variable("respBody", stringType))),
+        //ActionSignature("close", listOf()), // TODO mark this (and others) as 'service' or something so syncNum = 2
+    ),
+    mapOf(
+        Pair(ActionSignature("initially", listOf())) { JulHttpServer() },
+    ),
+    true)

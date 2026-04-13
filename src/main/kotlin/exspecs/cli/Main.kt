@@ -6,9 +6,6 @@ import exspecs.ast.ProcDeclType
 import exspecs.ast.RootNode
 import exspecs.parser.JulayLexer
 import exspecs.parser.JulayParser
-import exspecs.program.library.httpServerTSStaticInfoStr
-import exspecs.program.library.printlnTSStaticInfoStr
-import exspecs.program.library.readlnTSStaticInfoStr
 import org.antlr.v4.runtime.CharStreams
 import org.antlr.v4.runtime.CommonTokenStream
 import java.io.File
@@ -49,10 +46,10 @@ fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
     }
 
     val libPClassNames = setOf("Println", "Readln", "HttpServer")
-    val libStaticInfoMap = mapOf( // TODO don't use strings
-        Pair("Println", printlnTSStaticInfoStr),
-        Pair("Readln", readlnTSStaticInfoStr),
-        Pair("HttpServer", httpServerTSStaticInfoStr),
+    val libStaticInfoMap = mapOf(
+        Pair("Println", "printlnTSStaticInfo"),
+        Pair("Readln", "readlnTSStaticInfo"),
+        Pair("HttpServer", "httpServerTSStaticInfo"),
     )
 
     val procsToCompile = program.allProcNames().filter { it !in libPClassNames }

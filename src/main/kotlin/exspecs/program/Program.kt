@@ -32,7 +32,7 @@ class Program : Runnable {
         val initiallyAction = SymbolicAction(initiallySig, constructorCtx.mkTrue())
 
         // create a SyncChannel for each action
-        val actionBag = componentInfo.flatMap { it.alphabet union it.constructors }
+        val actionBag = componentInfo.flatMap { it.alphabet union it.constructors.keys }
         val actionCounts = actionBag.toSet()
             .associateWith { setAct -> actionBag.count { bagAct -> bagAct == setAct } }
             .toMutableMap()
@@ -57,10 +57,7 @@ class Program : Runnable {
             }
         }
 
-        val constructors = componentInfo
-            .flatMap { c -> c.constructors.map { act -> Pair(act, c) } }
-            .toSet()
-        constructorProc = Proc(ConstructorTransitionSystem(initiallyAction, constructors, channelTable, constructorCtx), channelTable)
+        constructorProc = Proc(ConstructorTransitionSystem(initiallyAction, componentInfo, channelTable, constructorCtx), channelTable)
     }
 
     override fun run() {

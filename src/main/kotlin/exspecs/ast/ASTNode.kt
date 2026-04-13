@@ -49,6 +49,7 @@ class ProcClassNode(
     private val localDecls : List<ASTNode>
 ) : ASTNode(localDecls) {
     override fun procClassPass(pclassName: String): List<ProcClassDecl> {
+        // TODO make sure there is at least one constructor
         if (pclassName != name) {
             return listOf()
         }

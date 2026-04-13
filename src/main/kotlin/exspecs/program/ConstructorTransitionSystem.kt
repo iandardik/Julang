@@ -8,15 +8,16 @@ import java.util.concurrent.locks.ReentrantLock
 
 class ConstructorTransitionSystem(
     private val initiallyAction : SymbolicAction,
-    private val constructors : Set<Pair<ActionSignature,TransitionSystemStaticInfo>>,
+    private val constructorsInfo : Set<TransitionSystemStaticInfo>,
     private val channelTable : Map<ActionSignature,SyncChannel<ConcreteAction, BoolExpr>>,
     private val ctx : Context,
     // TODO input the cli args into initially (accept them here as a constructor arg)
 ) : TransitionSystem {
     private val z3True = ctx.mkTrue()
-    private val nonInitiallyConstructorActions = constructors
-        .filter { (sig,_) -> sig != initiallyAction.signature }
-        .map { SymbolicAction(it.first, z3True) }
+    private val nonInitiallyConstructorActions = constructorsInfo
+        .flatMap { info -> info.constructors.keys }
+        .filter { sig -> sig != initiallyAction.signature }
+        .map { sig -> SymbolicAction(sig, z3True) }
         .toSet()
     private val liveProcsLock = ReentrantLock()
     private val liveSelfTerminatingProcs = mutableSetOf<Thread>()
@@ -33,19 +34,21 @@ class ConstructorTransitionSystem(
     }
 
     override fun transit(act: ConcreteAction) {
-        constructors
-            .filter { (sig,_) -> sig == act.signature }
-            .forEach { (_,tsInfo) ->
-                val t = Thread(Proc(tsInfo.construct.invoke(act),channelTable))
-                if (tsInfo.selfTerminate) {
-                    liveProcsLock.lock()
-                    try {
-                        liveSelfTerminatingProcs.add(t)
-                    } finally {
-                        liveProcsLock.unlock()
+        constructorsInfo
+            .forEach { tsInfo ->
+                if (tsInfo.constructors.containsKey(act.signature)) {
+                    val constructor = tsInfo.constructors[act.signature]!!
+                    val t = Thread(Proc(constructor.invoke(act), channelTable))
+                    if (tsInfo.selfTerminate) {
+                        liveProcsLock.lock()
+                        try {
+                            liveSelfTerminatingProcs.add(t)
+                        } finally {
+                            liveProcsLock.unlock()
+                        }
                     }
+                    t.start()
                 }
-                t.start()
             }
 
         // after the initially action, start monitoring for whether the program has ended in a new thread

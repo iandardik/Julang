@@ -35,25 +35,28 @@ data class ProcClassDecl(
 
     fun toKotlinStaticInfoString(): String {
         val transitionInfo = transitions.joinToString(",\n") { it.toStaticInfoString().prependIndent() }
-        val constructorInfo = constructors.joinToString(",\n") { it.toStaticInfoString().prependIndent() }
-        val ctor = constructors[0] // TODO handle multiple ctors, handle no ctors
-        val constructorArgs = ctor.transits.values
-            .map { v ->
-                val argTypes = ctor.action.args.associate { Pair(it.name,it.type) }
-                val symbolTypes = argTypes // no state vars are available during construction
-                val argSymbols = ctor.action.args.map { it.name }.toSet()
-                v.toTransitString(symbolTypes, argSymbols)
+        val constructorPairs = constructors
+            .joinToString(",\n") { ctor ->
+                val actSigStr = ctor.toStaticInfoString()
+                val constructorArgs = ctor.transits.values
+                    .map { v ->
+                        val argTypes = ctor.action.args.associate { Pair(it.name,it.type) }
+                        val argSymbols = ctor.action.args.map { it.name }.toSet()
+                        v.toTransitString(argTypes, argSymbols)
+                    }
+                    .joinToString(", ") { it }
+                val constructor = "$name($constructorArgs)"
+                val constructStr = "{ act -> $constructor }"
+                "Pair($actSigStr, $constructStr)".prependIndent()
             }
-            .joinToString(", ") { it }
-        val constructor = "$name($constructorArgs)"
         return "TransitionSystemStaticInfo(" +
                 ("\nsetOf(" +
                 "\n$transitionInfo" +
                 "\n)," +
-                "\nsetOf(" +
-                "\n$constructorInfo" +
+                "\nmapOf(" +
+                "\n$constructorPairs" +
                 "\n)," +
-                "\ntrue) { act -> $constructor }").prependIndent()
+                "\ntrue)").prependIndent()
     }
 }
 

@@ -4,7 +4,7 @@ p-class EchoHandler {
     var responded : Boolean
     var done : Boolean
 
-    constructor handleHttpReq(reqBody : String) {
+    constructor receiveRequest(reqBody : String) {
         transit:
             req := reqBody
             resp := reqBody + " is a good point!"
@@ -12,7 +12,7 @@ p-class EchoHandler {
             done := false
     }
 
-    transition httpResp(respBody : String) {
+    transition sendResponse(respBody : String) {
         guard:
             ~responded & respBody = resp
         transit:
