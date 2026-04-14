@@ -1,14 +1,14 @@
 package exspecs.program
 
-import com.microsoft.z3.BoolExpr
-
 /**
- * Represents a symbolic action for a given transition system / proc.
- * This class is particular to a transition system / proc because it dictates when it's enabled (via the guard). Usually
- * a symbolic action also describes how the transition system transits to a new state, but we do not include this here
- * (each TransitionSystem class decides how the transit should happen).
+ * Represents a symbolic action (in particular, its signature), excluding its types (for now).
+ * SymbolicActions are not particular to a given transition system / proc.
  */
 data class SymbolicAction(
-    val signature : ActionSignature,
-    val guard : BoolExpr,
-) {}
+    val name : String,
+    val args : List<Variable>
+) {
+    override fun toString(): String {
+        return "$name(" + args.joinToString(", ") + ")"
+    }
+}

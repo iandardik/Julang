@@ -13,12 +13,12 @@ class Program : Runnable {
     companion object {
         // a static channel table is ugly, but necessary for library processes that break the typical pattern where
         // procs cannot share resources (e.g. with HttpServer)
-        var channelTable : Map<ActionSignature, SyncChannel<ConcreteAction, BoolExpr>> = emptyMap()
+        var channelTable : Map<SymbolicAction, SyncChannel<ConcreteAction, BoolExpr>> = emptyMap()
     }
     private val constructorProc : Proc
 
     /**
-     * The constructor sets up a channel for each SymbolicAction so that each process that engages in the action can
+     * The constructor sets up a channel for each TSAction so that each process that engages in the action can
      * communicate (synchronize on args) over the channel.
      */
     constructor(componentInfo : Set<TransitionSystemStaticInfo>) {
@@ -28,8 +28,8 @@ class Program : Runnable {
         // TODO add a sanity check for the above requirement
 
         val constructorCtx = Context()
-        val initiallySig = ActionSignature("initially", listOf())
-        val initiallyAction = SymbolicAction(initiallySig, constructorCtx.mkTrue())
+        val initiallySig = SymbolicAction("initially", listOf())
+        val initiallyAction = TSAction(initiallySig, constructorCtx.mkTrue())
 
         // create a SyncChannel for each action
         val actionBag = componentInfo.flatMap { it.alphabet union it.constructors.keys }
@@ -39,7 +39,7 @@ class Program : Runnable {
         // the initially action is a self-sync for the constructor proc
         actionCounts[initiallySig] = 1
 
-        exspecs.tools.assert(channelTable == emptyMap<ActionSignature, SyncChannel<ConcreteAction, BoolExpr>>(),
+        exspecs.tools.assert(channelTable == emptyMap<SymbolicAction, SyncChannel<ConcreteAction, BoolExpr>>(),
             "Expected an empty channel table when running a program")
         channelTable = actionCounts.keys.associateWith { act ->
             val syncSize = actionCounts[act]!!

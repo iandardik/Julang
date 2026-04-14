@@ -31,8 +31,8 @@ class ProgTest {
         val ctx = Context()
         val initState = State(setOf(IntVarAssignment(VarName("i"), 0)))
         val alphabet = setOf(
-            SymbolicAction(
-                ActionSignature("I", listOf("inc")),
+            TSAction(
+                SymbolicAction("I", listOf("inc")),
                 ctx.mkAnd(
                     ctx.mkLe(ctx.mkIntConst("i"), ctx.mkInt(10)),
                     ctx.mkGt(ctx.mkIntConst("inc"), ctx.mkInt(2))
@@ -52,8 +52,8 @@ class ProgTest {
         val ctx = Context()
         val initState = State(setOf(IntVarAssignment(VarName("i"), 0)))
         val alphabet = setOf(
-            SymbolicAction(
-                ActionSignature("I", listOf("inc")),
+            TSAction(
+                SymbolicAction("I", listOf("inc")),
                 ctx.mkAnd(
                     ctx.mkLe(ctx.mkIntConst("i"), ctx.mkInt(10)),
                     ctx.mkEq(ctx.mkMod(ctx.mkIntConst("inc"), ctx.mkInt(2)), ctx.mkInt(0))
@@ -76,8 +76,8 @@ class ProgTest {
             IntVarAssignment(VarName("p"), 0),
         ))
         val alphabet = setOf(
-            SymbolicAction(
-                ActionSignature("I", listOf("inc")),
+            TSAction(
+                SymbolicAction("I", listOf("inc")),
                 ctx.mkAnd(
                     ctx.mkLe(ctx.mkIntConst("i"), ctx.mkInt(10)),
                     ctx.mkEq(ctx.mkIntConst("p"), ctx.mkInt(0)),
@@ -94,8 +94,8 @@ class ProgTest {
                     ),
                 )
             ),
-            SymbolicAction(
-                ActionSignature("Println2", listOf("msg")), // don't actually use the library function here
+            TSAction(
+                SymbolicAction("Println2", listOf("msg")), // don't actually use the library function here
                 ctx.mkAnd(
                     ctx.mkEq(ctx.mkIntConst("msg"),ctx.mkIntConst("i")),
                     ctx.mkOr(

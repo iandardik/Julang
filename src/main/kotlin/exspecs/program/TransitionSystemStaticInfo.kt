@@ -9,12 +9,12 @@ data class TransitionSystemStaticInfo(
     /**
      * The alphabet, i.e. the set of all possible symbolic actions that this TS will engage in.
      */
-    val alphabet : Set<ActionSignature>,
+    val alphabet : Set<SymbolicAction>,
 
     /**
      * For each constructor action, a function that constructs a new TransitionSystem.
      */
-    val constructors : Map<ActionSignature, (ConcreteAction)->TransitionSystem>,
+    val constructors : Map<SymbolicAction, (ConcreteAction)->TransitionSystem>,
 
     /**
      * Whether the transition system will terminate itself. If true (default) then the program will not end before the

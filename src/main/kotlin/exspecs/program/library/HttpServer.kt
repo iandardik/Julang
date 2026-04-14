@@ -12,10 +12,10 @@ class JulHttpServer : TransitionSystem, HttpHandler {
     companion object: StaticInfo {
         val reqBodyArg = Variable("reqBody", stringType)
         val respBodyArg = Variable("respBody", stringType)
-        val receiveRequestAct = ActionSignature("receiveRequest", listOf(reqBodyArg))
-        val sendResponseAct = ActionSignature("sendResponse", listOf(respBodyArg))
-        val closeAct = ActionSignature("close", listOf()) // TODO mark this (and others) as 'service' or something so syncNum = 2
-        val initiallyCtor = Pair(ActionSignature("initially", listOf())) { act : ConcreteAction -> JulHttpServer() }
+        val receiveRequestAct = SymbolicAction("receiveRequest", listOf(reqBodyArg))
+        val sendResponseAct = SymbolicAction("sendResponse", listOf(respBodyArg))
+        val closeAct = SymbolicAction("close", listOf()) // TODO mark this (and others) as 'service' or something so syncNum = 2
+        val initiallyCtor = Pair(SymbolicAction("initially", listOf())) { act : ConcreteAction -> JulHttpServer() }
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one
         override fun staticInfo() = TransitionSystemStaticInfo("JulHttpServer$", setOf(receiveRequestAct, sendResponseAct), mapOf(initiallyCtor), true)
     }
@@ -26,11 +26,11 @@ class JulHttpServer : TransitionSystem, HttpHandler {
         server.createContext("/", this)
         server.start()
     }
-    override fun actions(): Set<SymbolicAction> {
+    override fun actions(): Set<TSAction> {
         Thread.sleep(9999999L) // TODO this is temporary because no one calls close, so a deadlock happens immediately
         return setOf(
-            SymbolicAction(
-                ActionSignature("closeHttpServer", listOf()),
+            TSAction(
+                SymbolicAction("closeHttpServer", listOf()),
                 ctx.mkTrue()
             ),
         )
@@ -56,11 +56,11 @@ class JulHttpServer : TransitionSystem, HttpHandler {
             val reqHeaders = exchange.requestHeaders
             reqBody = exchange.requestBody.bufferedReader().use { it.readText() }
         }
-        override fun actions(): Set<SymbolicAction> {
+        override fun actions(): Set<TSAction> {
             if (initHttpReq) {
                 initHttpReq = false
                 return setOf(
-                    SymbolicAction(
+                    TSAction(
                         receiveRequestAct,
                         ctx.mkEq(ctx.mkStringConst("reqBody"), ctx.mkString(reqBody))
                     ),
@@ -68,14 +68,14 @@ class JulHttpServer : TransitionSystem, HttpHandler {
             }
             else if (finishHttpReq) {
                 finishHttpReq = false
-                return setOf(SymbolicAction(sendResponseAct, ctx.mkTrue()))
+                return setOf(TSAction(sendResponseAct, ctx.mkTrue()))
             }
             else {
                 return setOf()
             }
         }
         override fun transit(act: ConcreteAction) {
-            if (act.signature == sendResponseAct) {
+            if (act.symAction == sendResponseAct) {
                 val respBody = act.lookup(respBodyArg).value as String
                 exchange.responseHeaders
                 exchange.sendResponseHeaders(200, respBody.length.toLong())

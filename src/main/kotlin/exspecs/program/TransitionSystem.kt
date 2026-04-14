@@ -1,6 +1,5 @@
 package exspecs.program
 
-import com.microsoft.z3.BoolExpr
 import com.microsoft.z3.Context
 
 /**
@@ -14,7 +13,7 @@ interface TransitionSystem {
      * permissible to simply return the alphabet() here, though implementations may wish to dynamically decide which
      * actions to return.
      */
-    fun actions() : Set<SymbolicAction>
+    fun actions() : Set<TSAction>
 
     /**
      * The transition system transits to a (potentially new) state based on the given concrete action.

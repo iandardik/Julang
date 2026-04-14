@@ -135,7 +135,7 @@ class ConstructorNode(
     override fun constructors(): List<ActionDecl> {
         return listOf(
             ActionDecl(
-                ActionSignature(name,args.actionArgs()),
+                SymbolicAction(name,args.actionArgs()),
                 super.guards(),
                 super.transits()
             )
@@ -166,7 +166,7 @@ class TransitionNode(
     override fun transitions(): List<ActionDecl> {
         return listOf(
             ActionDecl(
-                ActionSignature(name,args.actionArgs()),
+                SymbolicAction(name,args.actionArgs()),
                 super.guards(),
                 super.transits()
             )

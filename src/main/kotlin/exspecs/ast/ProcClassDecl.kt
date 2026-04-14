@@ -12,15 +12,15 @@ data class ProcClassDecl(
     fun toKotlinClassString(): String {
         val stateVarTypes = stateVars.associate { Pair(it.name,it.type) }
         val stateVarsStr = stateVars.joinToString(",\n") { "private var $it" }
-        val actionsStr = "override fun actions(): Set<SymbolicAction> = setOf(\n" +
+        val actionsStr = "override fun actions(): Set<TSAction> = setOf(\n" +
                 transitions.joinToString(",\n") { it.toActionString(stateVarTypes).prependIndent() } +
                 "\n)"
         val transitStr = "override fun transit(act: ConcreteAction) {" +
-                "\nreturn when (act.signature.name) {".prependIndent() +
+                "\nreturn when (act.symAction.name) {".prependIndent() +
                 transitions.joinToString("") {
                     "\n\"${it.action.name}\" -> {" + "\n${it.toTransitString(stateVarTypes)}".prependIndent() + "\n}"
                 }.prependIndent().prependIndent() +
-                "\nelse -> throw RuntimeException(\"Action is outside my alphabet: \${act.signature}\")".prependIndent().prependIndent() +
+                "\nelse -> throw RuntimeException(\"Action is outside my alphabet: \${act.symAction}\")".prependIndent().prependIndent() +
                 "\n}".prependIndent() +
                 "\n}"
         return "class $name(" +
@@ -62,7 +62,7 @@ data class ProcClassDecl(
 }
 
 data class ActionDecl(
-    val action : ActionSignature,
+    val action : SymbolicAction,
     val guards : List<ASTNode>,
     val transits : Map<String,ASTNode>
 ) {
@@ -80,7 +80,7 @@ data class ActionDecl(
             }
             "Variable(\"${it.name}\", $typeStr)"
         }
-        val actionSigStr = "ActionSignature(\"${action.name}\", listOf($actionArgsStr))"
+        val actionSigStr = "SymbolicAction(\"${action.name}\", listOf($actionArgsStr))"
         val guardStr = if (guards.size == 1) {
             val guard = guards[0]
             guard.toZ3GuardString(symbolTypes, argSymbols)
@@ -88,7 +88,7 @@ data class ActionDecl(
             val body = guards.joinToString(", ") { it.toZ3GuardString(symbolTypes, argSymbols) }
             "ctx.mkAnd($body)"
         }
-        return "SymbolicAction(" +
+        return "TSAction(" +
                 "\n$actionSigStr,".prependIndent() +
                 "\n$guardStr".prependIndent() +
                 "\n)"
@@ -111,6 +111,6 @@ data class ActionDecl(
             }
             "Variable(\"${it.name}\", $typeStr)"
         }
-        return "ActionSignature(\"${action.name}\", listOf($actionArgsStr))"
+        return "SymbolicAction(\"${action.name}\", listOf($actionArgsStr))"
     }
 }

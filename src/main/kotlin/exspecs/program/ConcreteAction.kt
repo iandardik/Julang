@@ -5,10 +5,10 @@ import com.microsoft.z3.Model
 import exspecs.tools.assert
 
 class ConcreteAction(
-    val signature : ActionSignature,
+    val symAction : SymbolicAction,
     private val argAssignments : Map<Variable,Value>
 ) {
-    constructor(sig : ActionSignature, ctx : Context, model : Model)
+    constructor(sig : SymbolicAction, ctx : Context, model : Model)
         : this(sig, sig.args.associateWith { v ->
             val z3Value = model.eval(v.type.toZ3Expr(v,ctx), true)
             Value(z3Value, v.type)
@@ -24,10 +24,10 @@ class ConcreteAction(
     }
 
     override fun toString() : String {
-        return "ConcreteAction($signature): $argAssignments"
+        return "ConcreteAction($symAction): $argAssignments"
     }
 }
 
 fun emptyConcreteAction() : ConcreteAction {
-    return ConcreteAction(ActionSignature("",emptyList()), emptyMap())
+    return ConcreteAction(SymbolicAction("",emptyList()), emptyMap())
 }

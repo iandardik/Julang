@@ -7,9 +7,9 @@ import exspecs.tools.mkStringConst
 class ReadlnTS : TransitionSystem {
     companion object: StaticInfo {
         val msgArg = Variable("msg", stringType)
-        val promptAct = ActionSignature("prompt", listOf())
-        val readlnAct = ActionSignature("readln", listOf(msgArg))
-        val initiallyCtor = Pair(ActionSignature("initially", listOf())) { act : ConcreteAction -> ReadlnTS() }
+        val promptAct = SymbolicAction("prompt", listOf())
+        val readlnAct = SymbolicAction("readln", listOf(msgArg))
+        val initiallyCtor = Pair(SymbolicAction("initially", listOf())) { act : ConcreteAction -> ReadlnTS() }
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one
         override fun staticInfo() = TransitionSystemStaticInfo("ReadlnTS$", setOf(promptAct, readlnAct), mapOf(initiallyCtor), false)
     }
@@ -19,11 +19,11 @@ class ReadlnTS : TransitionSystem {
     private var msg = ""
 
     override fun actions() = setOf(
-        SymbolicAction(
+        TSAction(
             promptAct,
             ctx.mkEq(ctx.mkBool(prompt), ctx.mkBool(true))
         ),
-        SymbolicAction(
+        TSAction(
             readlnAct,
             ctx.mkAnd(
                 ctx.mkEq(ctx.mkBool(prompt), ctx.mkBool(false)),
@@ -32,7 +32,7 @@ class ReadlnTS : TransitionSystem {
         ),
     )
     override fun transit(act: ConcreteAction) {
-        if (act.signature == promptAct) {
+        if (act.symAction == promptAct) {
             prompt = false
             msg = readln()
         }

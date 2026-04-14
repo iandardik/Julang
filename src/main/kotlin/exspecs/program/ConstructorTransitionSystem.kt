@@ -7,9 +7,9 @@ import java.util.*
 import java.util.concurrent.locks.ReentrantLock
 
 class ConstructorTransitionSystem(
-    private val initiallyAction : SymbolicAction,
+    private val initiallyAction : TSAction,
     private val constructorsInfo : Set<TransitionSystemStaticInfo>,
-    private val channelTable : Map<ActionSignature,SyncChannel<ConcreteAction, BoolExpr>>,
+    private val channelTable : Map<SymbolicAction,SyncChannel<ConcreteAction, BoolExpr>>,
     private val ctx : Context,
     // TODO input the cli args into initially (accept them here as a constructor arg)
 ) : TransitionSystem {
@@ -22,14 +22,14 @@ class ConstructorTransitionSystem(
     private val z3True = ctx.mkTrue()
     private val nonInitiallyConstructorActions = constructorsInfo
         .flatMap { info -> info.constructors.keys }
-        .filter { sig -> sig != initiallyAction.signature }
-        .map { sig -> SymbolicAction(sig, z3True) }
+        .filter { act -> act != initiallyAction.symAction }
+        .map { act -> TSAction(act, z3True) }
         .toSet()
     private val liveProcsLock = ReentrantLock()
     private val liveSelfTerminatingProcs = mutableSetOf<Thread>()
     private var initially = true
 
-    override fun actions(): Set<SymbolicAction> {
+    override fun actions(): Set<TSAction> {
         return if (initially) {
             initially = false
             setOf(initiallyAction)
@@ -42,8 +42,8 @@ class ConstructorTransitionSystem(
     override fun transit(act: ConcreteAction) {
         constructorsInfo
             .forEach { tsInfo ->
-                if (tsInfo.constructors.containsKey(act.signature)) {
-                    val constructor = tsInfo.constructors[act.signature]!!
+                if (tsInfo.constructors.containsKey(act.symAction)) {
+                    val constructor = tsInfo.constructors[act.symAction]!!
                     val t = Thread(Proc(constructor.invoke(act), tsInfo, channelTable))
                     if (tsInfo.selfTerminate) {
                         liveProcsLock.lock()
@@ -58,7 +58,7 @@ class ConstructorTransitionSystem(
             }
 
         // after the initially action, start monitoring for whether the program has ended in a new thread
-        if (act.signature == initiallyAction.signature) {
+        if (act.symAction == initiallyAction.symAction) {
             Thread {
                 var running = true
                 while (running) {

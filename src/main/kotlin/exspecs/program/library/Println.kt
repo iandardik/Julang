@@ -6,14 +6,14 @@ import exspecs.program.*
 class PrintlnTS : TransitionSystem {
     companion object: StaticInfo {
         val msgArg = Variable("msg", stringType)
-        val printlnAct = ActionSignature("println", listOf(msgArg))
-        val initiallyCtor = Pair(ActionSignature("initially", listOf())) { act : ConcreteAction -> PrintlnTS() }
+        val printlnAct = SymbolicAction("println", listOf(msgArg))
+        val initiallyCtor = Pair(SymbolicAction("initially", listOf())) { act : ConcreteAction -> PrintlnTS() }
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one
         override fun staticInfo() = TransitionSystemStaticInfo("PrintlnTS$", setOf(printlnAct), mapOf(initiallyCtor), false)
     }
 
     private val ctx = Context()
-    private val alphabet = setOf(SymbolicAction(printlnAct, ctx.mkTrue()))
+    private val alphabet = setOf(TSAction(printlnAct, ctx.mkTrue()))
     override fun actions() = alphabet
     override fun transit(act: ConcreteAction) {
         val msg = act.lookup(msgArg)
