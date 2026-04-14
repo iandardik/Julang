@@ -126,7 +126,7 @@ fun gradleBuildFileContents(name : String, mainClassName : String) : String {
             "}\n" +
             "\n" +
             "dependencies {\n" +
-            "    implementation(files(\"../Exspecs.jar\"))\n" +
+            "    implementation(files(\"../julayc.jar\"))\n" +
             "}\n" +
             "\n" +
             "application {\n" +
