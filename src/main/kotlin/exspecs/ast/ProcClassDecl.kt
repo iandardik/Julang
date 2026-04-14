@@ -50,7 +50,8 @@ data class ProcClassDecl(
                 "Pair($actSigStr, $constructStr)".prependIndent()
             }
         return "TransitionSystemStaticInfo(" +
-                ("\nsetOf(" +
+                ("\n\"$name\"," +
+                "\nsetOf(" +
                 "\n$transitionInfo" +
                 "\n)," +
                 "\nmapOf(" +

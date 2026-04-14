@@ -16,7 +16,8 @@ class JulHttpServer : TransitionSystem, HttpHandler {
         val sendResponseAct = ActionSignature("sendResponse", listOf(respBodyArg))
         val closeAct = ActionSignature("close", listOf()) // TODO mark this (and others) as 'service' or something so syncNum = 2
         val initiallyCtor = Pair(ActionSignature("initially", listOf())) { act : ConcreteAction -> JulHttpServer() }
-        override fun staticInfo() = TransitionSystemStaticInfo(setOf(receiveRequestAct, sendResponseAct), mapOf(initiallyCtor), true)
+        // the $ in the name means that programs cannot create p-classes whose names conflict with this one
+        override fun staticInfo() = TransitionSystemStaticInfo("JulHttpServer$", setOf(receiveRequestAct, sendResponseAct), mapOf(initiallyCtor), true)
     }
 
     private val ctx = Context()
@@ -38,7 +39,7 @@ class JulHttpServer : TransitionSystem, HttpHandler {
     override fun getContext() = ctx
     override fun handle(exchange: HttpExchange?) {
         val resource = HttpResource(exchange!!)
-        Thread(Proc(resource, Program.channelTable)).start()
+        Thread(Proc(resource, staticInfo(), Program.channelTable)).start()
     }
 
     class HttpResource(

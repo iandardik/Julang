@@ -8,7 +8,8 @@ class PrintlnTS : TransitionSystem {
         val msgArg = Variable("msg", stringType)
         val printlnAct = ActionSignature("println", listOf(msgArg))
         val initiallyCtor = Pair(ActionSignature("initially", listOf())) { act : ConcreteAction -> PrintlnTS() }
-        override fun staticInfo() = TransitionSystemStaticInfo(setOf(printlnAct), mapOf(initiallyCtor), false)
+        // the $ in the name means that programs cannot create p-classes whose names conflict with this one
+        override fun staticInfo() = TransitionSystemStaticInfo("PrintlnTS$", setOf(printlnAct), mapOf(initiallyCtor), false)
     }
 
     private val ctx = Context()

@@ -57,7 +57,8 @@ class Program : Runnable {
             }
         }
 
-        constructorProc = Proc(ConstructorTransitionSystem(initiallyAction, componentInfo, channelTable, constructorCtx), channelTable)
+        constructorProc = Proc(ConstructorTransitionSystem(initiallyAction, componentInfo, channelTable, constructorCtx),
+            ConstructorTransitionSystem.staticInfo(), channelTable)
     }
 
     override fun run() {

@@ -10,7 +10,8 @@ class ReadlnTS : TransitionSystem {
         val promptAct = ActionSignature("prompt", listOf())
         val readlnAct = ActionSignature("readln", listOf(msgArg))
         val initiallyCtor = Pair(ActionSignature("initially", listOf())) { act : ConcreteAction -> ReadlnTS() }
-        override fun staticInfo() = TransitionSystemStaticInfo(setOf(promptAct, readlnAct), mapOf(initiallyCtor), false)
+        // the $ in the name means that programs cannot create p-classes whose names conflict with this one
+        override fun staticInfo() = TransitionSystemStaticInfo("ReadlnTS$", setOf(promptAct, readlnAct), mapOf(initiallyCtor), false)
     }
 
     private val ctx = Context()

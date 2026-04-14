@@ -13,6 +13,12 @@ class ConstructorTransitionSystem(
     private val ctx : Context,
     // TODO input the cli args into initially (accept them here as a constructor arg)
 ) : TransitionSystem {
+    companion object: StaticInfo {
+        // the $ in the name means that programs cannot create p-classes whose names conflict with this one
+        // the alphabet info is not strictly correct, but it does not matter since it's never used
+        override fun staticInfo() = TransitionSystemStaticInfo("ConstructorTS$", setOf(), mapOf(), false)
+    }
+
     private val z3True = ctx.mkTrue()
     private val nonInitiallyConstructorActions = constructorsInfo
         .flatMap { info -> info.constructors.keys }
@@ -38,7 +44,7 @@ class ConstructorTransitionSystem(
             .forEach { tsInfo ->
                 if (tsInfo.constructors.containsKey(act.signature)) {
                     val constructor = tsInfo.constructors[act.signature]!!
-                    val t = Thread(Proc(constructor.invoke(act), channelTable))
+                    val t = Thread(Proc(constructor.invoke(act), tsInfo, channelTable))
                     if (tsInfo.selfTerminate) {
                         liveProcsLock.lock()
                         try {

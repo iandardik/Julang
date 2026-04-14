@@ -2,6 +2,11 @@ package exspecs.program
 
 data class TransitionSystemStaticInfo(
     /**
+     * A name that uniquely describes the process class.
+     */
+    val name : String,
+
+    /**
      * The alphabet, i.e. the set of all possible symbolic actions that this TS will engage in.
      */
     val alphabet : Set<ActionSignature>,
@@ -17,7 +22,9 @@ data class TransitionSystemStaticInfo(
      * processes).
      */
     val selfTerminate : Boolean,
-) {}
+) {
+    fun classID() = hashCode()
+}
 
 interface StaticInfo {
     fun staticInfo() : TransitionSystemStaticInfo
