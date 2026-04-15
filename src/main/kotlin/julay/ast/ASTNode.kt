@@ -10,6 +10,7 @@ abstract class ASTNode(
     open fun procClassPass(pclassName : String) : List<ProcClassDecl> = children.flatMap { it.procClassPass(pclassName) }
     open fun constructors() : List<ActionDecl> = children.flatMap { it.constructors() }
     open fun transitions() : List<ActionDecl> = children.flatMap { it.transitions() }
+    open fun services() : List<ActionDecl> = children.flatMap { it.services() }
     open fun actionArgs() : List<Variable> = children.flatMap { it.actionArgs() }
     open fun guards() : List<ASTNode> = children.flatMap { it.guards() }
     open fun transits() : Map<String,ASTNode> = children.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() }
@@ -27,6 +28,7 @@ abstract class ASTNode(
 class RootNode(
     private val declNodes : List<ASTNode>
 ) : ASTNode(declNodes) {
+    // TODO for error pass, ensure that an action is marked as a "service" has at least one non-service p-class
     override fun toString(): String {
         return declNodes.joinToString("\n\n") { it.toString() }
     }
@@ -55,9 +57,11 @@ class ProcClassNode(
         }
         val stateVars = localDecls.flatMap { it.children }
             .filterIsInstance<VarNode>().map { Variable(it.name,it.type) }
-        val constructors = localDecls.flatMap { it.constructors() }
+        // TODO make sure constructors, transitions, and services are mutually exclusive
+        val constructors = localDecls.flatMap { it.constructors() } // TODO constructors cannot have repeat names
         val transitions = localDecls.flatMap { it.transitions() }
-        val decl = ProcClassDecl(name, stateVars, constructors, transitions)
+        val services = localDecls.flatMap { it.services() }
+        val decl = ProcClassDecl(name, stateVars, constructors, transitions, services)
         return listOf(decl)
     }
     override fun toString(): String {
@@ -137,7 +141,8 @@ class ConstructorNode(
             ActionDecl(
                 SymbolicAction(name,args.actionArgs()),
                 super.guards(),
-                super.transits()
+                super.transits(),
+                false
             )
         )
     }
@@ -168,13 +173,46 @@ class TransitionNode(
             ActionDecl(
                 SymbolicAction(name,args.actionArgs()),
                 super.guards(),
-                super.transits()
+                super.transits(),
+                false
             )
         )
     }
     override fun toString(): String {
         val bodyStr = body.joinToString("\n") { "$it".prependIndent() }
         return "transition $name($args) {\n$bodyStr\n}"
+    }
+}
+
+class ServiceNode(
+    private val name : String,
+    private val args : ASTNode,
+    private val body : List<ASTNode>,
+    private val loc : Pair<Int,Int>
+) : ASTNode(listOf(args) + body) {
+    override fun errorPass(): List<CompileError> {
+        val errors = mutableListOf<CompileError>()
+        errors.addAll(args.errorPass())
+        errors.addAll(body.flatMap { it.errorPass() })
+        if (name == "initially") {
+            errors.add(CompileError(loc, "only constructors (not service transitions) can synchronize on the 'initially' action"))
+        }
+        // TODO ensure that each transit has a unique state var
+        return errors
+    }
+    override fun services(): List<ActionDecl> {
+        return listOf(
+            ActionDecl(
+                SymbolicAction(name,args.actionArgs()),
+                super.guards(),
+                super.transits(),
+                true
+            )
+        )
+    }
+    override fun toString(): String {
+        val bodyStr = body.joinToString("\n") { "$it".prependIndent() }
+        return "service $name($args) {\n$bodyStr\n}"
     }
 }
 
@@ -385,7 +423,7 @@ class SymbolValueExprNode(
                     if (symbol in argSymbols) {
                         "ctx.intToString(ctx.mkIntConst(\"$symbol\"))"
                     } else {
-                        "ctx.ctx.mkString(${symbol}.toString())"
+                        "ctx.mkString(${symbol}.toString())"
                     }
                 }
                 is StringType -> {

@@ -9,7 +9,7 @@ import java.util.*
 class Proc(
     private val transitionSystem : TransitionSystem,
     private val tsInfo : TransitionSystemStaticInfo,
-    private val channelTable : Map<SymbolicAction, SyncChannel<ConcreteAction, BoolExpr>>
+    private val actionTable : Map<SymbolicAction,ProgramAction>
 ) : Runnable {
     private val ctx = transitionSystem.getContext()
 
@@ -21,11 +21,16 @@ class Proc(
                 solver.add(it.guard)
                 solver.check() == Status.SATISFIABLE
             }
-            val cases = enabledActions.map { symAct ->
-                val channel = channelTable[symAct.symAction]!!
-                // the anticonstraint ensures that processes from the same p-class never sync
-                val anticonstraint = ctx.mkEq(ctx.mkIntConst("classID"), ctx.mkInt(tsInfo.classID()))
-                Select.SyncCase(channel, symAct.guard, anticonstraint) { concAct : ConcreteAction ->
+            val cases = enabledActions.map { act ->
+                val programAction = actionTable[act.symAction]!!
+                // the first anticonstraint ensures that processes from the same p-class never sync
+                // the second ensures that service transitions act like servers, and all others act like clients
+                val anticonstraint = if (programAction.isServiced) {
+                    ctx.mkEq(ctx.mkBoolConst("serviceTransition"), ctx.mkBool(act.isServicer))
+                } else {
+                    ctx.mkEq(ctx.mkIntConst("classID"), ctx.mkInt(tsInfo.classID()))
+                }
+                Select.SyncCase(programAction.channel, act.guard, anticonstraint) { concAct : ConcreteAction ->
                     nextAct = Optional.of(concAct)
                 }
             }

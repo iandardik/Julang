@@ -32,6 +32,7 @@ pclass_body
     : var
     | constructor
     | transition
+    | service
     ;
 
 var
@@ -44,6 +45,10 @@ constructor
 
 transition
     : TRANSITION ID args LCURLY action_body* RCURLY
+    ;
+
+service
+    : SERVICE ID args LCURLY action_body* RCURLY
     ;
 
 args

@@ -11,4 +11,5 @@ import com.microsoft.z3.BoolExpr
 data class TSAction(
     val symAction : SymbolicAction,
     val guard : BoolExpr,
+    val isServicer : Boolean,
 ) {}

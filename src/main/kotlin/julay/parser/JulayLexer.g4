@@ -33,6 +33,7 @@ SPEC : 'spec' ;
 VAR : 'var' ;
 CONSTRUCTOR : 'constructor' ;
 TRANSITION : 'transition' ;
+SERVICE : 'service' ;
 GUARD : 'guard' ;
 TRANSIT : 'transit' ;
 ERROR : 'error' ;

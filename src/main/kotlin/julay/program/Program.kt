@@ -10,11 +10,7 @@ import java.util.*
  * A program represents one or more processes that interact together on a single computer.
  */
 class Program : Runnable {
-    companion object {
-        // a static channel table is ugly, but necessary for library processes that break the typical pattern where
-        // procs cannot share resources (e.g. with HttpServer)
-        var channelTable : Map<SymbolicAction, SyncChannel<ConcreteAction, BoolExpr>> = emptyMap()
-    }
+    val actionTable : Map<SymbolicAction,ProgramAction>
     private val constructorProc : Proc
 
     /**
@@ -22,26 +18,34 @@ class Program : Runnable {
      * communicate (synchronize on args) over the channel.
      */
     constructor(componentInfo : Set<TransitionSystemStaticInfo>) {
-        // all action signatures that have the same name should have the same param
-        // TODO add a sanity check for the above requirement
-        // no transition should be for initially (only constructors)
-        // TODO add a sanity check for the above requirement
+        // assumpmtions/requirements:
+        // - all action signatures that have the same name should have the same param
+        // - no transition should be for initially (only constructors)
+        // - for any serviced action, it must have at least one servicer and at least one non-servicer
+        // TODO based on ^^ we should really call them client/server instead
+        // - a TS who claims to be a servicer of an action must have that action in its alphabet
+        // TODO add a sanity check for each of the above requirements
 
         val constructorCtx = Context()
         val initiallySig = SymbolicAction("initially", listOf())
-        val initiallyAction = TSAction(initiallySig, constructorCtx.mkTrue())
+        val initiallyAction = TSAction(initiallySig, constructorCtx.mkTrue(), false)
 
         // create a SyncChannel for each action
+        val serviceActions = componentInfo.flatMap { it.services }.toSet()
         val actionBag = componentInfo.flatMap { it.alphabet union it.constructors.keys }
         val actionCounts = actionBag.toSet()
-            .associateWith { setAct -> actionBag.count { bagAct -> bagAct == setAct } }
+            .associateWith { setAct ->
+                if (setAct in serviceActions) {
+                    2
+                } else {
+                    actionBag.count { bagAct -> bagAct == setAct }
+                }
+            }
             .toMutableMap()
         // the initially action is a self-sync for the constructor proc
         actionCounts[initiallySig] = 1
 
-        julay.tools.assert(channelTable == emptyMap<SymbolicAction, SyncChannel<ConcreteAction, BoolExpr>>(),
-            "Expected an empty channel table when running a program")
-        channelTable = actionCounts.keys.associateWith { act ->
+        val channelTable = actionCounts.keys.associateWith { act ->
             val syncSize = actionCounts[act]!!
             val ctx = Context() // one Context per channel
             SyncChannel<ConcreteAction,BoolExpr>(syncSize) { constraints ->
@@ -57,8 +61,13 @@ class Program : Runnable {
             }
         }
 
-        constructorProc = Proc(ConstructorTransitionSystem(initiallyAction, componentInfo, channelTable, constructorCtx),
-            ConstructorTransitionSystem.staticInfo(), channelTable)
+        actionTable = channelTable.keys
+            .associateWith { ProgramAction(it, channelTable[it]!!, it in serviceActions) }
+        constructorProc = Proc(
+            ConstructorTransitionSystem(initiallyAction, componentInfo, this, constructorCtx),
+            ConstructorTransitionSystem.staticInfo(),
+            actionTable
+        )
     }
 
     override fun run() {

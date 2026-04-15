@@ -1,34 +1,50 @@
 p-class S {
-    var x : String = "noneS"
-    var p : String = "true"
-    var c : Int = 0
+    var x : Int
+    var print : Boolean
+
+    constructor initially() {
+        transit:
+            x := 0
+            print := true
+    }
     
-    action I(msg : String) {
+    transition increment(inc : Int) {
         guard:
-            (msg = x) & (p = "false")
-        update:
-            x := msg
-            p := "true"
+            (x <= 10) & (inc > 0) & (print = false)
+        transit:
+            x := x + inc
+            print := true
     }
 
-    action Println(msg : String) {
+    transition println(msg : String) {
         guard:
-            (p = "true") & (msg = x) & (c <= 10)
-        update:
-            p := "false"
-            c := c + 1
+            (print = true) & (msg = x + "")
+        transit:
+            print := false
     }
 }
 
 p-class T {
-    var y : String = "noneT"
-    var d : Int = 0
+    var x : Int
 
-    action I(msg : String) {
+    constructor initially() {
+        transit:
+            x := 0
+    }
+
+    transition increment(inc : Int) {
         guard:
-            d <= 10
-        update:
-            y := msg
-            d := d + 1
+            inc > 3 & x <= 10
+        transit:
+            x := x + inc
+    }
+
+    transition println(msg : String) {
+        guard:
+            (x > 1 & x <= 10) & (msg = x + "")
+        transit:
+            x := x + 1
     }
 }
+
+program TermTest2 := S || T || Println

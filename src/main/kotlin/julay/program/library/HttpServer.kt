@@ -7,17 +7,26 @@ import com.sun.net.httpserver.HttpServer
 import julay.program.*
 import julay.tools.mkStringConst
 import java.net.InetSocketAddress
+import java.util.Properties
 
-class JulHttpServer : TransitionSystem, HttpHandler {
+class JulHttpServer(
+    private val actionTable : Map<SymbolicAction,ProgramAction>
+) : TransitionSystem, HttpHandler {
     companion object: StaticInfo {
         val reqBodyArg = Variable("reqBody", stringType)
         val respBodyArg = Variable("respBody", stringType)
         val receiveRequestAct = SymbolicAction("receiveRequest", listOf(reqBodyArg))
         val sendResponseAct = SymbolicAction("sendResponse", listOf(respBodyArg))
-        val closeAct = SymbolicAction("close", listOf()) // TODO mark this (and others) as 'service' or something so syncNum = 2
-        val initiallyCtor = Pair(SymbolicAction("initially", listOf())) { act : ConcreteAction -> JulHttpServer() }
+        val closeAct = SymbolicAction("close", listOf())
+        val initiallyCtor = Pair(
+            SymbolicAction("initially", listOf())) { prog : Program, _ : ConcreteAction -> JulHttpServer(prog.actionTable) }
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one
-        override fun staticInfo() = TransitionSystemStaticInfo("JulHttpServer$", setOf(receiveRequestAct, sendResponseAct), mapOf(initiallyCtor), true)
+        override fun staticInfo() = TransitionSystemStaticInfo(
+            "JulHttpServer$",
+            setOf(receiveRequestAct, sendResponseAct, closeAct),
+            mapOf(initiallyCtor),
+            setOf(closeAct),
+            true)
     }
 
     private val ctx = Context()
@@ -27,19 +36,15 @@ class JulHttpServer : TransitionSystem, HttpHandler {
         server.start()
     }
     override fun actions(): Set<TSAction> {
-        Thread.sleep(9999999L) // TODO this is temporary because no one calls close, so a deadlock happens immediately
         return setOf(
-            TSAction(
-                SymbolicAction("closeHttpServer", listOf()),
-                ctx.mkTrue()
-            ),
+            TSAction(closeAct, ctx.mkTrue(), true),
         )
     }
     override fun transit(act: ConcreteAction) {}
     override fun getContext() = ctx
     override fun handle(exchange: HttpExchange?) {
         val resource = HttpResource(exchange!!)
-        Thread(Proc(resource, staticInfo(), Program.channelTable)).start()
+        Thread(Proc(resource, staticInfo(), actionTable)).start()
     }
 
     class HttpResource(
@@ -62,13 +67,14 @@ class JulHttpServer : TransitionSystem, HttpHandler {
                 return setOf(
                     TSAction(
                         receiveRequestAct,
-                        ctx.mkEq(ctx.mkStringConst("reqBody"), ctx.mkString(reqBody))
+                        ctx.mkEq(ctx.mkStringConst("reqBody"), ctx.mkString(reqBody)),
+                        false
                     ),
                 )
             }
             else if (finishHttpReq) {
                 finishHttpReq = false
-                return setOf(TSAction(sendResponseAct, ctx.mkTrue()))
+                return setOf(TSAction(sendResponseAct, ctx.mkTrue(), false))
             }
             else {
                 return setOf()

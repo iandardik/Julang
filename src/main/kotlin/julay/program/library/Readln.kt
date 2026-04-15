@@ -9,9 +9,14 @@ class ReadlnTS : TransitionSystem {
         val msgArg = Variable("msg", stringType)
         val promptAct = SymbolicAction("prompt", listOf())
         val readlnAct = SymbolicAction("readln", listOf(msgArg))
-        val initiallyCtor = Pair(SymbolicAction("initially", listOf())) { act : ConcreteAction -> ReadlnTS() }
+        val initiallyCtor = Pair(SymbolicAction("initially", listOf())) { _ : Program, _ : ConcreteAction -> ReadlnTS() }
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one
-        override fun staticInfo() = TransitionSystemStaticInfo("ReadlnTS$", setOf(promptAct, readlnAct), mapOf(initiallyCtor), false)
+        override fun staticInfo() = TransitionSystemStaticInfo(
+            "ReadlnTS$",
+            setOf(promptAct, readlnAct),
+            mapOf(initiallyCtor),
+            setOf(readlnAct),
+            false)
     }
 
     private val ctx = Context()
@@ -21,14 +26,16 @@ class ReadlnTS : TransitionSystem {
     override fun actions() = setOf(
         TSAction(
             promptAct,
-            ctx.mkEq(ctx.mkBool(prompt), ctx.mkBool(true))
+            ctx.mkEq(ctx.mkBool(prompt), ctx.mkBool(true)),
+            false
         ),
         TSAction(
             readlnAct,
             ctx.mkAnd(
                 ctx.mkEq(ctx.mkBool(prompt), ctx.mkBool(false)),
                 ctx.mkEq(ctx.mkStringConst("msg"), ctx.mkString(msg))
-            )
+            ),
+            true
         ),
     )
     override fun transit(act: ConcreteAction) {

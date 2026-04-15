@@ -76,6 +76,14 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
         return TransitionNode(name, args, body, loc)
     }
 
+    override fun visitService(ctx: JulayParser.ServiceContext?): ASTNode {
+        val name = ctx!!.ID().text
+        val args = visit(ctx.args())
+        val body = ctx.action_body().map { visit(it) }
+        val loc = Pair(ctx.getStart().line, ctx.getStart().line)
+        return ServiceNode(name, args, body, loc)
+    }
+
     override fun visitArgs(ctx: JulayParser.ArgsContext?): ASTNode {
         val args = ctx!!.arg().map { visit(it) }
         return ArgsNode(args)

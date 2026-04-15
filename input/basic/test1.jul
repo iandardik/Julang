@@ -1,6 +1,6 @@
 p-class S {
     var x : Int
-    var print : Bool
+    var print : Boolean
 
     constructor initially() {
         transit:
@@ -16,9 +16,9 @@ p-class S {
             print := true
     }
 
-    transition printlnInt(msg : Int) {
+    transition println(msg : String) {
         guard:
-            (print = true) & (msg = x)
+            (print = true) & (msg = x + "")
         transit:
             print := false
     }
@@ -40,4 +40,4 @@ p-class T {
     }
 }
 
-program main := S || T || PrintlnInt
+program TermTest1 := S || T || Println

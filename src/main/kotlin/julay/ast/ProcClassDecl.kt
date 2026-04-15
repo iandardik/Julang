@@ -7,6 +7,7 @@ data class ProcClassDecl(
     val stateVars : List<Variable>,
     val constructors : List<ActionDecl>,
     val transitions : List<ActionDecl>,
+    val services : List<ActionDecl>,
 ) {
 
     fun toKotlinClassString(): String {
@@ -46,9 +47,10 @@ data class ProcClassDecl(
                     }
                     .joinToString(", ") { it }
                 val constructor = "$name($constructorArgs)"
-                val constructStr = "{ act -> $constructor }"
+                val constructStr = "{ _,act -> $constructor }"
                 "Pair($actSigStr, $constructStr)".prependIndent()
             }
+        val serviceInfo = services.joinToString(",\n") { it.toStaticInfoString().prependIndent() }
         return "TransitionSystemStaticInfo(" +
                 ("\n\"$name\"," +
                 "\nsetOf(" +
@@ -57,6 +59,9 @@ data class ProcClassDecl(
                 "\nmapOf(" +
                 "\n$constructorPairs" +
                 "\n)," +
+                "\nsetOf(" +
+                "\n$serviceInfo" +
+                "\n)," +
                 "\ntrue)").prependIndent()
     }
 }
@@ -64,7 +69,8 @@ data class ProcClassDecl(
 data class ActionDecl(
     val action : SymbolicAction,
     val guards : List<ASTNode>,
-    val transits : Map<String,ASTNode>
+    val transits : Map<String,ASTNode>,
+    val isService : Boolean
 ) {
     fun toActionString(stateVarTypes : Map<String,Type>) : String {
         val argTypes = action.args.associate { Pair(it.name,it.type) }
@@ -88,9 +94,11 @@ data class ActionDecl(
             val body = guards.joinToString(", ") { it.toZ3GuardString(symbolTypes, argSymbols) }
             "ctx.mkAnd($body)"
         }
+        val serviceStr = isService
         return "TSAction(" +
                 "\n$actionSigStr,".prependIndent() +
-                "\n$guardStr".prependIndent() +
+                "\n$guardStr,".prependIndent() +
+                "\n$serviceStr".prependIndent() +
                 "\n)"
     }
 

@@ -14,7 +14,12 @@ data class TransitionSystemStaticInfo(
     /**
      * For each constructor action, a function that constructs a new TransitionSystem.
      */
-    val constructors : Map<SymbolicAction, (ConcreteAction)->TransitionSystem>,
+    val constructors : Map<SymbolicAction, (Program,ConcreteAction)->TransitionSystem>,
+
+    /**
+     * The services that this TransitionSystem offers. Must be a subset of the alphabet.
+     */
+    val services : Set<SymbolicAction>,
 
     /**
      * Whether the transition system will terminate itself. If true (default) then the program will not end before the
