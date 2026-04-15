@@ -19,6 +19,12 @@ data class Value(
     }
 
     override fun toString(): String {
+        if (type is StringType && value is String) {
+            // Z3 replaces newlines and tabs with a special escape sequence
+            return value
+                .replace("\\u{a}", "\n")
+                .replace("\\u{9}", "\t")
+        }
         return value.toString()
     }
 }

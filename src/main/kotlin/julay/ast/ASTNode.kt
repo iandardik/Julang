@@ -407,7 +407,7 @@ class LiteralValueExprNode(
     }
     override fun type(symbolTypes: Map<String, Type>) = type
     override fun toString(): String {
-        return if (type == stringType) "\"$value\"" else value
+        return if (type is StringType) "\"$value\"" else value
     }
 }
 

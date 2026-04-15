@@ -30,7 +30,7 @@ p-class FrontEnd {
             (state = "C") & (key = keyReq)
         transit:
             state := "D"
-            valReq := "val: " + val // just to test string concatenation
+            valReq := "val:\n\t" + val // just to test string concatenation and escape characters
     }
 
     transition println(msg : String) {
