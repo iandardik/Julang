@@ -90,7 +90,9 @@ class Select(private vararg val cases : Case) : Runnable {
             val select = selectRef.get()
             var done = false
             while (!done) {
-                val ret = chan.sync(constraint, anticonstraint, selectRef)
+                // TODO fix
+                //val ret = chan.sync(constraint, anticonstraint, selectRef)
+                val ret = SyncChannelResult.none<V>()
                 done = ret.isPresent || ret.isAborted || select.winner.isPresent || chan.isClosed()
                 if (ret.isPresent && ret.isSAT) {
                     julay.tools.assert(select.winner.get() == chan.hashCode())
