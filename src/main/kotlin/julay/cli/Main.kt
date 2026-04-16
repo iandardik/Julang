@@ -92,7 +92,7 @@ fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
     Runtime.getRuntime().exec(arrayOf("bash", "-c", "cd $buildDir; gradle wrapper --gradle-version 8.5")).waitFor()
     File("$buildDir/build.gradle.kts").writeText(gradleBuildFileContents(progName, mainClassName))
     Runtime.getRuntime().exec(arrayOf("bash", "-c", "cd $buildDir; ./gradlew shadowJar")).waitFor()
-    deleteDirectory(File(buildDir))
+    //deleteDirectory(File(buildDir))
 }
 
 // thank you: https://www.baeldung.com/kotlin/delete-directories-with-contents
@@ -115,7 +115,7 @@ fun gradleSettingsFileContents(name : String) : String {
 
 fun gradleBuildFileContents(name : String, mainClassName : String) : String {
     return "plugins {\n" +
-            "    kotlin(\"jvm\") version \"1.9.24\"\n" +
+            "    kotlin(\"jvm\") version \"2.1.0\"\n" +
             "    application\n" +
             "    id(\"com.github.johnrengelman.shadow\") version \"8.1.1\"\n" +
             "}\n" +

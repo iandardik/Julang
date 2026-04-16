@@ -2,5 +2,8 @@ out
 target
 bin
 gen
+build
 .idea
 .iml
+.gradle
+.kotlin
