@@ -16,13 +16,14 @@ repositories {
 }
 
 dependencies {
+    implementation(kotlin("stdlib-jdk8"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     implementation("com.microsoft.z3:java-jar:4.11.2")
     implementation("org.antlr:antlr4-runtime:4.13.2")
     //implementation(files("../julayc.jar"))
 
     testImplementation("org.testng:testng:7.10.2")
-    implementation(kotlin("stdlib-jdk8"))
+    testImplementation("org.slf4j:slf4j-simple:1.6.1")
 }
 
 application {
