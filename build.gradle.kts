@@ -1,5 +1,7 @@
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+
 plugins {
-    kotlin("jvm") version "2.1.0"
+    kotlin("jvm") version "2.1.21"
     application
     id("com.github.johnrengelman.shadow") version "8.1.1"
 }
@@ -20,6 +22,7 @@ dependencies {
     //implementation(files("../julayc.jar"))
 
     testImplementation("org.testng:testng:7.10.2")
+    implementation(kotlin("stdlib-jdk8"))
 }
 
 application {
@@ -27,7 +30,7 @@ application {
 }
 
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(18)
 }
 
 sourceSets {
@@ -40,7 +43,7 @@ tasks.shadowJar {
     archiveBaseName.set("julayc")
     archiveVersion.set("")
     archiveClassifier.set("")
-    destinationDirectory.set(file("$buildDir/../out"))
+    destinationDirectory.set(file("${layout.buildDirectory.get()}/../out/"))
 }
 
 tasks.test {
