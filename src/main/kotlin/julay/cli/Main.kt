@@ -92,7 +92,7 @@ fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
     Runtime.getRuntime().exec(arrayOf("bash", "-c", "cd $buildDir; gradle wrapper --gradle-version 8.5")).waitFor()
     File("$buildDir/build.gradle.kts").writeText(gradleBuildFileContents(progName, mainClassName))
     Runtime.getRuntime().exec(arrayOf("bash", "-c", "cd $buildDir; ./gradlew shadowJar")).waitFor()
-    //deleteDirectory(File(buildDir))
+    deleteDirectory(File(buildDir))
 }
 
 // thank you: https://www.baeldung.com/kotlin/delete-directories-with-contents
