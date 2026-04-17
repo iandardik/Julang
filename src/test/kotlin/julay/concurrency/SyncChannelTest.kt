@@ -5,6 +5,7 @@ import kotlin.test.*
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.time.Duration.Companion.milliseconds
 
 class SyncChannelTest {
 
@@ -114,85 +115,69 @@ class SyncChannelTest {
     }
 
     @Test
-    fun testClose1() {
-        /*
-        runBlocking {
-            for (i in 1.. 1000) {
-                val chan = SyncChannel<Unit,Unit>(2) { Optional.empty() }
-                val t1 = launch {
-                    chan.sync()
-                }
-                assertTrue(t1.isActive)
-                chan.close()
-                Thread.sleep(300)
-                assertFalse(t1.isActive)
+    fun testClose1() = runBlocking {
+        for (i in 1.. 1000) {
+            val chan = SyncChannel<Unit,Unit>(2) { Optional.empty() }
+            val t1 = launch { chan.sync() }
+            assertTrue(t1.isActive)
+            chan.close()
+            withTimeout(100.milliseconds) {
+                t1.join()
             }
-        }*/
+            assertFalse(t1.isActive)
+        }
     }
 
     @Test
-    fun testClose2() {
-        /*
-        runBlocking {
-            for (i in 1.. 20) {
-                val chan = SyncChannel<Int,Int>(2) { Optional.of(0) }
-                val t1 = launch { chan.sync() }
-                val t2 = launch { chan.sync() }
-                val t3 = launch { chan.sync() }
-                Thread.sleep(300)
-                // two threads will have synced, so exactly one must be alive
-                assertTrue(t1.isActive || t2.isActive || t3.isActive)
-                assertTrue((!t1.isActive && !t2.isActive) || (!t1.isActive && !t3.isActive) || (!t2.isActive && !t3.isActive))
+    fun testClose2() = runBlocking {
+        for (i in 1.. 20) {
+            val chan = SyncChannel<Int,Int>(2) { Optional.of(0) }
+            val t1 = launch { chan.sync() }
+            val t2 = launch { chan.sync() }
+            val t3 = launch { chan.sync() }
+            delay(2)
+            // two threads will have synced, so exactly one must be alive
+            assertTrue(t1.isActive || t2.isActive || t3.isActive)
+            assertTrue((!t1.isActive && !t2.isActive) || (!t1.isActive && !t3.isActive) || (!t2.isActive && !t3.isActive))
 
-                chan.close()
-                Thread.sleep(300)
-                assertFalse(t1.isActive)
-                assertFalse(t2.isActive)
-                assertFalse(t3.isActive)
-            }
-        }*/
+            chan.close()
+            delay(2)
+            assertFalse(t1.isActive)
+            assertFalse(t2.isActive)
+            assertFalse(t3.isActive)
+        }
     }
 
     @Test
-    fun testInterrupt1() {
-        // TODO
-        /*
-        runBlocking {
-            for (i in 1.. 1000) {
-                val chan = SyncChannel<Unit,Unit>(2) { Optional.empty() }
-                val t1 = launch {
-                    chan.sync()
-                }
-                assertTrue(t1.isActive)
-                t1.cancel()
-                Thread.sleep(100)
-                assertFalse(t1.isActive)
-            }
-        }*/
+    fun testCancel1() = runBlocking {
+        for (i in 1.. 100) {
+            val chan = SyncChannel<Unit,Unit>(2) { Optional.empty() }
+            val t1 = launch { chan.sync() }
+            assertTrue(t1.isActive)
+            t1.cancel()
+            assertFalse(t1.isActive)
+        }
     }
 
     @Test
-    fun testInterrupt2() {
-        /*
-        runBlocking {
-            for (i in 1.. 20) {
-                val chan = SyncChannel<Int,Int>(2) { Optional.of(0) }
-                val t1 = launch { chan.sync() }
-                val t2 = launch { chan.sync() }
-                val t3 = launch { chan.sync() }
-                Thread.sleep(300)
-                // two threads will have synced, so exactly one must be alive
-                assertTrue(t1.isActive || t2.isActive || t3.isActive)
-                assertTrue((!t1.isActive && !t2.isActive) || (!t1.isActive && !t3.isActive) || (!t2.isActive && !t3.isActive))
+    fun testCancel2() = runBlocking {
+        for (i in 1.. 20) {
+            val chan = SyncChannel<Int,Int>(2) { Optional.of(0) }
+            val t1 = launch { chan.sync() }
+            val t2 = launch { chan.sync() }
+            val t3 = launch { chan.sync() }
+            delay(2)
+            // two threads will have synced, so exactly one must be alive
+            assertTrue(t1.isActive || t2.isActive || t3.isActive)
+            assertTrue((!t1.isActive && !t2.isActive) || (!t1.isActive && !t3.isActive) || (!t2.isActive && !t3.isActive))
 
-                t1.cancel()
-                t2.cancel()
-                t3.cancel()
-                Thread.sleep(300)
-                assertFalse(t1.isActive)
-                assertFalse(t2.isActive)
-                assertFalse(t3.isActive)
-            }
-        }*/
+            t1.cancel()
+            t2.cancel()
+            t3.cancel()
+            delay(2)
+            assertFalse(t1.isActive)
+            assertFalse(t2.isActive)
+            assertFalse(t3.isActive)
+        }
     }
 }

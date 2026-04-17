@@ -8,25 +8,6 @@ import kotlinx.coroutines.channels.ClosedSendChannelException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.*
-import java.util.Collections.max
-import java.util.concurrent.locks.ReentrantLock
-
-suspend fun run(name : String, num : Int, chan : SyncChannel<Int,Int>) {
-    val result = chan.sync(num)
-    println("$name: $result")
-}
-
-suspend fun main(args : Array<String>) {
-    withContext(Dispatchers.Default) {
-        val chan = SyncChannel<Int,Int>(2) { numbers ->
-            Optional.of(max(numbers))
-        }
-        launch { run("A", 1, chan) }
-        launch { run("B", 2, chan) }
-        launch { run("C", 1, chan) }
-        launch { run("D", 2, chan) }
-    }
-}
 
 /**
  * V: The type of the value sent over the channel
@@ -36,11 +17,8 @@ class SyncChannel<V : Any, C : Any>(
     private val syncSize : Int,
     private val compute : (Set<C>)->Optional<V>
 ) {
-    val mutex = Mutex()
+    private val mutex = Mutex()
     private var participants = mutableSetOf<Participant<V,C>>()
-
-    // the shared variable used for closing this channel
-    private val closedLock = ReentrantLock()
     private var closed = false
 
     init {
@@ -75,10 +53,12 @@ class SyncChannel<V : Any, C : Any>(
             finally {
                 me.syncValueChan.close()
                 mutex.withLock {
-                    participants.forEach { p ->
-                        p.compatiblePeers.remove(me)
+                    if (!closed) {
+                        participants.forEach { p ->
+                            p.compatiblePeers.remove(me)
+                        }
+                        participants.remove(me)
                     }
-                    participants.remove(me)
                 }
                 me.syncValueChan = Channel()
             }
@@ -112,7 +92,9 @@ class SyncChannel<V : Any, C : Any>(
                 // this clean up is very important, but right now it's not exception safe
                 // TODO make exception safe
                 mutex.withLock {
-                    participants.addAll(group.minus(me))
+                    if (!closed) {
+                        participants.addAll(group.minus(me))
+                    }
                 }
                 SyncChannelResult.retry()
             }
@@ -131,6 +113,10 @@ class SyncChannel<V : Any, C : Any>(
 
     private suspend fun compatibleGroupAttempt(me : Participant<V,C>) : Triple<SyncChannelResult<V>, Optional<V>, Optional<Set<Participant<V,C>>>> {
         mutex.withLock {
+            if (closed) {
+                return Triple(SyncChannelResult.abort(), Optional.empty(), Optional.empty())
+            }
+
             // calculate the participants who are compatible
             val compatiblePeers = participants
                 .filter { p -> compatible(me, p) }
@@ -215,28 +201,20 @@ class SyncChannel<V : Any, C : Any>(
         }
     }
 
-    fun close() {
-        closedLock.lock()
-        try {
-            closed = true
-        } finally {
-            closedLock.unlock()
+    suspend fun close() {
+        mutex.withLock {
+            if (!closed) {
+                closed = true
+                participants.forEach { it.syncValueChan.close() }
+                participants.removeAll(participants)
+            }
         }
     }
 
-    // this function is called internally when the lobbyLock / comLock is already acquired, which is safe because we
-    // don't do anything with conditions (i.e. await() / signal()) with the closedLock.
-    fun isClosed() : Boolean {
-        closedLock.lock()
-        try {
-            if (closed) {
-                return true
-            }
+    suspend fun isClosed() : Boolean {
+        mutex.withLock {
+            return closed
         }
-        finally {
-            closedLock.unlock()
-        }
-        return false
     }
 
     private class Participant<V : Any, C : Any>(

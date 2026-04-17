@@ -80,7 +80,8 @@ class ConstructorTransitionSystem(
                         running = false
                     }
                 }
-                program.actionTable.values.forEach { it.channel.close() }
+                // TODO
+                //program.actionTable.values.forEach { it.channel.close() }
             }.start()
         }
     }
