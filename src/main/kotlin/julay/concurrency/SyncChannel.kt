@@ -65,17 +65,71 @@ class SyncChannel<V : Any, C : Any>(
     ) : SyncChannelResult<V> {
         val me = Participant<V,C>(constraint, anticonstraint, select)
         while (true) {
-            val result = syncAttempt(me)
-            val retry = result.isRetry && select.isEmpty // never retry if there's a select--the select itself will retry
-            if (!retry) {
-                return result
+            try {
+                val result = syncAttempt(me)
+                val retry = result.isRetry && select.isEmpty // never retry if there's a select--the select itself will retry
+                if (!retry) {
+                    return result
+                }
+            }
+            finally {
+                me.syncValueChan.close()
+                mutex.withLock {
+                    participants.forEach { p ->
+                        p.compatiblePeers.remove(me)
+                    }
+                    participants.remove(me)
+                }
+                me.syncValueChan = Channel()
             }
         }
     }
 
     private suspend fun syncAttempt(me : Participant<V,C>) : SyncChannelResult<V> {
-        var syncValue = Optional.empty<V>()
-        var syncGroup = Optional.empty<Set<Participant<V,C>>>()
+        val (groupAttemptResult, syncValue, syncGroup) = compatibleGroupAttempt(me)
+        if (!groupAttemptResult.isNone) {
+            return groupAttemptResult
+        }
+        if (syncValue.isPresent) {
+            assert(syncGroup.isPresent, "")
+            val group = syncGroup.get()
+            // TODO parallelize this
+            val commit = group.minus(me).all { p ->
+                if (p.syncValueChan.isClosedForSend || p.syncValueChan.isClosedForReceive) {
+                    return@all false
+                }
+                try {
+                    p.syncValueChan.send(syncValue.get())
+                    true
+                }
+                catch (_ : CancellationException) { false }
+                catch (_ : ClosedSendChannelException) { false }
+            }
+
+            return if (commit) {
+                SyncChannelResult.sat(syncValue.get())
+            } else {
+                // this clean up is very important, but right now it's not exception safe
+                // TODO make exception safe
+                mutex.withLock {
+                    participants.addAll(group.minus(me))
+                }
+                SyncChannelResult.retry()
+            }
+        }
+        else {
+            // at this point, the coroutine has failed to sync so we wait for someone else to lead the sync
+            assert(syncGroup.isEmpty, "")
+            try {
+                val syncVal = me.syncValueChan.receive()
+                return SyncChannelResult.sat(syncVal)
+            }
+            catch (_ : CancellationException) { return SyncChannelResult.abort() }
+            catch (_ : ClosedReceiveChannelException) { return SyncChannelResult.abort() }
+        }
+    }
+
+    private suspend fun compatibleGroupAttempt(me : Participant<V,C>) : Triple<SyncChannelResult<V>, Optional<V>, Optional<Set<Participant<V,C>>>> {
         mutex.withLock {
             // calculate the participants who are compatible
             val compatiblePeers = participants
@@ -90,81 +144,41 @@ class SyncChannel<V : Any, C : Any>(
                     intersection union setOfUs
                 }
                 .firstOrNull { g -> g.size >= syncSize }
-            val groupIsCompatible = syncSize == 1 || compatibleGroup != null
-            if (groupIsCompatible) {
-                println("will sync: $me")
-                val group = if (syncSize == 1) setOf(me) else compatibleGroup!!.take(syncSize).toSet()
+            val foundCompatibleGroup = syncSize == 1 || compatibleGroup != null
+            if (foundCompatibleGroup) {
+                //println("will sync: $me")
+                val group = if (syncSize == 1) setOf(me) else compatibleGroup!!.toSet()
+                assert(group.size == syncSize, "Expected group size to be equal to the sync size")
                 val selects = group
                     .filter { it.select.isPresent }
                     .map { it.select.get() }
                     .toSet()
                 if (!selectsCommit(selects)) {
-                    return SyncChannelResult.abort()
+                    val mySelectCanCommit = false // TODO
+                    val result = if (mySelectCanCommit) {
+                        SyncChannelResult.retry<V>()
+                    } else {
+                        SyncChannelResult.abort<V>()
+                    }
+                    return Triple(result, Optional.empty(), Optional.empty())
                 }
 
                 participants.removeAll(group)
-                syncGroup = Optional.of(group)
+                val syncGroup = Optional.of(group)
 
                 val constraints = group
                     .filter { it.constraint.isPresent }
                     .map { it.constraint.get() }
                     .toSet()
-                syncValue = compute.invoke(constraints)
+                val syncValue = compute.invoke(constraints)
                 assert(syncValue.isPresent, "Expected a sync value to be present")
+                return Triple(SyncChannelResult.none(), syncValue, syncGroup)
             }
             else {
-                println("didn't sync: $me")
+                //println("didn't sync: $me")
                 // at this point, the coroutine has failed to sync so we wait for someone else to lead the sync
                 participants.add(me)
-            }
-        }
-
-        try {
-            if (syncValue.isPresent) {
-                val group = syncGroup.get()
-                // TODO parallelize this
-                val commit = group.minus(me).all { p ->
-                    if (p.syncValueChan.isClosedForSend || p.syncValueChan.isClosedForReceive) {
-                        return@all false
-                    }
-                    try {
-                        p.syncValueChan.send(syncValue.get())
-                        true
-                    } catch (_ : ClosedSendChannelException) {
-                        false
-                    }
-                }
-
-                return if (commit) {
-                    SyncChannelResult.sat(syncValue.get())
-                } else {
-                    mutex.withLock {
-                        participants.addAll(group.minus(me))
-                    }
-                    SyncChannelResult.retry()
-                }
-            }
-            else {
-                // at this point, the coroutine has failed to sync so we wait for someone else to lead the sync
-                try {
-                    val syncVal = me.syncValueChan.receive()
-                    return SyncChannelResult.sat(syncVal)
-                }
-                catch (_ : CancellationException) {
-                    return SyncChannelResult.abort()
-                }
-                catch (_ : ClosedReceiveChannelException) {
-                    return SyncChannelResult.abort()
-                }
-            }
-        }
-        finally {
-            me.syncValueChan.close()
-            mutex.withLock {
-                participants.forEach { p ->
-                    p.compatiblePeers.remove(me)
-                }
-                participants.remove(me)
+                return Triple(SyncChannelResult.none(), Optional.empty(), Optional.empty())
             }
         }
     }
@@ -230,7 +244,7 @@ class SyncChannel<V : Any, C : Any>(
         val anticonstraint : Optional<C>,
         val select : Optional<Select>,
     ) {
-        val syncValueChan = Channel<V>()
+        var syncValueChan = Channel<V>()
         // compatible peers are pairwaise satisfiable
         val compatiblePeers = mutableSetOf<Participant<V,C>>()
     }
@@ -245,6 +259,7 @@ data class SyncChannelResult<V : Any>(
 ) {
     val isEmpty = result.isEmpty
     val isPresent = result.isPresent
+    val isNone = !isSAT && !isUNSAT && !isAborted && !isRetry && result.isEmpty
     init {
         julay.tools.assert(!isPresent || (isSAT && !isUNSAT && !isAborted && !isRetry),
             "Invalid channel result, expected: isPresent => (isSAT && !isUNSAT && !isAborted && !isRetry)")

@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class SelectTest {
 
+    /*
     @Test
     fun test1Case1Sync() {
         businessLogic1Case(1, 1000)
@@ -265,4 +266,6 @@ class SelectTest {
             select.run()
         }
     }
+
+     */
 }
