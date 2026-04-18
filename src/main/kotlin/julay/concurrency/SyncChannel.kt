@@ -73,7 +73,7 @@ class SyncChannel<V : Any, C : Any>(
         if (syncValue.isPresent) {
             assert(syncGroup.isPresent, "")
             val group = syncGroup.get()
-            // TODO parallelize this
+            // TODO parallelize this?
             val commit = group.minus(me).all { p ->
                 if (p.syncValueChan.isClosedForSend || p.syncValueChan.isClosedForReceive) {
                     return@all false
@@ -101,7 +101,7 @@ class SyncChannel<V : Any, C : Any>(
         }
         else {
             // at this point, the coroutine has failed to sync so we wait for someone else to lead the sync
-            assert(syncGroup.isEmpty, "Expected non-empty sync group")
+            assert(syncGroup.isEmpty, "Expected an empty sync group")
             try {
                 val syncVal = me.syncValueChan.receive()
                 return SyncChannelResult.sat(syncVal)
@@ -184,8 +184,13 @@ class SyncChannel<V : Any, C : Any>(
         var allCanCommit : Boolean
         val selectGroup = group.filter { p -> p.select.isPresent }
         val allMutexes = selectGroup.map { p -> p.select.get().getWinnerMutex() }.sorted()
+        var lockedMutexes = emptyList<StratifiedMutex>()
         try {
-            allMutexes.forEach { it.mutex.lock() }
+            lockedMutexes = allMutexes.map {
+                it.mutex.lock()
+                it
+            }
+            assert(lockedMutexes == allMutexes, "Expected all locked mutexes")
             allCanCommit = selectGroup.all { p ->
                 val select = p.select.get()
                 val selectCanCommit = select.canCommit(myHash)
@@ -197,11 +202,7 @@ class SyncChannel<V : Any, C : Any>(
             }
         }
         finally {
-            allMutexes.forEach {
-                if (it.mutex.isLocked) {
-                    it.mutex.unlock()
-                }
-            }
+            lockedMutexes.forEach { it.mutex.unlock() }
         }
         return allCanCommit
     }

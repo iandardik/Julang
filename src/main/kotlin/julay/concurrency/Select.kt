@@ -8,7 +8,6 @@ import kotlinx.coroutines.channels.ClosedSendChannelException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.yield
 import java.lang.RuntimeException
 import java.util.*
 
@@ -105,7 +104,6 @@ class Select(private vararg val cases : Case) {
             val select = selectRef.get()
             var ret = SyncChannelResult.retry<V>()
             while (ret.isRetry && select.winner.isEmpty && !chan.isClosed()) {
-                yield()
                 ret = chan.sync(constraint, anticonstraint, selectRef)
             }
             assert((ret.isPresent && ret.isSAT) || (!ret.isPresent && !ret.isSAT), "Expected ret.isPresent <=> ret.isSAT")
