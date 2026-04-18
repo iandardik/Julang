@@ -166,7 +166,7 @@ class SyncChannelTest {
             val t1 = launch { chan.sync() }
             val t2 = launch { chan.sync() }
             val t3 = launch { chan.sync() }
-            delay(2)
+            delay(4.milliseconds)
             // two threads will have synced, so exactly one must be alive
             assertTrue(t1.isActive || t2.isActive || t3.isActive)
             assertTrue((!t1.isActive && !t2.isActive) || (!t1.isActive && !t3.isActive) || (!t2.isActive && !t3.isActive))
@@ -174,7 +174,7 @@ class SyncChannelTest {
             t1.cancel()
             t2.cancel()
             t3.cancel()
-            delay(2)
+            delay(4.milliseconds)
             assertFalse(t1.isActive)
             assertFalse(t2.isActive)
             assertFalse(t3.isActive)

@@ -34,7 +34,8 @@ class Proc(
                     nextAct = Optional.of(concAct)
                 }
             }
-            Select(*cases.toTypedArray()).run()
+            // TODO
+            //Select(*cases.toTypedArray()).run()
 
             // check for deadlocks
             if (nextAct.isEmpty) {
