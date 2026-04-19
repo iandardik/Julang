@@ -103,8 +103,7 @@ class Select(private vararg val cases : Case) {
         override suspend fun run() {
             val select = selectRef.get()
             val ret = chan.sync(constraint, anticonstraint, selectRef)
-            assert((ret.isPresent && ret.isSAT) || (!ret.isPresent && !ret.isSAT), "Expected ret.isPresent <=> ret.isSAT")
-            if (ret.isPresent && ret.isSAT) {
+            if (ret.isPresent) {
                 assert(select.winner.get() == chan.hashCode(), "Expected winning case to have the winning channel")
                 callback.invoke(ret.result.get())
             }

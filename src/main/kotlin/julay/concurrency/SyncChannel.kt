@@ -5,7 +5,6 @@ import julay.tools.subsetsOfSize
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
-import kotlinx.coroutines.channels.ClosedSendChannelException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.*
@@ -42,11 +41,30 @@ class SyncChannel<V : Any, C : Any>(
         anticonstraint : Optional<C>,
         select : Optional<Select> = Optional.empty()
     ) : SyncChannelResult<V> {
-        while (true) {
-            val me = Participant<V,C>(constraint, anticonstraint, select)
+        val me = Participant<V,C>(constraint, anticonstraint, select)
+        val (validResult, syncInfo) = withContext(NonCancellable) {
+            // findCompatibleGroup() also performs important clean up of the participants list which should not be
+            // canceled part way through. we also call this function with the mutex because it interacts with the
+            // participants list, which is a shared data structure.
+            mutex.withLock { findCompatibleGroup(me) }
+        }
+        if (!validResult) {
+            return SyncChannelResult.abort()
+        }
+        if (syncInfo.isPresent) {
+            // we found a big enough compatible group to sync so send everyone in the group that value
+            val (syncValue, syncGroup) = syncInfo.get()
+            syncGroup.minus(me).forEach { p -> p.syncValueChan.send(syncValue) } // TODO parallelize this?
+            return SyncChannelResult.sat(syncValue)
+        }
+        else {
+            // we didn't find a big enough compatible group to sync so we wait for someone else to lead the sync
             try {
-                return syncAttempt(me)
+                val syncVal = me.syncValueChan.receive()
+                return SyncChannelResult.sat(syncVal)
             }
+            catch (_ : CancellationException) { }
+            catch (_ : ClosedReceiveChannelException) { }
             finally {
                 me.syncValueChan.close()
                 mutex.withLock {
@@ -58,91 +76,60 @@ class SyncChannel<V : Any, C : Any>(
                     }
                 }
             }
+            return SyncChannelResult.abort()
         }
     }
 
-    private suspend fun syncAttempt(me : Participant<V,C>) : SyncChannelResult<V> {
-        val (groupAttemptResult, syncValue, syncGroup) = withContext(NonCancellable) {
-            // compatibleGroupAttempt() also performs important clean up of the participants list which should not be
-            // canceled part way through.
-            compatibleGroupAttempt(me)
+    /**
+     * This function must be called with the mutex acquired.
+     */
+    private suspend fun findCompatibleGroup(me : Participant<V,C>) : Pair<Boolean, Optional<Pair<V, Set<Participant<V,C>>>>> {
+        if (closed) {
+            return Pair(false, Optional.empty())
         }
-        if (!groupAttemptResult.isNone) {
-            return groupAttemptResult
-        }
-        if (syncValue.isPresent) {
-            assert(syncGroup.isPresent, "Expected a non-empty sync group")
-            val group = syncGroup.get()
-            // TODO parallelize this?
-            group.minus(me).forEach { p -> p.syncValueChan.send(syncValue.get()) }
-            return SyncChannelResult.sat(syncValue.get())
-        }
-        else {
-            // at this point, the coroutine has failed to sync so we wait for someone else to lead the sync
-            assert(syncGroup.isEmpty, "Expected an empty sync group")
-            try {
-                val syncVal = me.syncValueChan.receive()
-                return SyncChannelResult.sat(syncVal)
-            }
-            catch (_ : CancellationException) {
-                return SyncChannelResult.abort()
-            }
-            catch (_ : ClosedReceiveChannelException) {
-                return SyncChannelResult.abort()
-            }
-        }
-    }
 
-    private suspend fun compatibleGroupAttempt(me : Participant<V,C>) : Triple<SyncChannelResult<V>, Optional<V>, Optional<Set<Participant<V,C>>>> {
-        mutex.withLock {
-            if (closed) {
-                return Triple(SyncChannelResult.abort(), Optional.empty(), Optional.empty())
+        // calculate the participants who are compatible
+        val compatiblePeers = participants
+            .filter { p -> compatible(me, p) }
+            .toSet()
+            .plus(me)
+        me.compatiblePeers.addAll(compatiblePeers)
+        compatiblePeers.forEach { it.compatiblePeers.add(me) }
+        participants.add(me)
+        val compatibleGroups = participants
+            .map { p -> me.compatiblePeers.intersect(p.compatiblePeers) }
+            .filter { g -> g.size >= syncSize }
+            .flatMap { g -> subsetsOfSize(g, syncSize) }
+            .toSet()
+
+        for (group in compatibleGroups) {
+            assert(group.size == syncSize, "Expected group size (${group.size}) to be equal to the sync size ($syncSize)")
+            val allSelectsCanCommit = selectsCommit(group)
+            if (allSelectsCanCommit) {
+                // found a compatible group--return the group and a satisfying value
+                val constraints = group
+                    .filter { it.constraint.isPresent }
+                    .map { it.constraint.get() }
+                    .toSet()
+                val syncValue = compute.invoke(constraints)
+                assert(syncValue.isPresent, "Expected a sync value to be present")
+                participants.removeAll(group)
+                return Pair(true, Optional.of(Pair(syncValue.get(), group)))
             }
-
-            // calculate the participants who are compatible
-            val compatiblePeers = participants
-                .filter { p -> compatible(me, p) }
-                .toSet()
-                .plus(me)
-            me.compatiblePeers.addAll(compatiblePeers)
-            compatiblePeers.forEach { it.compatiblePeers.add(me) }
-            participants.add(me)
-            val compatibleGroups = participants
-                .map { p -> me.compatiblePeers.intersect(p.compatiblePeers) }
-                .filter { g -> g.size >= syncSize }
-                .flatMap { g -> subsetsOfSize(g, syncSize) }
-                .toSet()
-
-            for (group in compatibleGroups) {
-                assert(group.size == syncSize, "Expected group size (${group.size}) to be equal to the sync size ($syncSize)")
-                val allSelectsCanCommit = selectsCommit(group)
-                if (allSelectsCanCommit) {
-                    // found a compatible group--return the group and a satisfying value
-                    val syncGroup = Optional.of(group)
-                    val constraints = group
-                        .filter { it.constraint.isPresent }
-                        .map { it.constraint.get() }
-                        .toSet()
-                    val syncValue = compute.invoke(constraints)
-                    assert(syncValue.isPresent, "Expected a sync value to be present")
-                    participants.removeAll(group)
-                    return Triple(SyncChannelResult.none(), syncValue, syncGroup)
-                }
-                else {
-                    // at least one participant is stale (has a select that has already been won). remove the stale
-                    // participants and try the next compatible group
-                    val staleParticipants = participants.filter { p -> p.selectIsWon }.toSet()
-                    participants.removeAll(staleParticipants)
-                    if (me in staleParticipants) {
-                        // if me is a stale participant then abort
-                        return Triple(SyncChannelResult.abort(), Optional.empty(), Optional.empty())
-                    }
+            else {
+                // at least one participant is stale (has a select that has already been won). remove the stale
+                // participants and try the next compatible group
+                val staleParticipants = participants.filter { p -> p.selectIsWon }.toSet()
+                participants.removeAll(staleParticipants)
+                if (me in staleParticipants) {
+                    // if me is a stale participant then abort
+                    return Pair(false, Optional.empty())
                 }
             }
-
-            // if we reach this point then there are no compatible groups yet, so we wait for someone else to lead the sync
-            return Triple(SyncChannelResult.none(), Optional.empty(), Optional.empty())
         }
+
+        // if we reach this point then there are no compatible groups yet, so we wait for someone else to lead the sync
+        return Pair(true, Optional.empty())
     }
 
     private fun compatible(p1 : Participant<V,C>, p2 : Participant<V,C>) : Boolean {
@@ -207,38 +194,23 @@ class SyncChannel<V : Any, C : Any>(
         val select : Optional<Select>,
     ) {
         var syncValueChan = Channel<V>()
-        // compatible peers are pairwaise satisfiable
+        // compatible peers are pairwise satisfiable
         val compatiblePeers = mutableSetOf<Participant<V,C>>()
         var selectIsWon = false
     }
 }
 
 data class SyncChannelResult<V : Any>(
-    val isSAT : Boolean,
-    val isUNSAT : Boolean,
-    val isAborted : Boolean,
-    val isRetry : Boolean,
     val result : Optional<V>
 ) {
     val isEmpty = result.isEmpty
     val isPresent = result.isPresent
-    val isNone = !isSAT && !isUNSAT && !isAborted && !isRetry && result.isEmpty
-    init {
-        assert(!isPresent || (isSAT && !isUNSAT && !isAborted && !isRetry),
-            "Invalid channel result, expected: isPresent => (isSAT && !isUNSAT && !isAborted && !isRetry)")
-    }
     companion object {
         fun <V : Any> sat(value : V) : SyncChannelResult<V> {
-            return SyncChannelResult(true, false, false, false, Optional.of(value))
-        }
-        fun <V : Any> unsat() : SyncChannelResult<V> {
-            return SyncChannelResult(false, true, false, false, Optional.empty())
+            return SyncChannelResult(Optional.of(value))
         }
         fun <V : Any> abort() : SyncChannelResult<V> {
-            return SyncChannelResult(false, false, true, false, Optional.empty())
-        }
-        fun <V : Any> none() : SyncChannelResult<V> {
-            return SyncChannelResult(false, false, false, false, Optional.empty())
+            return SyncChannelResult(Optional.empty())
         }
     }
 }
