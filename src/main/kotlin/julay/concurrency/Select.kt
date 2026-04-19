@@ -71,7 +71,7 @@ class Select(private vararg val cases : Case) {
             // It's possible to reach here and have winnerDone equal false. This would most likely be because all
             // channels have been closed. In this case, no case would fire; however--for now--we will not consider that
             // a bug.
-            //assert(winnerDone, "Select $tt expected a winner")
+            //assert(winnerDone, "Select $this expected a winner")
             jobs.forEach { it.cancel() }
             caseDoneChan.close()
         }
@@ -102,10 +102,7 @@ class Select(private vararg val cases : Case) {
         override fun getChannelHash() = chan.hashCode()
         override suspend fun run() {
             val select = selectRef.get()
-            var ret = SyncChannelResult.retry<V>()
-            while (ret.isRetry && select.winner.isEmpty && !chan.isClosed()) {
-                ret = chan.sync(constraint, anticonstraint, selectRef)
-            }
+            val ret = chan.sync(constraint, anticonstraint, selectRef)
             assert((ret.isPresent && ret.isSAT) || (!ret.isPresent && !ret.isSAT), "Expected ret.isPresent <=> ret.isSAT")
             if (ret.isPresent && ret.isSAT) {
                 assert(select.winner.get() == chan.hashCode(), "Expected winning case to have the winning channel")

@@ -45,11 +45,7 @@ class SyncChannel<V : Any, C : Any>(
         while (true) {
             val me = Participant<V,C>(constraint, anticonstraint, select)
             try {
-                val result = syncAttempt(me)
-                val retry = result.isRetry && select.isEmpty // never retry if there's a select--the select itself will retry
-                if (!retry) {
-                    return result
-                }
+                return syncAttempt(me)
             }
             finally {
                 me.syncValueChan.close()
@@ -66,38 +62,20 @@ class SyncChannel<V : Any, C : Any>(
     }
 
     private suspend fun syncAttempt(me : Participant<V,C>) : SyncChannelResult<V> {
-        val (groupAttemptResult, syncValue, syncGroup) = compatibleGroupAttempt(me)
+        val (groupAttemptResult, syncValue, syncGroup) = withContext(NonCancellable) {
+            // compatibleGroupAttempt() also performs important clean up of the participants list which should not be
+            // canceled part way through.
+            compatibleGroupAttempt(me)
+        }
         if (!groupAttemptResult.isNone) {
             return groupAttemptResult
         }
         if (syncValue.isPresent) {
-            assert(syncGroup.isPresent, "")
+            assert(syncGroup.isPresent, "Expected a non-empty sync group")
             val group = syncGroup.get()
             // TODO parallelize this?
-            val commit = group.minus(me).all { p ->
-                if (p.syncValueChan.isClosedForSend || p.syncValueChan.isClosedForReceive) {
-                    return@all false
-                }
-                try {
-                    p.syncValueChan.send(syncValue.get())
-                    true
-                }
-                //catch (_ : CancellationException) { false }
-                catch (_ : ClosedSendChannelException) { false }
-            }
-
-            return if (commit) {
-                SyncChannelResult.sat(syncValue.get())
-            } else {
-                // this clean up is very important, but right now it's not exception safe
-                // TODO make exception safe
-                mutex.withLock {
-                    if (!closed) {
-                        participants.addAll(group.minus(me))
-                    }
-                }
-                SyncChannelResult.retry()
-            }
+            group.minus(me).forEach { p -> p.syncValueChan.send(syncValue.get()) }
+            return SyncChannelResult.sat(syncValue.get())
         }
         else {
             // at this point, the coroutine has failed to sync so we wait for someone else to lead the sync
@@ -232,10 +210,6 @@ class SyncChannel<V : Any, C : Any>(
         // compatible peers are pairwaise satisfiable
         val compatiblePeers = mutableSetOf<Participant<V,C>>()
         var selectIsWon = false
-        override fun toString(): String {
-            //return "(${select.get()},${select.get().winner})" // TODO
-            return "num compat: ${compatiblePeers.size}"
-        }
     }
 }
 
@@ -262,9 +236,6 @@ data class SyncChannelResult<V : Any>(
         }
         fun <V : Any> abort() : SyncChannelResult<V> {
             return SyncChannelResult(false, false, true, false, Optional.empty())
-        }
-        fun <V : Any> retry() : SyncChannelResult<V> {
-            return SyncChannelResult(false, false, false, true, Optional.empty())
         }
         fun <V : Any> none() : SyncChannelResult<V> {
             return SyncChannelResult(false, false, false, false, Optional.empty())
