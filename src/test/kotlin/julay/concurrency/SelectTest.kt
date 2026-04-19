@@ -143,9 +143,6 @@ class SelectTest {
                         Select(
                             Select.SyncCase(chan1) { syncResult -> results.compute(syncResult, chmResultUpdate) },
                         ).run()
-                        // TODO make a test case for raw channel v selects too
-                        //val syncResult = chan1.sync()
-                        //results.compute(syncResult.result.get(), chmResultUpdate)
                     }
                     launch {
                         Select(
@@ -225,16 +222,71 @@ class SelectTest {
         }
     }
 
-    /*
+    @Test
+    fun testChanCase1Sync() {
+        businessLogicChanCase(1, 10_000)
+    }
+
+    @Test
+    fun testChanCase2Sync() {
+        businessLogicChanCase(2, 10_000)
+    }
+
+    @Test
+    fun testChanCase3Sync() {
+        businessLogicChanCase(3, 9_999)
+    }
+
+    @Test
+    fun testChanCase4Sync() {
+        businessLogicChanCase(4, 10_000)
+    }
+
+    private fun businessLogicChanCase(syncSize : Int, numThreads : Int) {
+        // if this is false then some threads will hang
+        julay.tools.assert(numThreads % syncSize == 0)
+
+        val incVal = AtomicInteger(1)
+        val results = ConcurrentHashMap<Int,Int>() // value -> count
+        val chan1 = SyncChannel<Int,Int>(syncSize) { Optional.of(incVal.getAndIncrement()) }
+        val chan2 = SyncChannel<Int,Int>(syncSize) { Optional.of(incVal.getAndIncrement()) }
+        runBlocking {
+            withContext(Dispatchers.Default) {
+                for (i in 1..numThreads) {
+                    launch {
+                        val syncResult = chan1.sync()
+                        results.compute(syncResult.result.get(), chmResultUpdate)
+                    }
+                    launch {
+                        Select(
+                            Select.SyncCase(chan1) { syncResult -> results.compute(syncResult, chmResultUpdate) },
+                            Select.SyncCase(chan2) { syncResult -> results.compute(syncResult, chmResultUpdate) },
+                        ).run()
+                    }
+                }
+            }
+        }
+
+        // testing
+        val maxKey = 2*numThreads / syncSize
+        assertEquals(maxKey, results.size)
+        for (k in results.keys()) {
+            assertEquals(syncSize, results[k])
+        }
+    }
+
     @Test
     fun testSanityCheckReuseChannel() {
         val chan = SyncChannel<Int,Int>(2) { Optional.of(1) }
-        assertThrows {
+        try {
             Select(
                 Select.SyncCase(chan) {},
                 Select.SyncCase(chan) {},
             )
+            // an exception should have been thrown before we reach this point
+            assertTrue(false, "an exception should have been thrown by the Select")
         }
+        catch (_ : RuntimeException) {}
     }
 
     @Test
@@ -242,9 +294,12 @@ class SelectTest {
         val chan = SyncChannel<Int,Int>(2) { Optional.of(1) }
         val case = Select.SyncCase(chan) {}
         Select(case)
-        assertThrows {
+        try {
             Select(case)
+            // an exception should have been thrown before we reach this point
+            assertTrue(false, "an exception should have been thrown by the Select")
         }
+        catch (_ : RuntimeException) {}
     }
 
     @Test
@@ -253,13 +308,15 @@ class SelectTest {
         val select = Select(
             Select.SyncCase(chan) {}
         )
-        select.run()
+        runBlocking { select.run() }
         // the select should only be able to be run once
-        assertThrows {
-            select.run()
+        try {
+            runBlocking { select.run() }
+            // an exception should have been thrown before we reach this point
+            assertTrue(false, "an exception should have been thrown by the Select")
         }
+        catch (_ : RuntimeException) {}
     }
-     */
 
     private val chmResultUpdate : (Int, Int?)->Int? = {
             _, curVal ->
