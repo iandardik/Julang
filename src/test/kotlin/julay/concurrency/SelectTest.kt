@@ -13,22 +13,22 @@ class SelectTest {
 
     @Test
     fun test1Case1Sync() {
-        businessLogic1Case(1, 10000)
+        businessLogic1Case(1, 10_000)
     }
 
     @Test
     fun test1Case2Sync() {
-        businessLogic1Case(2, 10000)
+        businessLogic1Case(2, 10_000)
     }
 
     @Test
     fun test1Case3Sync() {
-        businessLogic1Case(3, 9999)
+        businessLogic1Case(3, 9_999)
     }
 
     @Test
     fun test1Case4Sync() {
-        businessLogic1Case(4, 10000)
+        businessLogic1Case(4, 10_000)
     }
 
     private fun businessLogic1Case(syncSize : Int, numThreads : Int) {
@@ -61,22 +61,22 @@ class SelectTest {
 
     @Test
     fun test2Case1Sync() {
-        businessLogic2Cases(1, 10000)
+        businessLogic2Cases(1, 10_000)
     }
 
     @Test
     fun test2Case2Sync() {
-        businessLogic2Cases(2, 10000)
+        businessLogic2Cases(2, 10_000)
     }
 
     @Test
     fun test2Case3Sync() {
-        businessLogic2Cases(3, 9999)
+        businessLogic2Cases(3, 9_999)
     }
 
     @Test
     fun test2Case4Sync() {
-        businessLogic2Cases(4, 10000)
+        businessLogic2Cases(4, 10_000)
     }
 
     private fun businessLogic2Cases(syncSize : Int, numThreads : Int) {
@@ -110,22 +110,22 @@ class SelectTest {
 
     @Test
     fun test1and2Case1Sync() {
-        businessLogic1and2Cases(1, 10000)
+        businessLogic1and2Cases(1, 10_000)
     }
 
     @Test
     fun test1and2Case2Sync() {
-        businessLogic1and2Cases(2, 10000)
+        businessLogic1and2Cases(2, 10_000)
     }
 
     @Test
     fun test1and2Case3Sync() {
-        businessLogic1and2Cases(3, 9999)
+        businessLogic1and2Cases(3, 9_999)
     }
 
     @Test
     fun test1and2Case4Sync() {
-        businessLogic1and2Cases(4, 10000)
+        businessLogic1and2Cases(4, 10_000)
     }
 
     private fun businessLogic1and2Cases(syncSize : Int, numThreads : Int) {
