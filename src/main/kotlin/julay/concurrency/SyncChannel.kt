@@ -1,7 +1,13 @@
 package julay.concurrency
 
+import julay.tools.assert
+import julay.tools.subsetsOfSize
+import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ClosedReceiveChannelException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.*
-import java.util.concurrent.locks.ReentrantLock
 
 /**
  * V: The type of the value sent over the channel
@@ -11,364 +17,200 @@ class SyncChannel<V : Any, C : Any>(
     private val syncSize : Int,
     private val compute : (Set<C>)->Optional<V>
 ) {
-    // the shared variable used in the lobby
-    private val lobbyLock = ReentrantLock()
-    private val lobbyCond = lobbyLock.newCondition()
-    private var participants = mutableSetOf<Participant<C>>()
-
-    // the shared variables used for communication while attempting to sync
-    private val comLock = ReentrantLock()
-    private val comCond = comLock.newCondition()
-    private var syncValue = SyncChannelResult.none<V>()
-    private var commitVotes = 0
-    private var aborted = false
-    private var numExited = 0
-
-    // the shared variable used for closing this channel
-    private val closedLock = ReentrantLock()
+    private val mutex = Mutex()
+    private var participants = mutableSetOf<Participant<V,C>>()
     private var closed = false
 
-    fun sync(select : Optional<Select> = Optional.empty(), retryOnUNSAT : Boolean = true) : SyncChannelResult<V> {
-        return sync(Optional.empty(), Optional.empty(), select, retryOnUNSAT)
+    init {
+        assert(syncSize > 0, "SyncChannel expected a positive number for the syncSize")
     }
 
-    fun sync(constraint : C, select : Optional<Select> = Optional.empty(), retryOnUNSAT : Boolean = true) : SyncChannelResult<V> {
-        return sync(Optional.of(constraint), Optional.empty(), select, retryOnUNSAT)
+    suspend fun sync(select : Optional<Select> = Optional.empty()) : SyncChannelResult<V> {
+        return sync(Optional.empty(), Optional.empty(), select)
+    }
+
+    suspend fun sync(constraint : C, select : Optional<Select> = Optional.empty()) : SyncChannelResult<V> {
+        return sync(Optional.of(constraint), Optional.empty(), select)
     }
 
     /**
      * This method will not check each constraint to see if it is satisfiable--that is up to the caller.
      */
-    fun sync(constraint : Optional<C>,
-             anticonstraint : Optional<C>,
-             select : Optional<Select> = Optional.empty(),
-             retryOnUNSAT : Boolean = true
+    suspend fun sync(
+        constraint : Optional<C>,
+        anticonstraint : Optional<C>,
+        select : Optional<Select> = Optional.empty()
     ) : SyncChannelResult<V> {
-        val me = Participant(constraint, anticonstraint, select, Thread.currentThread())
-        try {
-            var attemptingSync = true
-            var syncResult = SyncChannelResult.none<V>()
-            while (attemptingSync) {
-                // not the fairest policy to have each thread reenter the lobby on each retry
-                val (enter, constraints, selects) = enterThroughLobby(me, retryOnUNSAT)
-                if (!enter) {
-                    return SyncChannelResult.abort()
-                }
-
-                // once we've made it here, attempt to sync
-                val result = syncAttempt(select.isPresent, constraints, selects)
-
-                // retry syncing under the following two conditions:
-                // 1. the result is a retry
-                // 2. the result is UNSAT and we're in retryOnUNSAT mode
-                val retry = result.isRetry || (result.isUNSAT && retryOnUNSAT)
-                if (!retry) {
-                    attemptingSync = false
-                    syncResult = result
-                }
-            }
-            return syncResult
+        val me = Participant<V,C>(constraint, anticonstraint, select)
+        val (validResult, syncInfo) = withContext(NonCancellable) {
+            // findCompatibleGroup() also performs important clean up of the participants list which should not be
+            // canceled part way through. we also call this function with the mutex because it interacts with the
+            // participants list, which is a shared data structure.
+            mutex.withLock { findCompatibleGroup(me) }
         }
-        catch (e : InterruptedException) {
-            handleGeneralInterrupt(me)
+        if (!validResult) {
             return SyncChannelResult.abort()
         }
-    }
-
-    private fun enterThroughLobby(me : Participant<C>, retryOnUNSAT : Boolean) : Triple<Boolean,Set<C>,Set<Select>> {
-        if (isClosed()) {
-            return Triple(false, emptySet(), emptySet())
+        if (syncInfo.isPresent) {
+            // we found a big enough compatible group to sync so send everyone in the group that value
+            val (syncValue, syncGroup) = syncInfo.get()
+            syncGroup.minus(me).forEach { p -> p.syncValueChan.send(syncValue) } // TODO parallelize this?
+            return SyncChannelResult.sat(syncValue)
         }
-
-        // wait to enter the channel
-        lobbyLock.lock()
-        try {
-            // waiting in the "lobby" to get in
-            while (participants.size == syncSize || (retryOnUNSAT && !compatibleWithCurrentLobby(me))) {
-                lobbyCond.await()
-                if (isClosed()) {
-                    return Triple(false, emptySet(), emptySet())
-                }
-            }
-
-            // the thread has gotten "in", now wait until enough threads have also gotten in
-            participants.add(me)
-            if (participants.size == syncSize) {
-                lobbyCond.signalAll()
-            } else {
-                lobbyCond.await()
-                if (isClosed()) {
-                    return Triple(false, emptySet(), emptySet())
-                }
-            }
-            val constraints = participants
-                .filter { it.constraint.isPresent }
-                .map { it.constraint.get() }
-                .toSet()
-            val selects = participants
-                .filter { it.select.isPresent }
-                .map { it.select.get() }
-                .toSet()
-            return Triple(true, constraints, selects)
-        }
-        catch (e : InterruptedException) {
-            // TODO clean up needs to happen here (this exception should be caught above and handled by
-            //  handleGeneralInterrupt) but deleting this catch results in problems.
-            return Triple(false, emptySet(), emptySet())
-        }
-        finally {
-            lobbyLock.unlock()
-        }
-    }
-
-    private fun syncAttempt(hasSelect : Boolean, constraints : Set<C>, selects : Set<Select>) : SyncChannelResult<V> {
-        // the channel has been entered
-        comLock.lock()
-        try {
-            // the first thread to enter this critical section will compute SAT on all formulas
-            if (syncValue.isEmpty) {
-                val computeResult = compute.invoke(constraints)
-                syncValue = if (computeResult.isPresent) {
-                    SyncChannelResult.sat(computeResult.get())
-                } else {
-                    SyncChannelResult.unsat()
-                }
-            }
-
-            // attempt to commit to the value
-            val commit = selectsCommit(selects)
-            if (commit) {
-                ++commitVotes
-            }
-            aborted = aborted || !commit
-            // wait until an abort or enough votes to commit the value
-            while (!aborted && commitVotes < syncSize) {
-                // at this point, this thread is attempting to commit but doesn't have the votes yet to commit.
-                // wait for the other threads to decide if they want to commit or abort.
-                comCond.await()
-                if (isClosed()) {
-                    return SyncChannelResult.abort()
-                }
-            }
-            comCond.signalAll()
-
-            return if (commit && !aborted) {
-                syncValue
-            } else if (commit && hasSelect) {
-                // never retry if there's a select--the select itself will retry
-                SyncChannelResult.retry()
-            } else {
-                SyncChannelResult.abort()
-            }
-        }
-        catch (e : InterruptedException) {
-            aborted = true
-            comCond.signalAll()
-            return SyncChannelResult.abort()
-        }
-        finally {
-            exitThroughTheLobby()
-        }
-    }
-
-    /**
-     * Returns whether the given constraint is mutually satisfiable with the current constraints in the lobby. Note that
-     * we do not perform a check (we simply return true) if the current set of constraints is empty; this is safe based
-     * on the assumption that each individual constraint is satisfiable, which we rely on for efficiency (to reduce the
-     * number of calls to the SMT solver).
-     */
-    private fun satisfiableConstraintsWithCurrentLobby(me : Participant<C>) : Boolean {
-        val myConstraint = me.constraint
-        val currentConstraints = participants
-            .filter { it.constraint.isPresent }
-            .map { it.constraint.get() }
-            .toSet()
-        if (myConstraint.isEmpty || currentConstraints.isEmpty()) {
-            return true
-        }
-        return compute.invoke(currentConstraints.plus(myConstraint.get())).isPresent
-    }
-
-    /**
-     * check the anticonstraints in a pairwise fashion
-     * it suffices to only check myAnticonstraint against all the others, since the invariant of the participants
-     * set is that each are pairwise mutually unsat
-     */
-    private fun unsatisfiableAnticonstraintsWithCurrentLobby(me : Participant<C>) : Boolean {
-        val myAnticonstraint = me.anticonstraint
-        val currentAnticonstraints = participants
-            .filter { it.anticonstraint.isPresent }
-            .map { it.anticonstraint.get() }
-            .toSet()
-        if (myAnticonstraint.isEmpty || currentAnticonstraints.isEmpty()) {
-            return true
-        }
-        return currentAnticonstraints.all { c ->
-            compute.invoke(setOf(myAnticonstraint.get(),c)).isEmpty
-        }
-    }
-
-    private fun compatibleWithCurrentLobby(me : Participant<C>) : Boolean {
-        return satisfiableConstraintsWithCurrentLobby(me) && unsatisfiableAnticonstraintsWithCurrentLobby(me)
-    }
-
-    /**
-     * Assumes that the comLock is held and must be released
-     */
-    private fun exitThroughTheLobby() {
-        var cleanup = false
-        try {
-            ++numExited
-            if (numExited == syncSize) {
-                // the last one out cleans up
-                commitVotes = 0
-                aborted = false
-                syncValue = SyncChannelResult.none()
-                numExited = 0
-                cleanup = true
-            }
-        } finally {
-            comLock.unlock()
-        }
-
-        // also clean up the participants data structure, which involves acquiring the lobbyLock
-        if (cleanup) {
-            lobbyLock.lock()
+        else {
+            // we didn't find a big enough compatible group to sync so we wait for someone else to lead the sync
             try {
-                participants = mutableSetOf()
-                lobbyCond.signalAll() // tell everyone in the lobby that we're done
+                val syncVal = me.syncValueChan.receive()
+                return SyncChannelResult.sat(syncVal)
             }
+            catch (_ : CancellationException) { }
+            catch (_ : ClosedReceiveChannelException) { }
             finally {
-                lobbyLock.unlock()
+                me.syncValueChan.close()
+                mutex.withLock {
+                    if (!closed) {
+                        participants.forEach { p ->
+                            p.compatiblePeers.remove(me)
+                        }
+                        participants.remove(me)
+                    }
+                }
             }
+            return SyncChannelResult.abort()
         }
     }
 
-    private fun selectsCommit(selects : Set<Select>) : Boolean {
-        // request a commit from all parties--only commit if all are able to
-        // 2PL on all selects
-        val allLocks = selects.map { it.getPublicLock() }.sorted()
+    /**
+     * This function must be called with the mutex acquired.
+     */
+    private suspend fun findCompatibleGroup(me : Participant<V,C>) : Pair<Boolean, Optional<Pair<V, Set<Participant<V,C>>>>> {
+        if (closed) {
+            return Pair(false, Optional.empty())
+        }
+
+        // calculate the participants who are compatible
+        val compatiblePeers = participants
+            .filter { p -> compatible(me, p) }
+            .toSet()
+            .plus(me)
+        me.compatiblePeers.addAll(compatiblePeers)
+        compatiblePeers.forEach { it.compatiblePeers.add(me) }
+        participants.add(me)
+        val compatibleGroups = participants
+            .map { p -> me.compatiblePeers.intersect(p.compatiblePeers) }
+            .filter { g -> g.size >= syncSize }
+            .flatMap { g -> subsetsOfSize(g, syncSize) }
+            .toSet()
+
+        for (group in compatibleGroups) {
+            assert(group.size == syncSize, "Expected group size (${group.size}) to be equal to the sync size ($syncSize)")
+            val allSelectsCanCommit = selectsCommit(group)
+            if (allSelectsCanCommit) {
+                // found a compatible group--return the group and a satisfying value
+                val constraints = group
+                    .filter { it.constraint.isPresent }
+                    .map { it.constraint.get() }
+                    .toSet()
+                val syncValue = compute.invoke(constraints)
+                assert(syncValue.isPresent, "Expected a sync value to be present")
+                participants.removeAll(group)
+                return Pair(true, Optional.of(Pair(syncValue.get(), group)))
+            }
+            else {
+                // at least one participant is stale (has a select that has already been won). remove the stale
+                // participants and try the next compatible group
+                val staleParticipants = participants.filter { p -> p.selectIsWon }.toSet()
+                participants.removeAll(staleParticipants)
+                if (me in staleParticipants) {
+                    // if me is a stale participant then abort
+                    return Pair(false, Optional.empty())
+                }
+            }
+        }
+
+        // if we reach this point then there are no compatible groups yet, so we wait for someone else to lead the sync
+        return Pair(true, Optional.empty())
+    }
+
+    private fun compatible(p1 : Participant<V,C>, p2 : Participant<V,C>) : Boolean {
+        // empty constraints are treated as TRUE
+        val satConstraints = p1.constraint.isEmpty || p2.constraint.isEmpty ||
+                pairwiseSatisfiable(p1.constraint.get(), p2.constraint.get())
+        // empty anticonstraints are treated as FALSE
+        val unsatAnticonstraints = p1.anticonstraint.isEmpty || p2.anticonstraint.isEmpty ||
+                !pairwiseSatisfiable(p1.anticonstraint.get(), p2.anticonstraint.get())
+        return satConstraints && unsatAnticonstraints
+    }
+    private fun pairwiseSatisfiable(c1 : C, c2 : C) = compute.invoke(setOf(c1, c2)).isPresent
+
+    private suspend fun selectsCommit(group : Set<Participant<V,C>>) : Boolean {
+        // request a commit from all parties--only commit if all are able to 2PL on all selects
+        val myHash = hashCode()
+        var allCanCommit : Boolean
+        val selectGroup = group.filter { p -> p.select.isPresent }
+        val allMutexes = selectGroup.map { p -> p.select.get().getWinnerMutex() }.sorted()
+        var lockedMutexes = emptyList<StratifiedMutex>()
         try {
-            allLocks.forEach { it.lock() }
-            val allCanCommit = selects.all { it.canCommit(hashCode()) }
+            lockedMutexes = allMutexes.map {
+                it.mutex.lock()
+                it
+            }
+            assert(lockedMutexes == allMutexes, "Expected all locked mutexes")
+            allCanCommit = selectGroup.all { p ->
+                val select = p.select.get()
+                val selectCanCommit = select.canCommit(myHash)
+                p.selectIsWon = !selectCanCommit
+                selectCanCommit
+            }
             if (allCanCommit) {
-                selects.forEach { it.doCommit(hashCode()) }
-            }
-            return allCanCommit
-        }
-        finally {
-            allLocks.forEach {
-                if (it.isLocked()) {
-                    it.unlock()
-                }
-            }
-        }
-    }
-
-    fun close() {
-        closedLock.lock()
-        try {
-            closed = true
-        } finally {
-            closedLock.unlock()
-        }
-        lobbyLock.lock()
-        try {
-            lobbyCond.signalAll()
-        } finally {
-            lobbyLock.unlock()
-        }
-        comLock.lock()
-        try {
-            comCond.signalAll()
-        } finally {
-            comLock.unlock()
-        }
-    }
-
-    // this function is called internally when the lobbyLock / comLock is already acquired, which is safe because we
-    // don't do anything with conditions (i.e. await() / signal()) with the closedLock.
-    fun isClosed() : Boolean {
-        closedLock.lock()
-        try {
-            if (closed) {
-                return true
+                selectGroup.forEach { it.select.get().doCommit(myHash) }
             }
         }
         finally {
-            closedLock.unlock()
+            lockedMutexes.forEach { it.mutex.unlock() }
         }
-        return false
+        return allCanCommit
     }
 
-    private fun handleGeneralInterrupt(me : Participant<C>) {
-        var issueAbort = false
-
-        // remove me from the participant list if its in there
-        lobbyLock.lock()
-        try {
-            if (me in participants) {
-                if (participants.size < syncSize) {
-                    // the sync attempt has not begun yet so it is safe to leave the participant list
-                    participants.remove(me)
-                } else if (participants.size == syncSize) {
-                    // the sync attempt has begun, so simply removing me from the participant list will not stop the
-                    // sync attempt. instead, we issue an abort.
-                    issueAbort = true
-                } else {
-                    throw RuntimeException("This case is impossible")
-                }
+    suspend fun close() {
+        mutex.withLock {
+            if (!closed) {
+                closed = true
+                participants.forEach { it.syncValueChan.close() }
+                participants.removeAll(participants)
             }
         }
-        finally {
-            lobbyLock.unlock()
-        }
+    }
 
-        // issue an abort. essentially, this thread should have made it into a sync attempt but was interrupted, so we
-        // exit the same way a sync attempt would.
-        if (issueAbort) {
-            comLock.lock()
-            aborted = true
-            exitThroughTheLobby()
+    suspend fun isClosed() : Boolean {
+        mutex.withLock {
+            return closed
         }
     }
 
-    private data class Participant<C : Any>(
+    private class Participant<V : Any, C : Any>(
         val constraint : Optional<C>,
         val anticonstraint : Optional<C>,
         val select : Optional<Select>,
-        val thread : Thread,
-    ) {}
+    ) {
+        var syncValueChan = Channel<V>()
+        // compatible peers are pairwise satisfiable
+        val compatiblePeers = mutableSetOf<Participant<V,C>>()
+        var selectIsWon = false
+    }
 }
 
 data class SyncChannelResult<V : Any>(
-    val isSAT : Boolean,
-    val isUNSAT : Boolean,
-    val isAborted : Boolean,
-    val isRetry : Boolean,
     val result : Optional<V>
 ) {
     val isEmpty = result.isEmpty
     val isPresent = result.isPresent
-    init {
-        julay.tools.assert(!isPresent || (isSAT && !isUNSAT && !isAborted && !isRetry),
-            "Invalid channel result, expected: isPresent => (isSAT && !isUNSAT && !isAborted && !isRetry)")
-    }
     companion object {
         fun <V : Any> sat(value : V) : SyncChannelResult<V> {
-            return SyncChannelResult(true, false, false, false, Optional.of(value))
-        }
-        fun <V : Any> unsat() : SyncChannelResult<V> {
-            return SyncChannelResult(false, true, false, false, Optional.empty())
+            return SyncChannelResult(Optional.of(value))
         }
         fun <V : Any> abort() : SyncChannelResult<V> {
-            return SyncChannelResult(false, false, true, false, Optional.empty())
-        }
-        fun <V : Any> retry() : SyncChannelResult<V> {
-            return SyncChannelResult(false, false, false, true, Optional.empty())
-        }
-        fun <V : Any> none() : SyncChannelResult<V> {
-            return SyncChannelResult(false, false, false, false, Optional.empty())
+            return SyncChannelResult(Optional.empty())
         }
     }
 }

@@ -22,8 +22,7 @@ dependencies {
     implementation("org.antlr:antlr4-runtime:4.13.2")
     //implementation(files("../julayc.jar"))
 
-    testImplementation("org.testng:testng:7.10.2")
-    testImplementation("org.slf4j:slf4j-simple:1.6.1")
+    testImplementation(kotlin("test"))
 }
 
 application {

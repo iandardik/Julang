@@ -19,8 +19,8 @@ class PrintlnTS : TransitionSystem {
 
     private val ctx = Context()
     private val alphabet = setOf(TSAction(printlnAct, ctx.mkTrue(), true))
-    override fun actions() = alphabet
-    override fun transit(act: ConcreteAction) {
+    override suspend fun actions() = alphabet
+    override suspend fun transit(act: ConcreteAction) {
         val msg = act.lookup(msgArg)
         println(msg)
     }

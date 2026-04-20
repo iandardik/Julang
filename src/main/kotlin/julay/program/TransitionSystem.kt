@@ -13,12 +13,12 @@ interface TransitionSystem {
      * permissible to simply return the alphabet() here, though implementations may wish to dynamically decide which
      * actions to return.
      */
-    fun actions() : Set<TSAction>
+    suspend fun actions() : Set<TSAction>
 
     /**
      * The transition system transits to a (potentially new) state based on the given concrete action.
      */
-    fun transit(act : ConcreteAction)
+    suspend fun transit(act : ConcreteAction)
 
     /**
      * Exactly one Context should be used, and should be available here for public use. Using just one Context is
