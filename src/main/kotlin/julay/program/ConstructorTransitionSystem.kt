@@ -25,6 +25,10 @@ class ConstructorTransitionSystem(
         val deadlockAct = SymbolicAction("deadlock", listOf())
     }
 
+    // in the future, we may want to switch to Dispatchers.Default or make it possible for the programmer to choose the
+    // dispatch type.
+    private val scope = CoroutineScope(Dispatchers.IO)
+
     private val z3True = ctx.mkTrue()
     private val nonInitiallyConstructorActions = constructorsInfo
         .asSequence()
@@ -33,7 +37,6 @@ class ConstructorTransitionSystem(
         .map { act -> TSAction(act, z3True, false) }
         .toSet()
         .plus(TSAction(deadlockAct, ctx.mkFalse(), true))
-    private val scope = CoroutineScope(Dispatchers.Default)
     private val liveProcsMutex = Mutex()
     private val liveSelfTerminatingProcs = mutableSetOf<Job>()
     private var initially = true

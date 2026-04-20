@@ -32,7 +32,7 @@ class JulHttpServer(
     }
 
     private val ctx = Context()
-    private val scope = CoroutineScope(Dispatchers.Default)
+    private val scope = CoroutineScope(Dispatchers.IO)
     init {
         val server = HttpServer.create(InetSocketAddress(8000), 0)
         server.createContext("/", this)
