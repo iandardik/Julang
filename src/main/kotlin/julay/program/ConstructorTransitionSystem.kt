@@ -1,10 +1,13 @@
 package julay.program
 
-import com.microsoft.z3.BoolExpr
 import com.microsoft.z3.Context
-import julay.concurrency.SyncChannel
+import julay.program.library.JulHttpServer.Companion.reqBodyArg
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.*
 import java.util.*
-import java.util.concurrent.locks.ReentrantLock
 
 class ConstructorTransitionSystem(
     private val initiallyAction : TSAction,
@@ -17,19 +20,25 @@ class ConstructorTransitionSystem(
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one
         // the alphabet info is not strictly correct, but it does not matter since it's never used
         override fun staticInfo() = TransitionSystemStaticInfo("ConstructorTS$", setOf(), mapOf(), setOf(), false)
+        // this action will never sync with any other action, meaning that this constructor proc will never deadlock and
+        // terminate
+        val deadlockAct = SymbolicAction("deadlock", listOf())
     }
 
     private val z3True = ctx.mkTrue()
     private val nonInitiallyConstructorActions = constructorsInfo
+        .asSequence()
         .flatMap { info -> info.constructors.keys }
         .filter { act -> act != initiallyAction.symAction }
         .map { act -> TSAction(act, z3True, false) }
         .toSet()
-    private val liveProcsLock = ReentrantLock()
-    private val liveSelfTerminatingProcs = mutableSetOf<Thread>()
+        .plus(TSAction(deadlockAct, ctx.mkFalse(), true))
+    private val scope = CoroutineScope(Dispatchers.Default)
+    private val liveProcsMutex = Mutex()
+    private val liveSelfTerminatingProcs = mutableSetOf<Job>()
     private var initially = true
 
-    override fun actions(): Set<TSAction> {
+    override suspend fun actions(): Set<TSAction> {
         return if (initially) {
             initially = false
             setOf(initiallyAction)
@@ -39,38 +48,32 @@ class ConstructorTransitionSystem(
         }
     }
 
-    override fun transit(act: ConcreteAction) {
+    override suspend fun transit(act: ConcreteAction) {
         constructorsInfo
             .forEach { tsInfo ->
                 if (tsInfo.constructors.containsKey(act.symAction)) {
                     val constructor = tsInfo.constructors[act.symAction]!!
-                    val t = Thread(Proc(constructor.invoke(program,act), tsInfo, program.actionTable))
+                    val proc = Proc(constructor.invoke(program,act), tsInfo, program.actionTable)
+                    val job = scope.launch { proc.run() }
                     if (tsInfo.selfTerminate) {
-                        liveProcsLock.lock()
-                        try {
-                            liveSelfTerminatingProcs.add(t)
-                        } finally {
-                            liveProcsLock.unlock()
+                        liveProcsMutex.withLock {
+                            liveSelfTerminatingProcs.add(job)
                         }
                     }
-                    t.start()
                 }
             }
 
         // after the initially action, start monitoring for whether the program has ended in a new thread
         if (act.symAction == initiallyAction.symAction) {
-            Thread {
+            scope.launch {
                 var running = true
                 while (running) {
-                    var nextLiveProc = Optional.empty<Thread>()
-                    liveProcsLock.lock()
-                    try {
+                    var nextLiveProc = Optional.empty<Job>()
+                    liveProcsMutex.withLock {
                         if (liveSelfTerminatingProcs.isNotEmpty()) {
                             nextLiveProc = Optional.of(liveSelfTerminatingProcs.random())
                             liveSelfTerminatingProcs.remove(nextLiveProc.get())
                         }
-                    } finally {
-                        liveProcsLock.unlock()
                     }
                     // wait for the proc to terminate
                     if (nextLiveProc.isPresent) {
@@ -80,9 +83,9 @@ class ConstructorTransitionSystem(
                         running = false
                     }
                 }
-                // TODO
-                //program.actionTable.values.forEach { it.channel.close() }
-            }.start()
+                // close all channels to end the program
+                program.actionTable.values.forEach { it.channel.close() }
+            }
         }
     }
 

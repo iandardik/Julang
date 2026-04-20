@@ -10,16 +10,17 @@ class Proc(
     private val transitionSystem : TransitionSystem,
     private val tsInfo : TransitionSystemStaticInfo,
     private val actionTable : Map<SymbolicAction,ProgramAction>
-) : Runnable {
+) {
     private val ctx = transitionSystem.getContext()
 
-    override fun run() {
+    suspend fun run() {
         while (true) {
             var nextAct = Optional.empty<ConcreteAction>()
-            val enabledActions = transitionSystem.actions().filter {
+            val enabledActions = transitionSystem.actions().filter { act ->
                 val solver = ctx.mkSolver()
-                solver.add(it.guard)
-                solver.check() == Status.SATISFIABLE
+                solver.add(act.guard)
+                // deadlock is not enabled, but we let it pass on purpose
+                act.symAction.name == "deadlock" || solver.check() == Status.SATISFIABLE
             }
             val cases = enabledActions.map { act ->
                 val programAction = actionTable[act.symAction]!!
@@ -34,8 +35,7 @@ class Proc(
                     nextAct = Optional.of(concAct)
                 }
             }
-            // TODO
-            //Select(*cases.toTypedArray()).run()
+            Select(*cases.toTypedArray()).run()
 
             // check for deadlocks
             if (nextAct.isEmpty) {

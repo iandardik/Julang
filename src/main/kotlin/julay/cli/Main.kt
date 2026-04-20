@@ -66,7 +66,7 @@ fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
     val staticInfoBody = (staticInfoCompiledProcs + staticInfoLib).joinToString(",\n") { it }
     val staticInfo = "val tsInfo = setOf(\n" + staticInfoBody.prependIndent() + "\n)"
     val runProgram = "Program(tsInfo).run()"
-    val mainFunction = "fun main(args : Array<String>) {" +
+    val mainFunction = "suspend fun main(args : Array<String>) {" +
             "\n$staticInfo".prependIndent() +
             "\n$runProgram".prependIndent() +
             "\n}"

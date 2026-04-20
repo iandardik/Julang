@@ -13,10 +13,10 @@ data class ProcClassDecl(
     fun toKotlinClassString(): String {
         val stateVarTypes = stateVars.associate { Pair(it.name,it.type) }
         val stateVarsStr = stateVars.joinToString(",\n") { "private var $it" }
-        val actionsStr = "override fun actions(): Set<TSAction> = setOf(\n" +
+        val actionsStr = "override suspend fun actions(): Set<TSAction> = setOf(\n" +
                 transitions.joinToString(",\n") { it.toActionString(stateVarTypes).prependIndent() } +
                 "\n)"
-        val transitStr = "override fun transit(act: ConcreteAction) {" +
+        val transitStr = "override suspend fun transit(act: ConcreteAction) {" +
                 "\nreturn when (act.symAction.name) {".prependIndent() +
                 transitions.joinToString("") {
                     "\n\"${it.action.name}\" -> {" + "\n${it.toTransitString(stateVarTypes)}".prependIndent() + "\n}"

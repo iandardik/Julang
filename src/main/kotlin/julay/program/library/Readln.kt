@@ -23,7 +23,7 @@ class ReadlnTS : TransitionSystem {
     private var prompt = true
     private var msg = ""
 
-    override fun actions() = setOf(
+    override suspend fun actions() = setOf(
         TSAction(
             promptAct,
             ctx.mkEq(ctx.mkBool(prompt), ctx.mkBool(true)),
@@ -38,7 +38,7 @@ class ReadlnTS : TransitionSystem {
             true
         ),
     )
-    override fun transit(act: ConcreteAction) {
+    override suspend fun transit(act: ConcreteAction) {
         if (act.symAction == promptAct) {
             prompt = false
             msg = readln()

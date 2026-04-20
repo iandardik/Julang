@@ -6,8 +6,10 @@ import com.sun.net.httpserver.HttpHandler
 import com.sun.net.httpserver.HttpServer
 import julay.program.*
 import julay.tools.mkStringConst
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.net.InetSocketAddress
-import java.util.Properties
 
 class JulHttpServer(
     private val actionTable : Map<SymbolicAction,ProgramAction>
@@ -30,21 +32,22 @@ class JulHttpServer(
     }
 
     private val ctx = Context()
+    private val scope = CoroutineScope(Dispatchers.Default)
     init {
         val server = HttpServer.create(InetSocketAddress(8000), 0)
         server.createContext("/", this)
         server.start()
     }
-    override fun actions(): Set<TSAction> {
+    override suspend fun actions(): Set<TSAction> {
         return setOf(
             TSAction(closeAct, ctx.mkTrue(), true),
         )
     }
-    override fun transit(act: ConcreteAction) {}
+    override suspend fun transit(act: ConcreteAction) {}
     override fun getContext() = ctx
     override fun handle(exchange: HttpExchange?) {
         val resource = HttpResource(exchange!!)
-        Thread(Proc(resource, staticInfo(), actionTable)).start()
+        scope.launch { Proc(resource, staticInfo(), actionTable).run() }
     }
 
     class HttpResource(
@@ -61,7 +64,7 @@ class JulHttpServer(
             val reqHeaders = exchange.requestHeaders
             reqBody = exchange.requestBody.bufferedReader().use { it.readText() }
         }
-        override fun actions(): Set<TSAction> {
+        override suspend fun actions(): Set<TSAction> {
             if (initHttpReq) {
                 initHttpReq = false
                 return setOf(
@@ -80,7 +83,7 @@ class JulHttpServer(
                 return setOf()
             }
         }
-        override fun transit(act: ConcreteAction) {
+        override suspend fun transit(act: ConcreteAction) {
             if (act.symAction == sendResponseAct) {
                 val respBody = act.lookup(respBodyArg).value as String
                 exchange.responseHeaders

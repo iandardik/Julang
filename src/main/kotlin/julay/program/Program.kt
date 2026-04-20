@@ -9,7 +9,7 @@ import java.util.*
 /**
  * A program represents one or more processes that interact together on a single computer.
  */
-class Program : Runnable {
+class Program {
     val actionTable : Map<SymbolicAction,ProgramAction>
     private val constructorProc : Proc
 
@@ -27,8 +27,9 @@ class Program : Runnable {
         // TODO add a sanity check for each of the above requirements
 
         val constructorCtx = Context()
-        val initiallySig = SymbolicAction("initially", listOf())
-        val initiallyAction = TSAction(initiallySig, constructorCtx.mkTrue(), false)
+        val initially = SymbolicAction("initially", listOf())
+        val initiallyAction = TSAction(initially, constructorCtx.mkTrue(), false)
+        val deadlock = SymbolicAction("deadlock", listOf())
 
         // create a SyncChannel for each action
         val serviceActions = componentInfo.flatMap { it.services }.toSet()
@@ -43,7 +44,9 @@ class Program : Runnable {
             }
             .toMutableMap()
         // the initially action is a self-sync for the constructor proc
-        actionCounts[initiallySig] = 1
+        actionCounts[initially] = 1
+        // the deadlock action should never sync
+        actionCounts[deadlock] = Int.MAX_VALUE
 
         val channelTable = actionCounts.keys.associateWith { act ->
             val syncSize = actionCounts[act]!!
@@ -70,7 +73,7 @@ class Program : Runnable {
         )
     }
 
-    override fun run() {
+    suspend fun run() {
         // the constructor proc is responsible for terminating the program when all 'self terminating' procs are done
         constructorProc.run()
     }
