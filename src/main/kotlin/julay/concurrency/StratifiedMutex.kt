@@ -1,7 +1,7 @@
 package julay.concurrency
 
 import kotlinx.coroutines.sync.Mutex
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 class StratifiedMutex(
     val isLocked: Boolean = false,
@@ -9,11 +9,11 @@ class StratifiedMutex(
     private val id = globalId.getAndIncrement()
     val mutex = Mutex(isLocked)
 
-    fun getId() : Int = id
+    fun getId() : Long = id
 
     override fun compareTo(other: StratifiedMutex): Int {
         return getId().compareTo(other.getId())
     }
 }
 
-val globalId = AtomicInteger(0)
+val globalId = AtomicLong(0)
