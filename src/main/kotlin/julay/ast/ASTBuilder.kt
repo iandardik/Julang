@@ -31,7 +31,14 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
 
     override fun visitPclass(ctx: JulayParser.PclassContext?): ASTNode {
         val name = ctx!!.ID().text
-        val localDecls = ctx.pclass_body().map { visit(it) }
+        val localDecls = ctx.pclass_body()
+            .map { visit(it) }
+            .map {
+                if (it !is ProcClassDeclNode) {
+                    throw RuntimeException("Expected ProcClassDeclNode but got $it")
+                }
+                it
+            }
         return ProcClassNode(name, localDecls)
     }
 
@@ -55,7 +62,7 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
 
     override fun visitPclass_body(ctx: JulayParser.Pclass_bodyContext?): ASTNode {
         val body = oneChoice(ctx!!.`var`(), ctx.constructor(), ctx.transition())
-        return ProcClassBodyNode(visit(body))
+        return visit(body)
     }
 
     override fun visitVar(ctx: JulayParser.VarContext?): ASTNode {
@@ -66,8 +73,20 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
 
     override fun visitConstructor(ctx: JulayParser.ConstructorContext?): ASTNode {
         val name = ctx!!.ID().text
-        val args = visit(ctx.args())
-        val body = ctx.action_body().map { visit(it) }
+        val args = visit(ctx.args()).let { argsNode ->
+            if (argsNode !is ArgsNode) {
+                throw RuntimeException("Expected ArgsNode but got $argsNode")
+            }
+            argsNode
+        }
+        val body = ctx.action_body()
+            .map { visit(it) }
+            .map {
+                if (it !is ActionBodyNode) {
+                    throw RuntimeException("Expected ActionBody but got $it")
+                }
+                it
+            }
         return ConstructorNode(name, args, body)
     }
 
@@ -81,14 +100,33 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
             else -> TSAction.SyncRole.CSP
         }
         val name = ctx.ID().text
-        val args = visit(ctx.args())
-        val body = ctx.action_body().map { visit(it) }
+        val args = visit(ctx.args()).let { argsNode ->
+            if (argsNode !is ArgsNode) {
+                throw RuntimeException("Expected ArgsNode but got $argsNode")
+            }
+            argsNode
+        }
+        val body = ctx.action_body()
+            .map { visit(it) }
+            .map {
+                if (it !is ActionBodyNode) {
+                    throw RuntimeException("Expected ActionBody but got $it")
+                }
+                it
+            }
         val loc = Pair(ctx.getStart().line, ctx.getStart().line)
         return TransitionNode(modifier, name, args, body, loc)
     }
 
     override fun visitArgs(ctx: JulayParser.ArgsContext?): ASTNode {
-        val args = ctx!!.arg().map { visit(it) }
+        val args = ctx!!.arg()
+            .map { visit(it) }
+            .map { argsNode ->
+                if (argsNode !is ArgsNode) {
+                    throw RuntimeException("Expected ArgsNode but got $argsNode")
+                }
+                argsNode
+            }
         return ArgsNode(args)
     }
 
@@ -100,7 +138,7 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
 
     override fun visitAction_body(ctx: JulayParser.Action_bodyContext?): ASTNode {
         val body = oneChoice(ctx!!.guard(), ctx.transit(), ctx.error())
-        return ActionBodyNode(visit(body))
+        return visit(body)
     }
 
     override fun visitGuard(ctx: JulayParser.GuardContext?): ASTNode {
@@ -112,12 +150,25 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
     }
 
     override fun visitTransit(ctx: JulayParser.TransitContext?): ASTNode {
-        val transits = ctx!!.var_transit().map { visit(it) }
+        val transits = ctx!!.var_transit()
+            .map { visit(it) }
+            .map {
+                if (it !is ActionBodyNode) {
+                    throw RuntimeException("Expected ActionBody but got $it")
+                }
+                it
+            }
         return TransitNode(transits)
     }
 
     override fun visitError(ctx: JulayParser.ErrorContext?): ASTNode {
         val errExpr = visit(ctx!!.expr())
+            .let {
+                if (it !is ExprNode) {
+                    throw RuntimeException("Expected ExprNode but got $it")
+                }
+                it
+            }
         return ErrorNode(errExpr)
     }
 

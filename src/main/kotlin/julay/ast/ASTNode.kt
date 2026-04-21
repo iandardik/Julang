@@ -9,11 +9,29 @@ abstract class ASTNode(
     open fun errorPass() : List<CompileError> = children.flatMap { it.errorPass() }
     open fun procPass() : List<ProcDecl> = children.flatMap { it.procPass() }
     open fun procClassPass(pclassName : String) : List<ProcClassDecl> = children.flatMap { it.procClassPass(pclassName) }
-    open fun constructors() : List<ActionDecl> = children.flatMap { it.constructors() }
-    open fun transitions() : List<ActionDecl> = children.flatMap { it.transitions() }
-    open fun actionArgs() : List<Variable> = children.flatMap { it.actionArgs() }
-    open fun guards() : List<ExprNode> = children.flatMap { it.guards() }
-    open fun transits() : Map<String,ExprNode> = children.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() }
+}
+
+abstract class ProcClassDeclNode(children : List<ASTNode>) : ASTNode(children) {
+    open fun stateVariables() : List<Variable> = listOf()
+    open fun constructors() : List<ActionDecl> = listOf()
+    open fun transitions() : List<ActionDecl> = listOf()
+}
+
+open class ArgsNode(
+    private val args : List<ArgsNode>
+) : ASTNode(args) {
+    open fun actionArgs() : List<Variable> = args.flatMap { it.actionArgs() }
+    override fun toString(): String {
+        return children.joinToString(", ") { it.toString() }
+    }
+}
+
+open class ActionBodyNode(
+    private val body : List<ActionBodyNode>,
+    exprs : List<ExprNode>
+) : ASTNode(body + exprs) {
+    open fun guards() : List<ExprNode> = body.flatMap { it.guards() }
+    open fun transits() : Map<String,ExprNode> = body.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() }
 }
 
 abstract class ExprNode(children : List<ASTNode>) : ASTNode(children) {
@@ -45,15 +63,14 @@ class DeclNode(
 
 class ProcClassNode(
     private val name : String,
-    private val localDecls : List<ASTNode>
+    private val localDecls : List<ProcClassDeclNode>
 ) : ASTNode(localDecls) {
     override fun procClassPass(pclassName: String): List<ProcClassDecl> {
         // TODO make sure there is at least one constructor
         if (pclassName != name) {
             return listOf()
         }
-        val stateVars = localDecls.flatMap { it.children }
-            .filterIsInstance<VarNode>().map { Variable(it.name,it.type) }
+        val stateVars = localDecls.flatMap { it.stateVariables() }
         // TODO make sure constructors, transitions, and services are mutually exclusive
         val constructors = localDecls.flatMap { it.constructors() } // TODO constructors cannot have repeat names
         val transitions = localDecls.flatMap { it.transitions() }
@@ -102,18 +119,11 @@ class SpecNode(
     }
 }
 
-class ProcClassBodyNode(
-    private val body : ASTNode
-) : ASTNode(listOf(body)) {
-    override fun toString(): String {
-        return body.toString()
-    }
-}
-
 class VarNode(
     val name : String,
     val type : Type
-) : ASTNode(listOf()) {
+) : ProcClassDeclNode(listOf()) {
+    override fun stateVariables(): List<Variable> = listOf(Variable(name, type))
     override fun toString(): String {
         return "$name : $type"
     }
@@ -121,9 +131,9 @@ class VarNode(
 
 class ConstructorNode(
     private val name : String,
-    private val args : ASTNode,
-    private val body : List<ASTNode>
-) : ASTNode(body) {
+    private val args : ArgsNode,
+    private val body : List<ActionBodyNode>
+) : ProcClassDeclNode(body) {
     override fun errorPass(): List<CompileError> {
         val errors = mutableListOf<CompileError>()
         errors.addAll(args.errorPass())
@@ -136,8 +146,8 @@ class ConstructorNode(
         return listOf(
             ActionDecl(
                 SymbolicAction(name, args.actionArgs(), SymbolicAction.SyncType.CSP),
-                super.guards(),
-                super.transits(),
+                body.flatMap { it.guards() },
+                body.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() },
                 TSAction.SyncRole.CSP
             )
         )
@@ -151,10 +161,10 @@ class ConstructorNode(
 class TransitionNode(
     private val modifier : TSAction.SyncRole,
     private val name : String,
-    private val args : ASTNode,
-    private val body : List<ASTNode>,
+    private val args : ArgsNode,
+    private val body : List<ActionBodyNode>,
     private val loc : Pair<Int,Int>
-) : ASTNode(listOf(args) + body) {
+) : ProcClassDeclNode(listOf(args) + body) {
     override fun errorPass(): List<CompileError> {
         val errors = mutableListOf<CompileError>()
         errors.addAll(args.errorPass())
@@ -175,8 +185,8 @@ class TransitionNode(
         return listOf(
             ActionDecl(
                 SymbolicAction(name, args.actionArgs(), syncType),
-                super.guards(),
-                super.transits(),
+                body.flatMap { it.guards() },
+                body.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() },
                 modifier
             )
         )
@@ -192,18 +202,10 @@ class TransitionNode(
     }
 }
 
-class ArgsNode(
-    private val args : List<ASTNode>
-) : ASTNode(args) {
-    override fun toString(): String {
-        return args.joinToString(", ") { it.toString() }
-    }
-}
-
 class ArgNode(
     private val name : String,
     private val type : Type
-) : ASTNode(listOf()) {
+) : ArgsNode(listOf()) {
     override fun actionArgs(): List<Variable> {
         return listOf(Variable(name,type))
     }
@@ -212,17 +214,9 @@ class ArgNode(
     }
 }
 
-class ActionBodyNode(
-    private val body : ASTNode
-) : ASTNode(listOf(body)) {
-    override fun toString(): String {
-        return body.toString()
-    }
-}
-
 class GuardNode(
     val expr : ExprNode
-) : ASTNode(listOf(expr)) {
+) : ActionBodyNode(listOf(), listOf(expr)) {
     override fun guards(): List<ExprNode> {
         return listOf(expr)
     }
@@ -233,16 +227,16 @@ class GuardNode(
 }
 
 class TransitNode(
-    private val transits : List<ASTNode>
-) : ASTNode(transits) {
+    private val transits : List<ActionBodyNode>
+) : ActionBodyNode(transits, listOf()) {
     override fun toString(): String {
         return "transit:\n${transits.joinToString("\n") { "$it".prependIndent() }}"
     }
 }
 
 class ErrorNode(
-    private val expr : ASTNode
-) : ASTNode(listOf(expr)) {
+    private val expr : ExprNode
+) : ActionBodyNode(listOf(), listOf(expr)) {
     override fun toString(): String {
         val exprStr = "$expr".prependIndent()
         return "error:\n$exprStr"
@@ -252,7 +246,7 @@ class ErrorNode(
 class VarTransitNode(
     val varName : String,
     val expr : ExprNode
-) : ASTNode(listOf(expr)) {
+) : ActionBodyNode(listOf(), listOf(expr)) {
     override fun transits(): Map<String, ExprNode> {
         return mapOf(Pair(varName,expr))
     }
