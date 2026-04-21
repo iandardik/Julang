@@ -10,14 +10,14 @@ p-class FrontEnd {
             valReq := ""
     }
 
-    transition prompt() {
+    p2p-consumer transition prompt() {
         guard:
             state = "A"
         transit:
             state := "B"
     }
     
-    transition readln(msg : String) {
+    p2p-consumer transition readln(msg : String) {
         guard:
             state = "B"
         transit:
@@ -33,7 +33,7 @@ p-class FrontEnd {
             valReq := "val:\n\t" + val // just to test string concatenation and escape characters
     }
 
-    transition println(msg : String) {
+    p2p-consumer transition println(msg : String) {
         guard:
             (state = "D") & ((msg + "") = valReq) // (msg + "") to test string concatenation with action args
         transit:

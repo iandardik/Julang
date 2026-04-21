@@ -19,7 +19,7 @@ class ConstructorTransitionSystem(
     companion object: StaticInfo {
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one
         // the alphabet info is not strictly correct, but it does not matter since it's never used
-        override fun staticInfo() = TransitionSystemStaticInfo("ConstructorTS$", setOf(), mapOf(), setOf(), false)
+        override fun staticInfo() = TransitionSystemStaticInfo("ConstructorTS$", setOf(), mapOf(), false)
         // this action will never sync with any other action, meaning that this constructor proc will never deadlock and
         // terminate
         val deadlockAct = SymbolicAction("deadlock", listOf())
@@ -34,9 +34,9 @@ class ConstructorTransitionSystem(
         .asSequence()
         .flatMap { info -> info.constructors.keys }
         .filter { act -> act != initiallyAction.symAction }
-        .map { act -> TSAction(act, z3True, false) }
+        .map { act -> TSAction(act, z3True) }
         .toSet()
-        .plus(TSAction(deadlockAct, ctx.mkFalse(), true))
+        .plus(TSAction(deadlockAct, ctx.mkFalse()))
     private val liveProcsMutex = Mutex()
     private val liveSelfTerminatingProcs = mutableSetOf<Job>()
     private var initially = true

@@ -17,11 +17,6 @@ data class TransitionSystemStaticInfo(
     val constructors : Map<SymbolicAction, (Program,ConcreteAction)->TransitionSystem>,
 
     /**
-     * The services that this TransitionSystem offers. Must be a subset of the alphabet.
-     */
-    val services : Set<SymbolicAction>,
-
-    /**
      * Whether the transition system will terminate itself. If true (default) then the program will not end before the
      * process terminates; otherwise, the process may be terminated early (this is desirable e.g., for library
      * processes).

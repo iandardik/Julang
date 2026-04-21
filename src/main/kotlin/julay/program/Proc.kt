@@ -26,10 +26,10 @@ class Proc(
                 val programAction = actionTable[act.symAction]!!
                 // the first anticonstraint ensures that processes from the same p-class never sync
                 // the second ensures that service transitions act like servers, and all others act like clients
-                val anticonstraint = if (programAction.isServiced) {
-                    ctx.mkEq(ctx.mkBoolConst("serviceTransition"), ctx.mkBool(act.isServicer))
-                } else {
-                    ctx.mkEq(ctx.mkIntConst("classID"), ctx.mkInt(tsInfo.classID()))
+                val anticonstraint = when (act.syncRole) {
+                    TSAction.SyncRole.CSP -> ctx.mkEq(ctx.mkIntConst("classID"), ctx.mkInt(tsInfo.classID()))
+                    TSAction.SyncRole.P2PService -> ctx.mkEq(ctx.mkBoolConst("serviceTransition"), ctx.mkTrue())
+                    TSAction.SyncRole.P2PConsumer -> ctx.mkEq(ctx.mkBoolConst("serviceTransition"), ctx.mkFalse())
                 }
                 Select.SyncCase(programAction.channel, act.guard, anticonstraint) { concAct : ConcreteAction ->
                     nextAct = Optional.of(concAct)

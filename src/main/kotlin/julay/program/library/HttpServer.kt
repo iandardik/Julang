@@ -19,7 +19,7 @@ class JulHttpServer(
         val respBodyArg = Variable("respBody", stringType)
         val receiveRequestAct = SymbolicAction("receiveRequest", listOf(reqBodyArg))
         val sendResponseAct = SymbolicAction("sendResponse", listOf(respBodyArg))
-        val closeAct = SymbolicAction("close", listOf())
+        val closeAct = SymbolicAction("close", listOf(), SymbolicAction.SyncType.P2P)
         val initiallyCtor = Pair(
             SymbolicAction("initially", listOf())) { prog : Program, _ : ConcreteAction -> JulHttpServer(prog.actionTable) }
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one
@@ -27,7 +27,6 @@ class JulHttpServer(
             "JulHttpServer$",
             setOf(receiveRequestAct, sendResponseAct, closeAct),
             mapOf(initiallyCtor),
-            setOf(closeAct),
             true)
     }
 
@@ -40,7 +39,7 @@ class JulHttpServer(
     }
     override suspend fun actions(): Set<TSAction> {
         return setOf(
-            TSAction(closeAct, ctx.mkTrue(), true),
+            TSAction(closeAct, ctx.mkTrue(), TSAction.SyncRole.P2PService),
         )
     }
     override suspend fun transit(act: ConcreteAction) {}
@@ -70,14 +69,13 @@ class JulHttpServer(
                 return setOf(
                     TSAction(
                         receiveRequestAct,
-                        ctx.mkEq(ctx.mkStringConst("reqBody"), ctx.mkString(reqBody)),
-                        false
+                        ctx.mkEq(ctx.mkStringConst("reqBody"), ctx.mkString(reqBody))
                     ),
                 )
             }
             else if (finishHttpReq) {
                 finishHttpReq = false
-                return setOf(TSAction(sendResponseAct, ctx.mkTrue(), false))
+                return setOf(TSAction(sendResponseAct, ctx.mkTrue()))
             }
             else {
                 return setOf()

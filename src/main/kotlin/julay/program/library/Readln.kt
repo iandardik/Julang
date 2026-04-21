@@ -7,15 +7,14 @@ import julay.tools.mkStringConst
 class ReadlnTS : TransitionSystem {
     companion object: StaticInfo {
         val msgArg = Variable("msg", stringType)
-        val promptAct = SymbolicAction("prompt", listOf())
-        val readlnAct = SymbolicAction("readln", listOf(msgArg))
+        val promptAct = SymbolicAction("prompt", listOf(), SymbolicAction.SyncType.P2P)
+        val readlnAct = SymbolicAction("readln", listOf(msgArg), SymbolicAction.SyncType.P2P)
         val initiallyCtor = Pair(SymbolicAction("initially", listOf())) { _ : Program, _ : ConcreteAction -> ReadlnTS() }
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one
         override fun staticInfo() = TransitionSystemStaticInfo(
             "ReadlnTS$",
             setOf(promptAct, readlnAct),
             mapOf(initiallyCtor),
-            setOf(readlnAct),
             false)
     }
 
@@ -27,7 +26,7 @@ class ReadlnTS : TransitionSystem {
         TSAction(
             promptAct,
             ctx.mkEq(ctx.mkBool(prompt), ctx.mkBool(true)),
-            false
+            TSAction.SyncRole.P2PService
         ),
         TSAction(
             readlnAct,
@@ -35,7 +34,7 @@ class ReadlnTS : TransitionSystem {
                 ctx.mkEq(ctx.mkBool(prompt), ctx.mkBool(false)),
                 ctx.mkEq(ctx.mkStringConst("msg"), ctx.mkString(msg))
             ),
-            true
+            TSAction.SyncRole.P2PService
         ),
     )
     override suspend fun transit(act: ConcreteAction) {

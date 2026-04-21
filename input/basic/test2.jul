@@ -16,7 +16,7 @@ p-class S {
             print := true
     }
 
-    transition println(msg : String) {
+    p2p-consumer transition println(msg : String) {
         guard:
             (print = true) & (msg = x + "")
         transit:
@@ -39,7 +39,7 @@ p-class T {
             x := x + inc
     }
 
-    transition println(msg : String) {
+    p2p-consumer transition println(msg : String) {
         guard:
             (x > 1 & x <= 10) & (msg = x + "")
         transit:

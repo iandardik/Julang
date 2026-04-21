@@ -19,7 +19,7 @@ p-class EchoHandler {
             responded := true
     }
 
-    transition println(msg : String) {
+    p2p-consumer transition println(msg : String) {
         guard:
               responded
             & ~done

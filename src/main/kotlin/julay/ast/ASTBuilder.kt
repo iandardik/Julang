@@ -2,10 +2,13 @@ package julay.ast
 
 import julay.parser.JulayParser
 import julay.parser.JulayParserBaseVisitor
+import julay.program.SymbolicAction
+import julay.program.TSAction
 import julay.program.boolType
 import julay.program.intType
 import julay.program.parseType
 import julay.program.stringType
+import julay.tools.assert
 import org.antlr.v4.runtime.ParserRuleContext
 
 fun oneChoice(vararg choices : ParserRuleContext?) : ParserRuleContext {
@@ -69,19 +72,19 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
     }
 
     override fun visitTransition(ctx: JulayParser.TransitionContext?): ASTNode {
-        val name = ctx!!.ID().text
+        val isService = ctx!!.SERVICE() != null
+        val isConsumer = ctx.CONSUMER() != null
+        assert(!isService || !isConsumer, "A transition cannot be both a service and consumer")
+        val modifier = when {
+            isService -> TSAction.SyncRole.P2PService
+            isConsumer -> TSAction.SyncRole.P2PConsumer
+            else -> TSAction.SyncRole.CSP
+        }
+        val name = ctx.ID().text
         val args = visit(ctx.args())
         val body = ctx.action_body().map { visit(it) }
         val loc = Pair(ctx.getStart().line, ctx.getStart().line)
-        return TransitionNode(name, args, body, loc)
-    }
-
-    override fun visitService(ctx: JulayParser.ServiceContext?): ASTNode {
-        val name = ctx!!.ID().text
-        val args = visit(ctx.args())
-        val body = ctx.action_body().map { visit(it) }
-        val loc = Pair(ctx.getStart().line, ctx.getStart().line)
-        return ServiceNode(name, args, body, loc)
+        return TransitionNode(modifier, name, args, body, loc)
     }
 
     override fun visitArgs(ctx: JulayParser.ArgsContext?): ASTNode {

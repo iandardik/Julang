@@ -1,6 +1,7 @@
 package julay.program
 
 import com.microsoft.z3.BoolExpr
+import julay.tools.assert
 
 /**
  * Represents a symbolic action for a given transition system / proc.
@@ -11,5 +12,17 @@ import com.microsoft.z3.BoolExpr
 data class TSAction(
     val symAction : SymbolicAction,
     val guard : BoolExpr,
-    val isServicer : Boolean,
-) {}
+    val syncRole : SyncRole = SyncRole.CSP,
+) {
+    enum class SyncRole {CSP, P2PService, P2PConsumer}
+
+    init {
+        // sanity checks
+        assert(!(syncRole == SyncRole.CSP) || (symAction.syncType == SymbolicAction.SyncType.CSP),
+            "Expected (syncRole == SyncRole.CSP) => (symAction.syncType == SymbolicAction.SyncType.CSP)")
+        assert(!(syncRole == SyncRole.P2PService) || (symAction.syncType == SymbolicAction.SyncType.P2P),
+            "Expected (syncRole == SyncRole.P2PService) => (symAction.syncType == SymbolicAction.SyncType.P2P)")
+        assert(!(syncRole == SyncRole.P2PConsumer) || (symAction.syncType == SymbolicAction.SyncType.P2P),
+            "Expected (syncRole == SyncRole.P2PConsumer) => (symAction.syncType == SymbolicAction.SyncType.P2P)")
+    }
+}

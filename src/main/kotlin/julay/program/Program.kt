@@ -27,19 +27,18 @@ class Program {
         // TODO add a sanity check for each of the above requirements
 
         val constructorCtx = Context()
-        val initially = SymbolicAction("initially", listOf())
-        val initiallyAction = TSAction(initially, constructorCtx.mkTrue(), false)
-        val deadlock = SymbolicAction("deadlock", listOf())
+        val initially = SymbolicAction("initially", listOf(), SymbolicAction.SyncType.CSP)
+        val initiallyAction = TSAction(initially, constructorCtx.mkTrue(), TSAction.SyncRole.CSP)
+        val deadlock = SymbolicAction("deadlock", listOf(), SymbolicAction.SyncType.CSP)
 
         // create a SyncChannel for each action
-        val serviceActions = componentInfo.flatMap { it.services }.toSet()
         val actionBag = componentInfo.flatMap { it.alphabet union it.constructors.keys }
         val actionCounts = actionBag.toSet()
             .associateWith { setAct ->
-                if (setAct in serviceActions) {
-                    2
-                } else {
+                if (setAct.syncType == SymbolicAction.SyncType.CSP) {
                     actionBag.count { bagAct -> bagAct == setAct }
+                } else {
+                    2
                 }
             }
             .toMutableMap()
@@ -65,7 +64,7 @@ class Program {
         }
 
         actionTable = channelTable.keys
-            .associateWith { ProgramAction(it, channelTable[it]!!, it in serviceActions) }
+            .associateWith { ProgramAction(it, channelTable[it]!!) }
         constructorProc = Proc(
             ConstructorTransitionSystem(initiallyAction, componentInfo, this, constructorCtx),
             ConstructorTransitionSystem.staticInfo(),

@@ -1,6 +1,7 @@
 package julay.ast
 
 import julay.program.*
+import julay.program.TSAction
 
 abstract class ASTNode(
     val children : List<ASTNode>
@@ -10,7 +11,6 @@ abstract class ASTNode(
     open fun procClassPass(pclassName : String) : List<ProcClassDecl> = children.flatMap { it.procClassPass(pclassName) }
     open fun constructors() : List<ActionDecl> = children.flatMap { it.constructors() }
     open fun transitions() : List<ActionDecl> = children.flatMap { it.transitions() }
-    open fun services() : List<ActionDecl> = children.flatMap { it.services() }
     open fun actionArgs() : List<Variable> = children.flatMap { it.actionArgs() }
     open fun guards() : List<ASTNode> = children.flatMap { it.guards() }
     open fun transits() : Map<String,ASTNode> = children.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() }
@@ -60,8 +60,7 @@ class ProcClassNode(
         // TODO make sure constructors, transitions, and services are mutually exclusive
         val constructors = localDecls.flatMap { it.constructors() } // TODO constructors cannot have repeat names
         val transitions = localDecls.flatMap { it.transitions() }
-        val services = localDecls.flatMap { it.services() }
-        val decl = ProcClassDecl(name, stateVars, constructors, transitions, services)
+        val decl = ProcClassDecl(name, stateVars, constructors, transitions)
         return listOf(decl)
     }
     override fun toString(): String {
@@ -139,10 +138,10 @@ class ConstructorNode(
     override fun constructors(): List<ActionDecl> {
         return listOf(
             ActionDecl(
-                SymbolicAction(name,args.actionArgs()),
+                SymbolicAction(name, args.actionArgs(), SymbolicAction.SyncType.CSP),
                 super.guards(),
                 super.transits(),
-                false
+                TSAction.SyncRole.CSP
             )
         )
     }
@@ -153,6 +152,7 @@ class ConstructorNode(
 }
 
 class TransitionNode(
+    private val modifier : TSAction.SyncRole,
     private val name : String,
     private val args : ASTNode,
     private val body : List<ASTNode>,
@@ -166,53 +166,32 @@ class TransitionNode(
             errors.add(CompileError(loc, "only constructors (not transitions) can synchronize on the 'initially' action"))
         }
         // TODO ensure that each transit has a unique state var
+        // TODO ensure that a modified action (in at least one place) is always modified
         return errors
     }
     override fun transitions(): List<ActionDecl> {
-        return listOf(
-            ActionDecl(
-                SymbolicAction(name,args.actionArgs()),
-                super.guards(),
-                super.transits(),
-                false
-            )
-        )
-    }
-    override fun toString(): String {
-        val bodyStr = body.joinToString("\n") { "$it".prependIndent() }
-        return "transition $name($args) {\n$bodyStr\n}"
-    }
-}
-
-class ServiceNode(
-    private val name : String,
-    private val args : ASTNode,
-    private val body : List<ASTNode>,
-    private val loc : Pair<Int,Int>
-) : ASTNode(listOf(args) + body) {
-    override fun errorPass(): List<CompileError> {
-        val errors = mutableListOf<CompileError>()
-        errors.addAll(args.errorPass())
-        errors.addAll(body.flatMap { it.errorPass() })
-        if (name == "initially") {
-            errors.add(CompileError(loc, "only constructors (not service transitions) can synchronize on the 'initially' action"))
+        val syncType = when (modifier) {
+            TSAction.SyncRole.CSP -> SymbolicAction.SyncType.CSP
+            TSAction.SyncRole.P2PService -> SymbolicAction.SyncType.P2P
+            TSAction.SyncRole.P2PConsumer -> SymbolicAction.SyncType.P2P
         }
-        // TODO ensure that each transit has a unique state var
-        return errors
-    }
-    override fun services(): List<ActionDecl> {
         return listOf(
             ActionDecl(
-                SymbolicAction(name,args.actionArgs()),
+                SymbolicAction(name, args.actionArgs(), syncType),
                 super.guards(),
                 super.transits(),
-                true
+                modifier
             )
         )
     }
     override fun toString(): String {
+        val modifierStr = when (modifier) {
+            TSAction.SyncRole.CSP -> ""
+            TSAction.SyncRole.P2PService -> "p2p-service "
+            TSAction.SyncRole.P2PConsumer -> "p2p-consumer "
+        }
         val bodyStr = body.joinToString("\n") { "$it".prependIndent() }
-        return "service $name($args) {\n$bodyStr\n}"
+        return "${modifierStr}transition $name($args) {\n$bodyStr\n}"
     }
 }
 

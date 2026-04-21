@@ -6,5 +6,4 @@ import julay.concurrency.SyncChannel
 data class ProgramAction(
     val action : SymbolicAction,
     var channel : SyncChannel<ConcreteAction, BoolExpr>,
-    var isServiced : Boolean
 ) {}

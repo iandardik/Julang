@@ -71,12 +71,6 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitTransition(JulayParser.TransitionContext ctx);
 	/**
-	 * Visit a parse tree produced by {@link JulayParser#service}.
-	 * @param ctx the parse tree
-	 * @return the visitor result
-	 */
-	T visitService(JulayParser.ServiceContext ctx);
-	/**
 	 * Visit a parse tree produced by {@link JulayParser#args}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
