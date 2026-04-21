@@ -12,17 +12,14 @@ abstract class ASTNode(
     open fun constructors() : List<ActionDecl> = children.flatMap { it.constructors() }
     open fun transitions() : List<ActionDecl> = children.flatMap { it.transitions() }
     open fun actionArgs() : List<Variable> = children.flatMap { it.actionArgs() }
-    open fun guards() : List<ASTNode> = children.flatMap { it.guards() }
-    open fun transits() : Map<String,ASTNode> = children.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() }
-    open fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean = false) : String {
-        throw RuntimeException("Unsupported")
-    }
-    open fun toTransitString(symbolTypes : Map<String,Type>, argSymbols : Set<String>) : String {
-        throw RuntimeException("Unsupported")
-    }
-    open fun type(symbolTypes : Map<String,Type>) : Type {
-        throw RuntimeException("type() is unsupported for: ${this.javaClass}")
-    }
+    open fun guards() : List<ExprNode> = children.flatMap { it.guards() }
+    open fun transits() : Map<String,ExprNode> = children.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() }
+}
+
+abstract class ExprNode(children : List<ASTNode>) : ASTNode(children) {
+    abstract fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean = false) : String
+    abstract fun toTransitString(symbolTypes : Map<String,Type>, argSymbols : Set<String>) : String
+    abstract fun type(symbolTypes : Map<String,Type>) : Type
 }
 
 class RootNode(
@@ -224,9 +221,9 @@ class ActionBodyNode(
 }
 
 class GuardNode(
-    val expr : ASTNode
+    val expr : ExprNode
 ) : ASTNode(listOf(expr)) {
-    override fun guards(): List<ASTNode> {
+    override fun guards(): List<ExprNode> {
         return listOf(expr)
     }
     override fun toString(): String {
@@ -254,9 +251,9 @@ class ErrorNode(
 
 class VarTransitNode(
     val varName : String,
-    val expr : ASTNode
+    val expr : ExprNode
 ) : ASTNode(listOf(expr)) {
-    override fun transits(): Map<String, ASTNode> {
+    override fun transits(): Map<String, ExprNode> {
         return mapOf(Pair(varName,expr))
     }
     override fun toString(): String {
@@ -266,8 +263,8 @@ class VarTransitNode(
 
 class UnaryOpExprNode(
     private val op : String,
-    private val operand : ASTNode
-) : ASTNode(listOf(operand)) {
+    private val operand : ExprNode
+) : ExprNode(listOf(operand)) {
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         julay.tools.assert(!forceString, "Cannot force a unary boolean operator to a string")
         return when (op) {
@@ -292,9 +289,9 @@ class UnaryOpExprNode(
 
 class BinaryOpExprNode(
     private val op : String,
-    private val lhsOperand : ASTNode,
-    private val rhsOperand : ASTNode
-) : ASTNode(listOf(lhsOperand,rhsOperand)) {
+    private val lhsOperand : ExprNode,
+    private val rhsOperand : ExprNode
+) : ExprNode(listOf(lhsOperand,rhsOperand)) {
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         val lhsType = lhsOperand.type(symbolTypes)
         val rhsType = rhsOperand.type(symbolTypes)
@@ -365,7 +362,7 @@ class BinaryOpExprNode(
 class LiteralValueExprNode(
     private val value : String,
     private val type : Type
-) : ASTNode(listOf()) {
+) : ExprNode(listOf()) {
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         if (forceString) {
             return "ctx.mkString(\"$value\")"
@@ -392,7 +389,7 @@ class LiteralValueExprNode(
 
 class SymbolValueExprNode(
     private val symbol : String
-) : ASTNode(listOf()) {
+) : ExprNode(listOf()) {
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         val type = symbolTypes[symbol]
         if (forceString) {

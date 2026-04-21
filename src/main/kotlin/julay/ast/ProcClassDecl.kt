@@ -63,8 +63,8 @@ data class ProcClassDecl(
 
 data class ActionDecl(
     val action : SymbolicAction,
-    val guards : List<ASTNode>,
-    val transits : Map<String,ASTNode>,
+    val guards : List<ExprNode>,
+    val transits : Map<String,ExprNode>,
     val modifier: TSAction.SyncRole,
 ) {
     fun toActionString(stateVarTypes : Map<String,Type>) : String {

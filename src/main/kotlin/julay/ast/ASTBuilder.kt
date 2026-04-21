@@ -105,6 +105,9 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
 
     override fun visitGuard(ctx: JulayParser.GuardContext?): ASTNode {
         val guardExpr = visit(ctx!!.expr())
+        if (guardExpr !is ExprNode) {
+            throw RuntimeException("Expected every guard to be an expr")
+        }
         return GuardNode(guardExpr)
     }
 
@@ -121,39 +124,61 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
     override fun visitVar_transit(ctx: JulayParser.Var_transitContext?): ASTNode {
         val varName = ctx!!.ID().text
         val transit = visit(ctx.expr())
+        if (transit !is ExprNode) {
+            throw RuntimeException("Expected transit to be assigned an expr")
+        }
         return VarTransitNode(varName, transit)
     }
 
     override fun visitExpr(ctx: JulayParser.ExprContext?): ASTNode {
-       return if (ctx!!.EQ() != null) {
-           BinaryOpExprNode("=", visit(ctx.expr(0)), visit(ctx.expr(1)))
-       } else if (ctx.NEQ() != null || ctx.BANG_NEQ() != null) {
-           BinaryOpExprNode("#", visit(ctx.expr(0)), visit(ctx.expr(1)))
-       } else if (ctx.LT() != null) {
-           BinaryOpExprNode("<", visit(ctx.expr(0)), visit(ctx.expr(1)))
-       } else if (ctx.LTE() != null) {
-           BinaryOpExprNode("<=", visit(ctx.expr(0)), visit(ctx.expr(1)))
-       } else if (ctx.GT() != null) {
-           BinaryOpExprNode(">", visit(ctx.expr(0)), visit(ctx.expr(1)))
-       } else if (ctx.GTE() != null) {
-           BinaryOpExprNode(">=", visit(ctx.expr(0)), visit(ctx.expr(1)))
-       } else if (ctx.AND() != null) {
-           BinaryOpExprNode("&", visit(ctx.expr(0)), visit(ctx.expr(1)))
-       } else if (ctx.OR() != null) {
-           BinaryOpExprNode("|", visit(ctx.expr(0)), visit(ctx.expr(1)))
-       } else if (ctx.NOT() != null || ctx.BANG() != null) {
-           UnaryOpExprNode("~", visit(ctx.expr(0)))
-       } else if (ctx.PLUS() != null) {
-           BinaryOpExprNode("+", visit(ctx.expr(0)), visit(ctx.expr(1)))
-       } else if (ctx.MINUS() != null) {
-           BinaryOpExprNode("-", visit(ctx.expr(0)), visit(ctx.expr(1)))
-       } else if (ctx.LPAREN() != null) {
-           visit(ctx.expr(0))
-       } else if (ctx.value() != null) {
-           visit(ctx.value())
-       } else {
-           throw RuntimeException("Invalid visitExpr: invalid expression found: ${ctx.text}")
-       }
+        ctx!!
+        val unaryOpMapper = {
+            when {
+                ctx.NOT() != null -> "~"
+                ctx.BANG() != null -> "~"
+                else -> "N/A"
+            }
+        }
+        val binaryOpMapper = {
+            when {
+                ctx.EQ() != null -> "="
+                ctx.NEQ() != null -> "#"
+                ctx.BANG_NEQ() != null -> "#"
+                ctx.LT() != null -> "<"
+                ctx.LTE() != null -> "<="
+                ctx.GT() != null -> ">"
+                ctx.GTE() != null -> ">="
+                ctx.AND() != null -> "&"
+                ctx.OR() != null -> "|"
+                ctx.PLUS() != null -> "+"
+                ctx.MINUS() != null -> "-"
+                else -> "N/A"
+            }
+        }
+        return when {
+            ctx.value() != null -> {
+                val valueNode = visit(ctx.value())
+                assert(valueNode is ExprNode, "Expected expr children to be ExprNodes")
+                valueNode
+            }
+            unaryOpMapper() != "N/A" -> {
+                val innerNode = visit(ctx.expr(0))
+                if (innerNode !is ExprNode) {
+                    throw RuntimeException("Expected expr children to be ExprNodes")
+                }
+                UnaryOpExprNode(unaryOpMapper(), innerNode)
+            }
+            binaryOpMapper() != "N/A" -> {
+                val lhsNode = visit(ctx.expr(0))
+                val rhsNode = visit(ctx.expr(1))
+                if (lhsNode !is ExprNode || rhsNode !is ExprNode) {
+                    throw RuntimeException("Expected expr children to be ExprNodes")
+                }
+                BinaryOpExprNode(binaryOpMapper(), lhsNode, rhsNode)
+            }
+            ctx.LPAREN() != null -> visit(ctx.expr(0))
+            else -> throw RuntimeException("Invalid expr node: ${ctx.text}")
+        }
     }
 
     override fun visitProc_expr(ctx: JulayParser.Proc_exprContext?): ASTNode {
