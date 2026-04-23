@@ -2,6 +2,9 @@ package julay.ast
 
 interface CompileError {}
 
+fun assertOrCompileError(assertion : Boolean, error : CompileError) =
+    if (assertion) listOf() else listOf(error)
+
 class SingleLocCompileError(
     private val loc : ProgramLoc,
     private val msg : String

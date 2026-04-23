@@ -9,9 +9,14 @@ import julay.program.library.ReadlnTS
 abstract class ASTNode(
     val children : List<ASTNode>
 ) {
+    abstract fun programLocation() : ProgramLoc
     open fun procPass() : List<ProcDecl> = children.flatMap { it.procPass() }
     open fun errorPass(procs : Set<String>) : List<CompileError> = children.flatMap { it.errorPass(procs) }
     open fun procClassPass(procs : Set<String>) : List<ProcClassDecl> = children.flatMap { it.procClassPass(procs) }
+}
+
+abstract class DeclNode(children : List<ASTNode>) : ASTNode(children) {
+    abstract fun name() : String
 }
 
 abstract class ProcClassDeclNode(children : List<ASTNode>) : ASTNode(children) {
@@ -21,15 +26,17 @@ abstract class ProcClassDeclNode(children : List<ASTNode>) : ASTNode(children) {
 }
 
 open class ArgsNode(
-    private val args : List<ArgsNode>
+    private val args : List<ArgsNode>,
+    private val loc : ProgramLoc
 ) : ASTNode(args) {
+    override fun programLocation() = loc
     open fun actionArgs() : List<Variable> = args.flatMap { it.actionArgs() }
     override fun toString(): String {
         return children.joinToString(", ") { it.toString() }
     }
 }
 
-open class ActionBodyNode(
+abstract class ActionBodyNode(
     private val body : List<ActionBodyNode>,
     exprs : List<ExprNode>
 ) : ASTNode(body + exprs) {
@@ -44,10 +51,12 @@ abstract class ExprNode(children : List<ASTNode>) : ASTNode(children) {
 }
 
 class RootNode(
-    private val declNodes : List<ASTNode>
+    private val declNodes : List<DeclNode>,
+    private val loc : ProgramLoc
 ) : ASTNode(declNodes) {
+    override fun programLocation(): ProgramLoc = loc
     override fun errorPass(procs : Set<String>): List<CompileError> {
-        return actionConsistencyErrors(procs)
+        return actionConsistencyErrors(procs) + overlappingDeclNamesErrors()
     }
     fun actionConsistencyErrors(procs : Set<String>) : List<CompileError> {
         val progTransitions = declNodes
@@ -68,15 +77,12 @@ class RootNode(
         val actionOccurrences = allTransitions.groupBy { it.action.name }
         return actionOccurrences.entries.flatMap { (name, actions) ->
             val refAction = actions[0]
-            val assertCompileError = { assertion : Boolean, error : CompileError ->
-                if (assertion) listOf() else listOf(error)
-            }
             val argMismatches = actions.flatMap { act ->
-                assertCompileError(refAction.action.args == act.action.args,
+                assertOrCompileError(refAction.action.args == act.action.args,
                     TwoLocsCompileError(refAction.loc, act.loc, "Expected action \"$name\" to have the same arguments"))
             }
             val inconsistentSyncTypes = actions.flatMap { act ->
-                assertCompileError(refAction.action.syncType == act.action.syncType,
+                assertOrCompileError(refAction.action.syncType == act.action.syncType,
                     TwoLocsCompileError(refAction.loc, act.loc, "Expected action \"$name\" to have the same modifiers"))
             }
             val p2pMissingASide = actions.let { actions ->
@@ -84,10 +90,20 @@ class RootNode(
                 val hasService = actions.any { act -> act.modifier == TSAction.SyncRole.P2PService }
                 val hasConsumer = actions.any { act -> act.modifier == TSAction.SyncRole.P2PConsumer }
                 val missingType = if (hasService) "p2p-consumer" else "p2p-service"
-                assertCompileError(!isP2P || (hasService && hasConsumer),
+                assertOrCompileError(!isP2P || (hasService && hasConsumer),
                     SingleLocCompileError(refAction.loc, "Expected action \"$name\" to have at least one corresponding \"$missingType\" action"))
             }
             argMismatches + inconsistentSyncTypes + p2pMissingASide
+        }
+    }
+    fun overlappingDeclNamesErrors() : List<CompileError> {
+        // an n^2 algorithm isn't super efficient, but the number of decls won't be large and we do need to detect both
+        // locations where the name conflict occur so we can report it
+        return declNodes.flatMap { refDecl ->
+            declNodes
+                .filter { decl -> refDecl != decl && refDecl.name() == decl.name() }
+                .map { decl -> TwoLocsCompileError(refDecl.programLocation(), decl.programLocation(),
+                    "Expected each declaration to have a unique name, but found at least two named \"${decl.name()}\"") }
         }
     }
     override fun toString(): String {
@@ -95,22 +111,13 @@ class RootNode(
     }
 }
 
-class DeclNode(
-    private val declNode : ASTNode
-) : ASTNode(listOf(declNode)) {
-    override fun errorPass(procs : Set<String>): List<CompileError> {
-        // TODO make sure the name of each decl is unique
-        return declNode.errorPass(procs)
-    }
-    override fun toString(): String {
-        return declNode.toString()
-    }
-}
-
 class ProcClassNode(
     private val name : String,
-    private val localDecls : List<ProcClassDeclNode>
-) : ASTNode(localDecls) {
+    private val localDecls : List<ProcClassDeclNode>,
+    private val loc : ProgramLoc
+) : DeclNode(localDecls) {
+    override fun programLocation() = loc
+    override fun name() = name
     override fun procClassPass(procs : Set<String>): List<ProcClassDecl> {
         // TODO make sure there is at least one constructor
         if (name !in procs) {
@@ -131,8 +138,11 @@ class ProcClassNode(
 
 class ProcNode(
     private val name : String,
-    private val value : ASTNode
-) : ASTNode(listOf(value)) {
+    private val value : ASTNode,
+    private val loc : ProgramLoc
+) : DeclNode(listOf(value)) {
+    override fun programLocation() = loc
+    override fun name() = name
     override fun procPass(): List<ProcDecl> {
         return listOf(ProcDecl(name, value.procPass(), ProcDeclType.Proc))
     }
@@ -143,8 +153,11 @@ class ProcNode(
 
 class ProgramNode(
     private val name : String,
-    private val value : ASTNode
-) : ASTNode(listOf(value)) {
+    private val value : ASTNode,
+    private val loc : ProgramLoc
+) : DeclNode(listOf(value)) {
+    override fun programLocation() = loc
+    override fun name() = name
     override fun procPass(): List<ProcDecl> {
         return listOf(ProcDecl(name, value.procPass(), ProcDeclType.Program))
     }
@@ -155,8 +168,11 @@ class ProgramNode(
 
 class SpecNode(
     private val name : String,
-    private val value : ASTNode
-) : ASTNode(listOf(value)) {
+    private val value : ASTNode,
+    private val loc : ProgramLoc
+) : DeclNode(listOf(value)) {
+    override fun programLocation() = loc
+    override fun name() = name
     override fun procPass(): List<ProcDecl> {
         return listOf(ProcDecl(name, value.procPass(), ProcDeclType.Spec))
     }
@@ -167,8 +183,10 @@ class SpecNode(
 
 class VarNode(
     val name : String,
-    val type : Type
+    val type : Type,
+    private val loc : ProgramLoc
 ) : ProcClassDeclNode(listOf()) {
+    override fun programLocation() = loc
     override fun stateVariables(): List<Variable> = listOf(Variable(name, type))
     override fun toString(): String {
         return "$name : $type"
@@ -181,6 +199,7 @@ class ConstructorNode(
     private val body : List<ActionBodyNode>,
     private val loc : ProgramLoc
 ) : ProcClassDeclNode(body) {
+    override fun programLocation() = loc
     override fun errorPass(procs : Set<String>): List<CompileError> {
         val errors = mutableListOf<CompileError>()
         errors.addAll(args.errorPass(procs))
@@ -213,6 +232,7 @@ class TransitionNode(
     private val body : List<ActionBodyNode>,
     private val loc : ProgramLoc
 ) : ProcClassDeclNode(listOf(args) + body) {
+    override fun programLocation() = loc
     override fun errorPass(procs : Set<String>): List<CompileError> {
         val errors = mutableListOf<CompileError>()
         errors.addAll(args.errorPass(procs))
@@ -253,8 +273,10 @@ class TransitionNode(
 
 class ArgNode(
     private val name : String,
-    private val type : Type
-) : ArgsNode(listOf()) {
+    private val type : Type,
+    private val loc : ProgramLoc
+) : ArgsNode(listOf(), loc) {
+    override fun programLocation() = loc
     override fun actionArgs(): List<Variable> {
         return listOf(Variable(name,type))
     }
@@ -264,8 +286,10 @@ class ArgNode(
 }
 
 class GuardNode(
-    val expr : ExprNode
+    val expr : ExprNode,
+    private val loc : ProgramLoc
 ) : ActionBodyNode(listOf(), listOf(expr)) {
+    override fun programLocation() = loc
     override fun guards(): List<ExprNode> {
         return listOf(expr)
     }
@@ -276,16 +300,20 @@ class GuardNode(
 }
 
 class TransitNode(
-    private val transits : List<ActionBodyNode>
+    private val transits : List<ActionBodyNode>,
+    private val loc : ProgramLoc
 ) : ActionBodyNode(transits, listOf()) {
+    override fun programLocation() = loc
     override fun toString(): String {
         return "transit:\n${transits.joinToString("\n") { "$it".prependIndent() }}"
     }
 }
 
 class ErrorNode(
-    private val expr : ExprNode
+    private val expr : ExprNode,
+    private val loc : ProgramLoc
 ) : ActionBodyNode(listOf(), listOf(expr)) {
+    override fun programLocation() = loc
     override fun toString(): String {
         val exprStr = "$expr".prependIndent()
         return "error:\n$exprStr"
@@ -294,8 +322,10 @@ class ErrorNode(
 
 class VarTransitNode(
     val varName : String,
-    val expr : ExprNode
+    val expr : ExprNode,
+    private val loc : ProgramLoc
 ) : ActionBodyNode(listOf(), listOf(expr)) {
+    override fun programLocation() = loc
     override fun transits(): Map<String, ExprNode> {
         return mapOf(Pair(varName,expr))
     }
@@ -306,8 +336,10 @@ class VarTransitNode(
 
 class UnaryOpExprNode(
     private val op : String,
-    private val operand : ExprNode
+    private val operand : ExprNode,
+    private val loc : ProgramLoc
 ) : ExprNode(listOf(operand)) {
+    override fun programLocation() = loc
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         julay.tools.assert(!forceString, "Cannot force a unary boolean operator to a string")
         return when (op) {
@@ -333,8 +365,10 @@ class UnaryOpExprNode(
 class BinaryOpExprNode(
     private val op : String,
     private val lhsOperand : ExprNode,
-    private val rhsOperand : ExprNode
+    private val rhsOperand : ExprNode,
+    private val loc : ProgramLoc
 ) : ExprNode(listOf(lhsOperand,rhsOperand)) {
+    override fun programLocation() = loc
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         val lhsType = lhsOperand.type(symbolTypes)
         val rhsType = rhsOperand.type(symbolTypes)
@@ -404,8 +438,10 @@ class BinaryOpExprNode(
 
 class LiteralValueExprNode(
     private val value : String,
-    private val type : Type
+    private val type : Type,
+    private val loc : ProgramLoc
 ) : ExprNode(listOf()) {
+    override fun programLocation() = loc
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         if (forceString) {
             return "ctx.mkString(\"$value\")"
@@ -431,8 +467,10 @@ class LiteralValueExprNode(
 }
 
 class SymbolValueExprNode(
-    private val symbol : String
+    private val symbol : String,
+    private val loc : ProgramLoc
 ) : ExprNode(listOf()) {
+    override fun programLocation() = loc
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         val type = symbolTypes[symbol]
         if (forceString) {
@@ -494,8 +532,10 @@ class SymbolValueExprNode(
 }
 
 class ValueProcExprNode(
-    private val name : String
+    private val name : String,
+    private val loc : ProgramLoc
 ) : ASTNode(listOf()) {
+    override fun programLocation() = loc
     override fun procPass(): List<ProcDecl> {
         return listOf(ProcDecl(name, listOf(), ProcDeclType.Proc))
     }
@@ -505,8 +545,10 @@ class ValueProcExprNode(
 }
 
 class CompositeProcExprNode(
-    private val compositeProcs : List<ASTNode>
+    private val compositeProcs : List<ASTNode>,
+    private val loc : ProgramLoc
 ) : ASTNode(compositeProcs) {
+    override fun programLocation() = loc
     override fun toString(): String {
         return compositeProcs.joinToString(" || ") { it.toString() }
     }
