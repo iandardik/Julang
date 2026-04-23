@@ -25,16 +25,23 @@ fun main(args : Array<String>) {
         println("Found compile errors, exiting.")
         return
     }
-    val ast = ASTBuilder().visit(root) as RootNode
-    val errors = ast.errorPass()
-    if (errors.isNotEmpty()) {
-        errors.forEach { println(it) }
-        println("Found compile errors, exiting.")
-        return
-    }
 
+    val ast = ASTBuilder().visit(root) as RootNode
     val procDecls = ast.procPass()
     val programs = procDecls.filter { it.type == ProcDeclType.Program }
+
+    // check for errors on each program individually
+    programs.forEach { program ->
+        val components = program.allProcNames()
+        val errors = ast.errorPass(components)
+        if (errors.isNotEmpty()) {
+            errors.forEach { println(it) }
+            println("Found errors while compiling the program \"${program.name}\"; exiting.")
+            return
+        }
+    }
+
+    // compile each program
     programs.forEach { compileProgram(it, ast, it.name) }
 }
 
@@ -55,7 +62,7 @@ fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
 
     val procsToCompile = program.allProcNames().filter { it !in libPClassNames }
     val compiledProcs = procsToCompile.flatMap {
-        val compiled = ast.procClassPass(it)
+        val compiled = ast.procClassPass(setOf(it))
         julay.tools.assert(compiled.size == 1, "Expected exactly one compiled proc, got: ${compiled.size}")
         compiled
     }

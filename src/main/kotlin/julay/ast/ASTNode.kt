@@ -9,9 +9,9 @@ import julay.program.library.ReadlnTS
 abstract class ASTNode(
     val children : List<ASTNode>
 ) {
-    open fun errorPass() : List<CompileError> = children.flatMap { it.errorPass() }
     open fun procPass() : List<ProcDecl> = children.flatMap { it.procPass() }
-    open fun procClassPass(pclassName : String = "*") : List<ProcClassDecl> = children.flatMap { it.procClassPass(pclassName) }
+    open fun errorPass(procs : Set<String>) : List<CompileError> = children.flatMap { it.errorPass(procs) }
+    open fun procClassPass(procs : Set<String>) : List<ProcClassDecl> = children.flatMap { it.procClassPass(procs) }
 }
 
 abstract class ProcClassDeclNode(children : List<ASTNode>) : ASTNode(children) {
@@ -46,13 +46,12 @@ abstract class ExprNode(children : List<ASTNode>) : ASTNode(children) {
 class RootNode(
     private val declNodes : List<ASTNode>
 ) : ASTNode(declNodes) {
-    override fun errorPass(): List<CompileError> {
-        // TODO do this per program, rather than for the root node (across all programs)
-        return actionConsistencyErrors()
+    override fun errorPass(procs : Set<String>): List<CompileError> {
+        return actionConsistencyErrors(procs)
     }
-    fun actionConsistencyErrors() : List<CompileError> {
+    fun actionConsistencyErrors(procs : Set<String>) : List<CompileError> {
         val progTransitions = declNodes
-            .flatMap { it.procClassPass() }
+            .flatMap { it.procClassPass(procs) }
             .flatMap { it.transitions }
         val libTransitions = procPass()
             .flatMap { it.allProcNames() }
@@ -99,9 +98,9 @@ class RootNode(
 class DeclNode(
     private val declNode : ASTNode
 ) : ASTNode(listOf(declNode)) {
-    override fun errorPass(): List<CompileError> {
+    override fun errorPass(procs : Set<String>): List<CompileError> {
         // TODO make sure the name of each decl is unique
-        return declNode.errorPass()
+        return declNode.errorPass(procs)
     }
     override fun toString(): String {
         return declNode.toString()
@@ -112,10 +111,9 @@ class ProcClassNode(
     private val name : String,
     private val localDecls : List<ProcClassDeclNode>
 ) : ASTNode(localDecls) {
-    override fun procClassPass(pclassName: String): List<ProcClassDecl> {
+    override fun procClassPass(procs : Set<String>): List<ProcClassDecl> {
         // TODO make sure there is at least one constructor
-        val doPassForThisProcClass = pclassName == "*" || pclassName == name
-        if (!doPassForThisProcClass) {
+        if (name !in procs) {
             return listOf()
         }
         val stateVars = localDecls.flatMap { it.stateVariables() }
@@ -183,10 +181,10 @@ class ConstructorNode(
     private val body : List<ActionBodyNode>,
     private val loc : ProgramLoc
 ) : ProcClassDeclNode(body) {
-    override fun errorPass(): List<CompileError> {
+    override fun errorPass(procs : Set<String>): List<CompileError> {
         val errors = mutableListOf<CompileError>()
-        errors.addAll(args.errorPass())
-        errors.addAll(body.flatMap { it.errorPass() })
+        errors.addAll(args.errorPass(procs))
+        errors.addAll(body.flatMap { it.errorPass(procs) })
         // TODO ensure that each transit includes each state var exactly once
         // TODO ensure that there is no guard, since it will not be followed by the ConstructorTS
         return errors
@@ -215,10 +213,10 @@ class TransitionNode(
     private val body : List<ActionBodyNode>,
     private val loc : ProgramLoc
 ) : ProcClassDeclNode(listOf(args) + body) {
-    override fun errorPass(): List<CompileError> {
+    override fun errorPass(procs : Set<String>): List<CompileError> {
         val errors = mutableListOf<CompileError>()
-        errors.addAll(args.errorPass())
-        errors.addAll(body.flatMap { it.errorPass() })
+        errors.addAll(args.errorPass(procs))
+        errors.addAll(body.flatMap { it.errorPass(procs) })
         if (name == "initially") {
             errors.add(SingleLocCompileError(loc, "only constructors (not transitions) can synchronize on the 'initially' action"))
         }
