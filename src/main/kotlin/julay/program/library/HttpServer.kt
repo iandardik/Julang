@@ -4,6 +4,8 @@ import com.microsoft.z3.Context
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpHandler
 import com.sun.net.httpserver.HttpServer
+import julay.ast.ActionDecl
+import julay.ast.LibraryLoc
 import julay.program.*
 import julay.tools.mkStringConst
 import kotlinx.coroutines.CoroutineScope
@@ -28,6 +30,11 @@ class JulHttpServer(
             setOf(receiveRequestAct, sendResponseAct, closeAct),
             mapOf(initiallyCtor),
             true)
+        val actionDecls = listOf(
+            ActionDecl(receiveRequestAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc("HttpServer")),
+            ActionDecl(sendResponseAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc("HttpServer")),
+            ActionDecl(closeAct, listOf(), mapOf(), TSAction.SyncRole.P2PService, LibraryLoc("HttpServer")),
+        )
     }
 
     private val ctx = Context()

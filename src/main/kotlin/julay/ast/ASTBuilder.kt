@@ -87,7 +87,8 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
                 }
                 it
             }
-        return ConstructorNode(name, args, body)
+        val loc = Pair(ctx.getStart().line, ctx.getStart().line)
+        return ConstructorNode(name, args, body, SourceLoc(loc))
     }
 
     override fun visitTransition(ctx: JulayParser.TransitionContext?): ASTNode {
@@ -115,7 +116,7 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
                 it
             }
         val loc = Pair(ctx.getStart().line, ctx.getStart().line)
-        return TransitionNode(modifier, name, args, body, loc)
+        return TransitionNode(modifier, name, args, body, SourceLoc(loc))
     }
 
     override fun visitArgs(ctx: JulayParser.ArgsContext?): ASTNode {

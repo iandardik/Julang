@@ -1,8 +1,7 @@
 package julay.program
 
 /**
- * Represents a symbolic action (in particular, its signature), excluding its types (for now).
- * SymbolicActions are not particular to a given transition system / proc.
+ * Represents a symbolic action. SymbolicActions are not particular to a given transition system / proc.
  */
 data class SymbolicAction(
     val name : String,

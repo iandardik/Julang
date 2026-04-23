@@ -45,6 +45,7 @@ fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
         exitProcess(1)
     }
 
+    // TODO make this cleaner
     val libPClassNames = setOf("Println", "Readln", "HttpServer")
     val libStaticInfoMap = mapOf(
         Pair("Println", "PrintlnTS"),

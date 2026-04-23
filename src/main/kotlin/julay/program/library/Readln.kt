@@ -1,6 +1,8 @@
 package julay.program.library
 
 import com.microsoft.z3.Context
+import julay.ast.ActionDecl
+import julay.ast.LibraryLoc
 import julay.program.*
 import julay.tools.mkStringConst
 
@@ -16,6 +18,10 @@ class ReadlnTS : TransitionSystem {
             setOf(promptAct, readlnAct),
             mapOf(initiallyCtor),
             false)
+        val actionDecls = listOf(
+            ActionDecl(readlnAct, listOf(), mapOf(), TSAction.SyncRole.P2PService, LibraryLoc("Readln")),
+            ActionDecl(promptAct, listOf(), mapOf(), TSAction.SyncRole.P2PService, LibraryLoc("Readln")),
+        )
     }
 
     private val ctx = Context()

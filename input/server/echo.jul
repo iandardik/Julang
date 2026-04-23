@@ -27,6 +27,12 @@ p-class EchoHandler {
         transit:
             done := true
     }
+
+    p2p-consumer transition close() {
+        guard:
+            // never close the server until the user hits ctrl-c
+            false
+    }
 }
 
 program EchoServer := EchoHandler || Println || HttpServer

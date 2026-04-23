@@ -66,6 +66,7 @@ data class ActionDecl(
     val guards : List<ExprNode>,
     val transits : Map<String,ExprNode>,
     val modifier: TSAction.SyncRole,
+    val loc: ProgramLoc
 ) {
     fun toActionString(stateVarTypes : Map<String,Type>) : String {
         val argTypes = action.args.associate { Pair(it.name,it.type) }

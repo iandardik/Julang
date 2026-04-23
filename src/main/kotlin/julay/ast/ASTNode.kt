@@ -2,13 +2,16 @@ package julay.ast
 
 import julay.program.*
 import julay.program.TSAction
+import julay.program.library.JulHttpServer
+import julay.program.library.PrintlnTS
+import julay.program.library.ReadlnTS
 
 abstract class ASTNode(
     val children : List<ASTNode>
 ) {
     open fun errorPass() : List<CompileError> = children.flatMap { it.errorPass() }
     open fun procPass() : List<ProcDecl> = children.flatMap { it.procPass() }
-    open fun procClassPass(pclassName : String) : List<ProcClassDecl> = children.flatMap { it.procClassPass(pclassName) }
+    open fun procClassPass(pclassName : String = "*") : List<ProcClassDecl> = children.flatMap { it.procClassPass(pclassName) }
 }
 
 abstract class ProcClassDeclNode(children : List<ASTNode>) : ASTNode(children) {
@@ -43,7 +46,51 @@ abstract class ExprNode(children : List<ASTNode>) : ASTNode(children) {
 class RootNode(
     private val declNodes : List<ASTNode>
 ) : ASTNode(declNodes) {
-    // TODO for error pass, ensure that an action is marked as a "service" has at least one non-service p-class
+    override fun errorPass(): List<CompileError> {
+        // TODO do this per program, rather than for the root node (across all programs)
+        return actionConsistencyErrors()
+    }
+    fun actionConsistencyErrors() : List<CompileError> {
+        val progTransitions = declNodes
+            .flatMap { it.procClassPass() }
+            .flatMap { it.transitions }
+        val libTransitions = procPass()
+            .flatMap { it.allProcNames() }
+            .flatMap { name ->
+                // TODO make this cleaner
+                when (name) {
+                    "Println" -> PrintlnTS.actionDecls
+                    "Readln" -> ReadlnTS.actionDecls
+                    "HttpServer" -> JulHttpServer.actionDecls
+                    else -> listOf()
+                }
+            }
+        val allTransitions = progTransitions + libTransitions
+        val actionOccurrences = allTransitions.groupBy { it.action.name }
+        return actionOccurrences.entries.flatMap { (name, actions) ->
+            val refAction = actions[0]
+            val assertCompileError = { assertion : Boolean, error : CompileError ->
+                if (assertion) listOf() else listOf(error)
+            }
+            val argMismatches = actions.flatMap { act ->
+                assertCompileError(refAction.action.args == act.action.args,
+                    TwoLocsCompileError(refAction.loc, act.loc, "Expected action \"$name\" to have the same arguments"))
+            }
+            val inconsistentSyncTypes = actions.flatMap { act ->
+                assertCompileError(refAction.action.syncType == act.action.syncType,
+                    TwoLocsCompileError(refAction.loc, act.loc, "Expected action \"$name\" to have the same modifiers"))
+            }
+            val p2pMissingASide = actions.let { actions ->
+                val isP2P = actions.any { act -> act.action.syncType == SymbolicAction.SyncType.P2P }
+                val hasService = actions.any { act -> act.modifier == TSAction.SyncRole.P2PService }
+                val hasConsumer = actions.any { act -> act.modifier == TSAction.SyncRole.P2PConsumer }
+                val missingType = if (hasService) "p2p-consumer" else "p2p-service"
+                assertCompileError(!isP2P || (hasService && hasConsumer),
+                    SingleLocCompileError(refAction.loc, "Expected action \"$name\" to have at least one corresponding \"$missingType\" action"))
+            }
+            argMismatches + inconsistentSyncTypes + p2pMissingASide
+        }
+    }
     override fun toString(): String {
         return declNodes.joinToString("\n\n") { it.toString() }
     }
@@ -67,7 +114,8 @@ class ProcClassNode(
 ) : ASTNode(localDecls) {
     override fun procClassPass(pclassName: String): List<ProcClassDecl> {
         // TODO make sure there is at least one constructor
-        if (pclassName != name) {
+        val doPassForThisProcClass = pclassName == "*" || pclassName == name
+        if (!doPassForThisProcClass) {
             return listOf()
         }
         val stateVars = localDecls.flatMap { it.stateVariables() }
@@ -132,7 +180,8 @@ class VarNode(
 class ConstructorNode(
     private val name : String,
     private val args : ArgsNode,
-    private val body : List<ActionBodyNode>
+    private val body : List<ActionBodyNode>,
+    private val loc : ProgramLoc
 ) : ProcClassDeclNode(body) {
     override fun errorPass(): List<CompileError> {
         val errors = mutableListOf<CompileError>()
@@ -148,7 +197,8 @@ class ConstructorNode(
                 SymbolicAction(name, args.actionArgs(), SymbolicAction.SyncType.CSP),
                 body.flatMap { it.guards() },
                 body.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() },
-                TSAction.SyncRole.CSP
+                TSAction.SyncRole.CSP,
+                loc
             )
         )
     }
@@ -163,14 +213,14 @@ class TransitionNode(
     private val name : String,
     private val args : ArgsNode,
     private val body : List<ActionBodyNode>,
-    private val loc : Pair<Int,Int>
+    private val loc : ProgramLoc
 ) : ProcClassDeclNode(listOf(args) + body) {
     override fun errorPass(): List<CompileError> {
         val errors = mutableListOf<CompileError>()
         errors.addAll(args.errorPass())
         errors.addAll(body.flatMap { it.errorPass() })
         if (name == "initially") {
-            errors.add(CompileError(loc, "only constructors (not transitions) can synchronize on the 'initially' action"))
+            errors.add(SingleLocCompileError(loc, "only constructors (not transitions) can synchronize on the 'initially' action"))
         }
         // TODO ensure that each transit has a unique state var
         // TODO ensure that a modified action (in at least one place) is always modified
@@ -187,7 +237,8 @@ class TransitionNode(
                 SymbolicAction(name, args.actionArgs(), syncType),
                 body.flatMap { it.guards() },
                 body.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() },
-                modifier
+                modifier,
+                loc
             )
         )
     }
@@ -460,19 +511,5 @@ class CompositeProcExprNode(
 ) : ASTNode(compositeProcs) {
     override fun toString(): String {
         return compositeProcs.joinToString(" || ") { it.toString() }
-    }
-}
-
-class CompileError(
-    private val loc : Pair<Int,Int>,
-    private val msg : String
-) {
-    override fun toString(): String {
-        val range = if (loc.first == loc.second) {
-            "line ${loc.first}"
-        } else {
-            "lines ${loc.first}-${loc.second}"
-        }
-        return "$range: $msg"
     }
 }
