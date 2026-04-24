@@ -201,14 +201,24 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
                 ctx.EQ() != null -> "="
                 ctx.NEQ() != null -> "#"
                 ctx.BANG_NEQ() != null -> "#"
+                ctx.TIMES() != null -> "*"
+                ctx.DIV() != null -> "/"
+                ctx.MOD() != null -> "%"
                 ctx.LT() != null -> "<"
                 ctx.LTE() != null -> "<="
                 ctx.GT() != null -> ">"
                 ctx.GTE() != null -> ">="
                 ctx.AND() != null -> "&"
                 ctx.OR() != null -> "|"
+                ctx.IMPLIES() != null -> "=>"
                 ctx.PLUS() != null -> "+"
                 ctx.MINUS() != null -> "-"
+                else -> "N/A"
+            }
+        }
+        val ternaryOpMapper = {
+            when {
+                ctx.IF() != null -> "if-else"
                 else -> "N/A"
             }
         }
@@ -232,6 +242,15 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
                     throw RuntimeException("Expected expr children to be ExprNodes")
                 }
                 BinaryOpExprNode(binaryOpMapper(), lhsNode, rhsNode, sourceLocation(ctx))
+            }
+            ternaryOpMapper() != "N/A" -> {
+                val condNode = visit(ctx.expr(0))
+                val thenNode = visit(ctx.expr(1))
+                val elseNode = visit(ctx.expr(2))
+                if (condNode !is ExprNode || thenNode !is ExprNode || elseNode !is ExprNode) {
+                    throw RuntimeException("Expected expr children to be ExprNodes")
+                }
+                IfElseExprNode(condNode, thenNode, elseNode, sourceLocation(ctx))
             }
             ctx.LPAREN() != null -> visit(ctx.expr(0))
             else -> throw RuntimeException("Invalid expr node: ${ctx.text}")

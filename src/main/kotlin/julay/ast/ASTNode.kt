@@ -442,12 +442,16 @@ class BinaryOpExprNode(
         return when (op) {
             "=" -> "ctx.mkEq($lhsGuardStr,$rhsGuardStr)"
             "#" -> "ctx.mkNot(ctx.mkEq($lhsGuardStr,$rhsGuardStr))"
+            "*" -> "ctx.mkMul($lhsGuardStr,$rhsGuardStr)"
+            "/" -> "ctx.mkDiv($lhsGuardStr,$rhsGuardStr)"
+            "%" -> "ctx.mkMod($lhsGuardStr,$rhsGuardStr)"
             "<" -> "ctx.mkLt($lhsGuardStr,$rhsGuardStr)"
             "<=" -> "ctx.mkLe($lhsGuardStr,$rhsGuardStr)"
             ">" -> "ctx.mkGt($lhsGuardStr,$rhsGuardStr)"
             ">=" -> "ctx.mkGe($lhsGuardStr,$rhsGuardStr)"
             "&" -> "ctx.mkAnd($lhsGuardStr,$rhsGuardStr)"
             "|" -> "ctx.mkOr($lhsGuardStr,$rhsGuardStr)"
+            "=>" -> "ctx.mkImplies($lhsGuardStr,$rhsGuardStr)"
             "+" -> {
                 when {
                     lhsType is IntType && rhsType is IntType -> "ctx.mkAdd($lhsGuardStr,$rhsGuardStr)"
@@ -463,18 +467,29 @@ class BinaryOpExprNode(
         // for readability
         val lhs = lhsOperand.toTransitString(symbolTypes, argSymbols)
         val rhs = rhsOperand.toTransitString(symbolTypes, argSymbols)
-        return "($lhs $op $rhs)"
+        return when (op) {
+            "=" -> "($lhs == $rhs)"
+            "#" -> "($lhs != $rhs)"
+            "&" -> "($lhs && $rhs)"
+            "|" -> "($lhs || $rhs)"
+            "=>" -> "(!($lhs) || $rhs)"
+            else -> "($lhs $op $rhs)"
+        }
     }
     override fun type(symbolTypes: Map<String, Type>): Type {
         return when (op) {
             "=" -> boolType
             "#" -> boolType
+            "*" -> intType
+            "/" -> intType
+            "%" -> intType
             "<" -> boolType
             "<=" -> boolType
             ">" -> boolType
             ">=" -> boolType
             "&" -> boolType
             "|" -> boolType
+            "=>" -> boolType
             "+" -> {
                 val lhsType = lhsOperand.type(symbolTypes)
                 val rhsType = rhsOperand.type(symbolTypes)
@@ -493,6 +508,38 @@ class BinaryOpExprNode(
         val lhs = "$lhsOperand"
         val rhs = "$rhsOperand"
         return "($lhs $op $rhs)"
+    }
+}
+
+class IfElseExprNode(
+    private val condExpr : ExprNode,
+    private val thenExpr : ExprNode,
+    private val elseExpr : ExprNode,
+    private val loc : ProgramLoc
+) : ExprNode(listOf(condExpr,thenExpr,elseExpr)) {
+    override fun programLocation() = loc
+    override fun errorPass(procs: Set<String>): List<CompileError> {
+        // TODO we need to have a 'type pass' first where we cache all types so they're available here
+        val matchingTypesErrors = emptyList<CompileError>() // TODO detect this
+        return super.errorPass(procs) + matchingTypesErrors
+    }
+    override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
+        val condGuardStr = condExpr.toZ3GuardString(symbolTypes,argSymbols)
+        val thenGuardStr = thenExpr.toZ3GuardString(symbolTypes,argSymbols)
+        val elseGuardStr = elseExpr.toZ3GuardString(symbolTypes,argSymbols)
+        return "ctx.mkITE<BoolSort>($condGuardStr,$thenGuardStr,$elseGuardStr) as BoolExpr"
+    }
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        val condTransitStr = condExpr.toTransitString(symbolTypes,argSymbols)
+        val thenTransitStr = thenExpr.toTransitString(symbolTypes,argSymbols)
+        val elseTransitStr = elseExpr.toTransitString(symbolTypes,argSymbols)
+        return "if ($condTransitStr) {$thenTransitStr} else {$elseTransitStr}"
+    }
+    override fun type(symbolTypes: Map<String, Type>): Type {
+        return thenExpr.type(symbolTypes)
+    }
+    override fun toString(): String {
+        return "if ($condExpr) {$thenExpr} else {$elseExpr)"
     }
 }
 

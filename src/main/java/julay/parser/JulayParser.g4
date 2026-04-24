@@ -82,6 +82,9 @@ expr
     | LPAREN expr RPAREN
     | NOT expr
     | BANG expr
+    | expr TIMES expr
+    | expr DIV expr
+    | expr MOD expr
     | expr PLUS expr
     | expr MINUS expr
     | expr LT expr
@@ -93,6 +96,8 @@ expr
     | expr BANG_NEQ expr
     | expr AND expr
     | expr OR expr
+    | expr IMPLIES expr
+    | IF LPAREN expr RPAREN THEN LCURLY expr RCURLY ELSE LCURLY expr RCURLY
     ;
 
 proc_expr

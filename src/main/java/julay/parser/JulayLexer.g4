@@ -14,6 +14,9 @@ AND : '&' ;
 OR : '|' ;
 NOT : '~' ;
 BANG : '!' ;
+TIMES : '*' ;
+DIV : '/' ;
+MOD : '%' ;
 PLUS : '+' ;
 MINUS : '-' ;
 LT : '<' ;
@@ -24,6 +27,10 @@ EQ : '=' ;
 BANG_NEQ : '!=' ;
 NEQ : '#' ;
 ASGN_EQ : ':=' ;
+IMPLIES : '=>' ;
+IF : 'if' ;
+THEN : 'then' ;
+ELSE : 'else' ;
 
 
 PCLASS : 'p-class' ;
