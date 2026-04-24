@@ -23,6 +23,7 @@ abstract class ProcClassDeclNode(children : List<ASTNode>) : ASTNode(children) {
     open fun stateVariables() : List<Variable> = listOf()
     open fun constructors() : List<ActionDecl> = listOf()
     open fun transitions() : List<ActionDecl> = listOf()
+    open fun transitVars() : List<Pair<String, ProgramLoc>> = listOf()
 }
 
 open class ArgsNode(
@@ -42,6 +43,7 @@ abstract class ActionBodyNode(
 ) : ASTNode(body + exprs) {
     open fun guards() : List<ExprNode> = body.flatMap { it.guards() }
     open fun transits() : Map<String,ExprNode> = body.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() }
+    open fun transitVars() : List<Pair<String, ProgramLoc>> = body.flatMap { it.transitVars() }
 }
 
 abstract class ExprNode(children : List<ASTNode>) : ASTNode(children) {
@@ -56,7 +58,7 @@ class RootNode(
 ) : ASTNode(declNodes) {
     override fun programLocation(): ProgramLoc = loc
     override fun errorPass(procs : Set<String>): List<CompileError> {
-        return actionConsistencyErrors(procs) + overlappingDeclNamesErrors()
+        return super.errorPass(procs) + actionConsistencyErrors(procs) + overlappingDeclNamesErrors()
     }
     fun actionConsistencyErrors(procs : Set<String>) : List<CompileError> {
         val progTransitions = declNodes
@@ -119,16 +121,51 @@ class ProcClassNode(
     override fun programLocation() = loc
     override fun name() = name
     override fun procClassPass(procs : Set<String>): List<ProcClassDecl> {
-        // TODO make sure there is at least one constructor
         if (name !in procs) {
             return listOf()
         }
         val stateVars = localDecls.flatMap { it.stateVariables() }
-        // TODO make sure constructors, transitions, and services are mutually exclusive
-        val constructors = localDecls.flatMap { it.constructors() } // TODO constructors cannot have repeat names
+        val constructors = localDecls.flatMap { it.constructors() }
         val transitions = localDecls.flatMap { it.transitions() }
         val decl = ProcClassDecl(name, stateVars, constructors, transitions)
         return listOf(decl)
+    }
+
+    override fun errorPass(procs: Set<String>): List<CompileError> {
+        // no repeat state var names
+        val stateVars = localDecls
+            .flatMap { it.stateVariables() }
+            .map { it.name }
+        val repeatStateVarNameErrors = stateVars
+            .groupingBy { it }
+            .eachCount()
+            // TODO should be a double loc compile error
+            .flatMap { assertOrCompileError(it.value == 1, SingleLocCompileError(loc, "Expected state variables to have unique names")) }
+        // ensure that each constructor assigns a value to every state var exactly once
+        val ctorsCompleteAssgnErrors = localDecls
+            .filterIsInstance<ConstructorNode>()
+            .flatMap { ctorNode ->
+                val stateVarSet = stateVars.toSet()
+                val transitVarSet = ctorNode.transitVars().map { it.first }.toSet()
+                val missingStateVars = stateVarSet.minus(transitVarSet)
+                assertOrCompileError(missingStateVars.isEmpty(), SingleLocCompileError(ctorNode.programLocation(),
+                        "Expected each constructor to assign a value to every state variable; missing assignments to $missingStateVars"))
+            }
+        // make sure there is at least one constructor
+        val atLeastOneConstructorErrors = assertOrCompileError(localDecls.flatMap { it.constructors() }.isNotEmpty(),
+            SingleLocCompileError(loc, "Expected \"$name\" to have at least one constructor"))
+        // constructors actions cannot intersect with transition actions
+        val constructorActions = localDecls.flatMap { it.constructors() }
+        val transitionActions = localDecls.flatMap { it.transitions() }
+        val ctorTransActionNotMutexErrors = constructorActions.flatMap { ctorAct ->
+            transitionActions.flatMap { transAct ->
+                assertOrCompileError(ctorAct.action.name != transAct.action.name,
+                    TwoLocsCompileError(ctorAct.loc, transAct.loc,
+                        "Expected constructor names to not overlap with transition names, but found at least one overlap for the action \"${ctorAct.action.name}\""))
+            }
+        }
+        return super.errorPass(procs) + repeatStateVarNameErrors + ctorsCompleteAssgnErrors +
+                atLeastOneConstructorErrors + ctorTransActionNotMutexErrors
     }
     override fun toString(): String {
         val body = localDecls.joinToString("\n") { "$it".prependIndent() }
@@ -198,15 +235,25 @@ class ConstructorNode(
     private val args : ArgsNode,
     private val body : List<ActionBodyNode>,
     private val loc : ProgramLoc
-) : ProcClassDeclNode(body) {
+) : ProcClassDeclNode(listOf(args) + body) {
     override fun programLocation() = loc
+    override fun transitVars() = body.flatMap { it.transitVars() }
     override fun errorPass(procs : Set<String>): List<CompileError> {
-        val errors = mutableListOf<CompileError>()
-        errors.addAll(args.errorPass(procs))
-        errors.addAll(body.flatMap { it.errorPass(procs) })
-        // TODO ensure that each transit includes each state var exactly once
-        // TODO ensure that there is no guard, since it will not be followed by the ConstructorTS
-        return errors
+        // TODO get rid of the copy pasta
+        val multiVarTransitError = body
+            .flatMap { it.transitVars() }
+            .let { transits ->
+                transits.flatMapIndexed { i, (refName,refLoc) ->
+                    transits.flatMapIndexed { j, (name,loc) ->
+                        assertOrCompileError(i <= j || refName != name, TwoLocsCompileError(refLoc, loc,
+                            "Expected at most one assignment per variable, but found multiple assignments for \"$name\""))
+                    }
+                }
+            }
+        // ensure that there is no guard, since it will not be followed by the ConstructorTS
+        val noGuardErrors = assertOrCompileError(body.flatMap { it.guards() }.isEmpty(),
+            SingleLocCompileError(loc, "Expected constructors not to have guards"))
+        return super.errorPass(procs) + multiVarTransitError + noGuardErrors
     }
     override fun constructors(): List<ActionDecl> {
         return listOf(
@@ -233,16 +280,23 @@ class TransitionNode(
     private val loc : ProgramLoc
 ) : ProcClassDeclNode(listOf(args) + body) {
     override fun programLocation() = loc
+    override fun transitVars() = body.flatMap { it.transitVars() }
     override fun errorPass(procs : Set<String>): List<CompileError> {
-        val errors = mutableListOf<CompileError>()
-        errors.addAll(args.errorPass(procs))
-        errors.addAll(body.flatMap { it.errorPass(procs) })
-        if (name == "initially") {
-            errors.add(SingleLocCompileError(loc, "only constructors (not transitions) can synchronize on the 'initially' action"))
-        }
-        // TODO ensure that each transit has a unique state var
-        // TODO ensure that a modified action (in at least one place) is always modified
-        return errors
+        val initiallyActionErrors = assertOrCompileError(name != "initially", SingleLocCompileError(loc,
+            "only constructors (not transitions) can synchronize on the 'initially' action"))
+        // ensure that each transit has a unique state var
+        // TODO get rid of the copy pasta
+        val multiVarTransitError = body
+            .flatMap { it.transitVars() }
+            .let { transits ->
+                transits.flatMapIndexed { i, (refName,refLoc) ->
+                    transits.flatMapIndexed { j, (name,loc) ->
+                        assertOrCompileError(i <= j || refName != name, TwoLocsCompileError(refLoc, loc,
+                            "Expected at most one assignment per variable, but found multiple assignments for \"$name\""))
+                    }
+                }
+            }
+        return super.errorPass(procs) + initiallyActionErrors + multiVarTransitError
     }
     override fun transitions(): List<ActionDecl> {
         val syncType = when (modifier) {
@@ -290,6 +344,11 @@ class GuardNode(
     private val loc : ProgramLoc
 ) : ActionBodyNode(listOf(), listOf(expr)) {
     override fun programLocation() = loc
+    override fun errorPass(procs: Set<String>): List<CompileError> {
+        val nonBoolErrors = assertOrCompileError(expr.type(emptyMap()) is BoolType,
+            SingleLocCompileError(loc, "Expected guards to be Boolean-valued expressions"))
+        return super.errorPass(procs) + nonBoolErrors
+    }
     override fun guards(): List<ExprNode> {
         return listOf(expr)
     }
@@ -326,7 +385,8 @@ class VarTransitNode(
     private val loc : ProgramLoc
 ) : ActionBodyNode(listOf(), listOf(expr)) {
     override fun programLocation() = loc
-    override fun transits(): Map<String, ExprNode> {
+    override fun transitVars() = listOf(Pair(varName,loc))
+        override fun transits(): Map<String, ExprNode> {
         return mapOf(Pair(varName,expr))
     }
     override fun toString(): String {
