@@ -68,6 +68,7 @@ class RootNode(
             .flatMap { it.transitions }
         val libTransitions = procPass()
             .flatMap { it.allProcNames() }
+            .filter { it in procs }
             .flatMap { name ->
                 // TODO make this cleaner
                 when (name) {
