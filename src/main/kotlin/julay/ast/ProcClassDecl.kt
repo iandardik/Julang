@@ -56,8 +56,7 @@ data class ProcClassDecl(
                 "\n)," +
                 "\nmapOf(" +
                 "\n$constructorPairs" +
-                "\n)," +
-                "\ntrue)").prependIndent()
+                "\n))").prependIndent()
     }
 }
 

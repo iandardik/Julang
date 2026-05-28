@@ -15,13 +15,6 @@ data class TransitionSystemStaticInfo(
      * For each constructor action, a function that constructs a new TransitionSystem.
      */
     val constructors : Map<SymbolicAction, (Program,ConcreteAction)->TransitionSystem>,
-
-    /**
-     * Whether the transition system will terminate itself. If true (default) then the program will not end before the
-     * process terminates; otherwise, the process may be terminated early (this is desirable e.g., for library
-     * processes).
-     */
-    val selfTerminate : Boolean,
 ) {
     fun classID() = hashCode()
 }

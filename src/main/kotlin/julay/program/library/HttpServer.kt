@@ -28,8 +28,7 @@ class JulHttpServer(
         override fun staticInfo() = TransitionSystemStaticInfo(
             "JulHttpServer$",
             setOf(receiveRequestAct, sendResponseAct, closeAct),
-            mapOf(initiallyCtor),
-            true)
+            mapOf(initiallyCtor))
         val actionDecls = listOf(
             ActionDecl(receiveRequestAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc("HttpServer")),
             ActionDecl(sendResponseAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc("HttpServer")),

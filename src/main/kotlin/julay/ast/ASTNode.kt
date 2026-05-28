@@ -2,9 +2,11 @@ package julay.ast
 
 import julay.program.*
 import julay.program.TSAction
+import julay.program.library.JulHttpClient
 import julay.program.library.JulHttpServer
 import julay.program.library.PrintlnTS
 import julay.program.library.ReadlnTS
+import julay.program.library.TimerTS
 
 abstract class ASTNode(
     val children : List<ASTNode>
@@ -72,6 +74,8 @@ class RootNode(
                     "Println" -> PrintlnTS.actionDecls
                     "Readln" -> ReadlnTS.actionDecls
                     "HttpServer" -> JulHttpServer.actionDecls
+                    "HttpClient" -> JulHttpClient.actionDecls
+                    "Timer" -> TimerTS.actionDecls
                     else -> listOf()
                 }
             }
@@ -345,6 +349,7 @@ class GuardNode(
 ) : ActionBodyNode(listOf(), listOf(expr)) {
     override fun programLocation() = loc
     override fun errorPass(procs: Set<String>): List<CompileError> {
+        // TODO passing an empty map doesn't work in general--need to do a 'type' pass first
         val nonBoolErrors = assertOrCompileError(expr.type(emptyMap()) is BoolType,
             SingleLocCompileError(loc, "Expected guards to be Boolean-valued expressions"))
         return super.errorPass(procs) + nonBoolErrors
@@ -527,6 +532,7 @@ class IfElseExprNode(
         val condGuardStr = condExpr.toZ3GuardString(symbolTypes,argSymbols)
         val thenGuardStr = thenExpr.toZ3GuardString(symbolTypes,argSymbols)
         val elseGuardStr = elseExpr.toZ3GuardString(symbolTypes,argSymbols)
+        // TODO check the type of the then/else exprs and case to the correct type
         return "ctx.mkITE<BoolSort>($condGuardStr,$thenGuardStr,$elseGuardStr) as BoolExpr"
     }
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
@@ -631,7 +637,7 @@ class SymbolValueExprNode(
         }
     }
     override fun type(symbolTypes: Map<String, Type>): Type {
-        return symbolTypes[symbol]!!
+        return symbolTypes[symbol] ?: throw RuntimeException("Found unexpected free variable $symbol at $loc")
     }
     override fun toString(): String {
         return symbol

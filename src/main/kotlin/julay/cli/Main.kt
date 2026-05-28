@@ -53,24 +53,26 @@ fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
     }
 
     // TODO make this cleaner
-    val libPClassNames = setOf("Println", "Readln", "HttpServer")
+    val libPClassNames = setOf("Println", "Readln", "HttpServer", "HttpClient", "Timer")
     val libStaticInfoMap = mapOf(
         Pair("Println", "PrintlnTS"),
         Pair("Readln", "ReadlnTS"),
         Pair("HttpServer", "JulHttpServer"),
+        Pair("HttpClient", "JulHttpClient"),
+        Pair("Timer", "TimerTS"),
     )
 
     val procsToCompile = program.allProcNames().filter { it !in libPClassNames }
-    val compiledProcs = procsToCompile.flatMap {
-        val compiled = ast.procClassPass(setOf(it))
-        julay.tools.assert(compiled.size == 1, "Expected exactly one compiled proc, got: ${compiled.size}")
-        compiled
+    val procClasses = procsToCompile.flatMap { proc ->
+        val procClass = ast.procClassPass(setOf(proc))
+        julay.tools.assert(procClass.size == 1, "Expected exactly one proc class for \"$proc\" but found: ${procClass.size}")
+        procClass
     }
 
     val libProcs = program.allProcNames().filter { it in libPClassNames }
     val staticInfoLib = libProcs.map { "${libStaticInfoMap[it]!!}.staticInfo()" }
 
-    val staticInfoCompiledProcs = compiledProcs.map { it.toKotlinStaticInfoString() }
+    val staticInfoCompiledProcs = procClasses.map { it.toKotlinStaticInfoString() }
     val staticInfoBody = (staticInfoCompiledProcs + staticInfoLib).joinToString(",\n") { it }
     val staticInfo = "val tsInfo = setOf(\n" + staticInfoBody.prependIndent() + "\n)"
     val runProgram = "Program(tsInfo).run()"
@@ -84,7 +86,7 @@ fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
             "import julay.program.library.*\n" +
             "import julay.tools.mkStringConst\n"
     val programText = "$imports\n" +
-            compiledProcs.joinToString("\n\n") { it.toKotlinClassString() } +
+            procClasses.joinToString("\n\n") { it.toKotlinClassString() } +
             "\n\n" +
             mainFunction
 

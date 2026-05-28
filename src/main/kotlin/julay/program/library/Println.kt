@@ -14,8 +14,7 @@ class PrintlnTS : TransitionSystem {
         override fun staticInfo() = TransitionSystemStaticInfo(
             "PrintlnTS$",
             setOf(printlnAct),
-            mapOf(initiallyCtor),
-            false)
+            mapOf(initiallyCtor))
         val actionDecls = listOf(
             ActionDecl(printlnAct, listOf(), mapOf(), TSAction.SyncRole.P2PService, LibraryLoc("Println")),
         )

@@ -16,8 +16,7 @@ class ReadlnTS : TransitionSystem {
         override fun staticInfo() = TransitionSystemStaticInfo(
             "ReadlnTS$",
             setOf(promptAct, readlnAct),
-            mapOf(initiallyCtor),
-            false)
+            mapOf(initiallyCtor))
         val actionDecls = listOf(
             ActionDecl(readlnAct, listOf(), mapOf(), TSAction.SyncRole.P2PService, LibraryLoc("Readln")),
             ActionDecl(promptAct, listOf(), mapOf(), TSAction.SyncRole.P2PService, LibraryLoc("Readln")),
