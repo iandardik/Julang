@@ -85,9 +85,6 @@ p-class IncReqHandler {
     }
 }
 
-//proc Printer := PeriodicPrint || Println || Timer
-//proc ServerLogic := IncReqHandler || HttpServer
-//program CounterServer := Counter || Printer || ServerLogic
-
-// TODO temporary, fix above
-program CounterServer := Counter || PeriodicPrint || Println || Timer || IncReqHandler || HttpServer
+proc Printer := PeriodicPrint || Println || Timer
+proc ServerLogic := IncReqHandler || HttpServer
+program CounterServer := Counter || Printer || ServerLogic

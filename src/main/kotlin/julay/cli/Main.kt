@@ -32,7 +32,7 @@ fun main(args : Array<String>) {
 
     // check for errors on each program individually
     programs.forEach { program ->
-        val components = program.allProcNames()
+        val components = program.allProcNames(procDecls)
         val errors = ast.errorPass(components)
         if (errors.isNotEmpty()) {
             errors.forEach { println(it) }
@@ -62,14 +62,16 @@ fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
         Pair("Timer", "TimerTS"),
     )
 
-    val procsToCompile = program.allProcNames().filter { it !in libPClassNames }
+    // TODO multiple calls to ast.procPass() is not very efficient
+    val procsToCompile = program.allProcNames(ast.procPass()).filter { it !in libPClassNames }
     val procClasses = procsToCompile.flatMap { proc ->
         val procClass = ast.procClassPass(setOf(proc))
         julay.tools.assert(procClass.size == 1, "Expected exactly one proc class for \"$proc\" but found: ${procClass.size}")
         procClass
     }
 
-    val libProcs = program.allProcNames().filter { it in libPClassNames }
+    // TODO multiple calls to ast.procPass() is not very efficient
+    val libProcs = program.allProcNames(ast.procPass()).filter { it in libPClassNames }
     val staticInfoLib = libProcs.map { "${libStaticInfoMap[it]!!}.staticInfo()" }
 
     val staticInfoCompiledProcs = procClasses.map { it.toKotlinStaticInfoString() }

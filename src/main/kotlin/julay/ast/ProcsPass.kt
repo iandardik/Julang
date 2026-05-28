@@ -5,11 +5,15 @@ data class ProcDecl(
     val components : List<ProcDecl>,
     val type : ProcDeclType
 ) {
-    fun allProcNames() : Set<String> {
-        return if (components.isEmpty()) {
+    fun allProcNames(procDecls : List<ProcDecl>) : Set<String> {
+        val procDeclNames = procDecls.associateBy { it.name }
+        val subComponents = components.map { cmpt ->
+            procDeclNames.getOrElse(cmpt.name) { cmpt }
+        }
+        return if (subComponents.isEmpty()) {
             setOf(name)
         } else {
-            components.flatMap { it.allProcNames() }.toSet()
+            subComponents.flatMap { it.allProcNames(procDecls) }.toSet()
         }
     }
 }
