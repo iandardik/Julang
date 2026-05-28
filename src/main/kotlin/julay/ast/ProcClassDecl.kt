@@ -38,11 +38,12 @@ data class ProcClassDecl(
         val constructorPairs = constructors
             .joinToString(",\n") { ctor ->
                 val actSigStr = ctor.toStaticInfoString()
-                val constructorArgs = ctor.transits.values
-                    .map { v ->
+                val constructorArgs = ctor.transits.entries
+                    .map { (k,v) ->
                         val argTypes = ctor.action.args.associate { Pair(it.name,it.type) }
                         val argSymbols = ctor.action.args.map { it.name }.toSet()
-                        v.toTransitString(argTypes, argSymbols)
+                        val value = v.toTransitString(argTypes, argSymbols)
+                        "$k = $value" // use named args so the ordering doesn't matter
                     }
                     .joinToString(", ") { it }
                 val constructor = "$name($constructorArgs)"
