@@ -43,13 +43,13 @@ p-class ClientDispatcher {
 
     constructor initially() {
         transit:
-            numReqs := 0
+            numReqs := 1
             maxNumReqs := 25
     }
 
     transition startReq(num : Int) {
         guard:
-            numReqs < maxNumReqs & num = numReqs
+            numReqs <= maxNumReqs & num = numReqs
         transit:
             numReqs := numReqs + 1
     }

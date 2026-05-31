@@ -30,6 +30,13 @@ fun main(args : Array<String>) {
     val procDecls = ast.procPass()
     val programs = procDecls.filter { it.type == ProcDeclType.Program }
 
+    val typeErrors = ast.typePass()
+    if (typeErrors.isNotEmpty()) {
+        typeErrors.forEach { println(it) }
+        println("Found type errors; exiting.")
+        return
+    }
+
     // check for errors on each program individually
     programs.forEach { program ->
         val components = program.allProcNames(procDecls)

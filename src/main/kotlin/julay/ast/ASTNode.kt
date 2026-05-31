@@ -15,6 +15,7 @@ abstract class ASTNode(
     open fun procPass() : List<ProcDecl> = children.flatMap { it.procPass() }
     open fun errorPass(procs : Set<String>) : List<CompileError> = children.flatMap { it.errorPass(procs) }
     open fun procClassPass(procs : Set<String>) : List<ProcClassDecl> = children.flatMap { it.procClassPass(procs) }
+    open fun typePass(symbolEnv : Map<String, Type> = emptyMap()) : List<CompileError> = children.flatMap { it.typePass(symbolEnv) }
 }
 
 abstract class DeclNode(children : List<ASTNode>) : ASTNode(children) {
@@ -34,6 +35,7 @@ open class ArgsNode(
 ) : ASTNode(args) {
     override fun programLocation() = loc
     open fun actionArgs() : List<Variable> = args.flatMap { it.actionArgs() }
+    fun argsTypeMap() : Map<String, Type> = actionArgs().associate { it.name to it.type }
     override fun toString(): String {
         return children.joinToString(", ") { it.toString() }
     }
@@ -48,10 +50,27 @@ abstract class ActionBodyNode(
     open fun transitVars() : List<Pair<String, ProgramLoc>> = body.flatMap { it.transitVars() }
 }
 
+sealed interface TypePassType {
+    data object Uninferred : TypePassType
+    data class Inferred(val type : Type) : TypePassType
+}
+
 abstract class ExprNode(children : List<ASTNode>) : ASTNode(children) {
+    private var myType : TypePassType = TypePassType.Uninferred
+    override fun typePass(symbolEnv : Map<String, Type>) : List<CompileError> {
+        // use a preorder traversal to infer the types of the children first
+        val childrenErrors = children.flatMap { it.typePass(symbolEnv) }
+        myType = TypePassType.Inferred(inferType(symbolEnv))
+        return childrenErrors
+    }
+    fun getType() : Type = when (val ts = myType) {
+        is TypePassType.Inferred -> ts.type
+        is TypePassType.Uninferred ->
+            throw RuntimeException("Type not inferred for expression at ${programLocation()}")
+    }
+    protected abstract fun inferType(symbolEnv : Map<String, Type>) : Type
     abstract fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean = false) : String
     abstract fun toTransitString(symbolTypes : Map<String,Type>, argSymbols : Set<String>) : String
-    abstract fun type(symbolTypes : Map<String,Type>) : Type
 }
 
 class RootNode(
@@ -172,6 +191,13 @@ class ProcClassNode(
         return super.errorPass(procs) + repeatStateVarNameErrors + ctorsCompleteAssgnErrors +
                 atLeastOneConstructorErrors + ctorTransActionNotMutexErrors
     }
+    override fun typePass(symbolEnv : Map<String, Type>) : List<CompileError> {
+        // populate the symbolEnv for each of the children
+        val localSymbolEnv = localDecls
+            .flatMap { it.stateVariables() }
+            .associate { it.name to it.type }
+        return localDecls.flatMap { it.typePass(localSymbolEnv) }
+    }
     override fun toString(): String {
         val body = localDecls.joinToString("\n") { "$it".prependIndent() }
         return "p-class $name {\n$body\n}"
@@ -260,6 +286,11 @@ class ConstructorNode(
             SingleLocCompileError(loc, "Expected constructors not to have guards"))
         return super.errorPass(procs) + multiVarTransitError + noGuardErrors
     }
+    override fun typePass(symbolEnv : Map<String, Type>) : List<CompileError> {
+        // add the arg types into the symbolEnv
+        val actionEnv = symbolEnv + args.argsTypeMap()
+        return args.typePass(symbolEnv) + body.flatMap { it.typePass(actionEnv) }
+    }
     override fun constructors(): List<ActionDecl> {
         return listOf(
             ActionDecl(
@@ -302,6 +333,11 @@ class TransitionNode(
                 }
             }
         return super.errorPass(procs) + initiallyActionErrors + multiVarTransitError
+    }
+    override fun typePass(symbolEnv : Map<String, Type>) : List<CompileError> {
+        // add the arg types into the symbolEnv
+        val actionEnv = symbolEnv + args.argsTypeMap()
+        return args.typePass(symbolEnv) + body.flatMap { it.typePass(actionEnv) }
     }
     override fun transitions(): List<ActionDecl> {
         val syncType = when (modifier) {
@@ -349,11 +385,13 @@ class GuardNode(
     private val loc : ProgramLoc
 ) : ActionBodyNode(listOf(), listOf(expr)) {
     override fun programLocation() = loc
-    override fun errorPass(procs: Set<String>): List<CompileError> {
-        // TODO passing an empty map doesn't work in general--need to do a 'type' pass first
-        val nonBoolErrors = assertOrCompileError(expr.type(emptyMap()) is BoolType,
-            SingleLocCompileError(loc, "Expected guards to be Boolean-valued expressions"))
-        return super.errorPass(procs) + nonBoolErrors
+    override fun typePass(symbolEnv : Map<String, Type>) : List<CompileError> {
+        val childrenErrors = super.typePass(symbolEnv)
+        val guardTypeErrors = assertOrCompileError(
+            expr.getType() is BoolType,
+            SingleLocCompileError(loc, "Expected guards to be Boolean-valued expressions")
+        )
+        return childrenErrors + guardTypeErrors
     }
     override fun guards(): List<ExprNode> {
         return listOf(expr)
@@ -417,7 +455,7 @@ class UnaryOpExprNode(
         val transitStr = operand.toTransitString(symbolTypes, argSymbols)
         return "($op $transitStr)"
     }
-    override fun type(symbolTypes: Map<String, Type>): Type {
+    override fun inferType(symbolEnv: Map<String, Type>): Type {
         return when (op) {
             "~" -> boolType
             else -> throw RuntimeException("Invalid unary op: $op")
@@ -436,8 +474,8 @@ class BinaryOpExprNode(
 ) : ExprNode(listOf(lhsOperand,rhsOperand)) {
     override fun programLocation() = loc
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
-        val lhsType = lhsOperand.type(symbolTypes)
-        val rhsType = rhsOperand.type(symbolTypes)
+        val lhsType = lhsOperand.getType()
+        val rhsType = rhsOperand.getType()
         val isStringConcat = op == "+" && (lhsType is StringType || rhsType is StringType)
         julay.tools.assert(!forceString || isStringConcat, "Cannot force a binary boolean operator to a string")
 
@@ -482,7 +520,7 @@ class BinaryOpExprNode(
             else -> "($lhs $op $rhs)"
         }
     }
-    override fun type(symbolTypes: Map<String, Type>): Type {
+    override fun inferType(symbolEnv: Map<String, Type>): Type {
         return when (op) {
             "=" -> boolType
             "#" -> boolType
@@ -497,8 +535,8 @@ class BinaryOpExprNode(
             "|" -> boolType
             "=>" -> boolType
             "+" -> {
-                val lhsType = lhsOperand.type(symbolTypes)
-                val rhsType = rhsOperand.type(symbolTypes)
+                val lhsType = lhsOperand.getType()
+                val rhsType = rhsOperand.getType()
                 when {
                     lhsType is IntType && rhsType is IntType -> intType
                     lhsType is StringType || rhsType is StringType -> stringType
@@ -524,10 +562,27 @@ class IfElseExprNode(
     private val loc : ProgramLoc
 ) : ExprNode(listOf(condExpr,thenExpr,elseExpr)) {
     override fun programLocation() = loc
-    override fun errorPass(procs: Set<String>): List<CompileError> {
-        // TODO we need to have a 'type pass' first where we cache all types so they're available here
-        val matchingTypesErrors = emptyList<CompileError>() // TODO detect this
-        return super.errorPass(procs) + matchingTypesErrors
+    override fun typePass(symbolEnv : Map<String, Type>) : List<CompileError> =
+        super.typePass(symbolEnv) + ifElseTypeErrors()
+    private fun ifElseTypeErrors() : List<CompileError> {
+        val errors = mutableListOf<CompileError>()
+        if (condExpr.getType() !is BoolType) {
+            errors.add(
+                SingleLocCompileError(programLocation(), "Expected if-condition to be Boolean")
+            )
+        }
+        val thenT = thenExpr.getType()
+        val elseT = elseExpr.getType()
+        if (thenT != elseT) {
+            errors.add(
+                TwoLocsCompileError(
+                    thenExpr.programLocation(),
+                    elseExpr.programLocation(),
+                    "Expected if-branches to have the same type, got $thenT and $elseT"
+                )
+            )
+        }
+        return errors
     }
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         val condGuardStr = condExpr.toZ3GuardString(symbolTypes,argSymbols)
@@ -542,8 +597,9 @@ class IfElseExprNode(
         val elseTransitStr = elseExpr.toTransitString(symbolTypes,argSymbols)
         return "if ($condTransitStr) {$thenTransitStr} else {$elseTransitStr}"
     }
-    override fun type(symbolTypes: Map<String, Type>): Type {
-        return thenExpr.type(symbolTypes)
+    override fun inferType(symbolEnv: Map<String, Type>): Type {
+        // typePass() ensures that elseExpr has the same type
+        return thenExpr.getType()
     }
     override fun toString(): String {
         return "if ($condExpr) {$thenExpr} else {$elseExpr)"
@@ -574,7 +630,7 @@ class LiteralValueExprNode(
             value
         }
     }
-    override fun type(symbolTypes: Map<String, Type>) = type
+    override fun inferType(symbolEnv: Map<String, Type>) = type
     override fun toString(): String {
         return if (type is StringType) "\"$value\"" else value
     }
@@ -637,8 +693,8 @@ class SymbolValueExprNode(
             symbol
         }
     }
-    override fun type(symbolTypes: Map<String, Type>): Type {
-        return symbolTypes[symbol] ?: throw RuntimeException("Found unexpected free variable $symbol at $loc")
+    override fun inferType(symbolEnv: Map<String, Type>): Type {
+        return symbolEnv[symbol] ?: throw RuntimeException("Found unexpected free variable $symbol at $loc")
     }
     override fun toString(): String {
         return symbol
