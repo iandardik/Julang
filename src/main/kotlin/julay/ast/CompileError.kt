@@ -5,7 +5,7 @@ interface CompileError {}
 fun assertOrCompileError(assertion : Boolean, error : CompileError) =
     if (assertion) listOf() else listOf(error)
 
-class SingleLocCompileError(
+class OneLocCompileError(
     private val loc : ProgramLoc,
     private val msg : String
 ) : CompileError {

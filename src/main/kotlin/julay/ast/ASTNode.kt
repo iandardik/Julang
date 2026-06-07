@@ -103,7 +103,7 @@ class RootNode(
                 val hasConsumer = actions.any { act -> act.modifier == TSAction.SyncRole.P2PConsumer }
                 val missingType = if (hasService) "p2p-consumer" else "p2p-service"
                 assertOrCompileError(!isP2P || (hasService && hasConsumer),
-                    SingleLocCompileError(refAction.loc, "Expected action \"$name\" to have at least one corresponding \"$missingType\" action"))
+                    OneLocCompileError(refAction.loc, "Expected action \"$name\" to have at least one corresponding \"$missingType\" action"))
             }
             argMismatches + inconsistentSyncTypes + p2pMissingASide
         }
@@ -143,27 +143,36 @@ class ProcClassNode(
 
     override fun errorPass(procs: Set<String>): List<CompileError> {
         // no repeat state var names
+        val repeatStateVarNameErrors = localDecls
+            .filterIsInstance<VarNode>()
+            .groupBy { it.name }
+            .flatMap { (_, nodes) ->
+                if (nodes.size == 1) emptyList()
+                // we have an error (repeat state var names) if there are more than one VarNode's with the same name
+                else listOf(
+                    TwoLocsCompileError(
+                        nodes[0].programLocation(),
+                        nodes[1].programLocation(),
+                        "Expected state variables to have unique names"
+                    )
+                )
+            }
+        // ensure that each constructor assigns a value to every state var exactly once
         val stateVars = localDecls
             .flatMap { it.stateVariables() }
             .map { it.name }
-        val repeatStateVarNameErrors = stateVars
-            .groupingBy { it }
-            .eachCount()
-            // TODO should be a double loc compile error
-            .flatMap { assertOrCompileError(it.value == 1, SingleLocCompileError(loc, "Expected state variables to have unique names")) }
-        // ensure that each constructor assigns a value to every state var exactly once
         val ctorsCompleteAssgnErrors = localDecls
             .filterIsInstance<ConstructorNode>()
             .flatMap { ctorNode ->
                 val stateVarSet = stateVars.toSet()
                 val transitVarSet = ctorNode.transitVars().map { it.first }.toSet()
                 val missingStateVars = stateVarSet.minus(transitVarSet)
-                assertOrCompileError(missingStateVars.isEmpty(), SingleLocCompileError(ctorNode.programLocation(),
+                assertOrCompileError(missingStateVars.isEmpty(), OneLocCompileError(ctorNode.programLocation(),
                         "Expected each constructor to assign a value to every state variable; missing assignments to $missingStateVars"))
             }
         // make sure there is at least one constructor
         val atLeastOneConstructorErrors = assertOrCompileError(localDecls.flatMap { it.constructors() }.isNotEmpty(),
-            SingleLocCompileError(loc, "Expected \"$name\" to have at least one constructor"))
+            OneLocCompileError(loc, "Expected \"$name\" to have at least one constructor"))
         // constructors actions cannot intersect with transition actions
         val constructorActions = localDecls.flatMap { it.constructors() }
         val transitionActions = localDecls.flatMap { it.transitions() }
@@ -269,7 +278,7 @@ class ConstructorNode(
             }
         // ensure that there is no guard, since it will not be followed by the ConstructorTS
         val noGuardErrors = assertOrCompileError(body.flatMap { it.guards() }.isEmpty(),
-            SingleLocCompileError(loc, "Expected constructors not to have guards"))
+            OneLocCompileError(loc, "Expected constructors not to have guards"))
         return super.errorPass(procs) + multiVarTransitError + noGuardErrors
     }
     override fun typePass(symbolEnv : Map<String, Type>) : List<CompileError> {
@@ -304,7 +313,7 @@ class TransitionNode(
     override fun programLocation() = loc
     override fun transitVars() = body.flatMap { it.transitVars() }
     override fun errorPass(procs : Set<String>): List<CompileError> {
-        val initiallyActionErrors = assertOrCompileError(name != "initially", SingleLocCompileError(loc,
+        val initiallyActionErrors = assertOrCompileError(name != "initially", OneLocCompileError(loc,
             "only constructors (not transitions) can synchronize on the 'initially' action"))
         // ensure that each transit has a unique state var
         // TODO get rid of the copy pasta
@@ -375,7 +384,7 @@ class GuardNode(
         val childrenErrors = super.typePass(symbolEnv)
         val guardTypeErrors = assertOrCompileError(
             expr.getType() is BoolType,
-            SingleLocCompileError(loc, "Expected guards to be Boolean-valued expressions")
+            OneLocCompileError(loc, "Expected guards to be Boolean-valued expressions")
         )
         return childrenErrors + guardTypeErrors
     }
@@ -425,12 +434,12 @@ class VarTransitNode(
         val varErrors = if (varType == null) {
             assertOrCompileError(
                 false,
-                SingleLocCompileError(loc, "Unknown variable \"$varName\" in transit assignment"),
+                OneLocCompileError(loc, "Unknown variable \"$varName\" in transit assignment"),
             )
         } else {
             assertOrCompileError(
                 expr.getType() == varType,
-                SingleLocCompileError(
+                OneLocCompileError(
                     loc,
                     "Expected assignment to \"$varName\" ($varType) but got expression of type ${expr.getType()}",
                 ),
@@ -573,7 +582,7 @@ class IfElseExprNode(
         val errors = mutableListOf<CompileError>()
         if (condExpr.getType() !is BoolType) {
             errors.add(
-                SingleLocCompileError(programLocation(), "Expected if-condition to be Boolean")
+                OneLocCompileError(programLocation(), "Expected if-condition to be Boolean")
             )
         }
         val thenT = thenExpr.getType()
@@ -593,7 +602,6 @@ class IfElseExprNode(
         val condGuardStr = condExpr.toZ3GuardString(symbolTypes,argSymbols)
         val thenGuardStr = thenExpr.toZ3GuardString(symbolTypes,argSymbols)
         val elseGuardStr = elseExpr.toZ3GuardString(symbolTypes,argSymbols)
-        // TODO check the type of the then/else exprs and case to the correct type
         return "ctx.mkITE<BoolSort>($condGuardStr,$thenGuardStr,$elseGuardStr) as BoolExpr"
     }
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
