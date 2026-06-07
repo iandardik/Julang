@@ -6,7 +6,7 @@ import java.nio.file.StandardCopyOption
 import java.util.concurrent.TimeUnit
 
 object JulCompiler {
-    fun compile(projectRoot: File, workspace: File, sourceJul: File): Map<String, File> {
+    fun compile(projectRoot: File, workspace: File, sourceJul: File): CompileResult {
         val compilerJar = resolveCompilerJar(projectRoot)
         val dest = File(workspace, "julayc.jar")
         Files.copy(compilerJar.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING)
@@ -27,10 +27,7 @@ object JulCompiler {
         }?.associateBy { it.nameWithoutExtension }
             ?: emptyMap()
 
-        check(jars.isNotEmpty()) {
-            "No program JARs produced in ${workspace.absolutePath}\n$output"
-        }
-        return jars
+        return CompileResult(output, jars)
     }
 
     private fun resolveCompilerJar(projectRoot: File): File {

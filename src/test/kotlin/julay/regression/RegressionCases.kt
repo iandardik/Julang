@@ -19,19 +19,34 @@ object RegressionCases {
         val root = Yaml().load<Map<String, Any>>(FileInputStream(file))
         val source = root["source"] as String
         val tags = (root["tags"] as? List<*>)?.map { it.toString() } ?: emptyList()
+        val expectCompileFailure = root["expectCompileFailure"] as? Boolean ?: false
+        val expectCompileOutputContains =
+            (root["expectCompileOutputContains"] as? List<*>)?.map { it.toString() } ?: emptyList()
         @Suppress("UNCHECKED_CAST")
-        val programsRaw = root["programs"] as List<Map<String, Any>>
+        val programsRaw = root["programs"] as? List<Map<String, Any>> ?: emptyList()
         val programs = programsRaw.map { parseProgram(it) }
-        return CaseFile(file.nameWithoutExtension, source, tags, programs)
+        check(expectCompileFailure || programs.isNotEmpty()) {
+            "Case ${file.name} must set expectCompileFailure: true or declare at least one program"
+        }
+        return CaseFile(
+            file.nameWithoutExtension, source, tags,
+            expectCompileFailure, expectCompileOutputContains, programs,
+        )
     }
 
     @Suppress("UNCHECKED_CAST")
     private fun parseProgram(map: Map<String, Any>): ProgramCase {
         val name = map["name"] as String
         val dependsOn = map["dependsOn"] as? String
+        val expectFailure = map["expectFailure"] as? Boolean ?: false
+        val expectFailureOutputContains =
+            (map["expectFailureOutputContains"] as? List<*>)?.map { it.toString() } ?: emptyList()
         val runMap = map["run"] as? Map<String, Any>
         val run = runMap?.let { parseRun(it) }
-        return ProgramCase(name, dependsOn, run)
+        if (!expectFailure) {
+            check(run != null) { "Program $name must have a run block unless expectFailure: true" }
+        }
+        return ProgramCase(name, dependsOn, expectFailure, expectFailureOutputContains, run)
     }
 
     @Suppress("UNCHECKED_CAST")

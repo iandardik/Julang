@@ -1,16 +1,27 @@
 package julay.regression
 
+import java.io.File
+
 data class CaseFile(
     val id: String,
     val source: String,
     val tags: List<String>,
+    val expectCompileFailure: Boolean,
+    val expectCompileOutputContains: List<String>,
     val programs: List<ProgramCase>,
 )
 
 data class ProgramCase(
     val name: String,
     val dependsOn: String?,
+    val expectFailure: Boolean,
+    val expectFailureOutputContains: List<String>,
     val run: RunConfig?,
+)
+
+data class CompileResult(
+    val output: String,
+    val jars: Map<String, File>,
 )
 
 data class RunConfig(

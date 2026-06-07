@@ -32,16 +32,17 @@ Regression tests are `julay.regression.RegressionTest` and run as part of the no
 
 ## Case file structure
 
-Every case file must define **`source`** and **`programs`**.
+Every case file must define **`source`**. Positive cases also need **`programs`**; negative compile-failure cases use **`expectCompileFailure`** instead (see [Negative tests](#negative-tests)).
 
 ```yaml
 source: input/basic/test1.jul   # required: path to .jul file
 tags:                           # optional
   - http
-programs:                       # required: list of programs to test
+programs:                       # required for positive cases
   - name: TermTest1             # must match `program <Name> := ...` in the .jul file
     dependsOn: EchoServer       # optional: start another program’s JAR first
-    run:                        # required per program entry
+    expectFailure: false        # optional: set true when the program run should fail
+    run:                        # required per program entry (unless expectFailure-only)
       # ... run options below
 ```
 
@@ -122,7 +123,53 @@ You can combine several matchers; **all** specified matchers must pass.
 | `expectStdoutLinesUnordered` | List of lines; each must appear as a **non-blank** line in stdout (order does not matter). Good when `Println` order is nondeterministic. |
 | `expectStdoutMatches` | Single regex matched anywhere in stdout (e.g. `"[0-9]+"` for timer output). |
 
-At least one expectation field is recommended per `run` block.
+At least one expectation field is recommended per `run` block (for positive tests).
+
+## Negative tests
+
+Negative cases verify that compilation or execution **fails as expected**.
+
+### Compile failure (case-level)
+
+Use when a `.jul` file should **not** compile. No `programs` block is needed.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `expectCompileFailure` | `false` | When `true`, the harness expects **no program JARs** to be produced. |
+| `expectCompileOutputContains` | `[]` | Optional substrings that must appear in compiler stdout (e.g. `"type errors"`, `"compile errors"`). |
+
+```yaml
+source: input/negative/type-error.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "type errors"
+```
+
+The test **passes** when compilation produces no JARs. If any JAR is produced, the test fails. When `expectCompileOutputContains` is set, each listed substring must appear in the compiler output.
+
+### Run failure (program-level)
+
+Use when a program **should compile** but its run should fail — for example, it hangs until timeout or violates an assertion.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `expectFailure` | `false` | When `true`, a failed run (timeout, stdout mismatch, HTTP error, etc.) counts as **success**. A run that completes without error fails the test. |
+| `expectFailureOutputContains` | `[]` | Optional substrings that must appear in the failure message (e.g. `"timed out"`). |
+
+```yaml
+source: input/server/inc.jul
+programs:
+  - name: CounterServer
+    expectFailure: true
+    expectFailureOutputContains:
+      - "timed out"
+    run:
+      timeoutMs: 1000   # server never exits; foreground run times out
+```
+
+`expectFailure` inverts the usual logic: the harness catches `AssertionError` from the run step and treats it as a pass. Use `expectFailureOutputContains` to pin the failure reason.
+
+**Note:** Positive and negative expectations are not mixed on the same program — a program with `expectFailure: true` must not also expect successful stdout/HTTP checks to pass.
 
 ## Examples
 
@@ -176,6 +223,17 @@ programs:
       expectStdoutContains: ["response:"]
 ```
 
+### Compile failure (negative)
+
+[`cases/negative-type-error.yaml`](cases/negative-type-error.yaml):
+
+```yaml
+source: input/negative/type-error.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "type errors"
+```
+
 ### Long-running server (timer / periodic output)
 
 [`cases/server-inc.yaml`](cases/server-inc.yaml):
@@ -212,9 +270,8 @@ Capture once by running the program locally, or copy the stdout section from a f
 ## Limitations
 
 - **Port 8000** is fixed in the compiler libraries; only one HTTP case runs at a time.
-- **Compile failures** are detected when no program JARs appear in the workspace (the compiler CLI may still exit 0 on semantic errors).
-- **No** automated negative tests (expected compile failure) yet.
-- Programs that never exit need `background: true` or an `http`/`durationMs` capture path, not foreground `timeoutMs` alone.
+- **Compile failures** on positive cases are detected when no program JARs appear in the workspace (the compiler CLI may still exit 0 on semantic errors).
+- Programs that never exit need `background: true` or an `http`/`durationMs` capture path, not foreground `timeoutMs` alone (unless using `expectFailure: true` to assert a timeout).
 
 ## Implementation reference
 

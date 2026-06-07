@@ -1,0 +1,4 @@
+source: input/negative/type-error.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "type errors"

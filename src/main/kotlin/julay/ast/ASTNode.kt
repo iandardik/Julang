@@ -435,6 +435,25 @@ class VarTransitNode(
         override fun transits(): Map<String, ExprNode> {
         return mapOf(Pair(varName,expr))
     }
+    override fun typePass(symbolEnv : Map<String, Type>) : List<CompileError> {
+        val childrenErrors = super.typePass(symbolEnv)
+        val varType = symbolEnv[varName]
+        val varErrors = if (varType == null) {
+            assertOrCompileError(
+                false,
+                SingleLocCompileError(loc, "Unknown variable \"$varName\" in transit assignment"),
+            )
+        } else {
+            assertOrCompileError(
+                expr.getType() == varType,
+                SingleLocCompileError(
+                    loc,
+                    "Expected assignment to \"$varName\" ($varType) but got expression of type ${expr.getType()}",
+                ),
+            )
+        }
+        return childrenErrors + varErrors
+    }
     override fun toString(): String {
         return "$varName := $expr"
     }
