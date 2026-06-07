@@ -8,11 +8,11 @@ End-to-end checks for Julang programs. Each case compiles a `.jul` file, runs th
 regression/
   README.md           # this file
   input/              # .jul sources used by regression cases (mirrors old input/ layout)
-  cases/              # one YAML file per test scenario (*.yaml or *.yml)
+  cases/              # YAML test scenarios, mirroring input/ layout (e.g. cases/basic/test1.yaml)
   expected/           # optional golden stdout files (referenced by path)
 ```
 
-Case files live in **`regression/cases/`**. Paths inside YAML (`source`, `expectStdout`) are relative to the **project root** (where `build.gradle.kts` lives).
+Case files live under **`regression/cases/`**, using the same subdirectory layout as `regression/input/` (e.g. `cases/basic/test1.yaml` pairs with `input/basic/test1.jul`). Paths inside YAML (`source`, `expectStdout`) are relative to the **project root** (where `build.gradle.kts` lives).
 
 ## Running tests
 
@@ -176,7 +176,7 @@ programs:
 
 ### Terminal output only
 
-[`cases/basic-test1.yaml`](cases/basic-test1.yaml) — compile and run until the program exits; check printed numbers in any order:
+[`cases/basic/test1.yaml`](cases/basic/test1.yaml) — compile and run until the program exits; check printed numbers in any order:
 
 ```yaml
 source: regression/input/basic/test1.jul
@@ -191,7 +191,7 @@ programs:
 
 ### Stdin + stdout
 
-[`cases/readln-kv.yaml`](cases/readln-kv.yaml) — two programs in one file, different stdin/expectations:
+[`cases/readln/kv.yaml`](cases/readln/kv.yaml) — two programs in one file, different stdin/expectations:
 
 ```yaml
 source: regression/input/readln/kv.jul
@@ -204,7 +204,7 @@ programs:
 
 ### HTTP server
 
-[`cases/server-test-inc.yaml`](cases/server-test-inc.yaml):
+[`cases/server/test-inc.yaml`](cases/server/test-inc.yaml):
 
 ```yaml
 tags: [http]
@@ -222,7 +222,7 @@ programs:
 
 ### Compile failure (negative)
 
-[`cases/negative-type-error.yaml`](cases/negative-type-error.yaml):
+[`cases/negative/type-error.yaml`](cases/negative/type-error.yaml):
 
 ```yaml
 source: regression/input/negative/type-error.jul
@@ -234,7 +234,7 @@ expectCompileOutputContains:
 ## Adding a new case
 
 1. Add or update a program under `regression/input/` (keeping the same subdirectory layout as needed).
-2. Create `regression/cases/<descriptive-name>.yaml` pointing at that source.
+2. Create `regression/cases/<subdir>/<name>.yaml` pointing at that source (mirror the `input/` path).
 3. For each `program` you care about, add a `run` block with stdin/HTTP/timeouts and expectations.
 4. Run `./gradlew test` and fix expectations from the failure diff if needed.
 5. Optionally store exact stdout in `regression/expected/` and reference it with `expectStdout`.

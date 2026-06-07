@@ -8,13 +8,19 @@ object RegressionCases {
     fun loadAll(projectRoot: File): List<CaseFile> {
         val dir = File(projectRoot, "regression/cases")
         require(dir.isDirectory) { "Missing regression/cases directory: ${dir.absolutePath}" }
-        return dir.listFiles { f -> f.extension == "yaml" || f.extension == "yml" }
-            ?.sortedBy { it.name }
-            ?.map { loadCase(projectRoot, it) }
-            ?: emptyList()
+        return dir.walkTopDown()
+            .filter { it.isFile && (it.extension == "yaml" || it.extension == "yml") }
+            .sortedBy { dir.toPath().relativize(it.toPath()).toString() }
+            .map { loadCase(projectRoot, dir, it) }
+            .toList()
     }
 
-    private fun loadCase(projectRoot: File, file: File): CaseFile {
+    private fun caseId(casesDir: File, file: File): String {
+        val relative = casesDir.toPath().relativize(file.toPath()).toString()
+        return relative.removeSuffix(".yaml").removeSuffix(".yml")
+    }
+
+    private fun loadCase(projectRoot: File, casesDir: File, file: File): CaseFile {
         @Suppress("UNCHECKED_CAST")
         val root = Yaml().load<Map<String, Any>>(FileInputStream(file))
         val source = root["source"] as String
@@ -29,7 +35,7 @@ object RegressionCases {
             "Case ${file.name} must set expectCompileFailure: true or declare at least one program"
         }
         return CaseFile(
-            file.nameWithoutExtension, source, tags,
+            caseId(casesDir, file), source, tags,
             expectCompileFailure, expectCompileOutputContains, programs,
         )
     }

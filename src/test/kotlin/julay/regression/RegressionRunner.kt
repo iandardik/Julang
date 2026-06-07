@@ -23,7 +23,7 @@ object RegressionRunner {
         workspaceParent.mkdirs()
         val workspace = Files.createTempDirectory(
             workspaceParent.toPath(),
-            "${case.id}-",
+            "${case.id.replace('/', '-')}-",
         ).toFile()
         var background: JulProcess.Running? = null
         try {
