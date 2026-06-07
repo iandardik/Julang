@@ -1,12 +1,13 @@
 # Julang regression tests
 
-End-to-end checks for programs under `input/`. Each case compiles a `.jul` file, runs the generated JAR(s), and compares terminal output and/or HTTP responses to what you declare in YAML.
+End-to-end checks for Julang programs. Each case compiles a `.jul` file, runs the generated JAR(s), and compares terminal output and/or HTTP responses to what you declare in YAML.
 
 ## Layout
 
 ```
 regression/
   README.md           # this file
+  input/              # .jul sources used by regression cases (mirrors old input/ layout)
   cases/              # one YAML file per test scenario (*.yaml or *.yml)
   expected/           # optional golden stdout files (referenced by path)
 ```
@@ -35,7 +36,7 @@ Regression tests are `julay.regression.RegressionTest` and run as part of the no
 Every case file must define **`source`**. Positive cases also need **`programs`**; negative compile-failure cases use **`expectCompileFailure`** instead (see [Negative tests](#negative-tests)).
 
 ```yaml
-source: input/basic/test1.jul   # required: path to .jul file
+source: regression/input/basic/test1.jul   # required: path to .jul file
 tags:                           # optional
   - http
 programs:                       # required for positive cases
@@ -139,7 +140,7 @@ Use when a `.jul` file should **not** compile. No `programs` block is needed.
 | `expectCompileOutputContains` | `[]` | Optional substrings that must appear in compiler stdout (e.g. `"type errors"`, `"compile errors"`). |
 
 ```yaml
-source: input/negative/type-error.jul
+source: regression/input/negative/type-error.jul
 expectCompileFailure: true
 expectCompileOutputContains:
   - "type errors"
@@ -178,7 +179,7 @@ programs:
 [`cases/basic-test1.yaml`](cases/basic-test1.yaml) — compile and run until the program exits; check printed numbers in any order:
 
 ```yaml
-source: input/basic/test1.jul
+source: regression/input/basic/test1.jul
 programs:
   - name: TermTest1
     run:
@@ -193,7 +194,7 @@ programs:
 [`cases/readln-kv.yaml`](cases/readln-kv.yaml) — two programs in one file, different stdin/expectations:
 
 ```yaml
-source: input/readln/kv.jul
+source: regression/input/readln/kv.jul
 programs:
   - name: KVOne
     run:
@@ -201,26 +202,22 @@ programs:
       expectStdoutContains: ["apple"]
 ```
 
-### HTTP server + client
+### HTTP server
 
-[`cases/server-echo.yaml`](cases/server-echo.yaml):
+[`cases/server-test-inc.yaml`](cases/server-test-inc.yaml):
 
 ```yaml
 tags: [http]
-source: input/server/echo.jul
+source: regression/input/server/test-inc.jul
 programs:
-  - name: EchoServer
+  - name: CounterServerTest
     run:
-      durationMs: 2000
+      durationMs: 4500
       http:
         - post: "hello"
-          expectBody: "hello is a good point!"
-      expectStdoutContains: ["Req: 'hello'"]
-  - name: EchoClient
-    dependsOn: EchoServer
-    run:
-      timeoutMs: 180000
-      expectStdoutContains: ["response:"]
+          expectBody: "1"
+        - post: "exit"
+          expectBody: "4"
 ```
 
 ### Compile failure (negative)
@@ -228,30 +225,15 @@ programs:
 [`cases/negative-type-error.yaml`](cases/negative-type-error.yaml):
 
 ```yaml
-source: input/negative/type-error.jul
+source: regression/input/negative/type-error.jul
 expectCompileFailure: true
 expectCompileOutputContains:
   - "type errors"
 ```
 
-### Long-running server (timer / periodic output)
-
-[`cases/server-inc.yaml`](cases/server-inc.yaml):
-
-```yaml
-tags: [http]
-source: input/server/inc.jul
-programs:
-  - name: CounterServer
-    run:
-      background: true
-      durationMs: 4500
-      expectStdoutMatches: "[0-9]+"
-```
-
 ## Adding a new case
 
-1. Add or update a program under `input/`.
+1. Add or update a program under `regression/input/` (keeping the same subdirectory layout as needed).
 2. Create `regression/cases/<descriptive-name>.yaml` pointing at that source.
 3. For each `program` you care about, add a `run` block with stdin/HTTP/timeouts and expectations.
 4. Run `./gradlew test` and fix expectations from the failure diff if needed.

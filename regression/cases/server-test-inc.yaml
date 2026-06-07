@@ -1,6 +1,6 @@
 tags:
   - http
-source: input/server/test-inc.jul
+source: regression/input/server/test-inc.jul
 programs:
   - name: CounterServerTest
     run:

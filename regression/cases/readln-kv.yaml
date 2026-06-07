@@ -1,4 +1,4 @@
-source: input/readln/kv.jul
+source: regression/input/readln/kv.jul
 programs:
   - name: KVOne
     run:

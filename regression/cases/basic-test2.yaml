@@ -1,4 +1,4 @@
-source: input/basic/test2.jul
+source: regression/input/basic/test2.jul
 programs:
   - name: TermTest2
     run:
