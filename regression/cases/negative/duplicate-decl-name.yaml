@@ -1,0 +1,5 @@
+source: regression/input/negative/duplicate-decl-name.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected each declaration to have a unique name, but found at least two named \"S\""
+  - "Found errors while compiling the program \"P\"; exiting."

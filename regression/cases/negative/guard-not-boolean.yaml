@@ -1,0 +1,5 @@
+source: regression/input/negative/guard-not-boolean.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected guards to be Boolean-valued expressions"
+  - "Found type errors; exiting."

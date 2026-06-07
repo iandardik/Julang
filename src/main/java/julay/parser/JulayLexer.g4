@@ -29,7 +29,6 @@ NEQ : '#' ;
 ASGN_EQ : ':=' ;
 IMPLIES : '=>' ;
 IF : 'if' ;
-THEN : 'then' ;
 ELSE : 'else' ;
 
 

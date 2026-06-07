@@ -1,0 +1,5 @@
+source: regression/input/negative/action-arg-mismatch.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected action \"println\" to have the same arguments"
+  - "Found errors while compiling the program \"P\"; exiting."

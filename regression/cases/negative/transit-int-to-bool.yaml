@@ -1,0 +1,5 @@
+source: regression/input/negative/transit-int-to-bool.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected assignment to \"flag\" (Boolean) but got expression of type Int"
+  - "Found type errors; exiting."

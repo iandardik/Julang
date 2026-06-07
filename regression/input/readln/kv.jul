@@ -51,9 +51,9 @@ p-class DB {
 
     transition readDB(key : String, val : String) {
         guard:
-            if (~(key = "A" | key = "B" | key = "C"))
-            then { val = "N/A" }
-            else {
+            if (~(key = "A" | key = "B" | key = "C")) {
+                val = "N/A"
+            } else {
                   (key = "A" & val = "apple")
                 | (key = "B" & val = "banana")
                 | (key = "C" & val = "cherry")

@@ -1,0 +1,5 @@
+source: regression/input/negative/ctor-transition-overlap.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected constructor names to not overlap with transition names, but found at least one overlap for the action \"reset\""
+  - "Found errors while compiling the program \"P\"; exiting."

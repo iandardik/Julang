@@ -1,0 +1,11 @@
+p-class S {
+    var x : Int
+    var x : Int
+
+    constructor initially() {
+        transit:
+            x := 0
+    }
+}
+
+program P := S

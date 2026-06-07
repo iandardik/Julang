@@ -1,0 +1,5 @@
+source: regression/input/negative/p2p-missing-consumer.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected action \"println\" to have at least one corresponding \"p2p-consumer\" action"
+  - "Found errors while compiling the program \"P\"; exiting."

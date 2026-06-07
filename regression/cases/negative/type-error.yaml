@@ -1,4 +1,0 @@
-source: regression/input/negative/type-error.jul
-expectCompileFailure: true
-expectCompileOutputContains:
-  - "type errors"

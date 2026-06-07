@@ -1,0 +1,5 @@
+source: regression/input/negative/transition-named-initially.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "only constructors (not transitions) can synchronize on the 'initially' action"
+  - "Found errors while compiling the program \"P\"; exiting."

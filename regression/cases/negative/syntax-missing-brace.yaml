@@ -1,0 +1,4 @@
+source: regression/input/negative/syntax-missing-brace.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Found compile errors, exiting."

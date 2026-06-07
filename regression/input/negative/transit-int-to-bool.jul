@@ -1,0 +1,10 @@
+p-class S {
+    var flag : Boolean
+
+    constructor initially() {
+        transit:
+            flag := 0
+    }
+}
+
+program P := S

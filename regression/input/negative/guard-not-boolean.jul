@@ -1,0 +1,17 @@
+p-class S {
+    var x : Int
+
+    constructor initially() {
+        transit:
+            x := 0
+    }
+
+    transition tick() {
+        guard:
+            x
+        transit:
+            x := x + 1
+    }
+}
+
+program P := S

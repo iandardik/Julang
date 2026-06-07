@@ -1,0 +1,33 @@
+p-class ConsumerOnly {
+    var x : Int
+
+    constructor initially() {
+        transit:
+            x := 0
+    }
+
+    p2p-consumer transition println(msg : String) {
+        guard:
+            true
+        transit:
+            x := x + 1
+    }
+}
+
+p-class ServiceOnly {
+    var y : Int
+
+    constructor initially() {
+        transit:
+            y := 0
+    }
+
+    transition println(msg : String) {
+        guard:
+            true
+        transit:
+            y := y + 1
+    }
+}
+
+program P := ConsumerOnly || ServiceOnly

@@ -1,0 +1,5 @@
+source: regression/input/negative/no-constructor.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected \"S\" to have at least one constructor"
+  - "Found errors while compiling the program \"P\"; exiting."

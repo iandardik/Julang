@@ -140,10 +140,10 @@ Use when a `.jul` file should **not** compile. No `programs` block is needed.
 | `expectCompileOutputContains` | `[]` | Optional substrings that must appear in compiler stdout (e.g. `"type errors"`, `"compile errors"`). |
 
 ```yaml
-source: regression/input/negative/type-error.jul
+source: regression/input/negative/transit-bool-to-int.jul
 expectCompileFailure: true
 expectCompileOutputContains:
-  - "type errors"
+  - "Expected assignment to \"x\" (Int) but got expression of type Bool"
 ```
 
 The test **passes** when compilation produces no JARs. If any JAR is produced, the test fails. When `expectCompileOutputContains` is set, each listed substring must appear in the compiler output.
@@ -222,13 +222,13 @@ programs:
 
 ### Compile failure (negative)
 
-[`cases/negative/type-error.yaml`](cases/negative/type-error.yaml):
+[`cases/negative/transit-bool-to-int.yaml`](cases/negative/transit-bool-to-int.yaml):
 
 ```yaml
-source: regression/input/negative/type-error.jul
+source: regression/input/negative/transit-bool-to-int.jul
 expectCompileFailure: true
 expectCompileOutputContains:
-  - "type errors"
+  - "Expected assignment to \"x\" (Int) but got expression of type Bool"
 ```
 
 ## Adding a new case

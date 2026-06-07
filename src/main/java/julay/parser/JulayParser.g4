@@ -97,7 +97,7 @@ expr
     | expr AND expr
     | expr OR expr
     | expr IMPLIES expr
-    | IF LPAREN expr RPAREN THEN LCURLY expr RCURLY ELSE LCURLY expr RCURLY
+    | IF LPAREN expr RPAREN LCURLY expr RCURLY ELSE LCURLY expr RCURLY
     ;
 
 proc_expr

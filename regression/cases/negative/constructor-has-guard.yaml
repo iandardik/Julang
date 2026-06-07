@@ -1,0 +1,5 @@
+source: regression/input/negative/constructor-has-guard.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected constructors not to have guards"
+  - "Found errors while compiling the program \"P\"; exiting."

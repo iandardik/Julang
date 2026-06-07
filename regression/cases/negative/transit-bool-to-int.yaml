@@ -1,0 +1,5 @@
+source: regression/input/negative/transit-bool-to-int.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected assignment to \"x\" (Int) but got expression of type Bool"
+  - "Found type errors; exiting."

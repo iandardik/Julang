@@ -1,0 +1,5 @@
+source: regression/input/negative/missing-state-assignment.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected each constructor to assign a value to every state variable; missing assignments to [y]"
+  - "Found errors while compiling the program \"P\"; exiting."

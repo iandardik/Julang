@@ -1,0 +1,10 @@
+p-class S {
+    var x : Int
+
+    transition tick() {
+        transit:
+            x := 1
+    }
+}
+
+program P := S

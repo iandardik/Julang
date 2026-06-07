@@ -1,0 +1,5 @@
+source: regression/input/negative/duplicate-state-var.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected state variables to have unique names"
+  - "Found errors while compiling the program \"P\"; exiting."

@@ -1,0 +1,5 @@
+source: regression/input/negative/action-modifier-mismatch.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected action \"println\" to have the same modifiers"
+  - "Found errors while compiling the program \"P\"; exiting."

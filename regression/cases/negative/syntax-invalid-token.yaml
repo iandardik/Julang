@@ -1,0 +1,4 @@
+source: regression/input/negative/syntax-invalid-token.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Found compile errors, exiting."
