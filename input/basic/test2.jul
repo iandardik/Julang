@@ -10,7 +10,7 @@ p-class S {
     
     transition increment(inc : Int) {
         guard:
-            (x <= 10) & (inc > 0) & (print = false)
+            ~print & (x <= 10) & (inc > 0)
         transit:
             x := x + inc
             print := true
@@ -18,9 +18,13 @@ p-class S {
 
     p2p-consumer transition println(msg : String) {
         guard:
-            (print = true) & (msg = x + "")
+            print & (msg = x + "")
         transit:
             print := false
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard: ~print & x > 10
     }
 }
 
@@ -34,17 +38,10 @@ p-class T {
 
     transition increment(inc : Int) {
         guard:
-            inc > 3 & x <= 10
+            inc > 2 & x <= 10
         transit:
             x := x + inc
     }
-
-    p2p-consumer transition println(msg : String) {
-        guard:
-            (x > 1 & x <= 10) & (msg = x + "")
-        transit:
-            x := x + 1
-    }
 }
 
-program TermTest2 := S || T || Println
+program TermTest2 := S || T || Println || ExitSystem

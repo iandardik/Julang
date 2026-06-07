@@ -27,7 +27,7 @@ p-class FrontEnd {
 
     transition readDB(key : String, val : String) {
         guard:
-            (state = "C") & (key = keyReq)
+            (state = "C") & (key = keyReq) & (keyReq != "exit")
         transit:
             state := "D"
             valReq := "val:\n\t" + val // just to test string concatenation and escape characters
@@ -38,6 +38,11 @@ p-class FrontEnd {
             (state = "D") & ((msg + "") = valReq) // (msg + "") to test string concatenation with action args
         transit:
             state := "A"
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard:
+            keyReq = "exit"
     }
 }
 
@@ -68,5 +73,5 @@ p-class DB2 {
     }
 }
 
-program KVOne := FrontEnd || DB || Println || Readln
-program KVTwo := FrontEnd || DB2 || Println || Readln
+program KVOne := FrontEnd || DB || Println || Readln || ExitSystem
+program KVTwo := FrontEnd || DB2 || Println || Readln || ExitSystem

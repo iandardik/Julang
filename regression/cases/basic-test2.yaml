@@ -1,0 +1,11 @@
+source: input/basic/test2.jul
+programs:
+  - name: TermTest2
+    run:
+      timeoutMs: 60000
+      expectStdoutLinesUnordered:
+        - "0"
+        - "3"
+        - "6"
+        - "9"
+        - "12"

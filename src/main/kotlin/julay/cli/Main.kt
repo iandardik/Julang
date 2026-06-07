@@ -60,13 +60,14 @@ fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
     }
 
     // TODO make this cleaner
-    val libPClassNames = setOf("Println", "Readln", "HttpServer", "HttpClient", "Timer")
+    val libPClassNames = setOf("Println", "Readln", "HttpServer", "HttpClient", "Timer", "ExitSystem")
     val libStaticInfoMap = mapOf(
         Pair("Println", "PrintlnTS"),
         Pair("Readln", "ReadlnTS"),
         Pair("HttpServer", "JulHttpServer"),
         Pair("HttpClient", "JulHttpClient"),
         Pair("Timer", "TimerTS"),
+        Pair("ExitSystem", "ExitSystemTS"),
     )
 
     // TODO multiple calls to ast.procPass() is not very efficient

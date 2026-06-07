@@ -20,9 +20,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     implementation("com.microsoft.z3:java-jar:4.11.2")
     implementation("org.antlr:antlr4-runtime:4.13.2")
-    //implementation(files("../julayc.jar"))
 
     testImplementation(kotlin("test"))
+    testImplementation("org.yaml:snakeyaml:2.2")
 }
 
 application {
@@ -43,10 +43,8 @@ tasks.shadowJar {
     archiveBaseName.set("julayc")
     archiveVersion.set("")
     archiveClassifier.set("")
-    destinationDirectory.set(file("${layout.buildDirectory.get()}/../out/"))
 }
 
 tasks.test {
-    workingDir = file("out/")
-    useTestNG()
+    dependsOn(tasks.shadowJar)
 }

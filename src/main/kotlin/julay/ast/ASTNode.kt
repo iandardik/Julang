@@ -6,6 +6,7 @@ import julay.program.library.JulHttpClient
 import julay.program.library.JulHttpServer
 import julay.program.library.PrintlnTS
 import julay.program.library.ReadlnTS
+import julay.program.library.ExitSystemTS
 import julay.program.library.TimerTS
 
 abstract class ASTNode(
@@ -96,6 +97,7 @@ class RootNode(
                     "HttpServer" -> JulHttpServer.actionDecls
                     "HttpClient" -> JulHttpClient.actionDecls
                     "Timer" -> TimerTS.actionDecls
+                    "ExitSystem" -> ExitSystemTS.actionDecls
                     else -> listOf()
                 }
             }

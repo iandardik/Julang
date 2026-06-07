@@ -1,0 +1,24 @@
+source: input/readln/kv.jul
+programs:
+  - name: KVOne
+    run:
+      timeoutMs: 30000
+      stdin:
+        - "A"
+        - "B"
+        - "C"
+        - "exit"
+      expectStdoutContains:
+        - "val:"
+        - "apple"
+        - "banana"
+        - "cherry"
+  - name: KVTwo
+    run:
+      timeoutMs: 30000
+      stdin:
+        - "B"
+        - "exit"
+      expectStdoutContains:
+        - "val:"
+        - "bats"

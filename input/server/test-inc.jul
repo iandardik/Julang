@@ -1,0 +1,96 @@
+p-class Counter {
+    var counter : Int
+    
+    constructor initially() {
+        transit: counter := 0
+    }
+
+    p2p-service transition increment() {
+        transit: counter := counter + 1
+    }
+
+    p2p-service transition getCounter(counterVal : Int) {
+        guard: counterVal = counter
+    }
+
+    p2p-consumer transition close() {
+        guard: false // never close the server
+    }
+}
+
+/* prints the current value of the counter every 2 seconds
+*/
+p-class PeriodicPrint {
+    var localCounter : Int
+    var step : String
+
+    constructor initially() {
+        transit:
+            localCounter := -1
+            step := "A"
+    }
+
+    constructor timeout() {
+        transit:
+            localCounter := -1
+            step := "A"
+    }
+
+    p2p-consumer transition getCounter(counterVal : Int) {
+        guard:
+            step = "A"
+        transit:
+            localCounter := counterVal
+            step := "B"
+    }
+
+    p2p-consumer transition println(msg : String) {
+        guard:   step = "B" & (msg = localCounter + "")
+        transit: step := "C"
+    }
+
+    transition timer(time : Int) {
+        guard:   step = "C" & time = 5 // seconds
+        transit: step := "D"
+    }
+}
+
+p-class IncReqHandler {
+    var localCounter : Int
+    var step : String
+    var exit : Boolean
+
+    constructor receiveRequest(reqBody : String) {
+        transit:
+            localCounter := -1 // TODO the reverse order causes a compiler bug
+            step := "A"
+            exit := (reqBody = "exit")
+    }
+
+    p2p-consumer transition increment() {
+        guard:   step = "A"
+        transit: step := "B"
+    }
+
+    p2p-consumer transition getCounter(counterVal : Int) {
+        guard: step = "B"
+        transit:
+            localCounter := counterVal
+            step := "C"
+    }
+
+    transition sendResponse(respBody : String) {
+        guard:
+            step = "C" & respBody = localCounter + ""
+        transit:
+            step := "D"
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard: exit & (step = "D")
+    }
+}
+
+proc Printer := PeriodicPrint || Println || Timer
+proc ServerLogic := IncReqHandler || HttpServer || ExitSystem
+program CounterServerTest := Counter || Printer || ServerLogic

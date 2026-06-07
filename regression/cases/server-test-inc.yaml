@@ -1,0 +1,16 @@
+tags:
+  - http
+source: input/server/test-inc.jul
+programs:
+  - name: CounterServerTest
+    run:
+      durationMs: 4500
+      http:
+        - post: "hello"
+          expectBody: "1"
+        - post: "hello"
+          expectBody: "2"
+        - post: "hi"
+          expectBody: "3"
+        - post: "exit"
+          expectBody: "4"
