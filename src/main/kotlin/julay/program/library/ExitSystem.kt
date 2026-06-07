@@ -7,7 +7,8 @@ import julay.program.*
 import kotlin.system.exitProcess
 
 class ExitSystemTS : TransitionSystem {
-    companion object: StaticInfo {
+    companion object: JulLibrary {
+        override val julName = "ExitSystem"
         val exitSystemAct = SymbolicAction("exitSystem", listOf(), SymbolicAction.SyncType.P2P)
         val initiallyCtor = Pair(SymbolicAction("initially", listOf())) { _ : Program, _ : ConcreteAction -> ExitSystemTS() }
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one
@@ -15,8 +16,8 @@ class ExitSystemTS : TransitionSystem {
             "ExitSystemTS$",
             setOf(exitSystemAct),
             mapOf(initiallyCtor))
-        val actionDecls = listOf(
-            ActionDecl(exitSystemAct, listOf(), mapOf(), TSAction.SyncRole.P2PService, LibraryLoc("ExitSystem")),
+        override val actionDecls = listOf(
+            ActionDecl(exitSystemAct, listOf(), mapOf(), TSAction.SyncRole.P2PService, LibraryLoc(julName)),
         )
     }
 

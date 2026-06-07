@@ -6,6 +6,7 @@ import julay.ast.ProcDeclType
 import julay.ast.RootNode
 import julay.parser.JulayLexer
 import julay.parser.JulayParser
+import julay.program.library.LibraryRegistry
 import org.antlr.v4.runtime.CharStreams
 import org.antlr.v4.runtime.CommonTokenStream
 import java.io.File
@@ -59,16 +60,7 @@ fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
         exitProcess(1)
     }
 
-    // TODO make this cleaner
-    val libPClassNames = setOf("Println", "Readln", "HttpServer", "HttpClient", "Timer", "ExitSystem")
-    val libStaticInfoMap = mapOf(
-        Pair("Println", "PrintlnTS"),
-        Pair("Readln", "ReadlnTS"),
-        Pair("HttpServer", "JulHttpServer"),
-        Pair("HttpClient", "JulHttpClient"),
-        Pair("Timer", "TimerTS"),
-        Pair("ExitSystem", "ExitSystemTS"),
-    )
+    val libPClassNames = LibraryRegistry.julNames
 
     // TODO multiple calls to ast.procPass() is not very efficient
     val procsToCompile = program.allProcNames(ast.procPass()).filter { it !in libPClassNames }
@@ -80,7 +72,7 @@ fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
 
     // TODO multiple calls to ast.procPass() is not very efficient
     val libProcs = program.allProcNames(ast.procPass()).filter { it in libPClassNames }
-    val staticInfoLib = libProcs.map { "${libStaticInfoMap[it]!!}.staticInfo()" }
+    val staticInfoLib = libProcs.map { LibraryRegistry.staticInfoCodegenExpr(it) }
 
     val staticInfoCompiledProcs = procClasses.map { it.toKotlinStaticInfoString() }
     val staticInfoBody = (staticInfoCompiledProcs + staticInfoLib).joinToString(",\n") { it }

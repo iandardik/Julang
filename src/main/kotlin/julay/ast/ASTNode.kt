@@ -2,12 +2,7 @@ package julay.ast
 
 import julay.program.*
 import julay.program.TSAction
-import julay.program.library.JulHttpClient
-import julay.program.library.JulHttpServer
-import julay.program.library.PrintlnTS
-import julay.program.library.ReadlnTS
-import julay.program.library.ExitSystemTS
-import julay.program.library.TimerTS
+import julay.program.library.LibraryRegistry
 
 abstract class ASTNode(
     val children : List<ASTNode>
@@ -88,19 +83,8 @@ class RootNode(
             .flatMap { it.transitions }
         val libTransitions = procPass()
             .flatMap { it.allProcNames(procPass()) }
-            .filter { it in procs }
-            .flatMap { name ->
-                // TODO make this cleaner
-                when (name) {
-                    "Println" -> PrintlnTS.actionDecls
-                    "Readln" -> ReadlnTS.actionDecls
-                    "HttpServer" -> JulHttpServer.actionDecls
-                    "HttpClient" -> JulHttpClient.actionDecls
-                    "Timer" -> TimerTS.actionDecls
-                    "ExitSystem" -> ExitSystemTS.actionDecls
-                    else -> listOf()
-                }
-            }
+            .filter { it in procs && LibraryRegistry.isLibrary(it) }
+            .flatMap { LibraryRegistry.actionDecls(it) }
         val allTransitions = progTransitions + libTransitions
         val actionOccurrences = allTransitions.groupBy { it.action.name }
         return actionOccurrences.entries.flatMap { (name, actions) ->

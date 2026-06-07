@@ -5,7 +5,6 @@ import julay.ast.ActionDecl
 import julay.ast.LibraryLoc
 import julay.program.ConcreteAction
 import julay.program.Program
-import julay.program.StaticInfo
 import julay.program.SymbolicAction
 import julay.program.TSAction
 import julay.program.TransitionSystem
@@ -22,7 +21,8 @@ import java.net.http.HttpResponse.BodyHandlers
 class JulHttpClient(
     private val sendBody : String
 ) : TransitionSystem {
-    companion object: StaticInfo {
+    companion object: JulLibrary {
+        override val julName = "HttpClient"
         val sendBodyArg = Variable("sendBody", stringType)
         val respBodyArg = Variable("respBody", stringType)
         val sendRequestAct = SymbolicAction("sendRequest", listOf(sendBodyArg))
@@ -36,9 +36,9 @@ class JulHttpClient(
             "JulHttpClient$",
             setOf(receiveResponseAct),
             mapOf(sendRequestCtor))
-        val actionDecls = listOf(
-            ActionDecl(sendRequestAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc("HttpClient")),
-            ActionDecl(receiveResponseAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc("HttpClient")),
+        override val actionDecls = listOf(
+            ActionDecl(sendRequestAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
+            ActionDecl(receiveResponseAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
         )
     }
 

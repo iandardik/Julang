@@ -16,7 +16,8 @@ import java.net.InetSocketAddress
 class JulHttpServer(
     private val actionTable : Map<SymbolicAction,ProgramAction>
 ) : TransitionSystem, HttpHandler {
-    companion object: StaticInfo {
+    companion object: JulLibrary {
+        override val julName = "HttpServer"
         val reqBodyArg = Variable("reqBody", stringType)
         val respBodyArg = Variable("respBody", stringType)
         val receiveRequestAct = SymbolicAction("receiveRequest", listOf(reqBodyArg))
@@ -29,10 +30,10 @@ class JulHttpServer(
             "JulHttpServer$",
             setOf(receiveRequestAct, sendResponseAct, closeAct),
             mapOf(initiallyCtor))
-        val actionDecls = listOf(
-            ActionDecl(receiveRequestAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc("HttpServer")),
-            ActionDecl(sendResponseAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc("HttpServer")),
-            ActionDecl(closeAct, listOf(), mapOf(), TSAction.SyncRole.P2PService, LibraryLoc("HttpServer")),
+        override val actionDecls = listOf(
+            ActionDecl(receiveRequestAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
+            ActionDecl(sendResponseAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
+            ActionDecl(closeAct, listOf(), mapOf(), TSAction.SyncRole.P2PService, LibraryLoc(julName)),
         )
     }
 

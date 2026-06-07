@@ -5,7 +5,6 @@ import julay.ast.ActionDecl
 import julay.ast.LibraryLoc
 import julay.program.ConcreteAction
 import julay.program.Program
-import julay.program.StaticInfo
 import julay.program.SymbolicAction
 import julay.program.TSAction
 import julay.program.TransitionSystem
@@ -16,7 +15,8 @@ import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.seconds
 
 class TimerTS : TransitionSystem {
-    companion object: StaticInfo {
+    companion object: JulLibrary {
+        override val julName = "Timer"
         val timeArg = Variable("time", intType)
         val timerAct = SymbolicAction("timer", listOf(timeArg))
         val timeoutAct = SymbolicAction("timeout", listOf())
@@ -26,9 +26,9 @@ class TimerTS : TransitionSystem {
             "TimerTS$",
             setOf(timerAct, timeoutAct),
             mapOf(initiallyCtor))
-        val actionDecls = listOf(
-            ActionDecl(timerAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc("Timer")),
-            ActionDecl(timeoutAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc("Timer")),
+        override val actionDecls = listOf(
+            ActionDecl(timerAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
+            ActionDecl(timeoutAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
         )
     }
 

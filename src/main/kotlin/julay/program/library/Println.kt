@@ -6,7 +6,8 @@ import julay.ast.LibraryLoc
 import julay.program.*
 
 class PrintlnTS : TransitionSystem {
-    companion object: StaticInfo {
+    companion object: JulLibrary {
+        override val julName = "Println"
         val msgArg = Variable("msg", stringType)
         val printlnAct = SymbolicAction("println", listOf(msgArg), SymbolicAction.SyncType.P2P)
         val initiallyCtor = Pair(SymbolicAction("initially", listOf()))  { _ : Program, _ : ConcreteAction -> PrintlnTS() }
@@ -15,8 +16,8 @@ class PrintlnTS : TransitionSystem {
             "PrintlnTS$",
             setOf(printlnAct),
             mapOf(initiallyCtor))
-        val actionDecls = listOf(
-            ActionDecl(printlnAct, listOf(), mapOf(), TSAction.SyncRole.P2PService, LibraryLoc("Println")),
+        override val actionDecls = listOf(
+            ActionDecl(printlnAct, listOf(), mapOf(), TSAction.SyncRole.P2PService, LibraryLoc(julName)),
         )
     }
 

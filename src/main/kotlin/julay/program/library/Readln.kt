@@ -7,7 +7,8 @@ import julay.program.*
 import julay.tools.mkStringConst
 
 class ReadlnTS : TransitionSystem {
-    companion object: StaticInfo {
+    companion object: JulLibrary {
+        override val julName = "Readln"
         val msgArg = Variable("msg", stringType)
         val promptAct = SymbolicAction("prompt", listOf(), SymbolicAction.SyncType.P2P)
         val readlnAct = SymbolicAction("readln", listOf(msgArg), SymbolicAction.SyncType.P2P)
@@ -17,9 +18,9 @@ class ReadlnTS : TransitionSystem {
             "ReadlnTS$",
             setOf(promptAct, readlnAct),
             mapOf(initiallyCtor))
-        val actionDecls = listOf(
-            ActionDecl(readlnAct, listOf(), mapOf(), TSAction.SyncRole.P2PService, LibraryLoc("Readln")),
-            ActionDecl(promptAct, listOf(), mapOf(), TSAction.SyncRole.P2PService, LibraryLoc("Readln")),
+        override val actionDecls = listOf(
+            ActionDecl(readlnAct, listOf(), mapOf(), TSAction.SyncRole.P2PService, LibraryLoc(julName)),
+            ActionDecl(promptAct, listOf(), mapOf(), TSAction.SyncRole.P2PService, LibraryLoc(julName)),
         )
     }
 
