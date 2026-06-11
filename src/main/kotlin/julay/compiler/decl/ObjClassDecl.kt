@@ -1,5 +1,6 @@
-package julay.ast
+package julay.compiler.decl
 
+import julay.compiler.*
 import julay.program.*
 
 /**
@@ -23,7 +24,7 @@ data class ObjClassDecl(
  * any order — including forward references to o-classes defined later in the file.
  *
  * We need both [RawObjClassDecl] and [ObjClassDecl] because resolution is a separate phase:
- * [RawObjClassDecl] is what [ObjClassNode.objClassPass] emits from the parse tree, while
+ * [RawObjClassDecl] is what [julay.compiler.pass.objClassPass] emits from the parse tree, while
  * [ObjClassDecl] is the output of [ObjClassRegistry.build] once every field type name has
  * been looked up, nested structs expanded, and errors (unknown types, cycles) collected.
  * Type checking and codegen consume [ObjClassDecl]; they must not run on raw string types.
@@ -118,9 +119,9 @@ private class ObjClassResolver(
  * The file-scoped registry of resolved o-class types.
  *
  * Built once per compilation unit from a list of [RawObjClassDecl] via [build]. The
- * registry is threaded through [typePass] so that [VarNode], [ArgNode], struct
+ * registry is threaded through [julay.compiler.pass.typePass] so that [VarNode], [ArgNode], struct
  * literals, and field accesses can resolve type names like `"Point"` to [ObjClassType].
- * It also exposes [ObjClassDecl] list for o-class type val codegen in [CodegenPass].
+ * It also exposes [ObjClassDecl] list for o-class type val codegen in [julay.compiler.pass.codegenPass].
  */
 class ObjClassRegistry(
     val types: Map<String, ObjClassType>,

@@ -1,6 +1,6 @@
 package julay.program.library
 
-import julay.ast.ActionDecl
+import julay.compiler.decl.ActionDecl
 import julay.program.StaticInfo
 
 interface JulLibrary : StaticInfo {

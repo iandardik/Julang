@@ -1,5 +1,6 @@
-package julay.ast
+package julay.compiler.ast
 
+import julay.compiler.SourceLoc
 import julay.parser.JulayParser
 import julay.parser.JulayParserBaseVisitor
 import julay.program.TSAction

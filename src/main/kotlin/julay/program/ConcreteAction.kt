@@ -2,7 +2,7 @@ package julay.program
 
 import com.microsoft.z3.Context
 import com.microsoft.z3.Model
-import julay.ast.ObjClassType
+import julay.compiler.ObjClassType
 import julay.tools.assert
 
 class ConcreteAction {

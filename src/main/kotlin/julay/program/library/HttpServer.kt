@@ -4,8 +4,8 @@ import com.microsoft.z3.Context
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpHandler
 import com.sun.net.httpserver.HttpServer
-import julay.ast.ActionDecl
-import julay.ast.LibraryLoc
+import julay.compiler.decl.ActionDecl
+import julay.compiler.LibraryLoc
 import julay.program.*
 import julay.tools.mkStringConst
 import kotlinx.coroutines.CoroutineScope

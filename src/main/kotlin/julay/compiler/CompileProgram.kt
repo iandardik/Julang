@@ -1,76 +1,10 @@
-package julay.cli
+package julay.compiler
 
-import com.github.ajalt.clikt.core.CliktCommand
-import com.github.ajalt.clikt.core.main
-import com.github.ajalt.clikt.parameters.arguments.argument
-import com.github.ajalt.clikt.parameters.options.flag
-import com.github.ajalt.clikt.parameters.options.option
-import com.github.ajalt.clikt.parameters.types.path
-import julay.ast.*
-import julay.parser.JulayLexer
-import julay.parser.JulayParser
-import org.antlr.v4.runtime.CharStreams
-import org.antlr.v4.runtime.CommonTokenStream
+import julay.compiler.ast.RootNode
+import julay.compiler.decl.ProcDecl
+import julay.compiler.pass.codegenPass
 import java.io.File
-import java.nio.file.Path
-import kotlin.io.path.pathString
 import kotlin.system.exitProcess
-
-class Julayc : CliktCommand(name = "julayc") {
-    private val keepBuild by option(
-        "--keep-build",
-        help = "Keep generated <program>-jul-build directories after a successful compile",
-    ).flag()
-
-    private val input by argument(
-        help = "Jul source file to compile",
-    ).path(mustExist = true, canBeFile = true)
-
-    override fun run() {
-        compileJulFile(input, keepBuild)
-    }
-}
-
-fun main(args : Array<String>) = Julayc().main(args)
-
-fun compileJulFile(source : Path, keepBuild : Boolean) {
-    val input = CharStreams.fromFileName(source.pathString)
-    val lexer = JulayLexer(input)
-    val tokens = CommonTokenStream(lexer)
-    val parser = JulayParser(tokens)
-    val root = parser.root()
-    if (parser.numberOfSyntaxErrors > 0) {
-        println("Found compile errors, exiting.")
-        return
-    }
-
-    val ast = ASTBuilder().visit(root) as RootNode
-    val procDecls = ast.procPass()
-    val programs = procDecls.filter { it.type == ProcDeclType.Program }
-
-    val typeErrors = ast.typePass()
-    if (typeErrors.isNotEmpty()) {
-        typeErrors.forEach { println(it) }
-        println("Found type errors; exiting.")
-        return
-    }
-
-    // check for errors on each program individually
-    programs.forEach { program ->
-        val components = program.allProcNames(procDecls)
-        val errors = ast.errorPass(components)
-        if (errors.isNotEmpty()) {
-            errors.forEach { println(it) }
-            println("Found errors while compiling the program \"${program.name}\"; exiting.")
-            return
-        }
-    }
-
-    val flatAst = ast.flattenObjClassPass(ast.resolvedObjClassRegistry())
-
-    // compile each program
-    programs.forEach { compileProgram(it, flatAst, procDecls, keepBuild) }
-}
 
 fun compileProgram(program : ProcDecl, ast : RootNode, procDecls : List<ProcDecl>, keepBuild : Boolean = false) {
     val buildDir = "${program.name}-jul-build"
@@ -107,7 +41,7 @@ fun compileProgram(program : ProcDecl, ast : RootNode, procDecls : List<ProcDecl
 }
 
 // thank you: https://www.baeldung.com/kotlin/delete-directories-with-contents
-fun deleteDirectory(directory: File) {
+private fun deleteDirectory(directory: File) {
     if (directory.exists() && directory.isDirectory) {
         directory.listFiles()?.forEach { file ->
             if (file.isDirectory) {
@@ -120,11 +54,11 @@ fun deleteDirectory(directory: File) {
     }
 }
 
-fun gradleSettingsFileContents(name : String) : String {
+private fun gradleSettingsFileContents(name : String) : String {
     return "rootProject.name = \"$name\""
 }
 
-fun gradleBuildFileContents(name : String, mainClassName : String) : String {
+private fun gradleBuildFileContents(name : String, mainClassName : String) : String {
     return "plugins {\n" +
             "    kotlin(\"jvm\") version \"2.1.0\"\n" +
             "    application\n" +

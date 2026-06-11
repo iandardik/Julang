@@ -1,5 +1,8 @@
-package julay.ast
+package julay.compiler.pass
 
+import julay.compiler.*
+import julay.compiler.ast.*
+import julay.compiler.decl.*
 import julay.program.*
 import julay.program.library.LibraryRegistry
 
@@ -33,7 +36,7 @@ fun codegenPass(
         "\n}"
 
     val imports = "import com.microsoft.z3.*\n" +
-        "import julay.ast.ObjClassType\n" +
+        "import julay.compiler.ObjClassType\n" +
         "import julay.program.*\n" +
         "import julay.program.library.*\n" +
         "import julay.tools.mkStringConst\n"

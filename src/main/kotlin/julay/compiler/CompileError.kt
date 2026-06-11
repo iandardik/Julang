@@ -1,4 +1,4 @@
-package julay.ast
+package julay.compiler
 
 interface CompileError {}
 

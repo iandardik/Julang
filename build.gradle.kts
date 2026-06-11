@@ -27,7 +27,7 @@ dependencies {
 }
 
 application {
-    mainClass.set("julay.cli.MainKt")
+    mainClass.set("julay.compiler.MainKt")
 }
 
 kotlin {

@@ -1,5 +1,10 @@
-package julay.ast
+package julay.compiler.ast
 
+import julay.compiler.decl.ActionDecl
+import julay.compiler.ObjClassType
+import julay.compiler.ProgramLoc
+import julay.compiler.*
+import julay.compiler.pass.TypePassType
 import julay.program.*
 import julay.program.TSAction
 

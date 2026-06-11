@@ -1,4 +1,8 @@
-package julay.ast
+package julay.compiler.pass
+
+import julay.compiler.*
+import julay.compiler.ast.*
+import julay.compiler.decl.*
 
 fun ASTNode.procPass(): List<ProcDecl> = when (this) {
     is ProcNode -> listOf(ProcDecl(procNodeName(), procNodeValue().procPass(), ProcDeclType.Proc))

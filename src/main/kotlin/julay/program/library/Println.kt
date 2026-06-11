@@ -1,8 +1,8 @@
 package julay.program.library
 
 import com.microsoft.z3.Context
-import julay.ast.ActionDecl
-import julay.ast.LibraryLoc
+import julay.compiler.decl.ActionDecl
+import julay.compiler.LibraryLoc
 import julay.program.*
 
 class PrintlnTS : TransitionSystem {

@@ -1,7 +1,7 @@
-// ObjClassType lives in julay.ast (not julay.program) because o-class types are used only
+// ObjClassType lives in julay.compiler (not julay.program) because o-class types are used only
 // for static type checking and codegen. At runtime, state and action values are desugared to
 // primitive types; julay.program is reserved for runtime support code.
-package julay.ast
+package julay.compiler
 
 import com.microsoft.z3.Context
 import com.microsoft.z3.Expr

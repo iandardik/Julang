@@ -1,5 +1,8 @@
-package julay.ast
+package julay.compiler.pass
 
+import julay.compiler.*
+import julay.compiler.ast.*
+import julay.compiler.decl.*
 import julay.program.*
 import julay.program.library.LibraryRegistry
 

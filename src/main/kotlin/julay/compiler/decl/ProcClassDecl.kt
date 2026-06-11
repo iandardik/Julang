@@ -1,5 +1,7 @@
-package julay.ast
+package julay.compiler.decl
 
+import julay.compiler.ProgramLoc
+import julay.compiler.ast.ExprNode
 import julay.program.*
 
 data class ProcClassDecl(

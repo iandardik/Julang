@@ -1,4 +1,8 @@
-package julay.ast
+package julay.compiler.pass
+
+import julay.compiler.*
+import julay.compiler.ast.*
+import julay.compiler.decl.*
 
 fun ASTNode.objClassPass(): List<RawObjClassDecl> = when (this) {
     is ObjClassNode -> listOf(
