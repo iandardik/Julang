@@ -1,0 +1,6 @@
+source: regression/input/oclass/field-access.jul
+programs:
+  - name: FieldAccessTest
+    run:
+      background: true
+      durationMs: 500

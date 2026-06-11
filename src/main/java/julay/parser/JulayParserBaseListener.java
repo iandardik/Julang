@@ -53,6 +53,18 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
+	@Override public void enterOclass(JulayParser.OclassContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitOclass(JulayParser.OclassContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
 	@Override public void enterProc(JulayParser.ProcContext ctx) { }
 	/**
 	 * {@inheritDoc}
@@ -96,6 +108,18 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 * <p>The default implementation does nothing.</p>
 	 */
 	@Override public void exitPclass_body(JulayParser.Pclass_bodyContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void enterField(JulayParser.FieldContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitField(JulayParser.FieldContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
@@ -252,6 +276,42 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 * <p>The default implementation does nothing.</p>
 	 */
 	@Override public void exitValue(JulayParser.ValueContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void enterStruct_literal(JulayParser.Struct_literalContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitStruct_literal(JulayParser.Struct_literalContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void enterStruct_field_assign(JulayParser.Struct_field_assignContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitStruct_field_assign(JulayParser.Struct_field_assignContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void enterField_access(JulayParser.Field_accessContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitField_access(JulayParser.Field_accessContext ctx) { }
 
 	/**
 	 * {@inheritDoc}

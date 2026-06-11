@@ -49,8 +49,10 @@ fun main(args : Array<String>) {
         }
     }
 
+    val flatAst = ast.flattenObjClassPass(ast.resolvedObjClassRegistry())
+
     // compile each program
-    programs.forEach { compileProgram(it, ast, it.name) }
+    programs.forEach { compileProgram(it, flatAst, it.name) }
 }
 
 fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
@@ -59,6 +61,11 @@ fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
         println("Could not create $buildDir dir")
         exitProcess(1)
     }
+
+    // Each program gets its own generated source file; remove stale ones so Gradle
+    // does not compile multiple programs' p-classes into the same module.
+    File(buildDir).listFiles()?.filter { it.isFile && it.extension == "kt" }?.forEach { it.delete() }
+    deleteDirectory(File("$buildDir/build"))
 
     val libPClassNames = LibraryRegistry.julNames
 
@@ -84,10 +91,15 @@ fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
             "\n}"
 
     val imports = "import com.microsoft.z3.*\n" +
+            "import julay.ast.ObjClassType\n" +
             "import julay.program.*\n" +
             "import julay.program.library.*\n" +
             "import julay.tools.mkStringConst\n"
+    val objClassDecls = ast.resolvedObjClassDecls()
+    val objClassCode = objClassDecls.joinToString("\n\n") { it.toKotlinTypeValString() }
+    val objClassSection = if (objClassCode.isEmpty()) "" else "$objClassCode\n\n"
     val programText = "$imports\n" +
+            objClassSection +
             procClasses.joinToString("\n\n") { it.toKotlinClassString() } +
             "\n\n" +
             mainFunction
@@ -103,7 +115,13 @@ fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
     File("$buildDir/settings.gradle.kts").writeText(gradleSettingsFileContents(progName))
     Runtime.getRuntime().exec(arrayOf("bash", "-c", "cd $buildDir; gradle wrapper --gradle-version 8.5")).waitFor()
     File("$buildDir/build.gradle.kts").writeText(gradleBuildFileContents(progName, mainClassName))
-    Runtime.getRuntime().exec(arrayOf("bash", "-c", "cd $buildDir; ./gradlew shadowJar")).waitFor()
+    val gradleProc = Runtime.getRuntime().exec(arrayOf("bash", "-c", "cd $buildDir; ./gradlew shadowJar 2>&1"))
+    val gradleOutput = gradleProc.inputStream.bufferedReader().readText()
+    val gradleExit = gradleProc.waitFor()
+    if (gradleExit != 0) {
+        println("Gradle build failed for program \"$progName\" (exit $gradleExit):\n$gradleOutput")
+        return
+    }
     deleteDirectory(File(buildDir))
 }
 
@@ -151,7 +169,10 @@ fun gradleBuildFileContents(name : String, mainClassName : String) : String {
             "\n" +
             "sourceSets {\n" +
             "    main {\n" +
-            "        kotlin.srcDirs(\".\")\n" +
+            "        kotlin {\n" +
+            "            srcDir(\".\")\n" +
+            "            include(\"${mainClassName}.kt\")\n" +
+            "        }\n" +
             "    }\n" +
             "}\n" +
             "\n" +

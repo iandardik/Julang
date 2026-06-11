@@ -1,0 +1,15 @@
+o-class Point {
+    x : Int
+    y : Int
+}
+
+p-class Bad {
+    var pos : Point
+
+    constructor init() {
+        transit:
+            pos := Point { x := 0 }
+    }
+}
+
+program BadTest := Bad

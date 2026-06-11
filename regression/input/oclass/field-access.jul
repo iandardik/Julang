@@ -1,0 +1,29 @@
+o-class Point {
+    x : Int
+    y : Int
+}
+
+p-class Worker {
+    var pos : Point
+
+    constructor init(p : Point) {
+        transit:
+            pos := p
+    }
+
+    transition move(newPos : Point) {
+        guard:
+            pos.x = newPos.x & pos.y = newPos.y
+        transit:
+            pos := newPos
+    }
+
+    transition reportX(expected : Int) {
+        guard:
+            pos.x = expected
+        transit:
+            pos := pos
+    }
+}
+
+program FieldAccessTest := Worker

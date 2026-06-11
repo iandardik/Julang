@@ -11,7 +11,9 @@ data class ProcClassDecl(
 
     fun toKotlinClassString(): String {
         val stateVarTypes = stateVars.associate { Pair(it.name,it.type) }
-        val stateVarsStr = stateVars.joinToString(",\n") { "private var $it" }
+        val stateVarsStr = stateVars.joinToString(",\n") {
+            "private var ${it.name.toKotlinIdent()}: ${it.type.toKotlinTypeString()}"
+        }
         val actionsStr = "override suspend fun actions(): Set<TSAction> = setOf(\n" +
                 transitions.joinToString(",\n") { it.toActionString(stateVarTypes).prependIndent() } +
                 "\n)"
@@ -38,14 +40,13 @@ data class ProcClassDecl(
         val constructorPairs = constructors
             .joinToString(",\n") { ctor ->
                 val actSigStr = ctor.toStaticInfoString()
+                val argSymbols = flattenedArgSymbols(ctor.action.args)
+                val stateVarTypes = stateVars.associate { Pair(it.name, it.type) }
+                val symbolTypes = stateVarTypes + flattenActionArgEnv(ctor.action.args)
                 val constructorArgs = ctor.transits.entries
-                    .map { (k,v) ->
-                        val argTypes = ctor.action.args.associate { Pair(it.name,it.type) }
-                        val argSymbols = ctor.action.args.map { it.name }.toSet()
-                        val value = v.toTransitString(argTypes, argSymbols)
-                        "$k = $value" // use named args so the ordering doesn't matter
+                    .joinToString(", ") { (k, v) ->
+                        "${k.toKotlinIdent()} = ${v.toTransitString(symbolTypes, argSymbols)}"
                     }
-                    .joinToString(", ") { it }
                 val constructor = "$name($constructorArgs)"
                 val constructStr = "{ _,act -> $constructor }"
                 "Pair($actSigStr, $constructStr)".prependIndent()
@@ -69,18 +70,11 @@ data class ActionDecl(
     val loc: ProgramLoc
 ) {
     fun toActionString(stateVarTypes : Map<String,Type>) : String {
-        val argTypes = action.args.associate { Pair(it.name,it.type) }
-        val symbolTypes = stateVarTypes + argTypes // action args are more tightly scoped than state vars
-        val argSymbols = action.args.map { it.name }.toSet()
+        val symbolTypes = stateVarTypes + flattenActionArgEnv(action.args)
+        val argSymbols = flattenedArgSymbols(action.args)
 
         val actionArgsStr = action.args.joinToString(", ") {
-            val typeStr = when (it.type) {
-                boolType -> "boolType"
-                intType -> "intType"
-                stringType -> "stringType"
-                else -> throw RuntimeException("Invalid type: ${it.type}")
-            }
-            "Variable(\"${it.name}\", $typeStr)"
+            "Variable(\"${it.name}\", ${it.type.toCodegenTypeVal()})"
         }
         val syncTypeStr = when (action.syncType) {
             SymbolicAction.SyncType.CSP -> "SymbolicAction.SyncType.CSP"
@@ -107,21 +101,16 @@ data class ActionDecl(
     }
 
     fun toTransitString(stateVarTypes : Map<String,Type>) : String {
-        val argTypes = action.args.associate { Pair(it.name,it.type) }
-        val symbolTypes = stateVarTypes + argTypes // action args are more tightly scoped than state vars
-        val argSymbols = action.args.map { it.name }.toSet()
-        return transits.map { (v,e) -> "$v = ${e.toTransitString(symbolTypes,argSymbols)}" }.joinToString("\n")
+        val symbolTypes = stateVarTypes + flattenActionArgEnv(action.args)
+        val argSymbols = flattenedArgSymbols(action.args)
+        return transits.map { (v, e) ->
+            "${v.toKotlinIdent()} = ${e.toTransitString(symbolTypes, argSymbols)}"
+        }.joinToString("\n")
     }
 
     fun toStaticInfoString(): String {
         val actionArgsStr = action.args.joinToString(", ") {
-            val typeStr = when (it.type) {
-                boolType -> "boolType"
-                intType -> "intType"
-                stringType -> "stringType"
-                else -> throw RuntimeException("Invalid type: ${it.type}")
-            }
-            "Variable(\"${it.name}\", $typeStr)"
+            "Variable(\"${it.name}\", ${it.type.toCodegenTypeVal()})"
         }
         val syncTypeStr = when (action.syncType) {
             SymbolicAction.SyncType.CSP -> "SymbolicAction.SyncType.CSP"

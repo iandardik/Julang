@@ -7,6 +7,7 @@ root
 
 decl
     : pclass
+    | oclass
     | proc
     | program
     | spec
@@ -14,6 +15,10 @@ decl
 
 pclass
     : PCLASS ID LCURLY pclass_body* RCURLY
+    ;
+
+oclass
+    : OCLASS ID LCURLY field* RCURLY
     ;
 
 proc
@@ -32,6 +37,10 @@ pclass_body
     : var
     | constructor
     | transition
+    ;
+
+field
+    : ID COLON ID
     ;
 
 var
@@ -73,7 +82,7 @@ error
     ;
 
 var_transit
-    : ID ASGN_EQ expr
+    : field_access ASGN_EQ expr
     ;
 
 // order according to the Java rules: https://introcs.cs.princeton.edu/java/11precedence/
@@ -107,9 +116,22 @@ proc_expr
     ;
 
 value
-    : ID
+    : struct_literal
+    | field_access
     | INT
     | TRUE
     | FALSE
     | STRING
+    ;
+
+struct_literal
+    : ID LCURLY struct_field_assign (COMMA struct_field_assign)* RCURLY
+    ;
+
+struct_field_assign
+    : ID ASGN_EQ expr
+    ;
+
+field_access
+    : ID (DOT ID)*
     ;

@@ -18,7 +18,7 @@ p-class Counter {
     }
 }
 
-/* prints the current value of the counter every 2 seconds
+/* prints the current value of the counter every 5 seconds
 */
 p-class PeriodicPrint {
     var localCounter : Int

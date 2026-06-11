@@ -1,0 +1,32 @@
+o-class Point {
+    x : Int
+    y : Int
+}
+
+o-class Line {
+    start : Point
+    end : Point
+}
+
+p-class Worker {
+    var pos : Point
+    var segment : Line
+
+    constructor initially() {
+        transit:
+            pos := Point { x := 0, y := 0 }
+            segment := Line {
+                start := Point { x := 1, y := 2 },
+                end := Point { x := 3, y := 4 }
+            }
+    }
+
+    transition reset() {
+        guard:
+            pos = Point { x := 0, y := 0 }
+        transit:
+            pos := Point { x := 0, y := 0 }
+    }
+}
+
+program ObjClassLiteralTest := Worker

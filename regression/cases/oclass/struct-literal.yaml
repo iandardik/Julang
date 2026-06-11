@@ -1,0 +1,6 @@
+source: regression/input/oclass/struct-literal.jul
+programs:
+  - name: ObjClassLiteralTest
+    run:
+      background: true
+      durationMs: 500

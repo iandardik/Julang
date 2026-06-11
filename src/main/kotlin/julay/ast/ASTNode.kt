@@ -11,7 +11,9 @@ abstract class ASTNode(
     open fun procPass() : List<ProcDecl> = children.flatMap { it.procPass() }
     open fun errorPass(procs : Set<String>) : List<CompileError> = children.flatMap { it.errorPass(procs) }
     open fun procClassPass(procs : Set<String>) : List<ProcClassDecl> = children.flatMap { it.procClassPass(procs) }
-    open fun typePass(symbolEnv : Map<String, Type> = emptyMap()) : List<CompileError> = children.flatMap { it.typePass(symbolEnv) }
+    open fun objClassPass() : List<RawObjClassDecl> = children.flatMap { it.objClassPass() }
+    open fun typePass(symbolEnv : Map<String, Type> = emptyMap(), registry : ObjClassRegistry = ObjClassRegistry.EMPTY) : List<CompileError> =
+        children.flatMap { it.typePass(symbolEnv, registry) }
 }
 
 abstract class DeclNode(children : List<ASTNode>) : ASTNode(children) {
@@ -53,9 +55,8 @@ sealed interface TypePassType {
 
 abstract class ExprNode(children : List<ASTNode>) : ASTNode(children) {
     private var myType : TypePassType = TypePassType.Uninferred
-    override fun typePass(symbolEnv : Map<String, Type>) : List<CompileError> {
-        // use a preorder traversal to infer the types of the children first
-        val childrenErrors = children.flatMap { it.typePass(symbolEnv) }
+    override fun typePass(symbolEnv : Map<String, Type>, registry: ObjClassRegistry) : List<CompileError> {
+        val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry) }
         myType = TypePassType.Inferred(inferType(symbolEnv))
         return childrenErrors
     }
@@ -118,6 +119,19 @@ class RootNode(
                     "Expected each declaration to have a unique name, but found at least two named \"${decl.name()}\"") }
         }
     }
+    override fun typePass(symbolEnv: Map<String, Type>, registry: ObjClassRegistry): List<CompileError> {
+        val built = ObjClassRegistry.build(declNodes.flatMap { it.objClassPass() })
+        return built.errors + declNodes.flatMap { it.typePass(symbolEnv, built) }
+    }
+
+    fun resolvedObjClassDecls(): List<ObjClassDecl> = resolvedObjClassRegistry().decls
+
+    fun resolvedObjClassRegistry(): ObjClassRegistry = ObjClassRegistry.build(declNodes.flatMap { it.objClassPass() })
+
+    fun withDeclNodes(decls: List<DeclNode>): RootNode = RootNode(decls, programLocation())
+
+    fun flattenObjClassPass(registry: ObjClassRegistry): RootNode = flattenObjClassPass(this, registry)
+
     override fun toString(): String {
         return declNodes.joinToString("\n\n") { it.toString() }
     }
@@ -140,6 +154,11 @@ class ProcClassNode(
         val decl = ProcClassDecl(name, stateVars, constructors, transitions)
         return listOf(decl)
     }
+
+    internal fun localDecls(): List<ProcClassDeclNode> = localDecls
+
+    internal fun withLocalDecls(decls: List<ProcClassDeclNode>): ProcClassNode =
+        ProcClassNode(name, decls, programLocation())
 
     override fun errorPass(procs: Set<String>): List<CompileError> {
         // no repeat state var names
@@ -186,12 +205,16 @@ class ProcClassNode(
         return super.errorPass(procs) + repeatStateVarNameErrors + ctorsCompleteAssgnErrors +
                 atLeastOneConstructorErrors + ctorTransActionNotMutexErrors
     }
-    override fun typePass(symbolEnv : Map<String, Type>) : List<CompileError> {
-        // populate the symbolEnv for each of the children
+    override fun typePass(symbolEnv : Map<String, Type>, registry: ObjClassRegistry) : List<CompileError> {
+        val varErrors = localDecls
+            .filterIsInstance<VarNode>()
+            .flatMap { it.typePass(symbolEnv, registry) }
         val localSymbolEnv = localDecls
-            .flatMap { it.stateVariables() }
+            .filterIsInstance<VarNode>()
             .associate { it.name to it.type }
-        return localDecls.flatMap { it.typePass(localSymbolEnv) }
+        return varErrors + localDecls.flatMap { decl ->
+            if (decl is VarNode) emptyList() else decl.typePass(localSymbolEnv, registry)
+        }
     }
     override fun toString(): String {
         val body = localDecls.joinToString("\n") { "$it".prependIndent() }
@@ -244,15 +267,95 @@ class SpecNode(
     }
 }
 
+class ObjClassNode(
+    private val name: String,
+    val fields: List<FieldNode>,
+    private val loc: ProgramLoc,
+) : DeclNode(fields) {
+    override fun programLocation() = loc
+    override fun name() = name
+    override fun objClassPass(): List<RawObjClassDecl> = listOf(
+        RawObjClassDecl(name, fields.map { it.fieldName to it.typeName }, loc)
+    )
+    override fun errorPass(procs: Set<String>): List<CompileError> {
+        val repeatFieldErrors = fields
+            .groupBy { it.fieldName }
+            .flatMap { (_, nodes) ->
+                if (nodes.size == 1) emptyList()
+                else listOf(
+                    TwoLocsCompileError(
+                        nodes[0].programLocation(),
+                        nodes[1].programLocation(),
+                        "Expected o-class fields to have unique names",
+                    )
+                )
+            }
+        return super.errorPass(procs) + repeatFieldErrors
+    }
+    override fun toString(): String {
+        val body = fields.joinToString("\n") { "$it".prependIndent() }
+        return "o-class $name {\n$body\n}"
+    }
+}
+
+class FieldNode(
+    val fieldName: String,
+    val typeName: String,
+    private val loc: ProgramLoc,
+) : ASTNode(listOf()) {
+    override fun programLocation() = loc
+    override fun toString(): String = "$fieldName : $typeName"
+}
+
+private sealed interface TypeNameResolution {
+    data object Unresolved : TypeNameResolution
+    data class Resolved(val type: Type) : TypeNameResolution
+}
+
 class VarNode(
     val name : String,
-    val type : Type,
+    val typeName : String,
     private val loc : ProgramLoc
 ) : ProcClassDeclNode(listOf()) {
+    private var typeResolution : TypeNameResolution = TypeNameResolution.Unresolved
+    val type : Type
+        get() = when (val resolution = typeResolution) {
+            is TypeNameResolution.Resolved -> resolution.type
+            is TypeNameResolution.Unresolved ->
+                throw RuntimeException("Type not resolved for state variable \"$name\"")
+        }
     override fun programLocation() = loc
+    override fun typePass(symbolEnv: Map<String, Type>, registry: ObjClassRegistry): List<CompileError> {
+        return when (val result = registry.resolveTypeName(typeName)) {
+            is TypeResolveResult.Found -> {
+                typeResolution = TypeNameResolution.Resolved(result.type)
+                emptyList()
+            }
+            is TypeResolveResult.NotFound ->
+                listOf(OneLocCompileError(loc, "Unknown type \"$typeName\" for state variable \"$name\""))
+        }
+    }
     override fun stateVariables(): List<Variable> = listOf(Variable(name, type))
+    companion object {
+        fun primitive(name: String, type: Type, loc: ProgramLoc): VarNode {
+            val node = VarNode(name, primitiveTypeName(type), loc)
+            node.typeResolution = TypeNameResolution.Resolved(type)
+            return node
+        }
+
+        private fun primitiveTypeName(type: Type): String = when (type) {
+            is BoolType -> "Boolean"
+            is IntType -> "Int"
+            is StringType -> "String"
+            else -> throw RuntimeException("Cannot create flattened VarNode for type $type")
+        }
+    }
     override fun toString(): String {
-        return "$name : $type"
+        val displayType = when (val resolution = typeResolution) {
+            is TypeNameResolution.Resolved -> resolution.type
+            is TypeNameResolution.Unresolved -> typeName
+        }
+        return "$name : $displayType"
     }
 }
 
@@ -281,10 +384,10 @@ class ConstructorNode(
             OneLocCompileError(loc, "Expected constructors not to have guards"))
         return super.errorPass(procs) + multiVarTransitError + noGuardErrors
     }
-    override fun typePass(symbolEnv : Map<String, Type>) : List<CompileError> {
-        // add the arg types into the symbolEnv
-        val actionEnv = symbolEnv + args.argsTypeMap()
-        return args.typePass(symbolEnv) + body.flatMap { it.typePass(actionEnv) }
+    override fun typePass(symbolEnv : Map<String, Type>, registry: ObjClassRegistry) : List<CompileError> {
+        val argErrors = args.typePass(symbolEnv, registry)
+        val actionEnv = symbolEnv + args.argsTypeMap() + flattenActionArgEnv(args.actionArgs())
+        return argErrors + body.flatMap { it.typePass(actionEnv, registry) }
     }
     override fun constructors(): List<ActionDecl> {
         return listOf(
@@ -297,6 +400,10 @@ class ConstructorNode(
             )
         )
     }
+    internal fun body(): List<ActionBodyNode> = body
+    internal fun actionArgs(): List<Variable> = args.actionArgs()
+    internal fun withBody(newBody: List<ActionBodyNode>): ConstructorNode =
+        ConstructorNode(name, args, newBody, programLocation())
     override fun toString(): String {
         val bodyStr = body.joinToString("\n") { "$it".prependIndent() }
         return "constructor $name($args) {\n$bodyStr\n}"
@@ -329,10 +436,10 @@ class TransitionNode(
             }
         return super.errorPass(procs) + initiallyActionErrors + multiVarTransitError
     }
-    override fun typePass(symbolEnv : Map<String, Type>) : List<CompileError> {
-        // add the arg types into the symbolEnv
-        val actionEnv = symbolEnv + args.argsTypeMap()
-        return args.typePass(symbolEnv) + body.flatMap { it.typePass(actionEnv) }
+    override fun typePass(symbolEnv : Map<String, Type>, registry: ObjClassRegistry) : List<CompileError> {
+        val argErrors = args.typePass(symbolEnv, registry)
+        val actionEnv = symbolEnv + args.argsTypeMap() + flattenActionArgEnv(args.actionArgs())
+        return argErrors + body.flatMap { it.typePass(actionEnv, registry) }
     }
     override fun transitions(): List<ActionDecl> {
         val syncType = when (modifier) {
@@ -350,6 +457,10 @@ class TransitionNode(
             )
         )
     }
+    internal fun body(): List<ActionBodyNode> = body
+    internal fun actionArgs(): List<Variable> = args.actionArgs()
+    internal fun withBody(newBody: List<ActionBodyNode>): TransitionNode =
+        TransitionNode(modifier, name, args, newBody, programLocation())
     override fun toString(): String {
         val modifierStr = when (modifier) {
             TSAction.SyncRole.CSP -> ""
@@ -363,15 +474,36 @@ class TransitionNode(
 
 class ArgNode(
     private val name : String,
-    private val type : Type,
+    private val typeName : String,
     private val loc : ProgramLoc
 ) : ArgsNode(listOf(), loc) {
+    private var typeResolution : TypeNameResolution = TypeNameResolution.Unresolved
+    val type : Type
+        get() = when (val resolution = typeResolution) {
+            is TypeNameResolution.Resolved -> resolution.type
+            is TypeNameResolution.Unresolved ->
+                throw RuntimeException("Type not resolved for action argument \"$name\"")
+        }
     override fun programLocation() = loc
+    override fun typePass(symbolEnv: Map<String, Type>, registry: ObjClassRegistry): List<CompileError> {
+        return when (val result = registry.resolveTypeName(typeName)) {
+            is TypeResolveResult.Found -> {
+                typeResolution = TypeNameResolution.Resolved(result.type)
+                emptyList()
+            }
+            is TypeResolveResult.NotFound ->
+                listOf(OneLocCompileError(loc, "Unknown type \"$typeName\" for action argument \"$name\""))
+        }
+    }
     override fun actionArgs(): List<Variable> {
-        return listOf(Variable(name,type))
+        return listOf(Variable(name, type))
     }
     override fun toString(): String {
-        return "$name : $type"
+        val displayType = when (val resolution = typeResolution) {
+            is TypeNameResolution.Resolved -> resolution.type
+            is TypeNameResolution.Unresolved -> typeName
+        }
+        return "$name : $displayType"
     }
 }
 
@@ -380,8 +512,8 @@ class GuardNode(
     private val loc : ProgramLoc
 ) : ActionBodyNode(listOf(), listOf(expr)) {
     override fun programLocation() = loc
-    override fun typePass(symbolEnv : Map<String, Type>) : List<CompileError> {
-        val childrenErrors = super.typePass(symbolEnv)
+    override fun typePass(symbolEnv : Map<String, Type>, registry: ObjClassRegistry) : List<CompileError> {
+        val childrenErrors = super.typePass(symbolEnv, registry)
         val guardTypeErrors = assertOrCompileError(
             expr.getType() is BoolType,
             OneLocCompileError(loc, "Expected guards to be Boolean-valued expressions")
@@ -402,6 +534,7 @@ class TransitNode(
     private val loc : ProgramLoc
 ) : ActionBodyNode(transits, listOf()) {
     override fun programLocation() = loc
+    internal fun transitBodies(): List<ActionBodyNode> = transits
     override fun toString(): String {
         return "transit:\n${transits.joinToString("\n") { "$it".prependIndent() }}"
     }
@@ -420,23 +553,31 @@ class ErrorNode(
 
 class VarTransitNode(
     val varName : String,
+    val fieldPath : List<String> = emptyList(),
     val expr : ExprNode,
     private val loc : ProgramLoc
 ) : ActionBodyNode(listOf(), listOf(expr)) {
     override fun programLocation() = loc
-    override fun transitVars() = listOf(Pair(varName,loc))
+
+    private fun transitKey(): String =
+        if (fieldPath.isEmpty()) varName else "$varName.${fieldPath.joinToString(".")}"
+
+    override fun transitVars() = listOf(Pair(transitKey(), loc))
         override fun transits(): Map<String, ExprNode> {
-        return mapOf(Pair(varName,expr))
+        return mapOf(Pair(transitKey(), expr))
     }
-    override fun typePass(symbolEnv : Map<String, Type>) : List<CompileError> {
-        val childrenErrors = super.typePass(symbolEnv)
+    override fun typePass(symbolEnv : Map<String, Type>, registry: ObjClassRegistry) : List<CompileError> {
+        val childrenErrors = super.typePass(symbolEnv, registry)
+        if (childrenErrors.isNotEmpty()) {
+            return childrenErrors
+        }
         val varType = symbolEnv[varName]
         val varErrors = if (varType == null) {
             assertOrCompileError(
                 false,
                 OneLocCompileError(loc, "Unknown variable \"$varName\" in transit assignment"),
             )
-        } else {
+        } else if (fieldPath.isEmpty()) {
             assertOrCompileError(
                 expr.getType() == varType,
                 OneLocCompileError(
@@ -444,11 +585,34 @@ class VarTransitNode(
                     "Expected assignment to \"$varName\" ($varType) but got expression of type ${expr.getType()}",
                 ),
             )
+        } else {
+            when (val result = resolveFieldPath(varType, fieldPath)) {
+                is FieldPathResult.Error -> listOf(OneLocCompileError(loc, result.message))
+                is FieldPathResult.Resolved -> {
+                    if (result.type is ObjClassType) {
+                        assertOrCompileError(
+                            false,
+                            OneLocCompileError(
+                                loc,
+                                "Cannot assign a scalar to o-class field \"${transitKey()}\"; assign the whole value instead",
+                            ),
+                        )
+                    } else {
+                        assertOrCompileError(
+                            expr.getType() == result.type,
+                            OneLocCompileError(
+                                loc,
+                                "Expected assignment to \"${transitKey()}\" (${result.type}) but got expression of type ${expr.getType()}",
+                            ),
+                        )
+                    }
+                }
+            }
         }
         return childrenErrors + varErrors
     }
     override fun toString(): String {
-        return "$varName := $expr"
+        return "${transitKey()} := $expr"
     }
 }
 
@@ -458,6 +622,8 @@ class UnaryOpExprNode(
     private val loc : ProgramLoc
 ) : ExprNode(listOf(operand)) {
     override fun programLocation() = loc
+    internal fun op(): String = op
+    internal fun operand(): ExprNode = operand
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         julay.tools.assert(!forceString, "Cannot force a unary boolean operator to a string")
         return when (op) {
@@ -487,6 +653,9 @@ class BinaryOpExprNode(
     private val loc : ProgramLoc
 ) : ExprNode(listOf(lhsOperand,rhsOperand)) {
     override fun programLocation() = loc
+    internal fun op(): String = op
+    internal fun lhsOperand(): ExprNode = lhsOperand
+    internal fun rhsOperand(): ExprNode = rhsOperand
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         val lhsType = lhsOperand.getType()
         val rhsType = rhsOperand.getType()
@@ -494,12 +663,10 @@ class BinaryOpExprNode(
         julay.tools.assert(!forceString || isStringConcat, "Cannot force a binary boolean operator to a string")
 
         val forceStringOperands = forceString || isStringConcat
-        val lhsGuardStr = lhsOperand.toZ3GuardString(symbolTypes,argSymbols, forceStringOperands)
-        val rhsGuardStr = rhsOperand.toZ3GuardString(symbolTypes,argSymbols, forceStringOperands)
+        val lhsGuardStr = lhsOperand.toZ3GuardString(symbolTypes, argSymbols, forceStringOperands)
+        val rhsGuardStr = rhsOperand.toZ3GuardString(symbolTypes, argSymbols, forceStringOperands)
 
         return when (op) {
-            "=" -> "ctx.mkEq($lhsGuardStr,$rhsGuardStr)"
-            "#" -> "ctx.mkNot(ctx.mkEq($lhsGuardStr,$rhsGuardStr))"
             "*" -> "ctx.mkMul($lhsGuardStr,$rhsGuardStr)"
             "/" -> "ctx.mkDiv($lhsGuardStr,$rhsGuardStr)"
             "%" -> "ctx.mkMod($lhsGuardStr,$rhsGuardStr)"
@@ -507,6 +674,8 @@ class BinaryOpExprNode(
             "<=" -> "ctx.mkLe($lhsGuardStr,$rhsGuardStr)"
             ">" -> "ctx.mkGt($lhsGuardStr,$rhsGuardStr)"
             ">=" -> "ctx.mkGe($lhsGuardStr,$rhsGuardStr)"
+            "=" -> "ctx.mkEq($lhsGuardStr,$rhsGuardStr)"
+            "#" -> "ctx.mkNot(ctx.mkEq($lhsGuardStr,$rhsGuardStr))"
             "&" -> "ctx.mkAnd($lhsGuardStr,$rhsGuardStr)"
             "|" -> "ctx.mkOr($lhsGuardStr,$rhsGuardStr)"
             "=>" -> "ctx.mkImplies($lhsGuardStr,$rhsGuardStr)"
@@ -533,6 +702,26 @@ class BinaryOpExprNode(
             "=>" -> "(!($lhs) || $rhs)"
             else -> "($lhs $op $rhs)"
         }
+    }
+    override fun typePass(symbolEnv: Map<String, Type>, registry: ObjClassRegistry): List<CompileError> {
+        val childErrors = super.typePass(symbolEnv, registry)
+        if (childErrors.isNotEmpty()) {
+            return childErrors
+        }
+        val lhsType = lhsOperand.getType()
+        val rhsType = rhsOperand.getType()
+        val structOpErrors = if (lhsType is ObjClassType || rhsType is ObjClassType) {
+            when (op) {
+                "=", "#" -> assertOrCompileError(
+                    lhsType == rhsType,
+                    OneLocCompileError(loc, "Expected both sides of \"$op\" to have the same o-class type, got $lhsType and $rhsType"),
+                )
+                else -> listOf(OneLocCompileError(loc, "Cannot apply \"$op\" to o-class type $lhsType"))
+            }
+        } else {
+            emptyList()
+        }
+        return childErrors + structOpErrors
     }
     override fun inferType(symbolEnv: Map<String, Type>): Type {
         return when (op) {
@@ -576,8 +765,11 @@ class IfElseExprNode(
     private val loc : ProgramLoc
 ) : ExprNode(listOf(condExpr,thenExpr,elseExpr)) {
     override fun programLocation() = loc
-    override fun typePass(symbolEnv : Map<String, Type>) : List<CompileError> =
-        super.typePass(symbolEnv) + ifElseTypeErrors()
+    internal fun condExpr(): ExprNode = condExpr
+    internal fun thenExpr(): ExprNode = thenExpr
+    internal fun elseExpr(): ExprNode = elseExpr
+    override fun typePass(symbolEnv : Map<String, Type>, registry: ObjClassRegistry) : List<CompileError> =
+        super.typePass(symbolEnv, registry) + ifElseTypeErrors()
     private fun ifElseTypeErrors() : List<CompileError> {
         val errors = mutableListOf<CompileError>()
         if (condExpr.getType() !is BoolType) {
@@ -619,6 +811,113 @@ class IfElseExprNode(
     }
 }
 
+class ObjClassLiteralExprNode(
+    val className: String,
+    val fieldEntries: List<Pair<String, ExprNode>>,
+    private val loc: ProgramLoc,
+) : ExprNode(fieldEntries.map { it.second }) {
+    private sealed interface ObjClassLiteralResolution {
+        data object Unresolved : ObjClassLiteralResolution
+        data class Resolved(val structType: ObjClassType) : ObjClassLiteralResolution
+    }
+
+    private var objClassLiteralResolution: ObjClassLiteralResolution = ObjClassLiteralResolution.Unresolved
+
+    val structType: ObjClassType
+        get() = when (val resolution = objClassLiteralResolution) {
+            is ObjClassLiteralResolution.Resolved -> resolution.structType
+            is ObjClassLiteralResolution.Unresolved ->
+                throw RuntimeException("O-class literal type not resolved at $loc")
+        }
+
+    val fieldAssignments: Map<String, ExprNode> = fieldEntries.toMap()
+
+    override fun programLocation() = loc
+
+    override fun typePass(symbolEnv: Map<String, Type>, registry: ObjClassRegistry): List<CompileError> {
+        val classErrors = when (val classResult = registry.resolveTypeName(className)) {
+            is TypeResolveResult.NotFound ->
+                listOf(OneLocCompileError(loc, "Unknown o-class \"$className\" in o-class literal"))
+            is TypeResolveResult.Found -> {
+                if (classResult.type !is ObjClassType) {
+                    listOf(OneLocCompileError(loc, "\"$className\" is not an o-class type"))
+                } else {
+                    objClassLiteralResolution = ObjClassLiteralResolution.Resolved(classResult.type)
+                    emptyList()
+                }
+            }
+        }
+        if (classErrors.isNotEmpty()) {
+            return classErrors
+        }
+
+        val resolvedType = structType
+        val duplicateFieldErrors = fieldEntries
+            .groupBy { it.first }
+            .flatMap { (name, entries) ->
+                if (entries.size == 1) emptyList()
+                else listOf(
+                    TwoLocsCompileError(
+                        entries[0].second.programLocation(),
+                        entries[1].second.programLocation(),
+                        "Expected o-class literal fields to have unique names, but found duplicate \"$name\"",
+                    )
+                )
+            }
+        val providedFields = fieldEntries.map { it.first }.toSet()
+        val expectedFields = resolvedType.fields.map { it.name }.toSet()
+        val missingFields = expectedFields - providedFields
+        val extraFields = providedFields - expectedFields
+        val fieldSetErrors = buildList {
+            if (missingFields.isNotEmpty()) {
+                add(OneLocCompileError(loc, "O-class literal for \"$className\" is missing fields: $missingFields"))
+            }
+            if (extraFields.isNotEmpty()) {
+                add(OneLocCompileError(loc, "O-class literal for \"$className\" has unknown fields: $extraFields"))
+            }
+        }
+        if (duplicateFieldErrors.isNotEmpty() || fieldSetErrors.isNotEmpty()) {
+            return classErrors + duplicateFieldErrors + fieldSetErrors
+        }
+
+        val childErrors = super.typePass(symbolEnv, registry)
+        if (childErrors.isNotEmpty()) {
+            return childErrors
+        }
+
+        val matchErrors = resolvedType.fields.flatMap { field ->
+            val expr = fieldAssignments.getValue(field.name)
+            assertOrCompileError(
+                expr.getType() == field.type,
+                OneLocCompileError(
+                    expr.programLocation(),
+                    "Expected field \"${field.name}\" of \"$className\" to have type ${field.type} but got ${expr.getType()}",
+                ),
+            )
+        }
+        return matchErrors
+    }
+
+    override fun toZ3GuardString(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+        forceString: Boolean,
+    ): String {
+        throw RuntimeException("O-class literal at $loc must appear in an equality comparison, not as a scalar expression")
+    }
+
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        throw RuntimeException("O-class literal at $loc must be assigned via flattened primitive fields")
+    }
+
+    override fun inferType(symbolEnv: Map<String, Type>): Type = structType
+
+    override fun toString(): String {
+        val fields = fieldEntries.joinToString(", ") { (name, expr) -> "$name := $expr" }
+        return "$className { $fields }"
+    }
+}
+
 class LiteralValueExprNode(
     private val value : String,
     private val type : Type,
@@ -649,8 +948,88 @@ class LiteralValueExprNode(
     }
 }
 
+class FieldAccessExprNode(
+    val baseSymbol: String,
+    val fieldPath: List<String>,
+    private val loc: ProgramLoc,
+) : ExprNode(listOf()) {
+    private sealed interface FieldAccessResolution {
+        data object Unresolved : FieldAccessResolution
+        data class Resolved(val leafType: Type, val relPath: String) : FieldAccessResolution
+    }
+
+    private var fieldResolution: FieldAccessResolution = FieldAccessResolution.Unresolved
+
+    override fun programLocation() = loc
+
+    override fun typePass(symbolEnv: Map<String, Type>, registry: ObjClassRegistry): List<CompileError> {
+        val baseType = symbolEnv[baseSymbol]
+        if (baseType == null) {
+            return listOf(OneLocCompileError(loc, "Unknown variable \"$baseSymbol\" in field access"))
+        }
+        return when (val result = resolveFieldPath(baseType, fieldPath)) {
+            is FieldPathResult.Error -> listOf(OneLocCompileError(loc, result.message))
+            is FieldPathResult.Resolved -> {
+                fieldResolution = FieldAccessResolution.Resolved(result.type, result.relPath)
+                super.typePass(symbolEnv, registry)
+            }
+        }
+    }
+
+    override fun toZ3GuardString(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+        forceString: Boolean,
+    ): String {
+        val resolution = fieldResolution as FieldAccessResolution.Resolved
+        val baseType = symbolTypes.getValue(baseSymbol) as ObjClassType
+        val isArg = baseSymbol in argSymbols
+        if (forceString) {
+            return when (resolution.leafType) {
+                is BoolType -> throw RuntimeException("Cannot convert a Bool to a string")
+                is IntType -> {
+                    if (isArg) {
+                        "ctx.intToString(${baseType.fieldZ3Guard(baseSymbol, resolution.relPath, intType, true)})"
+                    } else {
+                        val flatName = baseType.flatVarName(baseSymbol, resolution.relPath)
+                        "ctx.mkString(${flatName.toKotlinIdent()}.toString())"
+                    }
+                }
+                is StringType -> baseType.fieldZ3Guard(baseSymbol, resolution.relPath, stringType, isArg)
+                is ObjClassType -> throw RuntimeException("Cannot convert o-class field to string")
+                else -> throw RuntimeException("Invalid field type: ${resolution.leafType}")
+            }
+        }
+        if (resolution.leafType is ObjClassType) {
+            throw RuntimeException("O-class field $baseSymbol.${fieldPath.joinToString(".")} must be used in whole-value equality")
+        }
+        return baseType.fieldZ3Guard(baseSymbol, resolution.relPath, resolution.leafType, isArg)
+    }
+
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        val resolution = fieldResolution as FieldAccessResolution.Resolved
+        val baseType = symbolTypes.getValue(baseSymbol) as ObjClassType
+        val flatName = baseType.flatVarName(baseSymbol, resolution.relPath)
+        if (baseSymbol in argSymbols) {
+            val typeStr = resolution.leafType.toCodegenTypeVal()
+            return "(act.lookup(Variable(\"${flatName.escapeKotlinStringLiteral()}\", $typeStr)).value as ${resolution.leafType.toKotlinTypeString()})"
+        }
+        return flatName.toKotlinIdent()
+    }
+
+    override fun inferType(symbolEnv: Map<String, Type>): Type {
+        return when (val resolution = fieldResolution) {
+            is FieldAccessResolution.Resolved -> resolution.leafType
+            is FieldAccessResolution.Unresolved ->
+                throw RuntimeException("Field access not resolved at $loc")
+        }
+    }
+
+    override fun toString(): String = fieldPath.joinToString(".", prefix = "$baseSymbol.")
+}
+
 class SymbolValueExprNode(
-    private val symbol : String,
+    val symbol : String,
     private val loc : ProgramLoc
 ) : ExprNode(listOf()) {
     override fun programLocation() = loc
@@ -661,49 +1040,48 @@ class SymbolValueExprNode(
                 is BoolType -> throw RuntimeException("Cannot convert a Bool to a string")
                 is IntType -> {
                     if (symbol in argSymbols) {
-                        "ctx.intToString(ctx.mkIntConst(\"$symbol\"))"
+                        "ctx.intToString(ctx.mkIntConst(\"${symbol.escapeKotlinStringLiteral()}\"))"
                     } else {
-                        "ctx.mkString(${symbol}.toString())"
+                        "ctx.mkString(${symbol.toKotlinIdent()}.toString())"
                     }
                 }
                 is StringType -> {
                     if (symbol in argSymbols) {
-                        "ctx.mkStringConst(\"$symbol\")"
+                        "ctx.mkStringConst(\"${symbol.escapeKotlinStringLiteral()}\")"
                     } else {
-                        "ctx.mkString($symbol)"
+                        "ctx.mkString(${symbol.toKotlinIdent()})"
                     }
                 }
+                is ObjClassType -> throw RuntimeException("Cannot convert o-class type $type to string")
                 else -> throw RuntimeException("Invalid type: $type")
             }
 
         }
+        if (type is ObjClassType) {
+            throw RuntimeException("O-class symbol $symbol must be used in whole-value equality, not as a scalar guard expression")
+        }
         if (symbol in argSymbols) {
             return when (type) {
-                is BoolType -> "ctx.mkBoolConst(\"$symbol\")"
-                is IntType -> "ctx.mkIntConst(\"$symbol\")"
-                is StringType -> "ctx.mkStringConst(\"$symbol\")"
+                is BoolType -> "ctx.mkBoolConst(\"${symbol.escapeKotlinStringLiteral()}\")"
+                is IntType -> "ctx.mkIntConst(\"${symbol.escapeKotlinStringLiteral()}\")"
+                is StringType -> "ctx.mkStringConst(\"${symbol.escapeKotlinStringLiteral()}\")"
                 else -> throw RuntimeException("Invalid type: $type")
             }
         }
         return when (type) {
-            is BoolType -> "ctx.mkBool($symbol)"
-            is IntType -> "ctx.mkInt($symbol)"
-            is StringType -> "ctx.mkString($symbol)"
+            is BoolType -> "ctx.mkBool(${symbol.toKotlinIdent()})"
+            is IntType -> "ctx.mkInt(${symbol.toKotlinIdent()})"
+            is StringType -> "ctx.mkString(${symbol.toKotlinIdent()})"
             else -> throw RuntimeException("Invalid type: $type")
         }
     }
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        val type = symbolTypes.getValue(symbol)
         return if (symbol in argSymbols) {
-            val type = symbolTypes[symbol]
-            val typeStr = when (type) {
-                is BoolType -> "boolType"
-                is IntType -> "intType"
-                is StringType -> "stringType"
-                else -> throw RuntimeException("Invalid type: $type (symbol: $symbol)")
-            }
-            "act.lookup(Variable(\"$symbol\", $typeStr)).value as $type"
+            val typeStr = type.toCodegenTypeVal()
+            "(act.lookup(Variable(\"${symbol.escapeKotlinStringLiteral()}\", $typeStr)).value as ${type.toKotlinTypeString()})"
         } else {
-            symbol
+            symbol.toKotlinIdent()
         }
     }
     override fun inferType(symbolEnv: Map<String, Type>): Type {

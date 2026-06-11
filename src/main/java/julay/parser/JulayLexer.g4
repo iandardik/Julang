@@ -1,6 +1,7 @@
 lexer grammar JulayLexer;
 
 COMMA : ',' ;
+DOT : '.' ;
 COLON : ':' ;
 LPAREN : '(' ;
 RPAREN : ')' ;
@@ -33,6 +34,7 @@ ELSE : 'else' ;
 
 
 PCLASS : 'p-class' ;
+OCLASS : 'o-class' ;
 PROC : 'proc' ;
 PROGRAM : 'program' ;
 SPEC : 'spec' ;

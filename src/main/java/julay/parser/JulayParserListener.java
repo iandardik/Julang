@@ -38,6 +38,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitPclass(JulayParser.PclassContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#oclass}.
+	 * @param ctx the parse tree
+	 */
+	void enterOclass(JulayParser.OclassContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#oclass}.
+	 * @param ctx the parse tree
+	 */
+	void exitOclass(JulayParser.OclassContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#proc}.
 	 * @param ctx the parse tree
 	 */
@@ -77,6 +87,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 * @param ctx the parse tree
 	 */
 	void exitPclass_body(JulayParser.Pclass_bodyContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#field}.
+	 * @param ctx the parse tree
+	 */
+	void enterField(JulayParser.FieldContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#field}.
+	 * @param ctx the parse tree
+	 */
+	void exitField(JulayParser.FieldContext ctx);
 	/**
 	 * Enter a parse tree produced by {@link JulayParser#var}.
 	 * @param ctx the parse tree
@@ -207,4 +227,34 @@ public interface JulayParserListener extends ParseTreeListener {
 	 * @param ctx the parse tree
 	 */
 	void exitValue(JulayParser.ValueContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#struct_literal}.
+	 * @param ctx the parse tree
+	 */
+	void enterStruct_literal(JulayParser.Struct_literalContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#struct_literal}.
+	 * @param ctx the parse tree
+	 */
+	void exitStruct_literal(JulayParser.Struct_literalContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#struct_field_assign}.
+	 * @param ctx the parse tree
+	 */
+	void enterStruct_field_assign(JulayParser.Struct_field_assignContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#struct_field_assign}.
+	 * @param ctx the parse tree
+	 */
+	void exitStruct_field_assign(JulayParser.Struct_field_assignContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#field_access}.
+	 * @param ctx the parse tree
+	 */
+	void enterField_access(JulayParser.Field_accessContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#field_access}.
+	 * @param ctx the parse tree
+	 */
+	void exitField_access(JulayParser.Field_accessContext ctx);
 }

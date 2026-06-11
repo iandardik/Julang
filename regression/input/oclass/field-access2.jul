@@ -1,0 +1,47 @@
+o-class Point {
+    x : Int
+    y : Int
+}
+
+p-class Worker {
+    var pos : Point
+    var count : Int
+
+    constructor initially() {
+        transit:
+            count := 0
+            pos := Point { x := 0, y := 0 }
+    }
+
+    transition moveSomewhere(newPos : Point) {
+        guard:
+            count < 5
+        transit:
+            pos := newPos
+            count := count + 1
+    }
+
+    transition moveUp(newPos : Point) {
+        guard:
+              newPos.y > 0
+            & count < 5
+        transit:
+            pos.y := newPos.y
+            count := count + 1
+    }
+
+    transition moveLeft(newPos : Point) {
+        guard:
+              newPos.x < 0
+            & count < 5
+        transit:
+            pos.x := newPos.x
+            count := count + 1
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard: count = 5
+    }
+}
+
+program FieldAccessTest2 := Worker || ExitSystem

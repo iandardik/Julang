@@ -1,0 +1,5 @@
+source: regression/input/oclass/field-access2.jul
+programs:
+  - name: FieldAccessTest2
+    run:
+      timeoutMs: 60000

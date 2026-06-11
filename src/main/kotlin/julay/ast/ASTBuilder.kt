@@ -5,7 +5,6 @@ import julay.parser.JulayParserBaseVisitor
 import julay.program.TSAction
 import julay.program.boolType
 import julay.program.intType
-import julay.program.parseType
 import julay.program.stringType
 import julay.tools.assert
 import org.antlr.v4.runtime.ParserRuleContext
@@ -32,8 +31,27 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
     }
 
     override fun visitDecl(ctx: JulayParser.DeclContext?): ASTNode {
-        val decl = oneChoice(ctx!!.pclass(), ctx.proc(), ctx.program(), ctx.spec())
+        val decl = oneChoice(ctx!!.pclass(), ctx.oclass(), ctx.proc(), ctx.program(), ctx.spec())
         return visit(decl)
+    }
+
+    override fun visitOclass(ctx: JulayParser.OclassContext?): ASTNode {
+        val name = ctx!!.ID().text
+        val fields = ctx.field()
+            .map { visit(it) }
+            .map {
+                if (it !is FieldNode) {
+                    throw RuntimeException("Expected FieldNode but got $it")
+                }
+                it
+            }
+        return ObjClassNode(name, fields, sourceLocation(ctx))
+    }
+
+    override fun visitField(ctx: JulayParser.FieldContext?): ASTNode {
+        val fieldName = ctx!!.ID(0).text
+        val typeName = ctx.ID(1).text
+        return FieldNode(fieldName, typeName, sourceLocation(ctx))
     }
 
     override fun visitPclass(ctx: JulayParser.PclassContext?): ASTNode {
@@ -74,8 +92,8 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
 
     override fun visitVar(ctx: JulayParser.VarContext?): ASTNode {
         val name = ctx!!.ID(0).text
-        val type = ctx!!.ID(1).text
-        return VarNode(name, parseType(type), sourceLocation(ctx))
+        val typeName = ctx.ID(1).text
+        return VarNode(name, typeName, sourceLocation(ctx))
     }
 
     override fun visitConstructor(ctx: JulayParser.ConstructorContext?): ASTNode {
@@ -138,8 +156,8 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
 
     override fun visitArg(ctx: JulayParser.ArgContext?): ASTNode {
         val name = ctx!!.ID(0).text
-        val type = ctx!!.ID(1).text
-        return ArgNode(name, parseType(type), sourceLocation(ctx))
+        val typeName = ctx.ID(1).text
+        return ArgNode(name, typeName, sourceLocation(ctx))
     }
 
     override fun visitAction_body(ctx: JulayParser.Action_bodyContext?): ASTNode {
@@ -179,12 +197,16 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
     }
 
     override fun visitVar_transit(ctx: JulayParser.Var_transitContext?): ASTNode {
-        val varName = ctx!!.ID().text
+        val lhs = visit(ctx!!.field_access())
         val transit = visit(ctx.expr())
         if (transit !is ExprNode) {
             throw RuntimeException("Expected transit to be assigned an expr")
         }
-        return VarTransitNode(varName, transit, sourceLocation(ctx))
+        return when (lhs) {
+            is FieldAccessExprNode -> VarTransitNode(lhs.baseSymbol, lhs.fieldPath, transit, sourceLocation(ctx))
+            is SymbolValueExprNode -> VarTransitNode(lhs.symbol, emptyList(), transit, sourceLocation(ctx))
+            else -> throw RuntimeException("Expected field access on left-hand side of transit assignment")
+        }
     }
 
     override fun visitExpr(ctx: JulayParser.ExprContext?): ASTNode {
@@ -266,9 +288,32 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
         }
     }
 
+    override fun visitStruct_literal(ctx: JulayParser.Struct_literalContext?): ASTNode {
+        val className = ctx!!.ID().text
+        val fieldEntries = ctx.struct_field_assign().map { assign ->
+            val fieldName = assign.ID().text
+            val expr = visit(assign.expr())
+            if (expr !is ExprNode) {
+                throw RuntimeException("Expected o-class literal field value to be an expression")
+            }
+            fieldName to expr
+        }
+        return ObjClassLiteralExprNode(className, fieldEntries, sourceLocation(ctx))
+    }
+
+    override fun visitField_access(ctx: JulayParser.Field_accessContext?): ASTNode {
+        val ids = ctx!!.ID().map { it.text }
+        if (ids.size == 1) {
+            return SymbolValueExprNode(ids[0], sourceLocation(ctx))
+        }
+        return FieldAccessExprNode(ids[0], ids.drop(1), sourceLocation(ctx))
+    }
+
     override fun visitValue(ctx: JulayParser.ValueContext?): ASTNode {
-        return if (ctx!!.ID() != null) {
-            SymbolValueExprNode(ctx.ID().text, sourceLocation(ctx))
+        return if (ctx!!.struct_literal() != null) {
+            visit(ctx.struct_literal())
+        } else if (ctx.field_access() != null) {
+            visit(ctx.field_access())
         } else if (ctx.INT() != null) {
             LiteralValueExprNode(ctx.INT().text, intType, sourceLocation(ctx))
         } else if (ctx.TRUE() != null) {

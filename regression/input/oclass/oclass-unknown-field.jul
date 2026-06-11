@@ -1,0 +1,19 @@
+o-class Point {
+    x : Int
+}
+
+p-class Bad {
+    var pos : Point
+
+    constructor init(p : Point) {
+        transit:
+            pos := p
+    }
+
+    transition check() {
+        guard:
+            pos.z = 0
+    }
+}
+
+program BadTest := Bad

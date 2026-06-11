@@ -1,20 +1,26 @@
+o-class ReqInfo {
+    req : String
+    resp : String
+}
+
 p-class EchoHandler {
-    var req : String
-    var resp : String
+    var info : ReqInfo
     var responded : Boolean
     var done : Boolean
 
     constructor receiveRequest(reqBody : String) {
         transit:
-            req := reqBody
-            resp := reqBody + " is a good point!"
+            info := ReqInfo {
+                req := reqBody,
+                resp := reqBody + " is a good point!"
+            }
             responded := false
             done := false
     }
 
     transition sendResponse(respBody : String) {
         guard:
-            ~responded & respBody = resp
+            ~responded & respBody = info.resp
         transit:
             responded := true
     }
@@ -23,7 +29,7 @@ p-class EchoHandler {
         guard:
               responded
             & ~done
-            & msg = "Req: '" + req + "', I responded: '" + resp + "'"
+            & msg = "Req: '" + info.req + "', I responded: '" + info.resp + "'"
         transit:
             done := true
     }
