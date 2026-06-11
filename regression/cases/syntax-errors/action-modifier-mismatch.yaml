@@ -1,4 +1,4 @@
-source: regression/input/negative/action-modifier-mismatch.jul
+source: regression/input/syntax-errors/action-modifier-mismatch.jul
 expectCompileFailure: true
 expectCompileOutputContains:
   - "Expected action \"println\" to have the same modifiers"

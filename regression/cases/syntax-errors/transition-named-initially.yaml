@@ -1,4 +1,4 @@
-source: regression/input/negative/transition-named-initially.jul
+source: regression/input/syntax-errors/transition-named-initially.jul
 expectCompileFailure: true
 expectCompileOutputContains:
   - "only constructors (not transitions) can synchronize on the 'initially' action"

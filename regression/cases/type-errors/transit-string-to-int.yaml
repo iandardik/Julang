@@ -1,4 +1,4 @@
-source: regression/input/negative/transit-string-to-int.jul
+source: regression/input/type-errors/transit-string-to-int.jul
 expectCompileFailure: true
 expectCompileOutputContains:
   - "Expected assignment to \"x\" (Int) but got expression of type String"

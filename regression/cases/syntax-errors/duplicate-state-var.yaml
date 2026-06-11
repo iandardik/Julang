@@ -1,5 +1,5 @@
-source: regression/input/negative/no-constructor.jul
+source: regression/input/syntax-errors/duplicate-state-var.jul
 expectCompileFailure: true
 expectCompileOutputContains:
-  - "Expected \"S\" to have at least one constructor"
+  - "Expected state variables to have unique names"
   - "Found errors while compiling the program \"P\"; exiting."

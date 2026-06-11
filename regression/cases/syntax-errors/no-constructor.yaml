@@ -1,5 +1,5 @@
-source: regression/input/negative/constructor-has-guard.jul
+source: regression/input/syntax-errors/no-constructor.jul
 expectCompileFailure: true
 expectCompileOutputContains:
-  - "Expected constructors not to have guards"
+  - "Expected \"S\" to have at least one constructor"
   - "Found errors while compiling the program \"P\"; exiting."

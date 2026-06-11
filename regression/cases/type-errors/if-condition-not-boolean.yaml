@@ -1,4 +1,4 @@
-source: regression/input/negative/if-condition-not-boolean.jul
+source: regression/input/type-errors/if-condition-not-boolean.jul
 expectCompileFailure: true
 expectCompileOutputContains:
   - "Expected if-condition to be Boolean"

@@ -1,4 +1,4 @@
-source: regression/input/negative/p2p-missing-consumer.jul
+source: regression/input/syntax-errors/p2p-missing-consumer.jul
 expectCompileFailure: true
 expectCompileOutputContains:
   - "Expected action \"println\" to have at least one corresponding \"p2p-consumer\" action"

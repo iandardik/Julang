@@ -1,4 +1,4 @@
-source: regression/input/negative/action-arg-mismatch.jul
+source: regression/input/syntax-errors/action-arg-mismatch.jul
 expectCompileFailure: true
 expectCompileOutputContains:
   - "Expected action \"println\" to have the same arguments"

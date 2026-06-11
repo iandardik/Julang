@@ -1,5 +1,5 @@
-source: regression/input/negative/duplicate-state-var.jul
+source: regression/input/syntax-errors/constructor-has-guard.jul
 expectCompileFailure: true
 expectCompileOutputContains:
-  - "Expected state variables to have unique names"
+  - "Expected constructors not to have guards"
   - "Found errors while compiling the program \"P\"; exiting."

@@ -1,4 +1,4 @@
-source: regression/input/negative/transit-unknown-var.jul
+source: regression/input/syntax-errors/transit-unknown-var.jul
 expectCompileFailure: true
 expectCompileOutputContains:
   - "Unknown variable \"y\" in transit assignment"

@@ -1,4 +1,4 @@
-source: regression/input/negative/syntax-missing-brace.jul
+source: regression/input/syntax-errors/syntax-invalid-token.jul
 expectCompileFailure: true
 expectCompileOutputContains:
   - "Found compile errors, exiting."

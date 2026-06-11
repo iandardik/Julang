@@ -1,4 +1,4 @@
-source: regression/input/negative/ctor-transition-overlap.jul
+source: regression/input/syntax-errors/ctor-transition-overlap.jul
 expectCompileFailure: true
 expectCompileOutputContains:
   - "Expected constructor names to not overlap with transition names, but found at least one overlap for the action \"reset\""

@@ -1,4 +1,4 @@
-source: regression/input/negative/missing-state-assignment.jul
+source: regression/input/syntax-errors/missing-state-assignment.jul
 expectCompileFailure: true
 expectCompileOutputContains:
   - "Expected each constructor to assign a value to every state variable; missing assignments to [y]"
