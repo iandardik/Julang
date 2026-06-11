@@ -1,0 +1,5 @@
+source: regression/input/oclass/action-arg-guard.jul
+programs:
+  - name: ActionArgGuardTest
+    run:
+      timeoutMs: 60000

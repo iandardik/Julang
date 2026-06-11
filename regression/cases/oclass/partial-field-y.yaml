@@ -1,0 +1,5 @@
+source: regression/input/oclass/partial-field-y.jul
+programs:
+  - name: PartialFieldYTest
+    run:
+      timeoutMs: 60000

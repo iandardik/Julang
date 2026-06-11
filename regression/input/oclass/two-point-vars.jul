@@ -1,0 +1,45 @@
+o-class Point {
+    x : Int
+    y : Int
+}
+
+p-class Worker {
+    var current : Point
+    var backup : Point
+    var steps : Int
+
+    constructor initially() {
+        transit:
+            steps := 0
+            current := Point { x := 1, y := 2 }
+            backup := Point { x := 9, y := 9 }
+    }
+
+    transition swap() {
+        guard:
+            steps = 0
+        transit:
+            backup := current
+            current := Point { x := 9, y := 9 }
+            steps := 1
+    }
+
+    transition restore() {
+        guard:
+              steps = 1
+            & current.x = 9
+            & current.y = 9
+        transit:
+            current := backup
+            steps := 2
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard:
+              steps = 2
+            & current.x = 1
+            & current.y = 2
+    }
+}
+
+program TwoPointVarsTest := Worker || ExitSystem

@@ -1,0 +1,30 @@
+o-class Point {
+    x : Int
+    y : Int
+}
+
+p-class Worker {
+    var pos : Point
+    var matched : Boolean
+
+    constructor initially() {
+        transit:
+            pos := Point { x := 5, y := 6 }
+            matched := false
+    }
+
+    transition check() {
+        guard:
+              pos = Point { x := 5, y := 6 }
+            & ~matched
+        transit:
+            matched := true
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard:
+            matched
+    }
+}
+
+program LiteralEqualityTest := Worker || ExitSystem

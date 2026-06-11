@@ -1,0 +1,5 @@
+source: regression/input/oclass/partial-field-x.jul
+programs:
+  - name: PartialFieldXTest
+    run:
+      timeoutMs: 60000

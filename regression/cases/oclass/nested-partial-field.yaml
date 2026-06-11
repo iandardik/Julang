@@ -1,0 +1,5 @@
+source: regression/input/oclass/nested-partial-field.jul
+programs:
+  - name: NestedPartialFieldTest
+    run:
+      timeoutMs: 60000

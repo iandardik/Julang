@@ -5,7 +5,7 @@ o-class Point {
 p-class Bad {
     var pos : Point
 
-    constructor init(p : Point) {
+    constructor initially(p : Point) {
         transit:
             pos := p
     }

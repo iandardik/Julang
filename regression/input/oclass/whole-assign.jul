@@ -1,0 +1,39 @@
+o-class Point {
+    x : Int
+    y : Int
+}
+
+p-class Worker {
+    var pos : Point
+    var steps : Int
+
+    constructor initially() {
+        transit:
+            steps := 0
+            pos := Point { x := 0, y := 0 }
+    }
+
+    transition move(newPos : Point) {
+        guard:
+            steps < 2
+        transit:
+            pos := newPos
+            steps := steps + 1
+    }
+
+    transition verify(newPos : Point) {
+        guard:
+              steps = 2
+            & pos.x = newPos.x
+            & pos.y = newPos.y
+        transit:
+            steps := 3
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard:
+            steps = 3
+    }
+}
+
+program WholeAssignTest := Worker || ExitSystem

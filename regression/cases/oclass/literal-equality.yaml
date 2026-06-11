@@ -1,0 +1,5 @@
+source: regression/input/oclass/literal-equality.jul
+programs:
+  - name: LiteralEqualityTest
+    run:
+      timeoutMs: 60000

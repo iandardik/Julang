@@ -1,0 +1,34 @@
+o-class Point {
+    x : Int
+    y : Int
+}
+
+p-class Worker {
+    var pos : Point
+    var seen : Boolean
+
+    constructor initially() {
+        transit:
+            pos := Point { x := 0, y := 0 }
+            seen := false
+    }
+
+    transition accept(target : Point) {
+        guard:
+              target.x = 11
+            & target.y = 22
+            & ~seen
+        transit:
+            pos := target
+            seen := true
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard:
+              seen
+            & pos.x = 11
+            & pos.y = 22
+    }
+}
+
+program ActionArgGuardTest := Worker || ExitSystem

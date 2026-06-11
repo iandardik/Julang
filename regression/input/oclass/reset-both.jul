@@ -1,0 +1,46 @@
+o-class Point {
+    x : Int
+    y : Int
+}
+
+o-class Line {
+    start : Point
+    end : Point
+}
+
+p-class Worker {
+    var pos : Point
+    var segment : Line
+    var done : Boolean
+
+    constructor initially() {
+        transit:
+            done := false
+            pos := Point { x := 1, y := 1 }
+            segment := Line {
+                start := Point { x := 2, y := 2 },
+                end := Point { x := 3, y := 3 }
+            }
+    }
+
+    transition reset() {
+        guard:
+            ~done
+        transit:
+            pos := Point { x := 0, y := 0 }
+            segment := Line {
+                start := Point { x := 0, y := 0 },
+                end := Point { x := 0, y := 0 }
+            }
+            done := true
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard:
+              done
+            & pos.x = 0
+            & segment.end.y = 0
+    }
+}
+
+program ResetBothTest := Worker || ExitSystem

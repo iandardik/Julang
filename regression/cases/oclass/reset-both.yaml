@@ -1,0 +1,5 @@
+source: regression/input/oclass/reset-both.jul
+programs:
+  - name: ResetBothTest
+    run:
+      timeoutMs: 60000

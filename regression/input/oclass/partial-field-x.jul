@@ -1,0 +1,40 @@
+o-class Point {
+    x : Int
+    y : Int
+}
+
+p-class Worker {
+    var pos : Point
+    var steps : Int
+
+    constructor initially() {
+        transit:
+            steps := 0
+            pos := Point { x := 0, y := 10 }
+    }
+
+    transition setX(newPos : Point) {
+        guard:
+              newPos.x = 42
+            & steps = 0
+        transit:
+            pos.x := newPos.x
+            steps := 1
+    }
+
+    transition confirm() {
+        guard:
+              pos.x = 42
+            & pos.y = 10
+            & steps = 1
+        transit:
+            steps := 2
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard:
+            steps = 2
+    }
+}
+
+program PartialFieldXTest := Worker || ExitSystem

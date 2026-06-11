@@ -1,0 +1,5 @@
+source: regression/input/oclass/nested-field-guard.jul
+programs:
+  - name: NestedFieldGuardTest
+    run:
+      timeoutMs: 60000

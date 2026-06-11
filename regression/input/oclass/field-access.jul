@@ -6,7 +6,7 @@ o-class Point {
 p-class Worker {
     var pos : Point
 
-    constructor init(p : Point) {
+    constructor initially(p : Point) {
         transit:
             pos := p
     }

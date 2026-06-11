@@ -1,0 +1,5 @@
+source: regression/input/oclass/whole-assign.jul
+programs:
+  - name: WholeAssignTest
+    run:
+      timeoutMs: 60000

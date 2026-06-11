@@ -1,0 +1,5 @@
+source: regression/input/oclass/two-point-vars.jul
+programs:
+  - name: TwoPointVarsTest
+    run:
+      timeoutMs: 60000

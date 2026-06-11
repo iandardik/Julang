@@ -1,0 +1,48 @@
+o-class Point {
+    x : Int
+    y : Int
+}
+
+o-class Line {
+    start : Point
+    end : Point
+}
+
+p-class Worker {
+    var segment : Line
+    var steps : Int
+
+    constructor initially() {
+        transit:
+            steps := 0
+            segment := Line {
+                start := Point { x := 0, y := 0 },
+                end := Point { x := 0, y := 0 }
+            }
+    }
+
+    transition patchStart(newLine : Line) {
+        guard:
+            steps = 0
+        transit:
+            segment.start.x := newLine.start.x
+            segment.start.y := newLine.start.y
+            steps := 1
+    }
+
+    transition confirm(newLine : Line) {
+        guard:
+              steps = 1
+            & segment.start.x = newLine.start.x
+            & segment.start.y = newLine.start.y
+        transit:
+            steps := 2
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard:
+            steps = 2
+    }
+}
+
+program NestedPartialFieldTest := Worker || ExitSystem
