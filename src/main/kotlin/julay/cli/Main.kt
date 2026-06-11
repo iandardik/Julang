@@ -1,5 +1,11 @@
 package julay.cli
 
+import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.core.main
+import com.github.ajalt.clikt.parameters.arguments.argument
+import com.github.ajalt.clikt.parameters.options.flag
+import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.types.path
 import julay.ast.ASTBuilder
 import julay.ast.ProcDecl
 import julay.ast.ProcDeclType
@@ -10,14 +16,29 @@ import julay.program.library.LibraryRegistry
 import org.antlr.v4.runtime.CharStreams
 import org.antlr.v4.runtime.CommonTokenStream
 import java.io.File
+import java.nio.file.Path
+import kotlin.io.path.pathString
 import kotlin.system.exitProcess
 
-fun main(args : Array<String>) {
-    if (args.size != 1) {
-        println("usage: Exspec <.jul file>")
-        return
+class Julayc : CliktCommand(name = "julayc") {
+    private val keepBuild by option(
+        "--keep-build",
+        help = "Keep generated <program>-jul-build directories after a successful compile",
+    ).flag()
+
+    private val input by argument(
+        help = "Jul source file to compile",
+    ).path(mustExist = true, canBeFile = true)
+
+    override fun run() {
+        compileJulFile(input, keepBuild)
     }
-    val input = CharStreams.fromFileName(args[0])
+}
+
+fun main(args : Array<String>) = Julayc().main(args)
+
+fun compileJulFile(source : Path, keepBuild : Boolean) {
+    val input = CharStreams.fromFileName(source.pathString)
     val lexer = JulayLexer(input)
     val tokens = CommonTokenStream(lexer)
     val parser = JulayParser(tokens)
@@ -52,11 +73,11 @@ fun main(args : Array<String>) {
     val flatAst = ast.flattenObjClassPass(ast.resolvedObjClassRegistry())
 
     // compile each program
-    programs.forEach { compileProgram(it, flatAst, it.name) }
+    programs.forEach { compileProgram(it, flatAst, it.name, keepBuild) }
 }
 
-fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
-    val buildDir = "jul-build"
+fun compileProgram(program : ProcDecl, ast : RootNode, progName : String, keepBuild : Boolean = false) {
+    val buildDir = "$progName-jul-build"
     if (!File(buildDir).exists() && !File(buildDir).mkdir()) {
         println("Could not create $buildDir dir")
         exitProcess(1)
@@ -122,7 +143,9 @@ fun compileProgram(program : ProcDecl, ast : RootNode, progName : String) {
         println("Gradle build failed for program \"$progName\" (exit $gradleExit):\n$gradleOutput")
         return
     }
-    deleteDirectory(File(buildDir))
+    if (!keepBuild) {
+        deleteDirectory(File(buildDir))
+    }
 }
 
 // thank you: https://www.baeldung.com/kotlin/delete-directories-with-contents
