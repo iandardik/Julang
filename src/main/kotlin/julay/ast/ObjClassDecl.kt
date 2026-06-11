@@ -13,14 +13,7 @@ data class ObjClassDecl(
     val name: String,
     val fields: List<Variable>,
     val loc: ProgramLoc,
-) {
-    fun toKotlinTypeValString(): String {
-        val fieldsStr = fields.joinToString(", ") {
-            "Variable(\"${it.name}\", ${it.type.toCodegenTypeVal()})"
-        }
-        return "val ${objClassTypeValName(name)} = ObjClassType(\"$name\", listOf($fieldsStr))"
-    }
-}
+)
 
 /**
  * An unresolved o-class declaration collected from the AST.
@@ -127,7 +120,7 @@ private class ObjClassResolver(
  * Built once per compilation unit from a list of [RawObjClassDecl] via [build]. The
  * registry is threaded through [typePass] so that [VarNode], [ArgNode], struct
  * literals, and field accesses can resolve type names like `"Point"` to [ObjClassType].
- * It also exposes [ObjClassDecl] list for [ObjClassType] val codegen in [julay.cli.Main].
+ * It also exposes [ObjClassDecl] list for o-class type val codegen in [CodegenPass].
  */
 class ObjClassRegistry(
     val types: Map<String, ObjClassType>,
