@@ -2,18 +2,11 @@ package julay.ast
 
 import julay.program.*
 import julay.program.TSAction
-import julay.program.library.LibraryRegistry
 
 abstract class ASTNode(
     val children : List<ASTNode>
 ) {
     abstract fun programLocation() : ProgramLoc
-    open fun procPass() : List<ProcDecl> = children.flatMap { it.procPass() }
-    open fun errorPass(procs : Set<String>) : List<CompileError> = children.flatMap { it.errorPass(procs) }
-    open fun procClassPass(procs : Set<String>) : List<ProcClassDecl> = children.flatMap { it.procClassPass(procs) }
-    open fun objClassPass() : List<RawObjClassDecl> = children.flatMap { it.objClassPass() }
-    open fun typePass(symbolEnv : Map<String, Type> = emptyMap(), registry : ObjClassRegistry = ObjClassRegistry.EMPTY) : List<CompileError> =
-        children.flatMap { it.typePass(symbolEnv, registry) }
 }
 
 abstract class DeclNode(children : List<ASTNode>) : ASTNode(children) {
@@ -48,24 +41,15 @@ abstract class ActionBodyNode(
     open fun transitVars() : List<Pair<String, ProgramLoc>> = body.flatMap { it.transitVars() }
 }
 
-sealed interface TypePassType {
-    data object Uninferred : TypePassType
-    data class Inferred(val type : Type) : TypePassType
-}
-
 abstract class ExprNode(children : List<ASTNode>) : ASTNode(children) {
     private var myType : TypePassType = TypePassType.Uninferred
-    override fun typePass(symbolEnv : Map<String, Type>, registry: ObjClassRegistry) : List<CompileError> {
-        val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry) }
-        myType = TypePassType.Inferred(inferType(symbolEnv))
-        return childrenErrors
-    }
+    internal fun setInferredType(type : TypePassType) { myType = type }
     fun getType() : Type = when (val ts = myType) {
         is TypePassType.Inferred -> ts.type
         is TypePassType.Uninferred ->
             throw RuntimeException("Type not inferred for expression at ${programLocation()}")
     }
-    protected abstract fun inferType(symbolEnv : Map<String, Type>) : Type
+    internal abstract fun inferType(symbolEnv : Map<String, Type>) : Type
     abstract fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean = false) : String
     abstract fun toTransitString(symbolTypes : Map<String,Type>, argSymbols : Set<String>) : String
 }
@@ -75,63 +59,8 @@ class RootNode(
     private val loc : ProgramLoc
 ) : ASTNode(declNodes) {
     override fun programLocation(): ProgramLoc = loc
-    override fun errorPass(procs : Set<String>): List<CompileError> {
-        return super.errorPass(procs) + actionConsistencyErrors(procs) + overlappingDeclNamesErrors()
-    }
-    fun actionConsistencyErrors(procs : Set<String>) : List<CompileError> {
-        val progTransitions = declNodes
-            .flatMap { it.procClassPass(procs) }
-            .flatMap { it.transitions }
-        val libTransitions = procPass()
-            .flatMap { it.allProcNames(procPass()) }
-            .filter { it in procs && LibraryRegistry.isLibrary(it) }
-            .flatMap { LibraryRegistry.actionDecls(it) }
-        val allTransitions = progTransitions + libTransitions
-        val actionOccurrences = allTransitions.groupBy { it.action.name }
-        return actionOccurrences.entries.flatMap { (name, actions) ->
-            val refAction = actions[0]
-            val argMismatches = actions.flatMap { act ->
-                assertOrCompileError(refAction.action.args == act.action.args,
-                    TwoLocsCompileError(refAction.loc, act.loc, "Expected action \"$name\" to have the same arguments"))
-            }
-            val inconsistentSyncTypes = actions.flatMap { act ->
-                assertOrCompileError(refAction.action.syncType == act.action.syncType,
-                    TwoLocsCompileError(refAction.loc, act.loc, "Expected action \"$name\" to have the same modifiers"))
-            }
-            val p2pMissingASide = actions.let { actions ->
-                val isP2P = actions.any { act -> act.action.syncType == SymbolicAction.SyncType.P2P }
-                val hasService = actions.any { act -> act.modifier == TSAction.SyncRole.P2PService }
-                val hasConsumer = actions.any { act -> act.modifier == TSAction.SyncRole.P2PConsumer }
-                val missingType = if (hasService) "p2p-consumer" else "p2p-service"
-                assertOrCompileError(!isP2P || (hasService && hasConsumer),
-                    OneLocCompileError(refAction.loc, "Expected action \"$name\" to have at least one corresponding \"$missingType\" action"))
-            }
-            argMismatches + inconsistentSyncTypes + p2pMissingASide
-        }
-    }
-    fun overlappingDeclNamesErrors() : List<CompileError> {
-        // an n^2 algorithm isn't super efficient, but the number of decls won't be large and we do need to detect both
-        // locations where the name conflict occur so we can report it
-        return declNodes.flatMap { refDecl ->
-            declNodes
-                .filter { decl -> refDecl != decl && refDecl.name() == decl.name() }
-                .map { decl -> TwoLocsCompileError(refDecl.programLocation(), decl.programLocation(),
-                    "Expected each declaration to have a unique name, but found at least two named \"${decl.name()}\"") }
-        }
-    }
-    override fun typePass(symbolEnv: Map<String, Type>, registry: ObjClassRegistry): List<CompileError> {
-        val built = ObjClassRegistry.build(declNodes.flatMap { it.objClassPass() })
-        return built.errors + declNodes.flatMap { it.typePass(symbolEnv, built) }
-    }
-
-    fun resolvedObjClassDecls(): List<ObjClassDecl> = resolvedObjClassRegistry().decls
-
-    fun resolvedObjClassRegistry(): ObjClassRegistry = ObjClassRegistry.build(declNodes.flatMap { it.objClassPass() })
-
+    internal fun declNodes(): List<DeclNode> = declNodes
     fun withDeclNodes(decls: List<DeclNode>): RootNode = RootNode(decls, programLocation())
-
-    fun flattenObjClassPass(registry: ObjClassRegistry): RootNode = flattenObjClassPass(this, registry)
-
     override fun toString(): String {
         return declNodes.joinToString("\n\n") { it.toString() }
     }
@@ -144,78 +73,10 @@ class ProcClassNode(
 ) : DeclNode(localDecls) {
     override fun programLocation() = loc
     override fun name() = name
-    override fun procClassPass(procs : Set<String>): List<ProcClassDecl> {
-        if (name !in procs) {
-            return listOf()
-        }
-        val stateVars = localDecls.flatMap { it.stateVariables() }
-        val constructors = localDecls.flatMap { it.constructors() }
-        val transitions = localDecls.flatMap { it.transitions() }
-        val decl = ProcClassDecl(name, stateVars, constructors, transitions)
-        return listOf(decl)
-    }
-
+    internal fun procClassNodeName() = name
     internal fun localDecls(): List<ProcClassDeclNode> = localDecls
-
     internal fun withLocalDecls(decls: List<ProcClassDeclNode>): ProcClassNode =
         ProcClassNode(name, decls, programLocation())
-
-    override fun errorPass(procs: Set<String>): List<CompileError> {
-        // no repeat state var names
-        val repeatStateVarNameErrors = localDecls
-            .filterIsInstance<VarNode>()
-            .groupBy { it.name }
-            .flatMap { (_, nodes) ->
-                if (nodes.size == 1) emptyList()
-                // we have an error (repeat state var names) if there are more than one VarNode's with the same name
-                else listOf(
-                    TwoLocsCompileError(
-                        nodes[0].programLocation(),
-                        nodes[1].programLocation(),
-                        "Expected state variables to have unique names"
-                    )
-                )
-            }
-        // ensure that each constructor assigns a value to every state var exactly once
-        val stateVars = localDecls
-            .flatMap { it.stateVariables() }
-            .map { it.name }
-        val ctorsCompleteAssgnErrors = localDecls
-            .filterIsInstance<ConstructorNode>()
-            .flatMap { ctorNode ->
-                val stateVarSet = stateVars.toSet()
-                val transitVarSet = ctorNode.transitVars().map { it.first }.toSet()
-                val missingStateVars = stateVarSet.minus(transitVarSet)
-                assertOrCompileError(missingStateVars.isEmpty(), OneLocCompileError(ctorNode.programLocation(),
-                        "Expected each constructor to assign a value to every state variable; missing assignments to $missingStateVars"))
-            }
-        // make sure there is at least one constructor
-        val atLeastOneConstructorErrors = assertOrCompileError(localDecls.flatMap { it.constructors() }.isNotEmpty(),
-            OneLocCompileError(loc, "Expected \"$name\" to have at least one constructor"))
-        // constructors actions cannot intersect with transition actions
-        val constructorActions = localDecls.flatMap { it.constructors() }
-        val transitionActions = localDecls.flatMap { it.transitions() }
-        val ctorTransActionNotMutexErrors = constructorActions.flatMap { ctorAct ->
-            transitionActions.flatMap { transAct ->
-                assertOrCompileError(ctorAct.action.name != transAct.action.name,
-                    TwoLocsCompileError(ctorAct.loc, transAct.loc,
-                        "Expected constructor names to not overlap with transition names, but found at least one overlap for the action \"${ctorAct.action.name}\""))
-            }
-        }
-        return super.errorPass(procs) + repeatStateVarNameErrors + ctorsCompleteAssgnErrors +
-                atLeastOneConstructorErrors + ctorTransActionNotMutexErrors
-    }
-    override fun typePass(symbolEnv : Map<String, Type>, registry: ObjClassRegistry) : List<CompileError> {
-        val varErrors = localDecls
-            .filterIsInstance<VarNode>()
-            .flatMap { it.typePass(symbolEnv, registry) }
-        val localSymbolEnv = localDecls
-            .filterIsInstance<VarNode>()
-            .associate { it.name to it.type }
-        return varErrors + localDecls.flatMap { decl ->
-            if (decl is VarNode) emptyList() else decl.typePass(localSymbolEnv, registry)
-        }
-    }
     override fun toString(): String {
         val body = localDecls.joinToString("\n") { "$it".prependIndent() }
         return "p-class $name {\n$body\n}"
@@ -229,9 +90,8 @@ class ProcNode(
 ) : DeclNode(listOf(value)) {
     override fun programLocation() = loc
     override fun name() = name
-    override fun procPass(): List<ProcDecl> {
-        return listOf(ProcDecl(name, value.procPass(), ProcDeclType.Proc))
-    }
+    internal fun procNodeName() = name
+    internal fun procNodeValue() = value
     override fun toString(): String {
         return "proc $name := $value"
     }
@@ -244,9 +104,8 @@ class ProgramNode(
 ) : DeclNode(listOf(value)) {
     override fun programLocation() = loc
     override fun name() = name
-    override fun procPass(): List<ProcDecl> {
-        return listOf(ProcDecl(name, value.procPass(), ProcDeclType.Program))
-    }
+    internal fun programNodeName() = name
+    internal fun programNodeValue() = value
     override fun toString(): String {
         return "program $name := $value"
     }
@@ -259,9 +118,8 @@ class SpecNode(
 ) : DeclNode(listOf(value)) {
     override fun programLocation() = loc
     override fun name() = name
-    override fun procPass(): List<ProcDecl> {
-        return listOf(ProcDecl(name, value.procPass(), ProcDeclType.Spec))
-    }
+    internal fun specNodeName() = name
+    internal fun specNodeValue() = value
     override fun toString(): String {
         return "spec $name := $value"
     }
@@ -274,24 +132,8 @@ class ObjClassNode(
 ) : DeclNode(fields) {
     override fun programLocation() = loc
     override fun name() = name
-    override fun objClassPass(): List<RawObjClassDecl> = listOf(
-        RawObjClassDecl(name, fields.map { it.fieldName to it.typeName }, loc)
-    )
-    override fun errorPass(procs: Set<String>): List<CompileError> {
-        val repeatFieldErrors = fields
-            .groupBy { it.fieldName }
-            .flatMap { (_, nodes) ->
-                if (nodes.size == 1) emptyList()
-                else listOf(
-                    TwoLocsCompileError(
-                        nodes[0].programLocation(),
-                        nodes[1].programLocation(),
-                        "Expected o-class fields to have unique names",
-                    )
-                )
-            }
-        return super.errorPass(procs) + repeatFieldErrors
-    }
+    internal fun objClassNodeName() = name
+    internal fun objClassFields(): List<FieldNode> = fields
     override fun toString(): String {
         val body = fields.joinToString("\n") { "$it".prependIndent() }
         return "o-class $name {\n$body\n}"
@@ -325,15 +167,8 @@ class VarNode(
                 throw RuntimeException("Type not resolved for state variable \"$name\"")
         }
     override fun programLocation() = loc
-    override fun typePass(symbolEnv: Map<String, Type>, registry: ObjClassRegistry): List<CompileError> {
-        return when (val result = registry.resolveTypeName(typeName)) {
-            is TypeResolveResult.Found -> {
-                typeResolution = TypeNameResolution.Resolved(result.type)
-                emptyList()
-            }
-            is TypeResolveResult.NotFound ->
-                listOf(OneLocCompileError(loc, "Unknown type \"$typeName\" for state variable \"$name\""))
-        }
+    internal fun resolveType(type: Type) {
+        typeResolution = TypeNameResolution.Resolved(type)
     }
     override fun stateVariables(): List<Variable> = listOf(Variable(name, type))
     companion object {
@@ -367,28 +202,6 @@ class ConstructorNode(
 ) : ProcClassDeclNode(listOf(args) + body) {
     override fun programLocation() = loc
     override fun transitVars() = body.flatMap { it.transitVars() }
-    override fun errorPass(procs : Set<String>): List<CompileError> {
-        // TODO get rid of the copy pasta
-        val multiVarTransitError = body
-            .flatMap { it.transitVars() }
-            .let { transits ->
-                transits.flatMapIndexed { i, (refName,refLoc) ->
-                    transits.flatMapIndexed { j, (name,loc) ->
-                        assertOrCompileError(i <= j || refName != name, TwoLocsCompileError(refLoc, loc,
-                            "Expected at most one assignment per variable, but found multiple assignments for \"$name\""))
-                    }
-                }
-            }
-        // ensure that there is no guard, since it will not be followed by the ConstructorTS
-        val noGuardErrors = assertOrCompileError(body.flatMap { it.guards() }.isEmpty(),
-            OneLocCompileError(loc, "Expected constructors not to have guards"))
-        return super.errorPass(procs) + multiVarTransitError + noGuardErrors
-    }
-    override fun typePass(symbolEnv : Map<String, Type>, registry: ObjClassRegistry) : List<CompileError> {
-        val argErrors = args.typePass(symbolEnv, registry)
-        val actionEnv = symbolEnv + args.argsTypeMap() + flattenActionArgEnv(args.actionArgs())
-        return argErrors + body.flatMap { it.typePass(actionEnv, registry) }
-    }
     override fun constructors(): List<ActionDecl> {
         return listOf(
             ActionDecl(
@@ -401,6 +214,7 @@ class ConstructorNode(
         )
     }
     internal fun body(): List<ActionBodyNode> = body
+    internal fun constructorArgs(): ArgsNode = args
     internal fun actionArgs(): List<Variable> = args.actionArgs()
     internal fun withBody(newBody: List<ActionBodyNode>): ConstructorNode =
         ConstructorNode(name, args, newBody, programLocation())
@@ -419,28 +233,6 @@ class TransitionNode(
 ) : ProcClassDeclNode(listOf(args) + body) {
     override fun programLocation() = loc
     override fun transitVars() = body.flatMap { it.transitVars() }
-    override fun errorPass(procs : Set<String>): List<CompileError> {
-        val initiallyActionErrors = assertOrCompileError(name != "initially", OneLocCompileError(loc,
-            "only constructors (not transitions) can synchronize on the 'initially' action"))
-        // ensure that each transit has a unique state var
-        // TODO get rid of the copy pasta
-        val multiVarTransitError = body
-            .flatMap { it.transitVars() }
-            .let { transits ->
-                transits.flatMapIndexed { i, (refName,refLoc) ->
-                    transits.flatMapIndexed { j, (name,loc) ->
-                        assertOrCompileError(i <= j || refName != name, TwoLocsCompileError(refLoc, loc,
-                            "Expected at most one assignment per variable, but found multiple assignments for \"$name\""))
-                    }
-                }
-            }
-        return super.errorPass(procs) + initiallyActionErrors + multiVarTransitError
-    }
-    override fun typePass(symbolEnv : Map<String, Type>, registry: ObjClassRegistry) : List<CompileError> {
-        val argErrors = args.typePass(symbolEnv, registry)
-        val actionEnv = symbolEnv + args.argsTypeMap() + flattenActionArgEnv(args.actionArgs())
-        return argErrors + body.flatMap { it.typePass(actionEnv, registry) }
-    }
     override fun transitions(): List<ActionDecl> {
         val syncType = when (modifier) {
             TSAction.SyncRole.CSP -> SymbolicAction.SyncType.CSP
@@ -457,7 +249,9 @@ class TransitionNode(
             )
         )
     }
+    internal fun transitionName() = name
     internal fun body(): List<ActionBodyNode> = body
+    internal fun transitionArgs(): ArgsNode = args
     internal fun actionArgs(): List<Variable> = args.actionArgs()
     internal fun withBody(newBody: List<ActionBodyNode>): TransitionNode =
         TransitionNode(modifier, name, args, newBody, programLocation())
@@ -485,15 +279,10 @@ class ArgNode(
                 throw RuntimeException("Type not resolved for action argument \"$name\"")
         }
     override fun programLocation() = loc
-    override fun typePass(symbolEnv: Map<String, Type>, registry: ObjClassRegistry): List<CompileError> {
-        return when (val result = registry.resolveTypeName(typeName)) {
-            is TypeResolveResult.Found -> {
-                typeResolution = TypeNameResolution.Resolved(result.type)
-                emptyList()
-            }
-            is TypeResolveResult.NotFound ->
-                listOf(OneLocCompileError(loc, "Unknown type \"$typeName\" for action argument \"$name\""))
-        }
+    internal fun argName() = name
+    internal fun argTypeName() = typeName
+    internal fun resolveArgType(type: Type) {
+        typeResolution = TypeNameResolution.Resolved(type)
     }
     override fun actionArgs(): List<Variable> {
         return listOf(Variable(name, type))
@@ -508,18 +297,11 @@ class ArgNode(
 }
 
 class GuardNode(
-    val expr : ExprNode,
+    private val expr : ExprNode,
     private val loc : ProgramLoc
 ) : ActionBodyNode(listOf(), listOf(expr)) {
     override fun programLocation() = loc
-    override fun typePass(symbolEnv : Map<String, Type>, registry: ObjClassRegistry) : List<CompileError> {
-        val childrenErrors = super.typePass(symbolEnv, registry)
-        val guardTypeErrors = assertOrCompileError(
-            expr.getType() is BoolType,
-            OneLocCompileError(loc, "Expected guards to be Boolean-valued expressions")
-        )
-        return childrenErrors + guardTypeErrors
-    }
+    internal fun guardExpr() = expr
     override fun guards(): List<ExprNode> {
         return listOf(expr)
     }
@@ -559,57 +341,14 @@ class VarTransitNode(
 ) : ActionBodyNode(listOf(), listOf(expr)) {
     override fun programLocation() = loc
 
-    private fun transitKey(): String =
+    internal fun transitKey(): String =
         if (fieldPath.isEmpty()) varName else "$varName.${fieldPath.joinToString(".")}"
 
+    internal fun transitExpr() = expr
+
     override fun transitVars() = listOf(Pair(transitKey(), loc))
-        override fun transits(): Map<String, ExprNode> {
+    override fun transits(): Map<String, ExprNode> {
         return mapOf(Pair(transitKey(), expr))
-    }
-    override fun typePass(symbolEnv : Map<String, Type>, registry: ObjClassRegistry) : List<CompileError> {
-        val childrenErrors = super.typePass(symbolEnv, registry)
-        if (childrenErrors.isNotEmpty()) {
-            return childrenErrors
-        }
-        val varType = symbolEnv[varName]
-        val varErrors = if (varType == null) {
-            assertOrCompileError(
-                false,
-                OneLocCompileError(loc, "Unknown variable \"$varName\" in transit assignment"),
-            )
-        } else if (fieldPath.isEmpty()) {
-            assertOrCompileError(
-                expr.getType() == varType,
-                OneLocCompileError(
-                    loc,
-                    "Expected assignment to \"$varName\" ($varType) but got expression of type ${expr.getType()}",
-                ),
-            )
-        } else {
-            when (val result = resolveFieldPath(varType, fieldPath)) {
-                is FieldPathResult.Error -> listOf(OneLocCompileError(loc, result.message))
-                is FieldPathResult.Resolved -> {
-                    if (result.type is ObjClassType) {
-                        assertOrCompileError(
-                            false,
-                            OneLocCompileError(
-                                loc,
-                                "Cannot assign a scalar to o-class field \"${transitKey()}\"; assign the whole value instead",
-                            ),
-                        )
-                    } else {
-                        assertOrCompileError(
-                            expr.getType() == result.type,
-                            OneLocCompileError(
-                                loc,
-                                "Expected assignment to \"${transitKey()}\" (${result.type}) but got expression of type ${expr.getType()}",
-                            ),
-                        )
-                    }
-                }
-            }
-        }
-        return childrenErrors + varErrors
     }
     override fun toString(): String {
         return "${transitKey()} := $expr"
@@ -691,7 +430,6 @@ class BinaryOpExprNode(
         }
     }
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
-        // for readability
         val lhs = lhsOperand.toTransitString(symbolTypes, argSymbols)
         val rhs = rhsOperand.toTransitString(symbolTypes, argSymbols)
         return when (op) {
@@ -702,26 +440,6 @@ class BinaryOpExprNode(
             "=>" -> "(!($lhs) || $rhs)"
             else -> "($lhs $op $rhs)"
         }
-    }
-    override fun typePass(symbolEnv: Map<String, Type>, registry: ObjClassRegistry): List<CompileError> {
-        val childErrors = super.typePass(symbolEnv, registry)
-        if (childErrors.isNotEmpty()) {
-            return childErrors
-        }
-        val lhsType = lhsOperand.getType()
-        val rhsType = rhsOperand.getType()
-        val structOpErrors = if (lhsType is ObjClassType || rhsType is ObjClassType) {
-            when (op) {
-                "=", "#" -> assertOrCompileError(
-                    lhsType == rhsType,
-                    OneLocCompileError(loc, "Expected both sides of \"$op\" to have the same o-class type, got $lhsType and $rhsType"),
-                )
-                else -> listOf(OneLocCompileError(loc, "Cannot apply \"$op\" to o-class type $lhsType"))
-            }
-        } else {
-            emptyList()
-        }
-        return childErrors + structOpErrors
     }
     override fun inferType(symbolEnv: Map<String, Type>): Type {
         return when (op) {
@@ -751,7 +469,6 @@ class BinaryOpExprNode(
         }
     }
     override fun toString(): String {
-        // for readability
         val lhs = "$lhsOperand"
         val rhs = "$rhsOperand"
         return "($lhs $op $rhs)"
@@ -768,28 +485,6 @@ class IfElseExprNode(
     internal fun condExpr(): ExprNode = condExpr
     internal fun thenExpr(): ExprNode = thenExpr
     internal fun elseExpr(): ExprNode = elseExpr
-    override fun typePass(symbolEnv : Map<String, Type>, registry: ObjClassRegistry) : List<CompileError> =
-        super.typePass(symbolEnv, registry) + ifElseTypeErrors()
-    private fun ifElseTypeErrors() : List<CompileError> {
-        val errors = mutableListOf<CompileError>()
-        if (condExpr.getType() !is BoolType) {
-            errors.add(
-                OneLocCompileError(programLocation(), "Expected if-condition to be Boolean")
-            )
-        }
-        val thenT = thenExpr.getType()
-        val elseT = elseExpr.getType()
-        if (thenT != elseT) {
-            errors.add(
-                TwoLocsCompileError(
-                    thenExpr.programLocation(),
-                    elseExpr.programLocation(),
-                    "Expected if-branches to have the same type, got $thenT and $elseT"
-                )
-            )
-        }
-        return errors
-    }
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         val condGuardStr = condExpr.toZ3GuardString(symbolTypes,argSymbols)
         val thenGuardStr = thenExpr.toZ3GuardString(symbolTypes,argSymbols)
@@ -803,11 +498,10 @@ class IfElseExprNode(
         return "if ($condTransitStr) {$thenTransitStr} else {$elseTransitStr}"
     }
     override fun inferType(symbolEnv: Map<String, Type>): Type {
-        // typePass() ensures that elseExpr has the same type
         return thenExpr.getType()
     }
     override fun toString(): String {
-        return "if ($condExpr) {$thenExpr} else {$elseExpr)"
+        return "if ($condExpr) {$thenExpr} else {$elseExpr}"
     }
 }
 
@@ -834,68 +528,8 @@ class ObjClassLiteralExprNode(
 
     override fun programLocation() = loc
 
-    override fun typePass(symbolEnv: Map<String, Type>, registry: ObjClassRegistry): List<CompileError> {
-        val classErrors = when (val classResult = registry.resolveTypeName(className)) {
-            is TypeResolveResult.NotFound ->
-                listOf(OneLocCompileError(loc, "Unknown o-class \"$className\" in o-class literal"))
-            is TypeResolveResult.Found -> {
-                if (classResult.type !is ObjClassType) {
-                    listOf(OneLocCompileError(loc, "\"$className\" is not an o-class type"))
-                } else {
-                    objClassLiteralResolution = ObjClassLiteralResolution.Resolved(classResult.type)
-                    emptyList()
-                }
-            }
-        }
-        if (classErrors.isNotEmpty()) {
-            return classErrors
-        }
-
-        val resolvedType = structType
-        val duplicateFieldErrors = fieldEntries
-            .groupBy { it.first }
-            .flatMap { (name, entries) ->
-                if (entries.size == 1) emptyList()
-                else listOf(
-                    TwoLocsCompileError(
-                        entries[0].second.programLocation(),
-                        entries[1].second.programLocation(),
-                        "Expected o-class literal fields to have unique names, but found duplicate \"$name\"",
-                    )
-                )
-            }
-        val providedFields = fieldEntries.map { it.first }.toSet()
-        val expectedFields = resolvedType.fields.map { it.name }.toSet()
-        val missingFields = expectedFields - providedFields
-        val extraFields = providedFields - expectedFields
-        val fieldSetErrors = buildList {
-            if (missingFields.isNotEmpty()) {
-                add(OneLocCompileError(loc, "O-class literal for \"$className\" is missing fields: $missingFields"))
-            }
-            if (extraFields.isNotEmpty()) {
-                add(OneLocCompileError(loc, "O-class literal for \"$className\" has unknown fields: $extraFields"))
-            }
-        }
-        if (duplicateFieldErrors.isNotEmpty() || fieldSetErrors.isNotEmpty()) {
-            return classErrors + duplicateFieldErrors + fieldSetErrors
-        }
-
-        val childErrors = super.typePass(symbolEnv, registry)
-        if (childErrors.isNotEmpty()) {
-            return childErrors
-        }
-
-        val matchErrors = resolvedType.fields.flatMap { field ->
-            val expr = fieldAssignments.getValue(field.name)
-            assertOrCompileError(
-                expr.getType() == field.type,
-                OneLocCompileError(
-                    expr.programLocation(),
-                    "Expected field \"${field.name}\" of \"$className\" to have type ${field.type} but got ${expr.getType()}",
-                ),
-            )
-        }
-        return matchErrors
+    internal fun resolveLiteralType(type: ObjClassType) {
+        objClassLiteralResolution = ObjClassLiteralResolution.Resolved(type)
     }
 
     override fun toZ3GuardString(
@@ -962,18 +596,8 @@ class FieldAccessExprNode(
 
     override fun programLocation() = loc
 
-    override fun typePass(symbolEnv: Map<String, Type>, registry: ObjClassRegistry): List<CompileError> {
-        val baseType = symbolEnv[baseSymbol]
-        if (baseType == null) {
-            return listOf(OneLocCompileError(loc, "Unknown variable \"$baseSymbol\" in field access"))
-        }
-        return when (val result = resolveFieldPath(baseType, fieldPath)) {
-            is FieldPathResult.Error -> listOf(OneLocCompileError(loc, result.message))
-            is FieldPathResult.Resolved -> {
-                fieldResolution = FieldAccessResolution.Resolved(result.type, result.relPath)
-                super.typePass(symbolEnv, registry)
-            }
-        }
+    internal fun resolveFieldAccess(leafType: Type, relPath: String) {
+        fieldResolution = FieldAccessResolution.Resolved(leafType, relPath)
     }
 
     override fun toZ3GuardString(
@@ -1097,9 +721,7 @@ class ValueProcExprNode(
     private val loc : ProgramLoc
 ) : ASTNode(listOf()) {
     override fun programLocation() = loc
-    override fun procPass(): List<ProcDecl> {
-        return listOf(ProcDecl(name, listOf(), ProcDeclType.Proc))
-    }
+    internal fun valueProcName() = name
     override fun toString(): String {
         return name
     }

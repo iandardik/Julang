@@ -61,7 +61,7 @@ private fun flattenActionBody(
     return body.flatMap { node ->
         when (node) {
             is GuardNode -> listOf(
-                GuardNode(flattenExpr(node.expr, logicalSymbolEnv, fullEnv, argSymbols), node.programLocation()),
+                GuardNode(flattenExpr(node.guardExpr(), logicalSymbolEnv, fullEnv, argSymbols), node.programLocation()),
             )
             is TransitNode -> listOf(TransitNode(node.transitBodies().flatMap { transitBody ->
                 when (transitBody) {
