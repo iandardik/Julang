@@ -1,0 +1,4 @@
+source: regression/input/imports/import-unknown-lib.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Unknown library julaylib.Nonexistent"

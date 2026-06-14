@@ -6,6 +6,7 @@ data class CaseFile(
     val id: String,
     val source: String,
     val tags: List<String>,
+    val disabled: Boolean,
     val expectCompileFailure: Boolean,
     val expectCompileOutputContains: List<String>,
     val programs: List<ProgramCase>,

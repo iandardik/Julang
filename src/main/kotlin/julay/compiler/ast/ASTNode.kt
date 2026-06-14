@@ -59,15 +59,43 @@ abstract class ExprNode(children : List<ASTNode>) : ASTNode(children) {
     abstract fun toTransitString(symbolTypes : Map<String,Type>, argSymbols : Set<String>) : String
 }
 
+class ImportNode(
+    private val qualifiedName : QualifiedNameNode,
+    private val loc : ProgramLoc
+) : ASTNode(listOf(qualifiedName)) {
+    override fun programLocation() = loc
+    fun qualifiedName() = qualifiedName
+    override fun toString(): String {
+        return "import $qualifiedName"
+    }
+}
+
+class QualifiedNameNode(
+    private val parts : List<String>,
+    private val loc : ProgramLoc
+) : ASTNode(listOf()) {
+    override fun programLocation() = loc
+    fun parts() = parts
+    fun modulePath() = parts.dropLast(1).joinToString(".")
+    fun symbol() = parts.last()
+    override fun toString(): String {
+        return parts.joinToString(".")
+    }
+}
+
 class RootNode(
+    private val importNodes : List<ImportNode>,
     private val declNodes : List<DeclNode>,
     private val loc : ProgramLoc
-) : ASTNode(declNodes) {
+) : ASTNode(importNodes + declNodes) {
     override fun programLocation(): ProgramLoc = loc
+    internal fun importNodes(): List<ImportNode> = importNodes
     internal fun declNodes(): List<DeclNode> = declNodes
-    fun withDeclNodes(decls: List<DeclNode>): RootNode = RootNode(decls, programLocation())
+    fun withDeclNodes(decls: List<DeclNode>): RootNode = RootNode(importNodes, decls, programLocation())
+    fun withImportsAndDecls(imports: List<ImportNode>, decls: List<DeclNode>): RootNode =
+        RootNode(imports, decls, programLocation())
     override fun toString(): String {
-        return declNodes.joinToString("\n\n") { it.toString() }
+        return (importNodes + declNodes).joinToString("\n\n") { it.toString() }
     }
 }
 
@@ -723,12 +751,16 @@ class SymbolValueExprNode(
 
 class ValueProcExprNode(
     private val name : String,
+    private val qualifiedParts : List<String>?,
     private val loc : ProgramLoc
 ) : ASTNode(listOf()) {
     override fun programLocation() = loc
     internal fun valueProcName() = name
+    internal fun qualifiedParts() = qualifiedParts
+    internal fun isQualified() = qualifiedParts != null
+    internal fun fullQualifiedName() = qualifiedParts?.joinToString(".") ?: name
     override fun toString(): String {
-        return name
+        return fullQualifiedName()
     }
 }
 

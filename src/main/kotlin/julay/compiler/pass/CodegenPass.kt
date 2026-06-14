@@ -15,8 +15,9 @@ fun codegenPass(
     ast: RootNode,
     program: ProcDecl,
     procDecls: List<ProcDecl>,
+    librariesInUse: Set<String> = emptySet(),
 ): CodegenResult {
-    val libPClassNames = LibraryRegistry.julNames
+    val libPClassNames = librariesInUse
     val procsToCompile = program.allProcNames(procDecls).filter { it !in libPClassNames }
     val procClasses = procsToCompile.flatMap { proc ->
         val procClass = ast.procClassPass(setOf(proc))

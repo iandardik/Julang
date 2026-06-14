@@ -1,0 +1,47 @@
+import julaylib.Println
+import julaylib.HttpServer
+
+o-class ReqInfo {
+    req : String
+    resp : String
+}
+
+p-class EchoHandler {
+    var info : ReqInfo
+    var responded : Boolean
+    var done : Boolean
+
+    constructor receiveRequest(reqBody : String) {
+        transit:
+            info := ReqInfo {
+                req := reqBody,
+                resp := reqBody + " is a good point!"
+            }
+            responded := false
+            done := false
+    }
+
+    transition sendResponse(respBody : String) {
+        guard:
+            ~responded & respBody = info.resp
+        transit:
+            responded := true
+    }
+
+    p2p-consumer transition println(msg : String) {
+        guard:
+              responded
+            & ~done
+            & msg = "Req: '" + info.req + "', I responded: '" + info.resp + "'"
+        transit:
+            done := true
+    }
+
+    p2p-consumer transition close() {
+        guard:
+            // never close the server until the user hits ctrl-c
+            false
+    }
+}
+
+proc Server := EchoHandler || Println || HttpServer

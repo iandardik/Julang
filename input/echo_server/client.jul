@@ -1,0 +1,57 @@
+import julaylib.HttpClient
+import julaylib.Println
+
+p-class ClientDispatcher {
+    var numReqs : Int
+    var maxNumReqs : Int
+
+    constructor initially() {
+        transit:
+            numReqs := 1
+            maxNumReqs := 25
+    }
+
+    transition startReq(num : Int) {
+        guard:
+            numReqs <= maxNumReqs & num = numReqs
+        transit:
+            numReqs := numReqs + 1
+    }
+}
+
+p-class ClientLogic {
+    var reqNum : Int
+    var state : String
+    var resp : String
+
+    constructor startReq(num : Int) {
+        transit:
+            reqNum := num
+            state := "A"
+            resp := ""
+    }
+
+    transition sendRequest(sendBody : String) {
+        guard:
+            state = "A" & sendBody = "ReqNum: " + reqNum
+        transit:
+            state := "B"
+    }
+
+    transition receiveResponse(respBody : String) {
+        guard:
+            state = "B"
+        transit:
+            resp := respBody
+            state := "C"
+    }
+
+    p2p-consumer transition println(msg : String) {
+        guard:
+            state = "C" & msg = "response: " + resp
+        transit:
+            state := "D"
+    }
+}
+
+proc Client := ClientDispatcher || ClientLogic || HttpClient || Println

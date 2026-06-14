@@ -1,0 +1,33 @@
+import julaylib.HttpServer
+
+p-class IncReqHandler {
+    var localCounter : Int
+    var step : String
+
+    constructor receiveRequest(reqBody : String) {
+        transit:
+            step := "A"
+            localCounter := -1
+    }
+
+    p2p-consumer transition increment() {
+        guard:   step = "A"
+        transit: step := "B"
+    }
+
+    p2p-consumer transition getCounter(counterVal : Int) {
+        guard: step = "B"
+        transit:
+            localCounter := counterVal
+            step := "C"
+    }
+
+    transition sendResponse(respBody : String) {
+        guard:
+            step = "C" & respBody = localCounter + ""
+        transit:
+            step := "D"
+    }
+}
+
+proc ServerLogic := IncReqHandler || HttpServer

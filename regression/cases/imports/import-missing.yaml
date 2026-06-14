@@ -1,0 +1,4 @@
+source: regression/input/imports/import-missing.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "did you mean to import julaylib.Println"

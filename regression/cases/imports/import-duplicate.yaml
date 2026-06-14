@@ -1,0 +1,4 @@
+source: regression/input/imports/import-duplicate.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Duplicate import"

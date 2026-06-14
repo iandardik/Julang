@@ -6,27 +6,26 @@ import julay.compiler.decl.*
 import julay.program.*
 import julay.program.library.LibraryRegistry
 
-fun ASTNode.errorPass(procs: Set<String>): List<CompileError> = when (this) {
-    is RootNode -> errorPassRoot(procs)
-    is ProcClassNode -> errorPassProcClass(procs)
-    is ObjClassNode -> errorPassObjClass(procs)
-    is ConstructorNode -> errorPassConstructor(procs)
-    is TransitionNode -> errorPassTransition(procs)
-    else -> children.flatMap { it.errorPass(procs) }
+fun ASTNode.errorPass(procs: Set<String>, librariesInUse: Set<String> = emptySet()): List<CompileError> = when (this) {
+    is RootNode -> errorPassRoot(procs, librariesInUse)
+    is ProcClassNode -> errorPassProcClass(procs, librariesInUse)
+    is ObjClassNode -> errorPassObjClass(procs, librariesInUse)
+    is ConstructorNode -> errorPassConstructor(procs, librariesInUse)
+    is TransitionNode -> errorPassTransition(procs, librariesInUse)
+    else -> children.flatMap { it.errorPass(procs, librariesInUse) }
 }
 
-private fun RootNode.errorPassRoot(procs: Set<String>): List<CompileError> =
-    children.flatMap { it.errorPass(procs) } +
-        actionConsistencyErrors(procs) +
+private fun RootNode.errorPassRoot(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> =
+    children.flatMap { it.errorPass(procs, librariesInUse) } +
+        actionConsistencyErrors(procs, librariesInUse) +
         overlappingDeclNamesErrors()
 
-private fun RootNode.actionConsistencyErrors(procs: Set<String>): List<CompileError> {
+private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
     val progTransitions = declNodes()
         .flatMap { it.procClassPass(procs) }
         .flatMap { it.transitions }
-    val libTransitions = procPass()
-        .flatMap { it.allProcNames(procPass()) }
-        .filter { it in procs && LibraryRegistry.isLibrary(it) }
+    val libTransitions = librariesInUse
+        .filter { it in procs }
         .flatMap { LibraryRegistry.actionDecls(it) }
     val allTransitions = progTransitions + libTransitions
     val actionOccurrences = allTransitions.groupBy { it.action.name }
@@ -84,7 +83,7 @@ private fun RootNode.overlappingDeclNamesErrors(): List<CompileError> {
     }
 }
 
-private fun ProcClassNode.errorPassProcClass(procs: Set<String>): List<CompileError> {
+private fun ProcClassNode.errorPassProcClass(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
     val localDecls = localDecls()
     val repeatStateVarNameErrors = localDecls
         .filterIsInstance<VarNode>()
@@ -132,11 +131,11 @@ private fun ProcClassNode.errorPassProcClass(procs: Set<String>): List<CompileEr
             )
         }
     }
-    return children.flatMap { it.errorPass(procs) } + repeatStateVarNameErrors + ctorsCompleteAssgnErrors +
+    return children.flatMap { it.errorPass(procs, librariesInUse) } + repeatStateVarNameErrors + ctorsCompleteAssgnErrors +
         atLeastOneConstructorErrors + ctorTransActionNotMutexErrors
 }
 
-private fun ObjClassNode.errorPassObjClass(procs: Set<String>): List<CompileError> {
+private fun ObjClassNode.errorPassObjClass(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
     val repeatFieldErrors = objClassFields()
         .groupBy { it.fieldName }
         .flatMap { (_, nodes) ->
@@ -149,10 +148,10 @@ private fun ObjClassNode.errorPassObjClass(procs: Set<String>): List<CompileErro
                 ),
             )
         }
-    return children.flatMap { it.errorPass(procs) } + repeatFieldErrors
+    return children.flatMap { it.errorPass(procs, librariesInUse) } + repeatFieldErrors
 }
 
-private fun ConstructorNode.errorPassConstructor(procs: Set<String>): List<CompileError> {
+private fun ConstructorNode.errorPassConstructor(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
     val multiVarTransitError = body()
         .flatMap { it.transitVars() }
         .let { transits ->
@@ -173,10 +172,10 @@ private fun ConstructorNode.errorPassConstructor(procs: Set<String>): List<Compi
         body().flatMap { it.guards() }.isEmpty(),
         OneLocCompileError(programLocation(), "Expected constructors not to have guards"),
     )
-    return children.flatMap { it.errorPass(procs) } + multiVarTransitError + noGuardErrors
+    return children.flatMap { it.errorPass(procs, librariesInUse) } + multiVarTransitError + noGuardErrors
 }
 
-private fun TransitionNode.errorPassTransition(procs: Set<String>): List<CompileError> {
+private fun TransitionNode.errorPassTransition(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
     val initiallyActionErrors = assertOrCompileError(
         transitionName() != "initially",
         OneLocCompileError(
@@ -200,5 +199,5 @@ private fun TransitionNode.errorPassTransition(procs: Set<String>): List<Compile
                 }
             }
         }
-    return children.flatMap { it.errorPass(procs) } + initiallyActionErrors + multiVarTransitError
+    return children.flatMap { it.errorPass(procs, librariesInUse) } + initiallyActionErrors + multiVarTransitError
 }

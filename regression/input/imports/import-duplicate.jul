@@ -1,0 +1,16 @@
+import julaylib.Println
+import julaylib.Println
+
+p-class S {
+    var x : Int
+
+    constructor initially() {
+        transit: x := 0
+    }
+
+    p2p-consumer transition println(msg : String) {
+        guard: msg = x + ""
+    }
+}
+
+program ImportDuplicateTest := S || Println

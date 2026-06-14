@@ -18,6 +18,26 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitRoot(JulayParser.RootContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#import_stmt}.
+	 * @param ctx the parse tree
+	 */
+	void enterImport_stmt(JulayParser.Import_stmtContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#import_stmt}.
+	 * @param ctx the parse tree
+	 */
+	void exitImport_stmt(JulayParser.Import_stmtContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#qualified_name}.
+	 * @param ctx the parse tree
+	 */
+	void enterQualified_name(JulayParser.Qualified_nameContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#qualified_name}.
+	 * @param ctx the parse tree
+	 */
+	void exitQualified_name(JulayParser.Qualified_nameContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#decl}.
 	 * @param ctx the parse tree
 	 */

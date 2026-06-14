@@ -1,3 +1,5 @@
+import julaylib.ExitSystem
+
 o-class Point {
     x : Int
     y : Int

@@ -1,3 +1,6 @@
+import julaylib.Println
+import julaylib.ExitSystem
+
 p-class S {
     var x : Int
     var print : Boolean

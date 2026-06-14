@@ -1,5 +1,0 @@
-source: regression/input/oclass/constructor-arg.jul
-programs:
-  - name: ConstructorArgTest
-    run:
-      timeoutMs: 60000

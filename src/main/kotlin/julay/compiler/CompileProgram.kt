@@ -4,9 +4,19 @@ import julay.compiler.ast.RootNode
 import julay.compiler.decl.ProcDecl
 import julay.compiler.pass.codegenPass
 import java.io.File
+import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
 
-fun compileProgram(program : ProcDecl, ast : RootNode, procDecls : List<ProcDecl>, keepBuild : Boolean = false) {
+private const val GRADLE_WRAPPER_TIMEOUT_MINUTES = 5L
+private const val GRADLE_BUILD_TIMEOUT_MINUTES = 10L
+
+fun compileProgram(
+    program: ProcDecl,
+    ast: RootNode,
+    procDecls: List<ProcDecl>,
+    librariesInUse: Set<String> = emptySet(),
+    keepBuild: Boolean = false,
+) {
     val buildDir = "${program.name}-jul-build"
     if (!File(buildDir).exists() && !File(buildDir).mkdir()) {
         println("Could not create $buildDir dir")
@@ -18,7 +28,7 @@ fun compileProgram(program : ProcDecl, ast : RootNode, procDecls : List<ProcDecl
     File(buildDir).listFiles()?.filter { it.isFile && it.extension == "kt" }?.forEach { it.delete() }
     deleteDirectory(File("$buildDir/build"))
 
-    val codegen = codegenPass(ast, program, procDecls)
+    val codegen = codegenPass(ast, program, procDecls, librariesInUse)
     val fileName = "${codegen.mainClassName}.kt"
     File("$buildDir/$fileName").writeText(codegen.sourceText)
 
@@ -26,18 +36,61 @@ fun compileProgram(program : ProcDecl, ast : RootNode, procDecls : List<ProcDecl
     File("$buildDir/build.gradle.kts").delete()
 
     File("$buildDir/settings.gradle.kts").writeText(gradleSettingsFileContents(program.name))
-    Runtime.getRuntime().exec(arrayOf("bash", "-c", "cd $buildDir; gradle wrapper --gradle-version 8.5")).waitFor()
+    val wrapperResult = runShellCommand(
+        "cd $buildDir; gradle wrapper --gradle-version 8.5",
+        GRADLE_WRAPPER_TIMEOUT_MINUTES,
+    )
+    if (wrapperResult.timedOut) {
+        println("Gradle wrapper timed out for program \"${program.name}\"")
+        return
+    }
+    if (wrapperResult.exitCode != 0) {
+        println("Gradle wrapper failed for program \"${program.name}\" (exit ${wrapperResult.exitCode}):\n${wrapperResult.output}")
+        return
+    }
+
     File("$buildDir/build.gradle.kts").writeText(gradleBuildFileContents(program.name, codegen.mainClassName))
-    val gradleProc = Runtime.getRuntime().exec(arrayOf("bash", "-c", "cd $buildDir; ./gradlew shadowJar 2>&1"))
-    val gradleOutput = gradleProc.inputStream.bufferedReader().readText()
-    val gradleExit = gradleProc.waitFor()
-    if (gradleExit != 0) {
-        println("Gradle build failed for program \"${program.name}\" (exit $gradleExit):\n$gradleOutput")
+    val gradleResult = runShellCommand(
+        "cd $buildDir; ./gradlew shadowJar 2>&1",
+        GRADLE_BUILD_TIMEOUT_MINUTES,
+    )
+    if (gradleResult.timedOut) {
+        println("Gradle build timed out for program \"${program.name}\"")
+        return
+    }
+    if (gradleResult.exitCode != 0) {
+        println("Gradle build failed for program \"${program.name}\" (exit ${gradleResult.exitCode}):\n${gradleResult.output}")
         return
     }
     if (!keepBuild) {
         deleteDirectory(File(buildDir))
     }
+}
+
+private data class ShellResult(val exitCode: Int, val output: String, val timedOut: Boolean)
+
+private fun runShellCommand(command: String, timeoutMinutes: Long): ShellResult {
+    val proc = Runtime.getRuntime().exec(arrayOf("bash", "-c", command))
+    val output = StringBuilder()
+    val reader = Thread {
+        proc.inputStream.bufferedReader().use { br ->
+            val buf = CharArray(4096)
+            var n: Int
+            while (br.read(buf).also { n = it } != -1) {
+                output.append(buf, 0, n)
+            }
+        }
+    }
+    reader.start()
+    val finished = proc.waitFor(timeoutMinutes, TimeUnit.MINUTES)
+    if (!finished) {
+        proc.destroyForcibly()
+        proc.waitFor(5, TimeUnit.SECONDS)
+        reader.join(2000)
+        return ShellResult(-1, output.toString(), timedOut = true)
+    }
+    reader.join(30_000)
+    return ShellResult(proc.exitValue(), output.toString(), timedOut = false)
 }
 
 // thank you: https://www.baeldung.com/kotlin/delete-directories-with-contents

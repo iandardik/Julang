@@ -21,14 +21,34 @@ fun sourceLocation(ctx : ParserRuleContext) = SourceLoc(Pair(ctx.getStart().line
 class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
 
     override fun visitRoot(ctx: JulayParser.RootContext?): ASTNode {
-        val declNodes = ctx!!.decl().map {
+        val importNodes = ctx!!.import_stmt().map {
+            val node = visit(it)
+            if (node !is ImportNode) {
+                throw RuntimeException("Expected ImportNode but got $node")
+            }
+            node
+        }
+        val declNodes = ctx.decl().map {
             val node = visit(it)
             if (node !is DeclNode) {
                 throw RuntimeException("Expected DeclNode but got $node")
             }
             node
         }
-        return RootNode(declNodes, sourceLocation(ctx))
+        return RootNode(importNodes, declNodes, sourceLocation(ctx))
+    }
+
+    override fun visitImport_stmt(ctx: JulayParser.Import_stmtContext?): ASTNode {
+        val qualifiedName = visit(ctx!!.qualified_name())
+        if (qualifiedName !is QualifiedNameNode) {
+            throw RuntimeException("Expected QualifiedNameNode but got $qualifiedName")
+        }
+        return ImportNode(qualifiedName, sourceLocation(ctx))
+    }
+
+    override fun visitQualified_name(ctx: JulayParser.Qualified_nameContext?): ASTNode {
+        val parts = ctx!!.ID().map { it.text }
+        return QualifiedNameNode(parts, sourceLocation(ctx))
     }
 
     override fun visitDecl(ctx: JulayParser.DeclContext?): ASTNode {
@@ -281,11 +301,19 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
     }
 
     override fun visitProc_expr(ctx: JulayParser.Proc_exprContext?): ASTNode {
-        return if (ctx!!.ID() != null) {
-            ValueProcExprNode(ctx.ID().text, sourceLocation(ctx))
-        } else {
-            val compositeProcs = ctx.proc_expr().map { visit(it) }
-            CompositeProcExprNode(compositeProcs, sourceLocation(ctx))
+        return when {
+            ctx!!.qualified_name() != null -> {
+                val qn = visit(ctx.qualified_name()) as QualifiedNameNode
+                val parts = qn.parts()
+                ValueProcExprNode(parts.last(), parts, sourceLocation(ctx))
+            }
+            ctx.ID() != null -> {
+                ValueProcExprNode(ctx.ID().text, null, sourceLocation(ctx))
+            }
+            else -> {
+                val compositeProcs = ctx.proc_expr().map { visit(it) }
+                CompositeProcExprNode(compositeProcs, sourceLocation(ctx))
+            }
         }
     }
 

@@ -31,6 +31,7 @@ ASGN_EQ : ':=' ;
 IMPLIES : '=>' ;
 IF : 'if' ;
 ELSE : 'else' ;
+IMPORT : 'import' ;
 
 
 PCLASS : 'p-class' ;

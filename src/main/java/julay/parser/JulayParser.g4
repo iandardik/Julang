@@ -2,7 +2,15 @@ parser grammar JulayParser;
 options { tokenVocab=JulayLexer; }
 
 root
-    : decl* EOF
+    : (import_stmt | decl)* EOF
+    ;
+
+import_stmt
+    : IMPORT qualified_name
+    ;
+
+qualified_name
+    : ID (DOT ID)+
     ;
 
 decl
@@ -110,7 +118,8 @@ expr
     ;
 
 proc_expr
-    : ID
+    : qualified_name
+    | ID
     | LPAREN proc_expr RPAREN
     | proc_expr PARALLEL proc_expr
     ;

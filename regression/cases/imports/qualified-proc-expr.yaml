@@ -1,0 +1,7 @@
+source: regression/input/imports/qualified-proc-expr.jul
+programs:
+  - name: QualifiedProcExprTest
+    run:
+      timeoutMs: 60000
+      expectStdoutContains:
+        - "0"

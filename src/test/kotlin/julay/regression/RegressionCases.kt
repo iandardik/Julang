@@ -26,16 +26,19 @@ object RegressionCases {
         val source = root["source"] as String
         val tags = (root["tags"] as? List<*>)?.map { it.toString() } ?: emptyList()
         val expectCompileFailure = root["expectCompileFailure"] as? Boolean ?: false
+        val disabled = root["disabled"] as? Boolean ?: false
         val expectCompileOutputContains =
             (root["expectCompileOutputContains"] as? List<*>)?.map { it.toString() } ?: emptyList()
         @Suppress("UNCHECKED_CAST")
         val programsRaw = root["programs"] as? List<Map<String, Any>> ?: emptyList()
         val programs = programsRaw.map { parseProgram(it) }
-        check(expectCompileFailure || programs.isNotEmpty()) {
-            "Case ${file.name} must set expectCompileFailure: true or declare at least one program"
+        if (!disabled) {
+            check(expectCompileFailure || programs.isNotEmpty()) {
+                "Case ${file.name} must set expectCompileFailure: true or declare at least one program"
+            }
         }
         return CaseFile(
-            caseId(casesDir, file), source, tags,
+            caseId(casesDir, file), source, tags, disabled,
             expectCompileFailure, expectCompileOutputContains, programs,
         )
     }
@@ -57,8 +60,10 @@ object RegressionCases {
 
     @Suppress("UNCHECKED_CAST")
     private fun parseRun(map: Map<String, Any>): RunConfig {
-        val timeoutMs = (map["timeoutMs"] as? Number)?.toLong() ?: 30_000L
+        val timeoutMs = ((map["timeoutMs"] as? Number)?.toLong() ?: RegressionTimeouts.CASE_MS)
+            .coerceAtMost(RegressionTimeouts.CASE_MS)
         val durationMs = (map["durationMs"] as? Number)?.toLong()
+            ?.coerceAtMost(RegressionTimeouts.CASE_MS)
         val stdin = (map["stdin"] as? List<*>)?.map { it.toString() } ?: emptyList()
         val background = map["background"] as? Boolean ?: false
         val expectStdout = map["expectStdout"] as? String

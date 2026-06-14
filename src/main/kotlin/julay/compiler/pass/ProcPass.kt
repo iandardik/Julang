@@ -11,3 +11,28 @@ fun ASTNode.procPass(): List<ProcDecl> = when (this) {
     is ValueProcExprNode -> listOf(ProcDecl(valueProcName(), listOf(), ProcDeclType.Proc))
     else -> children.flatMap { it.procPass() }
 }
+
+fun ASTNode.resolvedProcPass(unit: CompilationUnit): List<ProcDecl> = when (this) {
+    is ProcNode -> listOf(
+        ProcDecl(procNodeName(), procNodeValue().resolvedProcPass(unit), ProcDeclType.Proc),
+    )
+    is ProgramNode -> listOf(
+        ProcDecl(programNodeName(), programNodeValue().resolvedProcPass(unit), ProcDeclType.Program),
+    )
+    is SpecNode -> listOf(
+        ProcDecl(specNodeName(), specNodeValue().resolvedProcPass(unit), ProcDeclType.Spec),
+    )
+    is ValueProcExprNode -> {
+        val (resolved, _) = resolveProcLeaf(
+            this,
+            unit.entryDeclNames,
+            unit.allPClassNames,
+            unit.allProcNames,
+            unit.importTable,
+            unit.moduleSymbols,
+        )
+        val flatName = resolved?.flatName ?: valueProcName()
+        listOf(ProcDecl(flatName, listOf(), ProcDeclType.Proc))
+    }
+    else -> children.flatMap { it.resolvedProcPass(unit) }
+}

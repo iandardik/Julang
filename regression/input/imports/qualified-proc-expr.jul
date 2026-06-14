@@ -1,0 +1,20 @@
+p-class S {
+    var x : Int
+
+    constructor initially() {
+        transit: x := 0
+    }
+
+    p2p-consumer transition println(msg : String) {
+        guard:
+            x < 2 & msg = x + ""
+        transit:
+            x := x + 1
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard: x >= 2
+    }
+}
+
+program QualifiedProcExprTest := S || julaylib.Println || julaylib.ExitSystem

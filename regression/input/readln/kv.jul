@@ -1,3 +1,7 @@
+import julaylib.Println
+import julaylib.Readln
+import julaylib.ExitSystem
+
 p-class FrontEnd {
     var state : String
     var keyReq : String

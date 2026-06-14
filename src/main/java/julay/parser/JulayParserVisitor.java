@@ -17,6 +17,18 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitRoot(JulayParser.RootContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#import_stmt}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitImport_stmt(JulayParser.Import_stmtContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#qualified_name}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitQualified_name(JulayParser.Qualified_nameContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#decl}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
