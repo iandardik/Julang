@@ -1,22 +1,13 @@
 p-class Timer {
-    var timing : Boolean
+    var done : Boolean
 
-    constructor initially() {
-        transit:
-            timing := false
-    }
-
-    transition timer(time : Int) {
-        guard: ~timing
-        transit:
-            timing := true
-        effect:
-            delaySeconds(time)
+    constructor timer(time : Int) {
+        transit: done := false
+        effect:  delaySeconds(time)
     }
 
     transition timeout() {
-        guard: timing
-        transit:
-            timing := false
+        guard:   ~done
+        transit: done := true
     }
 }

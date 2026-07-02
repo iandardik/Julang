@@ -136,7 +136,7 @@ private fun ProcClassDecl.kotlinStaticInfoString(): String {
             "\nsetOf(" +
             "\n$transitionInfo" +
             "\n)," +
-            "\nmapOf(" +
+            "\nmapOf<SymbolicAction, suspend (Program, ConcreteAction) -> TransitionSystem>(" +
             "\n$constructorPairs" +
             "\n))").prependIndent()
 }

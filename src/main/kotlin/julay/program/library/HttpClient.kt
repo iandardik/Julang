@@ -26,7 +26,9 @@ class JulHttpClient(
         val sendBodyArg = Variable("sendBody", stringType)
         val respBodyArg = Variable("respBody", stringType)
         val sendRequestAct = SymbolicAction("sendRequest", listOf(sendBodyArg))
-        val sendRequestCtor = Pair(sendRequestAct) { _ : Program, act : ConcreteAction ->
+        val sendRequestCtor: Pair<SymbolicAction, suspend (Program, ConcreteAction) -> JulHttpClient> = Pair(
+            sendRequestAct,
+        ) { _, act ->
             val sendBody = act.lookup(sendBodyArg).value as String
             JulHttpClient(sendBody)
         }

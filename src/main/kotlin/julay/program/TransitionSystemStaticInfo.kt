@@ -14,7 +14,7 @@ data class TransitionSystemStaticInfo(
     /**
      * For each constructor action, a function that constructs a new TransitionSystem.
      */
-    val constructors : Map<SymbolicAction, (Program,ConcreteAction)->TransitionSystem>,
+    val constructors : Map<SymbolicAction, suspend (Program,ConcreteAction)->TransitionSystem>,
 ) {
     fun classID() = hashCode()
 }

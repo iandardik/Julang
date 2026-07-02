@@ -54,8 +54,10 @@ class ConstructorTransitionSystem(
             .forEach { tsInfo ->
                 if (tsInfo.constructors.containsKey(act.symAction)) {
                     val constructor = tsInfo.constructors[act.symAction]!!
-                    val proc = Proc(constructor.invoke(program,act), tsInfo, program.actionTable)
-                    scope.launch { proc.run() }
+                    scope.launch {
+                        val ts = constructor(program, act)
+                        Proc(ts, tsInfo, program.actionTable).run()
+                    }
                 }
             }
     }

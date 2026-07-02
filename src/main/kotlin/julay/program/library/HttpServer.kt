@@ -23,8 +23,9 @@ class JulHttpServer(
         val receiveRequestAct = SymbolicAction("receiveRequest", listOf(reqBodyArg))
         val sendResponseAct = SymbolicAction("sendResponse", listOf(respBodyArg))
         val closeAct = SymbolicAction("close", listOf(), SymbolicAction.SyncType.P2P)
-        val initiallyCtor = Pair(
-            SymbolicAction("initially", listOf())) { prog : Program, _ : ConcreteAction -> JulHttpServer(prog.actionTable) }
+        val initiallyCtor: Pair<SymbolicAction, suspend (Program, ConcreteAction) -> JulHttpServer> = Pair(
+            SymbolicAction("initially", listOf()),
+        ) { prog, _ -> JulHttpServer(prog.actionTable) }
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one
         override fun staticInfo() = TransitionSystemStaticInfo(
             "JulHttpServer$",
