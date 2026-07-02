@@ -72,7 +72,58 @@ private fun flattenActionBody(
                     else -> listOf(transitBody)
                 }
             }, node.programLocation()))
+            is EffectNode -> listOf(EffectNode(node.effects().map { effect ->
+                flattenEffectStmt(effect, logicalStateEnv, logicalSymbolEnv, fullEnv, argSymbols)
+            }, node.programLocation()))
             else -> listOf(node)
+        }
+    }
+}
+
+private fun flattenEffectStmt(
+    stmt: EffectStmtNode,
+    logicalStateEnv: Map<String, Type>,
+    logicalSymbolEnv: Map<String, Type>,
+    fullEnv: Map<String, Type>,
+    argSymbols: Set<String>,
+): EffectStmtNode {
+    return when (stmt) {
+        is EffectCallNode -> EffectCallNode(
+            stmt.callName(),
+            stmt.callArgs().map { flattenExpr(it, logicalSymbolEnv, fullEnv, argSymbols) },
+            stmt.programLocation(),
+        )
+        is EffectAssignNode -> {
+            if (stmt.fieldPath.isNotEmpty()) {
+                val baseType = logicalStateEnv.getValue(stmt.varName)
+                when (val result = resolveFieldPath(baseType, stmt.fieldPath)) {
+                    is FieldPathResult.Error -> throw RuntimeException(result.message)
+                    is FieldPathResult.Resolved -> {
+                        if (result.type is ObjClassType) {
+                            throw RuntimeException(
+                                "Cannot assign effect result to o-class field \"${stmt.assignKey()}\" at ${stmt.programLocation()}",
+                            )
+                        }
+                        val objClassType = baseType as ObjClassType
+                        val flatName = objClassType.flatVarName(stmt.varName, result.relPath)
+                        EffectAssignNode(
+                            flatName,
+                            emptyList(),
+                            stmt.callName(),
+                            stmt.callArgs().map { flattenExpr(it, logicalSymbolEnv, fullEnv, argSymbols) },
+                            stmt.programLocation(),
+                        )
+                    }
+                }
+            } else {
+                EffectAssignNode(
+                    stmt.varName,
+                    emptyList(),
+                    stmt.callName(),
+                    stmt.callArgs().map { flattenExpr(it, logicalSymbolEnv, fullEnv, argSymbols) },
+                    stmt.programLocation(),
+                )
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 package julay.compiler.decl
 
 import julay.compiler.ProgramLoc
+import julay.compiler.ast.EffectStmtNode
 import julay.compiler.ast.ExprNode
 import julay.program.*
 
@@ -16,5 +17,6 @@ data class ActionDecl(
     val guards : List<ExprNode>,
     val transits : Map<String,ExprNode>,
     val modifier: TSAction.SyncRole,
-    val loc: ProgramLoc
+    val loc: ProgramLoc,
+    val effects : List<EffectStmtNode> = emptyList(),
 )

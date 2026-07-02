@@ -3,19 +3,21 @@ package julay.program.library
 const val JULAYLIB_MODULE = "julaylib"
 
 object LibraryRegistry {
-    val all: List<JulLibrary> = listOf(
-        PrintlnTS,
-        ReadlnTS,
+    val julayStdlibNames: Set<String> = setOf("Println", "ExitSystem", "Readln", "Timer")
+
+    val kotlinLibraries: List<JulLibrary> = listOf(
         JulHttpServer,
         JulHttpClient,
-        TimerTS,
-        ExitSystemTS,
     )
 
-    val julNames: Set<String> = all.map { it.julName }.toSet()
-    private val byJulName: Map<String, JulLibrary> = all.associateBy { it.julName }
+    val kotlinLibraryNames: Set<String> = kotlinLibraries.map { it.julName }.toSet()
+    private val byJulName: Map<String, JulLibrary> = kotlinLibraries.associateBy { it.julName }
 
-    fun isLibrary(name: String) = name in byJulName
+    fun isKotlinLibrary(name: String) = name in byJulName
+
+    fun isJulayStdlib(name: String) = name in julayStdlibNames
+
+    fun isKnownJulaylibSymbol(name: String) = isJulayStdlib(name) || isKotlinLibrary(name)
 
     fun isJulaylibModule(module: String) = module == JULAYLIB_MODULE
 

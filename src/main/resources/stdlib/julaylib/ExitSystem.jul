@@ -1,0 +1,8 @@
+p-class ExitSystem {
+    constructor initially() {}
+
+    p2p-service transition exitSystem() {
+        effect:
+            exitProcess()
+    }
+}

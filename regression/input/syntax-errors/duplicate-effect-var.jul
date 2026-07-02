@@ -1,0 +1,18 @@
+p-class S {
+    var x : Int
+    var y : Int
+
+    constructor initially() {
+        transit:
+            x := 0
+            y := 0
+    }
+
+    transition go() {
+        effect:
+            x := readln()
+            x := readln()
+    }
+}
+
+program P := S

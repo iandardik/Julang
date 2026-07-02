@@ -9,11 +9,8 @@ import julay.program.library.LibraryRegistry
 import org.antlr.v4.runtime.CharStreams
 import org.antlr.v4.runtime.CommonTokenStream
 import java.nio.file.Path
-import kotlin.io.path.isRegularFile
 import kotlin.io.path.nameWithoutExtension
 import kotlin.io.path.pathString
-
-private data class ModuleFileLookup(val path: Path, val found: Boolean)
 
 private data class ParseResult(val root: RootNode, val ok: Boolean)
 
@@ -22,19 +19,6 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
     val errors = mutableListOf<CompileError>()
     val loaded = mutableMapOf<String, LoadedModule>()
     val loadingStack = mutableListOf<String>()
-
-    fun moduleFileName(modulePath: String): String = modulePath.replace('.', '/') + ".jul"
-
-    fun findModuleFile(modulePath: String): ModuleFileLookup {
-        val relPath = moduleFileName(modulePath)
-        for (base in searchPath) {
-            val candidate = base.resolve(relPath)
-            if (candidate.isRegularFile()) {
-                return ModuleFileLookup(candidate, found = true)
-            }
-        }
-        return ModuleFileLookup(entryPath, found = false)
-    }
 
     fun parseFile(path: Path): ParseResult {
         val input = CharStreams.fromFileName(path.pathString)
@@ -52,14 +36,18 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
     fun registerModuleSymbols(module: LoadedModule, symbols: MutableMap<String, ResolvedSymbol>) {
         if (module.isStub) return
         module.root.declNodes().forEach { decl ->
-            val key = qualifiedKey(listOf(module.modulePath, decl.name()))
+            val key = if (module.modulePath.startsWith("$JULAYLIB_MODULE.")) {
+                module.modulePath
+            } else {
+                qualifiedKey(listOf(module.modulePath, decl.name()))
+            }
             symbols[key] = if (module.isEntry) {
                 ResolvedSymbol.LocalDecl(decl, module.sourcePath)
             } else {
                 ResolvedSymbol.ImportedDecl(decl, module.modulePath, module.sourcePath)
             }
         }
-        LibraryRegistry.all.forEach { lib ->
+        LibraryRegistry.kotlinLibraries.forEach { lib ->
             symbols[qualifiedKey(listOf(JULAYLIB_MODULE, lib.julName))] = ResolvedSymbol.Library(lib)
         }
     }
@@ -81,8 +69,7 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
         val sourcePath = if (isEntry) {
             entryPath
         } else {
-            val lookup = findModuleFile(modulePath)
-            if (!lookup.found) {
+            resolveModuleSourcePath(modulePath, searchPath) ?: run {
                 errors.add(
                     OneLocCompileError(
                         SourceLoc(Pair(1, 1)),
@@ -91,7 +78,6 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
                 )
                 return cacheStub(modulePath, entryPath, isEntry)
             }
-            lookup.path
         }
 
         loadingStack.add(modulePath)
@@ -116,10 +102,21 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
 
         root.importNodes().forEach { importNode ->
             val parts = importNode.qualifiedName().parts()
-            if (parts.first() != JULAYLIB_MODULE && parts.size >= 2) {
-                val importedModule = parts.dropLast(1).joinToString(".")
+            if (parts.size >= 2) {
+                if (parts.first() == JULAYLIB_MODULE && LibraryRegistry.isKotlinLibrary(parts.last())) {
+                    return@forEach
+                }
+                val importedModule = if (parts.first() == JULAYLIB_MODULE) {
+                    parts.joinToString(".")
+                } else {
+                    parts.dropLast(1).joinToString(".")
+                }
                 loadModule(importedModule, isEntry = false)
             }
+        }
+
+        collectJulaylibStdlibModulePaths(root).forEach { modulePath ->
+            loadModule(modulePath, isEntry = false)
         }
 
         val moduleSymbolsSnapshot = mutableMapOf<String, ResolvedSymbol>()
@@ -181,4 +178,21 @@ fun buildModuleSearchPath(entryPath: Path, extraLibraryPaths: List<Path>): List<
     extraLibraryPaths.forEach { paths.add(it) }
     System.getenv("JULAY_PATH")?.split(':')?.filter { it.isNotEmpty() }?.forEach { paths.add(Path.of(it)) }
     return paths.distinct()
+}
+
+fun collectJulaylibStdlibModulePaths(node: ASTNode): Set<String> {
+    val paths = mutableSetOf<String>()
+    fun walk(n: ASTNode) {
+        if (n is ValueProcExprNode && n.isQualified()) {
+            val parts = n.qualifiedParts()!!
+            if (parts.size == 2 && parts.first() == JULAYLIB_MODULE &&
+                LibraryRegistry.isJulayStdlib(parts.last())
+            ) {
+                paths.add(parts.joinToString("."))
+            }
+        }
+        n.children.forEach { walk(it) }
+    }
+    walk(node)
+    return paths
 }

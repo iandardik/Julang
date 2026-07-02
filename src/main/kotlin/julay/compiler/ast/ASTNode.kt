@@ -44,6 +44,8 @@ abstract class ActionBodyNode(
     open fun guards() : List<ExprNode> = body.flatMap { it.guards() }
     open fun transits() : Map<String,ExprNode> = body.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() }
     open fun transitVars() : List<Pair<String, ProgramLoc>> = body.flatMap { it.transitVars() }
+    open fun effects() : List<EffectStmtNode> = body.flatMap { it.effects() }
+    open fun effectAssignVars() : List<Pair<String, ProgramLoc>> = body.flatMap { it.effectAssignVars() }
 }
 
 abstract class ExprNode(children : List<ASTNode>) : ASTNode(children) {
@@ -242,7 +244,8 @@ class ConstructorNode(
                 body.flatMap { it.guards() },
                 body.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() },
                 TSAction.SyncRole.CSP,
-                loc
+                loc,
+                body.flatMap { it.effects() },
             )
         )
     }
@@ -278,7 +281,8 @@ class TransitionNode(
                 body.flatMap { it.guards() },
                 body.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() },
                 modifier,
-                loc
+                loc,
+                body.flatMap { it.effects() },
             )
         )
     }
@@ -363,6 +367,61 @@ class ErrorNode(
     override fun toString(): String {
         val exprStr = "$expr".prependIndent()
         return "error:\n$exprStr"
+    }
+}
+
+sealed class EffectStmtNode(children : List<ASTNode>) : ASTNode(children) {
+    abstract fun callName(): String
+    abstract fun callArgs(): List<ExprNode>
+    open fun effectAssignVars(): List<Pair<String, ProgramLoc>> = emptyList()
+}
+
+class EffectCallNode(
+    private val name : String,
+    private val args : List<ExprNode>,
+    private val loc : ProgramLoc
+) : EffectStmtNode(args) {
+    override fun programLocation() = loc
+    override fun callName() = name
+    override fun callArgs() = args
+    override fun toString(): String {
+        val argStr = args.joinToString(", ") { "$it" }
+        return if (args.isEmpty()) "$name()" else "$name($argStr)"
+    }
+}
+
+class EffectAssignNode(
+    val varName : String,
+    val fieldPath : List<String> = emptyList(),
+    private val callName : String,
+    private val callArgs : List<ExprNode>,
+    private val loc : ProgramLoc
+) : EffectStmtNode(callArgs) {
+    override fun programLocation() = loc
+    override fun callName() = callName
+    override fun callArgs() = callArgs
+
+    internal fun assignKey(): String =
+        if (fieldPath.isEmpty()) varName else "$varName.${fieldPath.joinToString(".")}"
+
+    override fun effectAssignVars() = listOf(Pair(assignKey(), programLocation()))
+
+    override fun toString(): String {
+        val argStr = callArgs.joinToString(", ") { "$it" }
+        val callStr = if (callArgs.isEmpty()) "$callName()" else "$callName($argStr)"
+        return "${assignKey()} := $callStr"
+    }
+}
+
+class EffectNode(
+    private val stmts : List<EffectStmtNode>,
+    private val loc : ProgramLoc
+) : ActionBodyNode(emptyList(), listOf()) {
+    override fun programLocation() = loc
+    override fun effects(): List<EffectStmtNode> = stmts
+    override fun effectAssignVars(): List<Pair<String, ProgramLoc>> = stmts.flatMap { it.effectAssignVars() }
+    override fun toString(): String {
+        return "effect:\n${stmts.joinToString("\n") { "$it".prependIndent() }}"
     }
 }
 

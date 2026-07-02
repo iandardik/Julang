@@ -33,7 +33,7 @@ data class CompilationUnit(
         val programLibs = procDecls
             .filter { it.type == ProcDeclType.Program }
             .flatMap { it.allProcNames(procDecls) }
-            .filter { LibraryRegistry.isLibrary(it) }
+            .filter { LibraryRegistry.isKotlinLibrary(it) }
             .toSet()
         val importedLibs = importTable.shortNames.values
             .filterIsInstance<ResolvedSymbol.Library>()

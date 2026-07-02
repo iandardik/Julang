@@ -18,14 +18,15 @@ fun codegenPass(
     librariesInUse: Set<String> = emptySet(),
 ): CodegenResult {
     val libPClassNames = librariesInUse
-    val procsToCompile = program.allProcNames(procDecls).filter { it !in libPClassNames }
+    val kotlinLibProcs = program.allProcNames(procDecls).filter { it in libPClassNames }
+    val procsToCompile = program.allProcNames(procDecls).filter { it !in kotlinLibProcs }
     val procClasses = procsToCompile.flatMap { proc ->
         val procClass = ast.procClassPass(setOf(proc))
         julay.tools.assert(procClass.size == 1, "Expected exactly one proc class for \"$proc\" but found: ${procClass.size}")
         procClass
     }
 
-    val libProcs = program.allProcNames(procDecls).filter { it in libPClassNames }
+    val libProcs = kotlinLibProcs
     val staticInfoLib = libProcs.map { LibraryRegistry.staticInfoCodegenExpr(it) }
     val staticInfoCompiledProcs = procClasses.map { it.kotlinStaticInfoString() }
     val staticInfoBody = (staticInfoCompiledProcs + staticInfoLib).joinToString(",\n") { it }
@@ -45,7 +46,12 @@ fun codegenPass(
     val objClassCode = objClassDecls.joinToString("\n\n") { it.kotlinTypeValString() }
     val objClassSection = if (objClassCode.isEmpty()) "" else "$objClassCode\n\n"
     val mainClassName = program.name.replaceFirstChar { it.uppercase() }
-    val sourceText = "$imports\n" +
+    val effectImports = if (procClasses.any { it.usesEffects() }) {
+        EffectBuiltinRegistry.kotlinCodegenImports().joinToString("\n") { "import $it" } + "\n"
+    } else {
+        ""
+    }
+    val sourceText = "$imports$effectImports\n" +
         objClassSection +
         procClasses.joinToString("\n\n") { it.kotlinClassString() } +
         "\n\n" +
@@ -59,6 +65,23 @@ private fun ObjClassDecl.kotlinTypeValString(): String {
         "Variable(\"${it.name}\", ${it.type.toCodegenTypeVal()})"
     }
     return "val ${objClassTypeValName(name)} = ObjClassType(\"$name\", listOf($fieldsStr))"
+}
+
+private fun ProcClassDecl.usesEffects(): Boolean =
+    constructors.any { it.effects.isNotEmpty() } || transitions.any { it.effects.isNotEmpty() }
+
+private fun ActionDecl.kotlinEffectString(
+    stateVarTypes: Map<String, Type>,
+    assignPrefix: String = "",
+): String {
+    if (effects.isEmpty()) {
+        return ""
+    }
+    val symbolTypes = stateVarTypes + flattenActionArgEnv(action.args)
+    val argSymbols = flattenedArgSymbols(action.args)
+    return effects.joinToString("\n") {
+        EffectBuiltinRegistry.effectStmtKotlinString(it, symbolTypes, argSymbols, assignPrefix)
+    }
 }
 
 private fun ProcClassDecl.kotlinClassString(): String {
@@ -100,7 +123,12 @@ private fun ProcClassDecl.kotlinStaticInfoString(): String {
                     "${k.toKotlinIdent()} = ${v.toTransitString(symbolTypes, argSymbols)}"
                 }
             val constructor = "$name($constructorArgs)"
-            val constructStr = "{ _,act -> $constructor }"
+            val effectStr = ctor.kotlinEffectString(stateVarTypes, "result.")
+            val constructStr = if (effectStr.isEmpty()) {
+                "{ _,act -> $constructor }"
+            } else {
+                "{ _,act ->\nval result = $constructor\n$effectStr\nresult\n}"
+            }
             "Pair($actSigStr, $constructStr)".prependIndent()
         }
     return "TransitionSystemStaticInfo(" +
@@ -147,9 +175,13 @@ private fun ActionDecl.kotlinActionString(stateVarTypes: Map<String, Type>): Str
 private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): String {
     val symbolTypes = stateVarTypes + flattenActionArgEnv(action.args)
     val argSymbols = flattenedArgSymbols(action.args)
-    return transits.map { (v, e) ->
+    val transitLines = transits.map { (v, e) ->
         "${v.toKotlinIdent()} = ${e.toTransitString(symbolTypes, argSymbols)}"
-    }.joinToString("\n")
+    }
+    val effectLines = effects.map {
+        EffectBuiltinRegistry.effectStmtKotlinString(it, symbolTypes, argSymbols)
+    }
+    return (transitLines + effectLines).joinToString("\n")
 }
 
 private fun ActionDecl.kotlinStaticInfoString(): String {

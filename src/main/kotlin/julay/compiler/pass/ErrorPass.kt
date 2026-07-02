@@ -151,28 +151,53 @@ private fun ObjClassNode.errorPassObjClass(procs: Set<String>, librariesInUse: S
     return children.flatMap { it.errorPass(procs, librariesInUse) } + repeatFieldErrors
 }
 
-private fun ConstructorNode.errorPassConstructor(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
-    val multiVarTransitError = body()
-        .flatMap { it.transitVars() }
-        .let { transits ->
-            transits.flatMapIndexed { i, (refName, refLoc) ->
-                transits.flatMapIndexed { j, (name, loc) ->
-                    assertOrCompileError(
-                        i <= j || refName != name,
-                        TwoLocsCompileError(
-                            refLoc,
-                            loc,
-                            "Expected at most one assignment per variable, but found multiple assignments for \"$name\"",
-                        ),
-                    )
-                }
-            }
+private fun duplicateAssignmentErrors(
+    assignments: List<Pair<String, ProgramLoc>>,
+    message: (String) -> String,
+): List<CompileError> =
+    assignments.flatMapIndexed { i, (refName, refLoc) ->
+        assignments.flatMapIndexed { j, (name, loc) ->
+            assertOrCompileError(
+                i <= j || refName != name,
+                TwoLocsCompileError(refLoc, loc, message(name)),
+            )
         }
+    }
+
+private fun transitEffectOverlapErrors(
+    transitAssignments: List<Pair<String, ProgramLoc>>,
+    effectAssignments: List<Pair<String, ProgramLoc>>,
+): List<CompileError> =
+    transitAssignments.flatMap { (transitName, transitLoc) ->
+        effectAssignments.flatMap { (effectName, effectLoc) ->
+            assertOrCompileError(
+                transitName != effectName,
+                TwoLocsCompileError(
+                    transitLoc,
+                    effectLoc,
+                    "Expected a variable not to be assigned in both transit and effect, but found assignments for \"$transitName\"",
+                ),
+            )
+        }
+    }
+
+private fun actionBodyAssignmentErrors(body: List<ActionBodyNode>): List<CompileError> {
+    val transitAssignments = body.flatMap { it.transitVars() }
+    val effectAssignments = body.flatMap { it.effectAssignVars() }
+    return duplicateAssignmentErrors(transitAssignments) { name ->
+        "Expected at most one assignment per variable, but found multiple assignments for \"$name\""
+    } + duplicateAssignmentErrors(effectAssignments) { name ->
+        "Expected at most one assignment per variable in effect, but found multiple assignments for \"$name\""
+    } + transitEffectOverlapErrors(transitAssignments, effectAssignments)
+}
+
+private fun ConstructorNode.errorPassConstructor(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
+    val assignmentErrors = actionBodyAssignmentErrors(body())
     val noGuardErrors = assertOrCompileError(
         body().flatMap { it.guards() }.isEmpty(),
         OneLocCompileError(programLocation(), "Expected constructors not to have guards"),
     )
-    return children.flatMap { it.errorPass(procs, librariesInUse) } + multiVarTransitError + noGuardErrors
+    return children.flatMap { it.errorPass(procs, librariesInUse) } + assignmentErrors + noGuardErrors
 }
 
 private fun TransitionNode.errorPassTransition(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
@@ -183,21 +208,6 @@ private fun TransitionNode.errorPassTransition(procs: Set<String>, librariesInUs
             "only constructors (not transitions) can synchronize on the 'initially' action",
         ),
     )
-    val multiVarTransitError = body()
-        .flatMap { it.transitVars() }
-        .let { transits ->
-            transits.flatMapIndexed { i, (refName, refLoc) ->
-                transits.flatMapIndexed { j, (name, loc) ->
-                    assertOrCompileError(
-                        i <= j || refName != name,
-                        TwoLocsCompileError(
-                            refLoc,
-                            loc,
-                            "Expected at most one assignment per variable, but found multiple assignments for \"$name\"",
-                        ),
-                    )
-                }
-            }
-        }
-    return children.flatMap { it.errorPass(procs, librariesInUse) } + initiallyActionErrors + multiVarTransitError
+    val assignmentErrors = actionBodyAssignmentErrors(body())
+    return children.flatMap { it.errorPass(procs, librariesInUse) } + initiallyActionErrors + assignmentErrors
 }

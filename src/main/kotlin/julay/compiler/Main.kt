@@ -13,7 +13,10 @@ class Julayc : CliktCommand(name = "julayc") {
     override fun helpEpilog(context: Context) = """
         Environment variables:
           JULAY_PATH  Colon-separated list of directories searched for imported .jul modules
-                      (after the entry file's directory and any -L paths).
+                      (after the entry file's directory, any -L paths, and the embedded stdlib).
+
+        Stdlib: julaylib.Println, ExitSystem, Readln, and Timer are Julay modules shipped in the
+        compiler jar. julaylib.HttpServer and julaylib.HttpClient remain Kotlin-native libraries.
     """.trimIndent()
 
     private val keepBuild by option(

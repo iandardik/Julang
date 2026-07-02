@@ -1,0 +1,5 @@
+source: regression/input/syntax-errors/transit-effect-overlap.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected a variable not to be assigned in both transit and effect, but found assignments for \"msg\""
+  - "Found errors while compiling the program \"P\"; exiting."

@@ -1,0 +1,24 @@
+p-class Readln {
+    var prompt : Boolean
+    var readMsg : String
+
+    constructor initially() {
+        transit:
+            prompt := true
+            readMsg := ""
+    }
+
+    p2p-service transition prompt() {
+        guard: prompt
+        transit:
+            prompt := false
+        effect:
+            readMsg := readln()
+    }
+
+    p2p-service transition readln(msg : String) {
+        guard: ~prompt & (readMsg = msg)
+        transit:
+            prompt := true
+    }
+}

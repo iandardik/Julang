@@ -1,6 +1,3 @@
-import julaylib.Println
-import julaylib.ExitSystem
-
 p-class S {
     var x : Int
     var print : Boolean
@@ -19,15 +16,19 @@ p-class S {
             print := true
     }
 
-    p2p-consumer transition println(msg : String) {
+    transition println(msg : String) {
         guard:
             print & (msg = x + "")
         transit:
             print := false
+        effect:
+            println(msg)
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard: ~print & x > 10
+        effect:
+            exitProcess()
     }
 }
 
@@ -47,4 +48,4 @@ p-class T {
     }
 }
 
-program TermTest1 := S || T || Println || ExitSystem
+program TermTest1 := S || T

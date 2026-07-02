@@ -1,0 +1,22 @@
+p-class Timer {
+    var timing : Boolean
+
+    constructor initially() {
+        transit:
+            timing := false
+    }
+
+    transition timer(time : Int) {
+        guard: ~timing
+        transit:
+            timing := true
+        effect:
+            delaySeconds(time)
+    }
+
+    transition timeout() {
+        guard: timing
+        transit:
+            timing := false
+    }
+}

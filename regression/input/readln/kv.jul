@@ -1,7 +1,3 @@
-import julaylib.Println
-import julaylib.Readln
-import julaylib.ExitSystem
-
 p-class FrontEnd {
     var state : String
     var keyReq : String
@@ -37,16 +33,20 @@ p-class FrontEnd {
             valReq := "val:\n\t" + val // just to test string concatenation and escape characters
     }
 
-    p2p-consumer transition println(msg : String) {
+    transition println(msg : String) {
         guard:
             (state = "D") & ((msg + "") = valReq) // (msg + "") to test string concatenation with action args
         transit:
             state := "A"
+        effect:
+            println(msg)
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             keyReq = "exit"
+        effect:
+            exitProcess()
     }
 }
 
@@ -77,5 +77,30 @@ p-class DB2 {
     }
 }
 
-program KVOne := FrontEnd || DB || Println || Readln || ExitSystem
-program KVTwo := FrontEnd || DB2 || Println || Readln || ExitSystem
+p-class Readln {
+    var prompt : Boolean
+    var readMsg : String
+
+    constructor initially() {
+        transit:
+            prompt := true
+            readMsg := ""
+    }
+
+    p2p-service transition prompt() {
+        guard: prompt
+        transit:
+            prompt := false
+        effect:
+            readMsg := readln()
+    }
+
+    p2p-service transition readln(msg : String) {
+        guard: ~prompt & (readMsg = msg)
+        transit:
+            prompt := true
+    }
+}
+
+program KVOne := FrontEnd || DB || Readln
+program KVTwo := FrontEnd || DB2 || Readln

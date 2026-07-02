@@ -22,6 +22,9 @@ fun ASTNode.typePass(
     is ArgNode -> typePassArgNode(symbolEnv, registry)
     is GuardNode -> typePassGuard(symbolEnv, registry)
     is VarTransitNode -> typePassVarTransit(symbolEnv, registry)
+    is EffectNode -> typePassEffect(symbolEnv, registry)
+    is EffectCallNode -> typePassEffectCall(symbolEnv, registry)
+    is EffectAssignNode -> typePassEffectAssign(symbolEnv, registry)
     is BinaryOpExprNode -> typePassBinaryOp(symbolEnv, registry)
     is IfElseExprNode -> typePassIfElse(symbolEnv, registry)
     is ObjClassLiteralExprNode -> typePassObjClassLiteral(symbolEnv, registry)
@@ -148,6 +151,91 @@ private fun VarTransitNode.typePassVarTransit(
         }
     }
     return childrenErrors + varErrors
+}
+
+private fun EffectNode.typePassEffect(symbolEnv: Map<String, Type>, registry: ObjClassRegistry): List<CompileError> =
+    children.flatMap { it.typePass(symbolEnv, registry) }
+
+private fun EffectCallNode.typePassEffectCall(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+): List<CompileError> {
+    val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry) }
+    if (childrenErrors.isNotEmpty()) {
+        return childrenErrors
+    }
+    val builtin = EffectBuiltinRegistry.lookup(callName())
+    if (builtin == null) {
+        return listOf(OneLocCompileError(programLocation(), "Unknown effect builtin \"${callName()}\""))
+    }
+    if (builtin.paramTypes.size != callArgs().size) {
+        return listOf(
+            OneLocCompileError(
+                programLocation(),
+                "Expected effect \"${callName()}\" to take ${builtin.paramTypes.size} argument(s) but got ${callArgs().size}",
+            ),
+        )
+    }
+    return callArgs().zip(builtin.paramTypes).flatMap { (arg, expectedType) ->
+        assertOrCompileError(
+            arg.getType() == expectedType,
+            OneLocCompileError(
+                arg.programLocation(),
+                "Expected argument to \"${callName()}\" to have type $expectedType but got ${arg.getType()}",
+            ),
+        )
+    }
+}
+
+private fun EffectAssignNode.typePassEffectAssign(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+): List<CompileError> {
+    val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry) }
+    if (childrenErrors.isNotEmpty()) {
+        return childrenErrors
+    }
+    val callErrors = EffectCallNode(callName(), callArgs(), programLocation()).typePassEffectCall(symbolEnv, registry)
+    if (callErrors.isNotEmpty()) {
+        return callErrors
+    }
+    val builtin = EffectBuiltinRegistry.lookup(callName())!!
+    val returnType = builtin.returnType
+        ?: return listOf(
+            OneLocCompileError(
+                programLocation(),
+                "Effect \"${callName()}\" cannot be used in an assignment because it returns no value",
+            ),
+        )
+    val varType = symbolEnv[varName]
+    val varErrors = if (varType == null) {
+        assertOrCompileError(
+            false,
+            OneLocCompileError(programLocation(), "Unknown variable \"$varName\" in effect assignment"),
+        )
+    } else if (fieldPath.isEmpty()) {
+        assertOrCompileError(
+            returnType == varType,
+            OneLocCompileError(
+                programLocation(),
+                "Expected assignment to \"$varName\" ($varType) but got effect returning $returnType",
+            ),
+        )
+    } else {
+        when (val result = resolveFieldPath(varType, fieldPath)) {
+            is FieldPathResult.Error -> listOf(OneLocCompileError(programLocation(), result.message))
+            is FieldPathResult.Resolved -> {
+                assertOrCompileError(
+                    returnType == result.type,
+                    OneLocCompileError(
+                        programLocation(),
+                        "Expected assignment to \"${assignKey()}\" (${result.type}) but got effect returning $returnType",
+                    ),
+                )
+            }
+        }
+    }
+    return childrenErrors + callErrors + varErrors
 }
 
 private fun BinaryOpExprNode.typePassBinaryOp(

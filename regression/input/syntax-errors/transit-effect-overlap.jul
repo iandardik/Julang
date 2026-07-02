@@ -1,0 +1,17 @@
+p-class S {
+    var msg : String
+
+    constructor initially() {
+        transit:
+            msg := ""
+    }
+
+    transition go() {
+        transit:
+            msg := "pending"
+        effect:
+            msg := readln()
+    }
+}
+
+program P := S

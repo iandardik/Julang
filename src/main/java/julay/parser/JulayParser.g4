@@ -75,6 +75,7 @@ action_body
     : guard
     | transit
     | error
+    | effect
     ;
 
 guard
@@ -91,6 +92,19 @@ error
 
 var_transit
     : field_access ASGN_EQ expr
+    ;
+
+effect
+    : EFFECT COLON effect_stmt+
+    ;
+
+effect_stmt
+    : effect_call
+    | field_access ASGN_EQ effect_call
+    ;
+
+effect_call
+    : ID LPAREN (expr (COMMA expr)*)? RPAREN
     ;
 
 // order according to the Java rules: https://introcs.cs.princeton.edu/java/11precedence/

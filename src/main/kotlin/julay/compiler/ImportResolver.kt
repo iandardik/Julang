@@ -129,7 +129,7 @@ fun resolveProcLeaf(
     importTable.shortNames[name]?.let { resolved ->
         return ResolvedProcRef(resolved.flatName, resolved, resolved is ResolvedSymbol.Library) to null
     }
-    if (LibraryRegistry.isLibrary(name)) {
+    if (LibraryRegistry.isKnownJulaylibSymbol(name)) {
         return null to OneLocCompileError(
             node.programLocation(),
             "Unknown process \"$name\"; did you mean to import julaylib.$name?",
