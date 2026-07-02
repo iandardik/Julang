@@ -9,7 +9,12 @@ import julay.compiler.pass.resolvedProcPass
 import julay.compiler.pass.typePass
 import java.nio.file.Path
 
-fun compileJulFile(source: Path, keepBuild: Boolean, extraLibraryPaths: List<Path> = emptyList()) {
+fun compileJulFile(
+    source: Path,
+    keepBuild: Boolean,
+    extraLibraryPaths: List<Path> = emptyList(),
+    compilerJar: Path = resolveCompilerJar(),
+) {
     val (unit, loadErrors) = loadCompilationUnit(source, extraLibraryPaths)
     if (loadErrors.isNotEmpty()) {
         loadErrors.forEach { println(it) }
@@ -42,5 +47,5 @@ fun compileJulFile(source: Path, keepBuild: Boolean, extraLibraryPaths: List<Pat
 
     val flatAst = ast.flattenObjClassPass(ast.resolvedObjClassRegistry())
 
-    programs.forEach { compileProgram(it, flatAst, procDecls, librariesInUse, keepBuild) }
+    programs.forEach { compileProgram(it, flatAst, procDecls, librariesInUse, keepBuild, compilerJar) }
 }

@@ -4,6 +4,7 @@ import julay.compiler.ast.RootNode
 import julay.compiler.decl.ProcDecl
 import julay.compiler.pass.codegenPass
 import java.io.File
+import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
 
@@ -16,6 +17,7 @@ fun compileProgram(
     procDecls: List<ProcDecl>,
     librariesInUse: Set<String> = emptySet(),
     keepBuild: Boolean = false,
+    compilerJar: Path = resolveCompilerJar(),
 ) {
     val buildDir = "${program.name}-jul-build"
     if (!File(buildDir).exists() && !File(buildDir).mkdir()) {
@@ -49,7 +51,9 @@ fun compileProgram(
         return
     }
 
-    File("$buildDir/build.gradle.kts").writeText(gradleBuildFileContents(program.name, codegen.mainClassName))
+    File("$buildDir/build.gradle.kts").writeText(
+        gradleBuildFileContents(program.name, codegen.mainClassName, compilerJar),
+    )
     val gradleResult = runShellCommand(
         "cd $buildDir; ./gradlew shadowJar 2>&1",
         GRADLE_BUILD_TIMEOUT_MINUTES,
@@ -111,7 +115,8 @@ private fun gradleSettingsFileContents(name : String) : String {
     return "rootProject.name = \"$name\""
 }
 
-private fun gradleBuildFileContents(name : String, mainClassName : String) : String {
+private fun gradleBuildFileContents(name: String, mainClassName: String, compilerJar: Path): String {
+    val compilerJarPath = compilerJar.toGradlePathLiteral()
     return "plugins {\n" +
             "    kotlin(\"jvm\") version \"2.1.0\"\n" +
             "    application\n" +
@@ -124,7 +129,7 @@ private fun gradleBuildFileContents(name : String, mainClassName : String) : Str
             "}\n" +
             "\n" +
             "dependencies {\n" +
-            "    implementation(files(\"../julayc.jar\"))\n" +
+            "    implementation(files(\"$compilerJarPath\"))\n" +
             "}\n" +
             "\n" +
             "application {\n" +
