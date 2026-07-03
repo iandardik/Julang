@@ -1,0 +1,7 @@
+source: regression/input/expr/let-guard.jul
+programs:
+  - name: P
+    run:
+      timeoutMs: 60000
+      expectStdoutLinesUnordered:
+        - "1"

@@ -161,6 +161,24 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitExpr(JulayParser.ExprContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#when_subject_arm}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitWhen_subject_arm(JulayParser.When_subject_armContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#when_guard_arm}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitWhen_guard_arm(JulayParser.When_guard_armContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#when_literal}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitWhen_literal(JulayParser.When_literalContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#proc_expr}.
 	 * @param ctx the parse tree
 	 * @return the visitor result

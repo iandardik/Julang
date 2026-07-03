@@ -223,6 +223,38 @@ private fun flattenExpr(
             flattenExpr(expr.elseExpr(), logicalSymbolEnv, flatSymbolEnv, argSymbols),
             expr.programLocation(),
         )
+        is LetExprNode -> LetExprNode(
+            expr.letName(),
+            expr.letTypeName(),
+            flattenExpr(expr.letInitExpr(), logicalSymbolEnv, flatSymbolEnv, argSymbols),
+            flattenExpr(
+                expr.bodyExpr(),
+                logicalSymbolEnv + (expr.letName() to expr.resolvedLetType),
+                flatSymbolEnv,
+                argSymbols,
+            ),
+            expr.programLocation(),
+            expr.resolvedLetType,
+        )
+        is WhenExprNode -> WhenExprNode(
+            expr.subjectExpr()?.let { flattenExpr(it, logicalSymbolEnv, flatSymbolEnv, argSymbols) },
+            expr.arms().map { arm ->
+                when (arm) {
+                    is WhenArm.Subject -> WhenArm.Subject(
+                        arm.literal,
+                        flattenExpr(arm.expr, logicalSymbolEnv, flatSymbolEnv, argSymbols),
+                    )
+                    is WhenArm.Guard -> WhenArm.Guard(
+                        flattenExpr(arm.cond, logicalSymbolEnv, flatSymbolEnv, argSymbols),
+                        flattenExpr(arm.expr, logicalSymbolEnv, flatSymbolEnv, argSymbols),
+                    )
+                    is WhenArm.Else -> WhenArm.Else(
+                        flattenExpr(arm.expr, logicalSymbolEnv, flatSymbolEnv, argSymbols),
+                    )
+                }
+            },
+            expr.programLocation(),
+        )
         is LiteralValueExprNode -> expr
         else -> throw RuntimeException("Unexpected expression node ${expr.javaClass.simpleName} at ${expr.programLocation()}")
     }

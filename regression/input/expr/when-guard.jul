@@ -1,0 +1,41 @@
+import julaylib.Println
+import julaylib.ExitSystem
+
+p-class S {
+    var key : String
+    var ok : Boolean
+    var print : Boolean
+
+    constructor initially() {
+        transit:
+            key := "B"
+            ok := false
+            print := true
+    }
+
+    transition check() {
+        guard:
+            print
+        transit:
+            ok := when {
+                key = "A" -> true
+                key = "B" -> true
+                else -> false
+            }
+            print := false
+    }
+
+    p2p-consumer transition println(msg : String) {
+        guard:
+            ~print & ok & (msg = "ok")
+        transit:
+            print := true
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard:
+            print
+    }
+}
+
+program P := S || Println || ExitSystem

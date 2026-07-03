@@ -597,6 +597,188 @@ class IfElseExprNode(
     }
 }
 
+sealed interface WhenLiteral {
+    data class IntLit(val value: String) : WhenLiteral
+    data class StringLit(val value: String) : WhenLiteral
+    data class BoolLit(val value: String) : WhenLiteral
+}
+
+sealed interface WhenArm {
+    data class Subject(val literal: WhenLiteral, val expr: ExprNode) : WhenArm
+    data class Guard(val cond: ExprNode, val expr: ExprNode) : WhenArm
+    data class Else(val expr: ExprNode) : WhenArm
+}
+
+class LetExprNode(
+    private val name: String,
+    private val typeName: String,
+    private val letInitExpr: ExprNode,
+    private val bodyExpr: ExprNode,
+    private val loc: ProgramLoc,
+    resolvedType: Type? = null,
+) : ExprNode(listOf(letInitExpr, bodyExpr)) {
+    private var letTypeResolution: Type? = resolvedType
+
+    val resolvedLetType: Type
+        get() = letTypeResolution
+            ?: throw RuntimeException("Type not resolved for let binding \"$name\" at $loc")
+
+    override fun programLocation() = loc
+    internal fun letName(): String = name
+    internal fun letTypeName(): String = typeName
+    internal fun letInitExpr(): ExprNode = letInitExpr
+    internal fun bodyExpr(): ExprNode = bodyExpr
+    internal fun resolvedLetTypeOrNull(): Type? = letTypeResolution
+
+    internal fun resolveLetType(type: Type) {
+        letTypeResolution = type
+    }
+
+    override fun toZ3GuardString(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+        forceString: Boolean,
+    ): String {
+        return substituteExpr(bodyExpr, name, letInitExpr)
+            .toZ3GuardString(symbolTypes, argSymbols, forceString)
+    }
+
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        val localBind = "${name.toKotlinIdent()}__let"
+        val initStr = letInitExpr.toTransitString(symbolTypes, argSymbols)
+        val localBody = substituteExpr(bodyExpr, name, SymbolValueExprNode(localBind, programLocation()))
+        val bodyStr = localBody.toTransitString(
+            symbolTypes + (localBind to resolvedLetType),
+            argSymbols - name,
+        )
+        return "run { val $localBind = $initStr; $bodyStr }"
+    }
+
+    override fun inferType(symbolEnv: Map<String, Type>): Type = bodyExpr.getType()
+
+    override fun toString(): String {
+        return "let ($name : $typeName := $letInitExpr) { $bodyExpr }"
+    }
+}
+
+class WhenExprNode(
+    private val subjectExpr: ExprNode?,
+    private val arms: List<WhenArm>,
+    private val loc: ProgramLoc,
+) : ExprNode(
+    (subjectExpr?.let { listOf(it) } ?: emptyList()) +
+        arms.flatMap { arm ->
+            when (arm) {
+                is WhenArm.Subject -> listOf(arm.expr)
+                is WhenArm.Guard -> listOf(arm.cond, arm.expr)
+                is WhenArm.Else -> listOf(arm.expr)
+            }
+        },
+) {
+    override fun programLocation() = loc
+    internal fun subjectExpr(): ExprNode? = subjectExpr
+    internal fun arms(): List<WhenArm> = arms
+
+    override fun toZ3GuardString(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+        forceString: Boolean,
+    ): String {
+        julay.tools.assert(!forceString, "Cannot force a when expression to a string")
+        return buildNestedZ3ITE(symbolTypes, argSymbols)
+    }
+
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        return buildNestedTransitIf(symbolTypes, argSymbols)
+    }
+
+    override fun inferType(symbolEnv: Map<String, Type>): Type {
+        val firstNonElse = arms.firstOrNull { it !is WhenArm.Else }
+            ?: throw RuntimeException("When expression at $loc has no non-else arms")
+        return when (firstNonElse) {
+            is WhenArm.Subject -> firstNonElse.expr.getType()
+            is WhenArm.Guard -> firstNonElse.expr.getType()
+            is WhenArm.Else -> firstNonElse.expr.getType()
+        }
+    }
+
+    private fun buildNestedZ3ITE(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        val elseArm = arms.last() as WhenArm.Else
+        var result = elseArm.expr.toZ3GuardString(symbolTypes, argSymbols)
+        for (arm in arms.dropLast(1).reversed()) {
+            val (condStr, branchStr) = when (arm) {
+                is WhenArm.Subject -> subjectMatchZ3String(arm.literal, symbolTypes, argSymbols) to
+                    arm.expr.toZ3GuardString(symbolTypes, argSymbols)
+                is WhenArm.Guard -> {
+                    arm.cond.toZ3GuardString(symbolTypes, argSymbols) to
+                        arm.expr.toZ3GuardString(symbolTypes, argSymbols)
+                }
+                is WhenArm.Else -> throw RuntimeException("Unexpected else arm before final position")
+            }
+            result = "ctx.mkITE<BoolSort>($condStr,$branchStr,$result) as BoolExpr"
+        }
+        return result
+    }
+
+    private fun buildNestedTransitIf(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        val elseArm = arms.last() as WhenArm.Else
+        var result = elseArm.expr.toTransitString(symbolTypes, argSymbols)
+        for (arm in arms.dropLast(1).reversed()) {
+            val (condStr, branchStr) = when (arm) {
+                is WhenArm.Subject -> subjectMatchTransitString(arm.literal, symbolTypes, argSymbols) to
+                    arm.expr.toTransitString(symbolTypes, argSymbols)
+                is WhenArm.Guard -> {
+                    arm.cond.toTransitString(symbolTypes, argSymbols) to
+                        arm.expr.toTransitString(symbolTypes, argSymbols)
+                }
+                is WhenArm.Else -> throw RuntimeException("Unexpected else arm before final position")
+            }
+            result = "if ($condStr) {$branchStr} else {$result}"
+        }
+        return result
+    }
+
+    private fun subjectMatchZ3String(
+        literal: WhenLiteral,
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+    ): String {
+        val subject = subjectExpr ?: throw RuntimeException("Subject when at $loc has no subject expression")
+        val literalExpr = literal.toLiteralExprNode(subject.programLocation())
+        val lhsStr = subject.toZ3GuardString(symbolTypes, argSymbols)
+        val rhsStr = literalExpr.toZ3GuardString(symbolTypes, argSymbols)
+        return "ctx.mkEq($lhsStr,$rhsStr)"
+    }
+
+    private fun subjectMatchTransitString(
+        literal: WhenLiteral,
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+    ): String {
+        val subject = subjectExpr ?: throw RuntimeException("Subject when at $loc has no subject expression")
+        val literalExpr = literal.toLiteralExprNode(subject.programLocation())
+        val lhsStr = subject.toTransitString(symbolTypes, argSymbols)
+        val rhsStr = literalExpr.toTransitString(symbolTypes, argSymbols)
+        return "($lhsStr == $rhsStr)"
+    }
+
+    override fun toString(): String {
+        return if (subjectExpr != null) {
+            val armStrs = arms.joinToString("\n") { arm -> "    $arm" }
+            "when ($subjectExpr) {\n$armStrs\n}"
+        } else {
+            val armStrs = arms.joinToString("\n") { arm -> "    $arm" }
+            "when {\n$armStrs\n}"
+        }
+    }
+}
+
+private fun WhenLiteral.toLiteralExprNode(loc: ProgramLoc): LiteralValueExprNode = when (this) {
+    is WhenLiteral.IntLit -> LiteralValueExprNode(value, intType, loc)
+    is WhenLiteral.StringLit -> LiteralValueExprNode(value, stringType, loc)
+    is WhenLiteral.BoolLit -> LiteralValueExprNode(value, boolType, loc)
+}
+
 class ObjClassLiteralExprNode(
     val className: String,
     val fieldEntries: List<Pair<String, ExprNode>>,

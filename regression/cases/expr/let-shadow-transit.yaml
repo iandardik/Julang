@@ -1,0 +1,7 @@
+source: regression/input/expr/let-shadow-transit.jul
+programs:
+  - name: P
+    run:
+      timeoutMs: 60000
+      expectStdoutLinesUnordered:
+        - "1"

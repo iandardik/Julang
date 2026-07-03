@@ -31,6 +31,9 @@ ASGN_EQ : ':=' ;
 IMPLIES : '=>' ;
 IF : 'if' ;
 ELSE : 'else' ;
+LET : 'let' ;
+WHEN : 'when' ;
+ARROW : '->' ;
 IMPORT : 'import' ;
 
 

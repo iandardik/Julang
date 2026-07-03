@@ -258,6 +258,36 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitExpr(JulayParser.ExprContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#when_subject_arm}.
+	 * @param ctx the parse tree
+	 */
+	void enterWhen_subject_arm(JulayParser.When_subject_armContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#when_subject_arm}.
+	 * @param ctx the parse tree
+	 */
+	void exitWhen_subject_arm(JulayParser.When_subject_armContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#when_guard_arm}.
+	 * @param ctx the parse tree
+	 */
+	void enterWhen_guard_arm(JulayParser.When_guard_armContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#when_guard_arm}.
+	 * @param ctx the parse tree
+	 */
+	void exitWhen_guard_arm(JulayParser.When_guard_armContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#when_literal}.
+	 * @param ctx the parse tree
+	 */
+	void enterWhen_literal(JulayParser.When_literalContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#when_literal}.
+	 * @param ctx the parse tree
+	 */
+	void exitWhen_literal(JulayParser.When_literalContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#proc_expr}.
 	 * @param ctx the parse tree
 	 */

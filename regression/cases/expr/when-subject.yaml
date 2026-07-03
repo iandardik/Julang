@@ -1,0 +1,7 @@
+source: regression/input/expr/when-subject.jul
+programs:
+  - name: P
+    run:
+      timeoutMs: 60000
+      expectStdoutLinesUnordered:
+        - "2"

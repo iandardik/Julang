@@ -1,0 +1,5 @@
+source: regression/input/type-errors/let-self-ref.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "let initializer for \"n\" cannot reference the bound name"
+  - "Found type errors; exiting."

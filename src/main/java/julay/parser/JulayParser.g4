@@ -129,6 +129,26 @@ expr
     | expr OR expr
     | expr IMPLIES expr
     | IF LPAREN expr RPAREN LCURLY expr RCURLY ELSE LCURLY expr RCURLY
+    | LET LPAREN ID COLON ID ASGN_EQ expr RPAREN LCURLY expr RCURLY
+    | WHEN LPAREN expr RPAREN LCURLY when_subject_arm+ RCURLY
+    | WHEN LCURLY when_guard_arm+ RCURLY
+    ;
+
+when_subject_arm
+    : when_literal ARROW expr
+    | ELSE ARROW expr
+    ;
+
+when_guard_arm
+    : expr ARROW expr
+    | ELSE ARROW expr
+    ;
+
+when_literal
+    : INT
+    | STRING
+    | TRUE
+    | FALSE
     ;
 
 proc_expr

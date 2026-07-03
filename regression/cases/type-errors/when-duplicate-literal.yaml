@@ -1,0 +1,5 @@
+source: regression/input/type-errors/when-duplicate-literal.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected when subject arms to have unique literals"
+  - "Found type errors; exiting."

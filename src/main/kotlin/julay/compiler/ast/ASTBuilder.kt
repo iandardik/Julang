@@ -316,6 +316,8 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
         val ternaryOpMapper = {
             when {
                 ctx.IF() != null -> "if-else"
+                ctx.LET() != null -> "let"
+                ctx.WHEN() != null -> "when"
                 else -> "N/A"
             }
         }
@@ -340,7 +342,7 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
                 }
                 BinaryOpExprNode(binaryOpMapper(), lhsNode, rhsNode, sourceLocation(ctx))
             }
-            ternaryOpMapper() != "N/A" -> {
+            ternaryOpMapper() == "if-else" -> {
                 val condNode = visit(ctx.expr(0))
                 val thenNode = visit(ctx.expr(1))
                 val elseNode = visit(ctx.expr(2))
@@ -349,8 +351,78 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
                 }
                 IfElseExprNode(condNode, thenNode, elseNode, sourceLocation(ctx))
             }
+            ternaryOpMapper() == "let" -> {
+                val name = ctx.ID(0).text
+                val typeName = ctx.ID(1).text
+                val letInitNode = visit(ctx.expr(0))
+                val bodyNode = visit(ctx.expr(1))
+                if (letInitNode !is ExprNode || bodyNode !is ExprNode) {
+                    throw RuntimeException("Expected expr children to be ExprNodes")
+                }
+                LetExprNode(name, typeName, letInitNode, bodyNode, sourceLocation(ctx))
+            }
+            ternaryOpMapper() == "when" -> {
+                if (ctx.LPAREN() != null) {
+                    val subjectNode = visit(ctx.expr(0))
+                    if (subjectNode !is ExprNode) {
+                        throw RuntimeException("Expected when subject to be an expression")
+                    }
+                    val arms = ctx.when_subject_arm().map { parseWhenSubjectArm(it) }
+                    WhenExprNode(subjectNode, arms, sourceLocation(ctx))
+                } else {
+                    val arms = ctx.when_guard_arm().map { parseWhenGuardArm(it) }
+                    WhenExprNode(null, arms, sourceLocation(ctx))
+                }
+            }
             ctx.LPAREN() != null -> visit(ctx.expr(0))
             else -> throw RuntimeException("Invalid expr node: ${ctx.text}")
+        }
+    }
+
+    private fun parseWhenSubjectArm(ctx: JulayParser.When_subject_armContext): WhenArm {
+        return if (ctx.ELSE() != null) {
+            val expr = visit(ctx.expr())
+            if (expr !is ExprNode) {
+                throw RuntimeException("Expected when arm expression to be an ExprNode")
+            }
+            WhenArm.Else(expr)
+        } else {
+            val literal = parseWhenLiteral(ctx.when_literal())
+            val expr = visit(ctx.expr())
+            if (expr !is ExprNode) {
+                throw RuntimeException("Expected when arm expression to be an ExprNode")
+            }
+            WhenArm.Subject(literal, expr)
+        }
+    }
+
+    private fun parseWhenGuardArm(ctx: JulayParser.When_guard_armContext): WhenArm {
+        return if (ctx.ELSE() != null) {
+            val expr = visit(ctx.expr(0))
+            if (expr !is ExprNode) {
+                throw RuntimeException("Expected when arm expression to be an ExprNode")
+            }
+            WhenArm.Else(expr)
+        } else {
+            val cond = visit(ctx.expr(0))
+            val expr = visit(ctx.expr(1))
+            if (cond !is ExprNode || expr !is ExprNode) {
+                throw RuntimeException("Expected when arm expressions to be ExprNodes")
+            }
+            WhenArm.Guard(cond, expr)
+        }
+    }
+
+    private fun parseWhenLiteral(ctx: JulayParser.When_literalContext): WhenLiteral {
+        return when {
+            ctx.INT() != null -> WhenLiteral.IntLit(ctx.INT().text)
+            ctx.STRING() != null -> {
+                val rawStr = ctx.STRING().text
+                WhenLiteral.StringLit(rawStr.substring(1, rawStr.length - 1))
+            }
+            ctx.TRUE() != null -> WhenLiteral.BoolLit(ctx.TRUE().text)
+            ctx.FALSE() != null -> WhenLiteral.BoolLit(ctx.FALSE().text)
+            else -> throw RuntimeException("Invalid when literal: ${ctx.text}")
         }
     }
 

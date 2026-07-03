@@ -27,6 +27,8 @@ fun ASTNode.typePass(
     is EffectAssignNode -> typePassEffectAssign(symbolEnv, registry)
     is BinaryOpExprNode -> typePassBinaryOp(symbolEnv, registry)
     is IfElseExprNode -> typePassIfElse(symbolEnv, registry)
+    is LetExprNode -> typePassLet(symbolEnv, registry)
+    is WhenExprNode -> typePassWhen(symbolEnv, registry)
     is ObjClassLiteralExprNode -> typePassObjClassLiteral(symbolEnv, registry)
     is FieldAccessExprNode -> typePassFieldAccess(symbolEnv, registry)
     is ExprNode -> typePassExpr(symbolEnv, registry)
@@ -289,6 +291,204 @@ private fun IfElseExprNode.ifElseTypeErrors(): List<CompileError> {
         )
     }
     return errors
+}
+
+private fun LetExprNode.typePassLet(symbolEnv: Map<String, Type>, registry: ObjClassRegistry): List<CompileError> {
+    val typeErrors = when (val result = registry.resolveTypeName(letTypeName())) {
+        is TypeResolveResult.Found -> {
+            if (result.type is ObjClassType) {
+                listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "let bindings support only primitive types",
+                    ),
+                )
+            } else {
+                resolveLetType(result.type)
+                emptyList()
+            }
+        }
+        is TypeResolveResult.NotFound ->
+            listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Unknown type \"${letTypeName()}\" for let binding \"${letName()}\"",
+                ),
+            )
+    }
+    if (typeErrors.isNotEmpty()) {
+        return typeErrors
+    }
+
+    val selfRefErrors = assertOrCompileError(
+        letName() in symbolEnv || !exprReferencesSymbol(letInitExpr(), letName()),
+        OneLocCompileError(
+            letInitExpr().programLocation(),
+            "let initializer for \"${letName()}\" cannot reference the bound name",
+        ),
+    )
+    if (selfRefErrors.isNotEmpty()) {
+        return selfRefErrors
+    }
+
+    val initErrors = letInitExpr().typePass(symbolEnv, registry)
+    if (initErrors.isNotEmpty()) {
+        return initErrors
+    }
+
+    val declaredType = resolvedLetType
+    val initTypeErrors = assertOrCompileError(
+        letInitExpr().getType() == declaredType,
+        OneLocCompileError(
+            letInitExpr().programLocation(),
+            "Expected let initializer for \"${letName()}\" to have type $declaredType but got ${letInitExpr().getType()}",
+        ),
+    )
+    if (initTypeErrors.isNotEmpty()) {
+        return initTypeErrors
+    }
+
+    val bodyEnv = symbolEnv + (letName() to declaredType)
+    val bodyErrors = bodyExpr().typePass(bodyEnv, registry)
+    inferExprType(bodyEnv)
+    return bodyErrors
+}
+
+private fun WhenExprNode.typePassWhen(symbolEnv: Map<String, Type>, registry: ObjClassRegistry): List<CompileError> {
+    val subjectErrors = subjectExpr()?.typePass(symbolEnv, registry) ?: emptyList()
+    if (subjectErrors.isNotEmpty()) {
+        return subjectErrors
+    }
+
+    val structureErrors = whenStructureErrors()
+    if (structureErrors.isNotEmpty()) {
+        return structureErrors
+    }
+
+    val armErrors = arms().flatMap { arm ->
+        when (arm) {
+            is WhenArm.Subject -> arm.expr.typePass(symbolEnv, registry)
+            is WhenArm.Guard -> arm.cond.typePass(symbolEnv, registry) + arm.expr.typePass(symbolEnv, registry)
+            is WhenArm.Else -> arm.expr.typePass(symbolEnv, registry)
+        }
+    }
+    if (armErrors.isNotEmpty()) {
+        return armErrors
+    }
+
+    inferExprType(symbolEnv)
+    return whenTypeErrors()
+}
+
+private fun WhenExprNode.whenStructureErrors(): List<CompileError> {
+    val errors = mutableListOf<CompileError>()
+    if (arms().isEmpty()) {
+        errors.add(OneLocCompileError(programLocation(), "Expected when expression to have at least one arm"))
+        return errors
+    }
+    val elseArms = arms().filterIsInstance<WhenArm.Else>()
+    if (elseArms.size != 1) {
+        errors.add(OneLocCompileError(programLocation(), "Expected when expression to have exactly one else arm"))
+    }
+    if (arms().last() !is WhenArm.Else) {
+        errors.add(OneLocCompileError(programLocation(), "Expected else arm to be the last arm in when expression"))
+    }
+    if (arms().count { it !is WhenArm.Else } == 0) {
+        errors.add(OneLocCompileError(programLocation(), "Expected when expression to have at least one non-else arm"))
+    }
+    if (subjectExpr() != null && arms().any { it is WhenArm.Guard }) {
+        errors.add(OneLocCompileError(programLocation(), "Expected subject when arms to use literals, not guard conditions"))
+    }
+    if (subjectExpr() == null && arms().any { it is WhenArm.Subject }) {
+        errors.add(OneLocCompileError(programLocation(), "Expected guard when arms to use conditions, not literals"))
+    }
+    return errors
+}
+
+private fun WhenExprNode.whenTypeErrors(): List<CompileError> {
+    val errors = mutableListOf<CompileError>()
+
+    subjectExpr()?.let { subject ->
+        if (subject.getType() is ObjClassType) {
+            errors.add(OneLocCompileError(subject.programLocation(), "Expected when subject to be a primitive type"))
+        }
+    }
+
+    arms().filterIsInstance<WhenArm.Guard>().forEach { arm ->
+        if (arm.cond.getType() !is BoolType) {
+            errors.add(
+                OneLocCompileError(arm.cond.programLocation(), "Expected when guard condition to be Boolean"),
+            )
+        }
+    }
+
+    subjectExpr()?.let { subject ->
+        val subjectType = subject.getType()
+        val literalArms = arms().filterIsInstance<WhenArm.Subject>()
+        literalArms.forEach { arm ->
+            val literalType = arm.literal.whenLiteralType()
+            if (literalType != subjectType) {
+                errors.add(
+                    OneLocCompileError(
+                        arm.expr.programLocation(),
+                        "Expected when arm literal to match subject type $subjectType but got $literalType",
+                    ),
+                )
+            }
+        }
+        val duplicateLiterals = literalArms
+            .groupBy { it.literal }
+            .filter { it.value.size > 1 }
+        duplicateLiterals.forEach { (literal, entries) ->
+            errors.add(
+                TwoLocsCompileError(
+                    entries[0].expr.programLocation(),
+                    entries[1].expr.programLocation(),
+                    "Expected when subject arms to have unique literals, but found duplicate $literal",
+                ),
+            )
+        }
+    }
+
+    val branchTypes = arms().map { arm ->
+        when (arm) {
+            is WhenArm.Subject -> arm.expr.getType()
+            is WhenArm.Guard -> arm.expr.getType()
+            is WhenArm.Else -> arm.expr.getType()
+        }
+    }
+    val expectedType = branchTypes.first()
+    branchTypes.drop(1).forEachIndexed { index, branchType ->
+        if (branchType != expectedType) {
+            val arm = arms()[index + 1]
+            val armLoc = when (arm) {
+                is WhenArm.Subject -> arm.expr.programLocation()
+                is WhenArm.Guard -> arm.expr.programLocation()
+                is WhenArm.Else -> arm.expr.programLocation()
+            }
+            errors.add(
+                TwoLocsCompileError(
+                    arms()[0].branchExpr().programLocation(),
+                    armLoc,
+                    "Expected when branches to have the same type, got $expectedType and $branchType",
+                ),
+            )
+        }
+    }
+
+    return errors
+}
+
+private fun WhenArm.branchExpr(): ExprNode = when (this) {
+    is WhenArm.Subject -> expr
+    is WhenArm.Guard -> expr
+    is WhenArm.Else -> expr
+}
+
+private fun WhenLiteral.whenLiteralType(): Type = when (this) {
+    is WhenLiteral.IntLit -> intType
+    is WhenLiteral.StringLit -> stringType
+    is WhenLiteral.BoolLit -> boolType
 }
 
 private fun ObjClassLiteralExprNode.typePassObjClassLiteral(

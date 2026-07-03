@@ -1,0 +1,5 @@
+source: regression/input/type-errors/when-missing-else.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected when expression to have exactly one else arm"
+  - "Found type errors; exiting."

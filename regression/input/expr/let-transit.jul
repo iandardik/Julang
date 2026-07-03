@@ -1,0 +1,27 @@
+import julaylib.Println
+import julaylib.ExitSystem
+
+p-class S {
+    var x : Int
+    var print : Boolean
+
+    constructor initially() {
+        transit:
+            x := let (inc : Int := 2) { inc + 3 }
+            print := true
+    }
+
+    p2p-consumer transition println(msg : String) {
+        guard:
+            print & (msg = x + "")
+        transit:
+            print := false
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard:
+            ~print
+    }
+}
+
+program P := S || Println || ExitSystem

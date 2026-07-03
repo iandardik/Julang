@@ -1,0 +1,5 @@
+source: regression/input/type-errors/when-branch-mismatch.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected when branches to have the same type, got Int and Bool"
+  - "Found type errors; exiting."
