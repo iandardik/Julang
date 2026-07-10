@@ -19,7 +19,7 @@ class Proc(
             val enabledActions = transitionSystem.actions().filter { act ->
                 val solver = ctx.mkSolver()
                 solver.add(act.guard)
-                // deadlock is not enabled, but we let it pass on purpose
+                // deadlock is not enabled, but we let it pass on purpose to create a deadlock
                 act.symAction.name == "deadlock" || solver.check() == Status.SATISFIABLE
             }
             val cases = enabledActions.map { act ->

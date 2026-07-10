@@ -15,5 +15,3 @@ fun RootNode.resolvedObjClassDecls(): List<ObjClassDecl> = resolvedObjClassRegis
 
 fun RootNode.resolvedObjClassRegistry(): ObjClassRegistry =
     ObjClassRegistry.build(declNodes().flatMap { it.objClassPass() })
-
-fun RootNode.flattenObjClassPass(registry: ObjClassRegistry): RootNode = flattenObjClassPass(this, registry)

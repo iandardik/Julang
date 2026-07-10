@@ -103,7 +103,7 @@ private fun ProcClassNode.errorPassProcClass(procs: Set<String>, librariesInUse:
         .filterIsInstance<ConstructorNode>()
         .flatMap { ctorNode ->
             val stateVarSet = stateVars.toSet()
-            val transitVarSet = ctorNode.transitVars().map { it.first }.toSet()
+            val transitVarSet = ctorNode.transitVars().map { transitRootVar(it.first) }.toSet()
             val missingStateVars = stateVarSet.minus(transitVarSet)
             assertOrCompileError(
                 missingStateVars.isEmpty(),

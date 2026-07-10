@@ -73,7 +73,6 @@ class Program {
     }
 
     suspend fun run() {
-        // the constructor proc is responsible for terminating the program when all 'self terminating' procs are done
         constructorProc.run()
     }
 }

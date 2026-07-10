@@ -31,6 +31,7 @@ fun codegenPass(
     val staticInfoCompiledProcs = procClasses.map { it.kotlinStaticInfoString() }
     val staticInfoBody = (staticInfoCompiledProcs + staticInfoLib).joinToString(",\n") { it }
     val staticInfo = "val tsInfo = setOf(\n" + staticInfoBody.prependIndent() + "\n)"
+    val objClassDecls = ast.resolvedObjClassDecls()
     val runProgram = "Program(tsInfo).run()"
     val mainFunction = "suspend fun main(args : Array<String>) {" +
         "\n$staticInfo".prependIndent() +
@@ -38,11 +39,11 @@ fun codegenPass(
         "\n}"
 
     val imports = "import com.microsoft.z3.*\n" +
-        "import julay.compiler.ObjClassType\n" +
         "import julay.program.*\n" +
         "import julay.program.library.*\n" +
         "import julay.tools.mkStringConst\n"
-    val objClassDecls = ast.resolvedObjClassDecls()
+    val dataClassCode = objClassDecls.joinToString("\n\n") { it.kotlinDataClassString() }
+    val dataClassSection = if (dataClassCode.isEmpty()) "" else "$dataClassCode\n\n"
     val objClassCode = objClassDecls.joinToString("\n\n") { it.kotlinTypeValString() }
     val objClassSection = if (objClassCode.isEmpty()) "" else "$objClassCode\n\n"
     val mainClassName = program.name.replaceFirstChar { it.uppercase() }
@@ -52,12 +53,20 @@ fun codegenPass(
         ""
     }
     val sourceText = "$imports$effectImports\n" +
+        dataClassSection +
         objClassSection +
-        procClasses.joinToString("\n\n") { it.kotlinClassString() } +
+        procClasses.joinToString("\n\n") { it.kotlinClassString(objClassDecls) } +
         "\n\n" +
         mainFunction
 
     return CodegenResult(sourceText, mainClassName)
+}
+
+private fun ObjClassDecl.kotlinDataClassString(): String {
+    val fieldsStr = fields.joinToString(", ") {
+        "val ${it.name}: ${it.type.toKotlinTypeString()}"
+    }
+    return "data class $name($fieldsStr)"
 }
 
 private fun ObjClassDecl.kotlinTypeValString(): String {
@@ -70,6 +79,12 @@ private fun ObjClassDecl.kotlinTypeValString(): String {
 private fun ProcClassDecl.usesEffects(): Boolean =
     constructors.any { it.effects.isNotEmpty() } || transitions.any { it.effects.isNotEmpty() }
 
+private fun actionArgEnv(actionArgs: List<Variable>): Map<String, Type> =
+    actionArgs.associate { it.name to it.type }
+
+private fun actionArgSymbols(actionArgs: List<Variable>): Set<String> =
+    actionArgs.map { it.name }.toSet()
+
 private fun ActionDecl.kotlinEffectString(
     stateVarTypes: Map<String, Type>,
     assignPrefix: String = "",
@@ -77,18 +92,19 @@ private fun ActionDecl.kotlinEffectString(
     if (effects.isEmpty()) {
         return ""
     }
-    val symbolTypes = stateVarTypes + flattenActionArgEnv(action.args)
-    val argSymbols = flattenedArgSymbols(action.args)
+    val symbolTypes = stateVarTypes + actionArgEnv(action.args)
+    val argSymbols = actionArgSymbols(action.args)
     return effects.joinToString("\n") {
         EffectBuiltinRegistry.effectStmtKotlinString(it, symbolTypes, argSymbols, assignPrefix)
     }
 }
 
-private fun ProcClassDecl.kotlinClassString(): String {
+private fun ProcClassDecl.kotlinClassString(objClassDecls: List<ObjClassDecl>): String {
     val stateVarTypes = stateVars.associate { Pair(it.name, it.type) }
     val stateVarsStr = stateVars.joinToString(",\n") {
         "private var ${it.name.toKotlinIdent()}: ${it.type.toKotlinTypeString()}"
     }
+    val registerTypes = ""
     val actionsStr = "override suspend fun actions(): Set<TSAction> = setOf(\n" +
         transitions.joinToString(",\n") { it.kotlinActionString(stateVarTypes).prependIndent() } +
         "\n)"
@@ -104,6 +120,7 @@ private fun ProcClassDecl.kotlinClassString(): String {
         "\n$stateVarsStr".prependIndent() +
         "\n) : TransitionSystem {" +
         "\nprivate val ctx = Context()".prependIndent() +
+        registerTypes +
         "\n$actionsStr".prependIndent() +
         "\n$transitStr".prependIndent() +
         "\noverride fun getContext() = ctx".prependIndent() +
@@ -115,12 +132,12 @@ private fun ProcClassDecl.kotlinStaticInfoString(): String {
     val constructorPairs = constructors
         .joinToString(",\n") { ctor ->
             val actSigStr = ctor.kotlinStaticInfoString()
-            val argSymbols = flattenedArgSymbols(ctor.action.args)
+            val argSymbols = actionArgSymbols(ctor.action.args)
             val stateVarTypes = stateVars.associate { Pair(it.name, it.type) }
-            val symbolTypes = stateVarTypes + flattenActionArgEnv(ctor.action.args)
+            val symbolTypes = stateVarTypes + actionArgEnv(ctor.action.args)
             val constructorArgs = ctor.transits.entries
                 .joinToString(", ") { (k, v) ->
-                    "${k.toKotlinIdent()} = ${v.toTransitString(symbolTypes, argSymbols)}"
+                    "${transitRootVar(k).toKotlinIdent()} = ${v.toTransitString(symbolTypes, argSymbols)}"
                 }
             val constructor = "$name($constructorArgs)"
             val effectStr = ctor.kotlinEffectString(stateVarTypes, "result.")
@@ -142,8 +159,8 @@ private fun ProcClassDecl.kotlinStaticInfoString(): String {
 }
 
 private fun ActionDecl.kotlinActionString(stateVarTypes: Map<String, Type>): String {
-    val symbolTypes = stateVarTypes + flattenActionArgEnv(action.args)
-    val argSymbols = flattenedArgSymbols(action.args)
+    val symbolTypes = stateVarTypes + actionArgEnv(action.args)
+    val argSymbols = actionArgSymbols(action.args)
 
     val actionArgsStr = action.args.joinToString(", ") {
         "Variable(\"${it.name}\", ${it.type.toCodegenTypeVal()})"
@@ -173,10 +190,14 @@ private fun ActionDecl.kotlinActionString(stateVarTypes: Map<String, Type>): Str
 }
 
 private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): String {
-    val symbolTypes = stateVarTypes + flattenActionArgEnv(action.args)
-    val argSymbols = flattenedArgSymbols(action.args)
-    val transitLines = transits.map { (v, e) ->
-        "${v.toKotlinIdent()} = ${e.toTransitString(symbolTypes, argSymbols)}"
+    val symbolTypes = stateVarTypes + actionArgEnv(action.args)
+    val argSymbols = actionArgSymbols(action.args)
+    val transitLines = transits.map { (k, e) ->
+        val rootVar = transitRootVar(k)
+        val rootType = stateVarTypes.getValue(rootVar)
+        val fieldPath = if (k.contains('.')) k.substringAfter('.').split('.') else emptyList()
+        val rhs = e.toTransitString(symbolTypes, argSymbols)
+        copyAssignmentString(rootVar, rootType, fieldPath, rhs)
     }
     val effectLines = effects.map {
         EffectBuiltinRegistry.effectStmtKotlinString(it, symbolTypes, argSymbols)

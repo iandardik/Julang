@@ -1,7 +1,6 @@
 package julay.compiler.ast
 
 import julay.compiler.decl.ActionDecl
-import julay.compiler.ObjClassType
 import julay.compiler.ProgramLoc
 import julay.compiler.*
 import julay.compiler.pass.TypePassType
@@ -811,11 +810,13 @@ class ObjClassLiteralExprNode(
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
-        throw RuntimeException("O-class literal at $loc must appear in an equality comparison, not as a scalar expression")
+        val fieldExprs = fieldEntries.map { it.second.toZ3GuardString(symbolTypes, argSymbols) }
+        return structType.literalToZ3Codegen(fieldExprs)
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
-        throw RuntimeException("O-class literal at $loc must be assigned via flattened primitive fields")
+        val fieldExprs = fieldEntries.map { it.second.toTransitString(symbolTypes, argSymbols) }
+        return structType.literalToTransit(fieldExprs)
     }
 
     override fun inferType(symbolEnv: Map<String, Type>): Type = structType
@@ -881,38 +882,39 @@ class FieldAccessExprNode(
     ): String {
         val resolution = fieldResolution as FieldAccessResolution.Resolved
         val baseType = symbolTypes.getValue(baseSymbol) as ObjClassType
-        val isArg = baseSymbol in argSymbols
+        val baseZ3 = recordZ3Expr(baseSymbol, baseType, argSymbols)
+        val fieldZ3 = ObjClassType.fieldAccessZ3Codegen(baseType, baseZ3, fieldPath)
         if (forceString) {
             return when (resolution.leafType) {
                 is BoolType -> throw RuntimeException("Cannot convert a Bool to a string")
-                is IntType -> {
-                    if (isArg) {
-                        "ctx.intToString(${baseType.fieldZ3Guard(baseSymbol, resolution.relPath, intType, true)})"
-                    } else {
-                        val flatName = baseType.flatVarName(baseSymbol, resolution.relPath)
-                        "ctx.mkString(${flatName.toKotlinIdent()}.toString())"
-                    }
-                }
-                is StringType -> baseType.fieldZ3Guard(baseSymbol, resolution.relPath, stringType, isArg)
+                is IntType -> "ctx.intToString($fieldZ3 as IntExpr)"
+                is StringType -> fieldZ3
                 is ObjClassType -> throw RuntimeException("Cannot convert o-class field to string")
                 else -> throw RuntimeException("Invalid field type: ${resolution.leafType}")
             }
         }
         if (resolution.leafType is ObjClassType) {
-            throw RuntimeException("O-class field $baseSymbol.${fieldPath.joinToString(".")} must be used in whole-value equality")
+            return fieldZ3
         }
-        return baseType.fieldZ3Guard(baseSymbol, resolution.relPath, resolution.leafType, isArg)
+        return when (resolution.leafType) {
+            is BoolType -> "$fieldZ3 as BoolExpr"
+            is IntType -> "$fieldZ3 as IntExpr"
+            is StringType -> fieldZ3
+            else -> throw RuntimeException("Invalid field type: ${resolution.leafType}")
+        }
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
-        val resolution = fieldResolution as FieldAccessResolution.Resolved
-        val baseType = symbolTypes.getValue(baseSymbol) as ObjClassType
-        val flatName = baseType.flatVarName(baseSymbol, resolution.relPath)
-        if (baseSymbol in argSymbols) {
-            val typeStr = resolution.leafType.toCodegenTypeVal()
-            return "(act.lookup(Variable(\"${flatName.escapeKotlinStringLiteral()}\", $typeStr)).value as ${resolution.leafType.toKotlinTypeString()})"
+        return ObjClassType.fieldAccessTransitString(baseSymbol, fieldPath, symbolTypes, argSymbols)
+    }
+
+    private fun recordZ3Expr(baseSymbol: String, baseType: ObjClassType, argSymbols: Set<String>): String {
+        val typeVal = objClassTypeValName(baseType.name)
+        return if (baseSymbol in argSymbols) {
+            ObjClassType.z3ConstString(baseSymbol, typeVal)
+        } else {
+            ObjClassType.stateToZ3String(typeVal, baseSymbol)
         }
-        return flatName.toKotlinIdent()
     }
 
     override fun inferType(symbolEnv: Map<String, Type>): Type {
@@ -956,7 +958,12 @@ class SymbolValueExprNode(
 
         }
         if (type is ObjClassType) {
-            throw RuntimeException("O-class symbol $symbol must be used in whole-value equality, not as a scalar guard expression")
+            val typeVal = objClassTypeValName(type.name)
+            return if (symbol in argSymbols) {
+                ObjClassType.z3ConstString(symbol, typeVal)
+            } else {
+                ObjClassType.stateToZ3String(typeVal, symbol)
+            }
         }
         if (symbol in argSymbols) {
             return when (type) {

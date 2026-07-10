@@ -3,8 +3,6 @@ package julay.compiler
 import julay.compiler.decl.ProcDecl
 import julay.compiler.decl.ProcDeclType
 import julay.compiler.pass.errorPass
-import julay.compiler.pass.flattenObjClassPass
-import julay.compiler.pass.resolvedObjClassRegistry
 import julay.compiler.pass.resolvedProcPass
 import julay.compiler.pass.typePass
 import java.nio.file.Path
@@ -45,7 +43,5 @@ fun compileJulFile(
         }
     }
 
-    val flatAst = ast.flattenObjClassPass(ast.resolvedObjClassRegistry())
-
-    programs.forEach { compileProgram(it, flatAst, procDecls, librariesInUse, keepBuild, compilerJar) }
+    programs.forEach { compileProgram(it, ast, procDecls, librariesInUse, keepBuild, compilerJar) }
 }

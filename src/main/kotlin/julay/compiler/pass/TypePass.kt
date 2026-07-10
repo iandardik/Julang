@@ -71,7 +71,7 @@ private fun ConstructorNode.typePassConstructor(
     registry: ObjClassRegistry,
 ): List<CompileError> {
     val argErrors = constructorArgs().typePass(symbolEnv, registry)
-    val actionEnv = symbolEnv + constructorArgs().argsTypeMap() + flattenActionArgEnv(constructorArgs().actionArgs())
+    val actionEnv = symbolEnv + constructorArgs().argsTypeMap() + constructorArgs().actionArgs().associate { it.name to it.type }
     return argErrors + body().flatMap { it.typePass(actionEnv, registry) }
 }
 
@@ -80,7 +80,7 @@ private fun TransitionNode.typePassTransition(
     registry: ObjClassRegistry,
 ): List<CompileError> {
     val argErrors = transitionArgs().typePass(symbolEnv, registry)
-    val actionEnv = symbolEnv + transitionArgs().argsTypeMap() + flattenActionArgEnv(transitionArgs().actionArgs())
+    val actionEnv = symbolEnv + transitionArgs().argsTypeMap() + transitionArgs().actionArgs().associate { it.name to it.type }
     return argErrors + body().flatMap { it.typePass(actionEnv, registry) }
 }
 

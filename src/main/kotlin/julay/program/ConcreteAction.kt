@@ -2,8 +2,6 @@ package julay.program
 
 import com.microsoft.z3.Context
 import com.microsoft.z3.Model
-import julay.compiler.ObjClassType
-import julay.tools.assert
 
 class ConcreteAction {
     val symAction : SymbolicAction
@@ -11,18 +9,14 @@ class ConcreteAction {
 
     constructor(sig : SymbolicAction, ctx : Context, model : Model) {
         symAction = sig
-        // The reason for the flatMap: primitive args correspond to a single variable, and are
-        // therefore associated with a single concrete value. However, o-class args desguar into
-        // multiple variables, and therefore may be associated with multiple concrete values.
-        argAssignments = sig.args.flatMap { v ->
-            when (val ty = v.type) {
-                is ObjClassType -> ty.flattenArgAssignments(v.name, model, ctx).toList()
-                else -> {
-                    val z3Value = model.eval(ty.toZ3Expr(v, ctx), true)
-                    listOf(v to Value(z3Value, ty))
-                }
+        argAssignments = sig.args.associateWith { v ->
+            val z3Value = model.eval(v.type.toZ3Expr(v, ctx), true)
+            val kotlinValue = when (val ty = v.type) {
+                is ObjClassType -> ty.fromZ3ExprWithContext(z3Value, ctx)
+                else -> ty.fromZ3Expr(z3Value)
             }
-        }.toMap()
+            Value(kotlinValue, v.type)
+        }
     }
 
     fun hasArg(arg : Variable) : Boolean {
@@ -30,7 +24,7 @@ class ConcreteAction {
     }
 
     fun lookup(variable : Variable) : Value {
-        assert(variable in argAssignments, "ConcreteAction.lookup($variable): is not assigned a value!")
+        julay.tools.assert(variable in argAssignments, "ConcreteAction.lookup($variable): is not assigned a value!")
         return argAssignments[variable]!!
     }
 

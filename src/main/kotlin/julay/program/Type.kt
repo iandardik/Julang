@@ -2,6 +2,7 @@ package julay.program
 
 import com.microsoft.z3.Context
 import com.microsoft.z3.Expr
+import com.microsoft.z3.IntNum
 import julay.tools.mkStringConst
 
 val boolType = BoolType()
@@ -98,6 +99,9 @@ class IntType : Type {
     }
 
     override fun fromZ3Expr(expr: Expr<*>): Any {
+        if (expr is IntNum) {
+            return expr.int
+        }
         return Integer.parseInt(expr.toString())
     }
 
