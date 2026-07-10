@@ -135,13 +135,18 @@ expr
     ;
 
 when_subject_arm
-    : when_literal ARROW expr
+    : when_pattern ARROW expr
     | ELSE ARROW expr
     ;
 
 when_guard_arm
     : expr ARROW expr
     | ELSE ARROW expr
+    ;
+
+when_pattern
+    : when_literal
+    | struct_literal
     ;
 
 when_literal

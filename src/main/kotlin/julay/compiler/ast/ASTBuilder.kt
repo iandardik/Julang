@@ -387,12 +387,26 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
             }
             WhenArm.Else(expr)
         } else {
-            val literal = parseWhenLiteral(ctx.when_literal())
+            val pattern = parseWhenPattern(ctx.when_pattern())
             val expr = visit(ctx.expr())
             if (expr !is ExprNode) {
                 throw RuntimeException("Expected when arm expression to be an ExprNode")
             }
-            WhenArm.Subject(literal, expr)
+            WhenArm.Subject(pattern, expr)
+        }
+    }
+
+    private fun parseWhenPattern(ctx: JulayParser.When_patternContext): WhenPattern {
+        return when {
+            ctx.when_literal() != null -> WhenPattern.Primitive(parseWhenLiteral(ctx.when_literal()))
+            ctx.struct_literal() != null -> {
+                val literal = visit(ctx.struct_literal())
+                if (literal !is ObjClassLiteralExprNode) {
+                    throw RuntimeException("Expected struct literal in when pattern")
+                }
+                WhenPattern.Struct(literal)
+            }
+            else -> throw RuntimeException("Invalid when pattern: ${ctx.text}")
         }
     }
 

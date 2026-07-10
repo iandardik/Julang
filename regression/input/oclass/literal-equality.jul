@@ -17,8 +17,10 @@ p-class Worker {
 
     transition check() {
         guard:
-              pos = Point { x := 5, y := 6 }
-            & ~matched
+            when (pos) {
+                Point { x := 5, y := 6 } -> ~matched
+                else -> false
+            }
         transit:
             matched := true
     }

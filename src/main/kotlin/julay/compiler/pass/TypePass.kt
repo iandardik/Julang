@@ -296,17 +296,8 @@ private fun IfElseExprNode.ifElseTypeErrors(): List<CompileError> {
 private fun LetExprNode.typePassLet(symbolEnv: Map<String, Type>, registry: ObjClassRegistry): List<CompileError> {
     val typeErrors = when (val result = registry.resolveTypeName(letTypeName())) {
         is TypeResolveResult.Found -> {
-            if (result.type is ObjClassType) {
-                listOf(
-                    OneLocCompileError(
-                        programLocation(),
-                        "let bindings support only primitive types",
-                    ),
-                )
-            } else {
-                resolveLetType(result.type)
-                emptyList()
-            }
+            resolveLetType(result.type)
+            emptyList()
         }
         is TypeResolveResult.NotFound ->
             listOf(
@@ -367,7 +358,13 @@ private fun WhenExprNode.typePassWhen(symbolEnv: Map<String, Type>, registry: Ob
 
     val armErrors = arms().flatMap { arm ->
         when (arm) {
-            is WhenArm.Subject -> arm.expr.typePass(symbolEnv, registry)
+            is WhenArm.Subject -> {
+                val patternErrors = when (val pattern = arm.pattern) {
+                    is WhenPattern.Primitive -> emptyList()
+                    is WhenPattern.Struct -> pattern.literal.typePass(symbolEnv, registry)
+                }
+                patternErrors + arm.expr.typePass(symbolEnv, registry)
+            }
             is WhenArm.Guard -> arm.cond.typePass(symbolEnv, registry) + arm.expr.typePass(symbolEnv, registry)
             is WhenArm.Else -> arm.expr.typePass(symbolEnv, registry)
         }
@@ -408,12 +405,6 @@ private fun WhenExprNode.whenStructureErrors(): List<CompileError> {
 private fun WhenExprNode.whenTypeErrors(): List<CompileError> {
     val errors = mutableListOf<CompileError>()
 
-    subjectExpr()?.let { subject ->
-        if (subject.getType() is ObjClassType) {
-            errors.add(OneLocCompileError(subject.programLocation(), "Expected when subject to be a primitive type"))
-        }
-    }
-
     arms().filterIsInstance<WhenArm.Guard>().forEach { arm ->
         if (arm.cond.getType() !is BoolType) {
             errors.add(
@@ -424,27 +415,48 @@ private fun WhenExprNode.whenTypeErrors(): List<CompileError> {
 
     subjectExpr()?.let { subject ->
         val subjectType = subject.getType()
-        val literalArms = arms().filterIsInstance<WhenArm.Subject>()
-        literalArms.forEach { arm ->
-            val literalType = arm.literal.whenLiteralType()
-            if (literalType != subjectType) {
-                errors.add(
-                    OneLocCompileError(
-                        arm.expr.programLocation(),
-                        "Expected when arm literal to match subject type $subjectType but got $literalType",
-                    ),
-                )
+        val subjectArms = arms().filterIsInstance<WhenArm.Subject>()
+        subjectArms.forEach { arm ->
+            when (val pattern = arm.pattern) {
+                is WhenPattern.Primitive -> {
+                    val literalType = pattern.literal.whenLiteralType()
+                    if (literalType != subjectType) {
+                        errors.add(
+                            OneLocCompileError(
+                                arm.expr.programLocation(),
+                                "Expected when arm literal to match subject type $subjectType but got $literalType",
+                            ),
+                        )
+                    }
+                }
+                is WhenPattern.Struct -> {
+                    if (subjectType !is ObjClassType) {
+                        errors.add(
+                            OneLocCompileError(
+                                pattern.literal.programLocation(),
+                                "Expected when subject to be an o-class type for struct pattern but got $subjectType",
+                            ),
+                        )
+                    } else if (pattern.literal.structType != subjectType) {
+                        errors.add(
+                            OneLocCompileError(
+                                pattern.literal.programLocation(),
+                                "Expected when arm struct pattern to match subject type $subjectType but got ${pattern.literal.structType}",
+                            ),
+                        )
+                    }
+                }
             }
         }
-        val duplicateLiterals = literalArms
-            .groupBy { it.literal }
+        val duplicatePatterns = subjectArms
+            .groupBy { it.pattern.duplicateKey() }
             .filter { it.value.size > 1 }
-        duplicateLiterals.forEach { (literal, entries) ->
+        duplicatePatterns.forEach { (_, entries) ->
             errors.add(
                 TwoLocsCompileError(
                     entries[0].expr.programLocation(),
                     entries[1].expr.programLocation(),
-                    "Expected when subject arms to have unique literals, but found duplicate $literal",
+                    "Expected when subject arms to have unique patterns, but found duplicate ${entries[0].pattern}",
                 ),
             )
         }
@@ -489,6 +501,12 @@ private fun WhenLiteral.whenLiteralType(): Type = when (this) {
     is WhenLiteral.IntLit -> intType
     is WhenLiteral.StringLit -> stringType
     is WhenLiteral.BoolLit -> boolType
+}
+
+private fun WhenPattern.duplicateKey(): Any = when (this) {
+    is WhenPattern.Primitive -> literal
+    is WhenPattern.Struct ->
+        literal.className to literal.fieldEntries.map { (name, expr) -> name to expr.toString() }
 }
 
 private fun ObjClassLiteralExprNode.typePassObjClassLiteral(

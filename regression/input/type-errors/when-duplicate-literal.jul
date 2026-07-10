@@ -1,11 +1,18 @@
+o-class Point {
+    x : Int
+    y : Int
+}
+
 p-class S {
+    var p : Point
     var x : Int
 
     constructor initially() {
         transit:
-            x := when (1) {
-                1 -> 0
-                1 -> 1
+            p := Point { x := 0, y := 0 }
+            x := when (p) {
+                Point { x := 0, y := 0 } -> 0
+                Point { x := 0, y := 0 } -> 1
                 else -> 2
             }
     }

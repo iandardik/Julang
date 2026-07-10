@@ -1,9 +1,14 @@
+o-class Point {
+    x : Int
+    y : Int
+}
+
 p-class S {
-    var x : Int
+    var p : Point
 
     constructor initially() {
         transit:
-            x := let (n : Int := true) { n }
+            p := let (n : Point := true) { n }
     }
 }
 

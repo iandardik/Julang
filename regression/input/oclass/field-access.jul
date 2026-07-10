@@ -14,9 +14,11 @@ p-class Worker {
 
     transition move(newPos : Point) {
         guard:
-            pos.x = newPos.x & pos.y = newPos.y
+            let (cur : Point := pos) {
+                cur.x = newPos.x & cur.y = newPos.y
+            }
         transit:
-            pos := newPos
+            pos := let (next : Point := newPos) { next }
     }
 
     transition reportX(expected : Int) {

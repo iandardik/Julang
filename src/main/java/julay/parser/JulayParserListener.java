@@ -278,6 +278,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitWhen_guard_arm(JulayParser.When_guard_armContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#when_pattern}.
+	 * @param ctx the parse tree
+	 */
+	void enterWhen_pattern(JulayParser.When_patternContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#when_pattern}.
+	 * @param ctx the parse tree
+	 */
+	void exitWhen_pattern(JulayParser.When_patternContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#when_literal}.
 	 * @param ctx the parse tree
 	 */

@@ -602,8 +602,13 @@ sealed interface WhenLiteral {
     data class BoolLit(val value: String) : WhenLiteral
 }
 
+sealed interface WhenPattern {
+    data class Primitive(val literal: WhenLiteral) : WhenPattern
+    data class Struct(val literal: ObjClassLiteralExprNode) : WhenPattern
+}
+
 sealed interface WhenArm {
-    data class Subject(val literal: WhenLiteral, val expr: ExprNode) : WhenArm
+    data class Subject(val pattern: WhenPattern, val expr: ExprNode) : WhenArm
     data class Guard(val cond: ExprNode, val expr: ExprNode) : WhenArm
     data class Else(val expr: ExprNode) : WhenArm
 }
@@ -668,7 +673,10 @@ class WhenExprNode(
     (subjectExpr?.let { listOf(it) } ?: emptyList()) +
         arms.flatMap { arm ->
             when (arm) {
-                is WhenArm.Subject -> listOf(arm.expr)
+                is WhenArm.Subject -> when (val pattern = arm.pattern) {
+                    is WhenPattern.Primitive -> listOf(arm.expr)
+                    is WhenPattern.Struct -> listOf(pattern.literal) + listOf(arm.expr)
+                }
                 is WhenArm.Guard -> listOf(arm.cond, arm.expr)
                 is WhenArm.Else -> listOf(arm.expr)
             }
@@ -706,7 +714,7 @@ class WhenExprNode(
         var result = elseArm.expr.toZ3GuardString(symbolTypes, argSymbols)
         for (arm in arms.dropLast(1).reversed()) {
             val (condStr, branchStr) = when (arm) {
-                is WhenArm.Subject -> subjectMatchZ3String(arm.literal, symbolTypes, argSymbols) to
+                is WhenArm.Subject -> subjectMatchZ3String(arm.pattern, symbolTypes, argSymbols) to
                     arm.expr.toZ3GuardString(symbolTypes, argSymbols)
                 is WhenArm.Guard -> {
                     arm.cond.toZ3GuardString(symbolTypes, argSymbols) to
@@ -724,7 +732,7 @@ class WhenExprNode(
         var result = elseArm.expr.toTransitString(symbolTypes, argSymbols)
         for (arm in arms.dropLast(1).reversed()) {
             val (condStr, branchStr) = when (arm) {
-                is WhenArm.Subject -> subjectMatchTransitString(arm.literal, symbolTypes, argSymbols) to
+                is WhenArm.Subject -> subjectMatchTransitString(arm.pattern, symbolTypes, argSymbols) to
                     arm.expr.toTransitString(symbolTypes, argSymbols)
                 is WhenArm.Guard -> {
                     arm.cond.toTransitString(symbolTypes, argSymbols) to
@@ -738,26 +746,36 @@ class WhenExprNode(
     }
 
     private fun subjectMatchZ3String(
-        literal: WhenLiteral,
+        pattern: WhenPattern,
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
     ): String {
         val subject = subjectExpr ?: throw RuntimeException("Subject when at $loc has no subject expression")
-        val literalExpr = literal.toLiteralExprNode(subject.programLocation())
         val lhsStr = subject.toZ3GuardString(symbolTypes, argSymbols)
-        val rhsStr = literalExpr.toZ3GuardString(symbolTypes, argSymbols)
+        val rhsStr = when (pattern) {
+            is WhenPattern.Primitive ->
+                pattern.literal.toLiteralExprNode(subject.programLocation())
+                    .toZ3GuardString(symbolTypes, argSymbols)
+            is WhenPattern.Struct ->
+                pattern.literal.toZ3GuardString(symbolTypes, argSymbols)
+        }
         return "ctx.mkEq($lhsStr,$rhsStr)"
     }
 
     private fun subjectMatchTransitString(
-        literal: WhenLiteral,
+        pattern: WhenPattern,
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
     ): String {
         val subject = subjectExpr ?: throw RuntimeException("Subject when at $loc has no subject expression")
-        val literalExpr = literal.toLiteralExprNode(subject.programLocation())
         val lhsStr = subject.toTransitString(symbolTypes, argSymbols)
-        val rhsStr = literalExpr.toTransitString(symbolTypes, argSymbols)
+        val rhsStr = when (pattern) {
+            is WhenPattern.Primitive ->
+                pattern.literal.toLiteralExprNode(subject.programLocation())
+                    .toTransitString(symbolTypes, argSymbols)
+            is WhenPattern.Struct ->
+                pattern.literal.toTransitString(symbolTypes, argSymbols)
+        }
         return "($lhsStr == $rhsStr)"
     }
 
@@ -782,13 +800,16 @@ class ObjClassLiteralExprNode(
     val className: String,
     val fieldEntries: List<Pair<String, ExprNode>>,
     private val loc: ProgramLoc,
+    resolvedType: ObjClassType? = null,
 ) : ExprNode(fieldEntries.map { it.second }) {
     private sealed interface ObjClassLiteralResolution {
         data object Unresolved : ObjClassLiteralResolution
         data class Resolved(val structType: ObjClassType) : ObjClassLiteralResolution
     }
 
-    private var objClassLiteralResolution: ObjClassLiteralResolution = ObjClassLiteralResolution.Unresolved
+    private var objClassLiteralResolution: ObjClassLiteralResolution =
+        if (resolvedType != null) ObjClassLiteralResolution.Resolved(resolvedType)
+        else ObjClassLiteralResolution.Unresolved
 
     val structType: ObjClassType
         get() = when (val resolution = objClassLiteralResolution) {
@@ -800,6 +821,9 @@ class ObjClassLiteralExprNode(
     val fieldAssignments: Map<String, ExprNode> = fieldEntries.toMap()
 
     override fun programLocation() = loc
+
+    internal fun resolvedStructTypeOrNull(): ObjClassType? =
+        (objClassLiteralResolution as? ObjClassLiteralResolution.Resolved)?.structType
 
     internal fun resolveLiteralType(type: ObjClassType) {
         objClassLiteralResolution = ObjClassLiteralResolution.Resolved(type)
@@ -861,18 +885,49 @@ class FieldAccessExprNode(
     val baseSymbol: String,
     val fieldPath: List<String>,
     private val loc: ProgramLoc,
+    resolvedLeafType: Type? = null,
+    resolvedRelPath: String? = null,
 ) : ExprNode(listOf()) {
     private sealed interface FieldAccessResolution {
         data object Unresolved : FieldAccessResolution
         data class Resolved(val leafType: Type, val relPath: String) : FieldAccessResolution
     }
 
-    private var fieldResolution: FieldAccessResolution = FieldAccessResolution.Unresolved
+    private var fieldResolution: FieldAccessResolution =
+        if (resolvedLeafType != null && resolvedRelPath != null) {
+            FieldAccessResolution.Resolved(resolvedLeafType, resolvedRelPath)
+        } else {
+            FieldAccessResolution.Unresolved
+        }
+
+    init {
+        if (resolvedLeafType != null) {
+            setInferredType(TypePassType.Inferred(resolvedLeafType))
+        }
+    }
 
     override fun programLocation() = loc
 
     internal fun resolveFieldAccess(leafType: Type, relPath: String) {
         fieldResolution = FieldAccessResolution.Resolved(leafType, relPath)
+        setInferredType(TypePassType.Inferred(leafType))
+    }
+
+    internal fun resolvedLeafTypeOrNull(): Type? =
+        (fieldResolution as? FieldAccessResolution.Resolved)?.leafType
+
+    internal fun resolvedRelPathOrNull(): String? =
+        (fieldResolution as? FieldAccessResolution.Resolved)?.relPath
+
+    internal fun withBaseSymbol(newBase: String): FieldAccessExprNode {
+        val resolved = fieldResolution as? FieldAccessResolution.Resolved
+        return FieldAccessExprNode(
+            newBase,
+            fieldPath,
+            loc,
+            resolved?.leafType,
+            resolved?.relPath,
+        )
     }
 
     override fun toZ3GuardString(
@@ -884,24 +939,7 @@ class FieldAccessExprNode(
         val baseType = symbolTypes.getValue(baseSymbol) as ObjClassType
         val baseZ3 = recordZ3Expr(baseSymbol, baseType, argSymbols)
         val fieldZ3 = ObjClassType.fieldAccessZ3Codegen(baseType, baseZ3, fieldPath)
-        if (forceString) {
-            return when (resolution.leafType) {
-                is BoolType -> throw RuntimeException("Cannot convert a Bool to a string")
-                is IntType -> "ctx.intToString($fieldZ3 as IntExpr)"
-                is StringType -> "$fieldZ3 as Expr<SeqSort<CharSort>>"
-                is ObjClassType -> throw RuntimeException("Cannot convert o-class field to string")
-                else -> throw RuntimeException("Invalid field type: ${resolution.leafType}")
-            }
-        }
-        if (resolution.leafType is ObjClassType) {
-            return fieldZ3
-        }
-        return when (resolution.leafType) {
-            is BoolType -> "$fieldZ3 as BoolExpr"
-            is IntType -> "$fieldZ3 as IntExpr"
-            is StringType -> "$fieldZ3 as Expr<SeqSort<CharSort>>"
-            else -> throw RuntimeException("Invalid field type: ${resolution.leafType}")
-        }
+        return castFieldZ3(fieldZ3, resolution.leafType, forceString)
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
@@ -926,6 +964,60 @@ class FieldAccessExprNode(
     }
 
     override fun toString(): String = fieldPath.joinToString(".", prefix = "$baseSymbol.")
+}
+
+class FieldAccessOnExprNode(
+    val baseExpr: ExprNode,
+    val fieldPath: List<String>,
+    private val loc: ProgramLoc,
+    val leafType: Type,
+) : ExprNode(listOf(baseExpr)) {
+    init {
+        setInferredType(TypePassType.Inferred(leafType))
+    }
+
+    override fun programLocation() = loc
+
+    override fun toZ3GuardString(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+        forceString: Boolean,
+    ): String {
+        val baseType = baseExpr.getType() as ObjClassType
+        val baseZ3 = baseExpr.toZ3GuardString(symbolTypes, argSymbols)
+        val fieldZ3 = ObjClassType.fieldAccessZ3Codegen(baseType, baseZ3, fieldPath)
+        return castFieldZ3(fieldZ3, leafType, forceString)
+    }
+
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        val base = baseExpr.toTransitString(symbolTypes, argSymbols)
+        return "($base).${fieldPath.joinToString(".")}"
+    }
+
+    override fun inferType(symbolEnv: Map<String, Type>): Type = leafType
+
+    override fun toString(): String = fieldPath.joinToString(".", prefix = "($baseExpr).")
+}
+
+private fun castFieldZ3(fieldZ3: String, leafType: Type, forceString: Boolean): String {
+    if (forceString) {
+        return when (leafType) {
+            is BoolType -> throw RuntimeException("Cannot convert a Bool to a string")
+            is IntType -> "ctx.intToString($fieldZ3 as IntExpr)"
+            is StringType -> "$fieldZ3 as Expr<SeqSort<CharSort>>"
+            is ObjClassType -> throw RuntimeException("Cannot convert o-class field to string")
+            else -> throw RuntimeException("Invalid field type: $leafType")
+        }
+    }
+    if (leafType is ObjClassType) {
+        return fieldZ3
+    }
+    return when (leafType) {
+        is BoolType -> "$fieldZ3 as BoolExpr"
+        is IntType -> "$fieldZ3 as IntExpr"
+        is StringType -> "$fieldZ3 as Expr<SeqSort<CharSort>>"
+        else -> throw RuntimeException("Invalid field type: $leafType")
+    }
 }
 
 class SymbolValueExprNode(
