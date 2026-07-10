@@ -86,12 +86,12 @@ private fun ObjClassDecl.kotlinTypeValWithConvertersString(): String {
     val toZ3Fun = objClassToZ3FunName(name)
     val fromZ3Fun = objClassFromZ3FunName(name)
     return """
-        |val $typeVal = ObjClassType("$name", listOf($fieldsStr)).also { type ->
-        |    type.installConverters(
-        |        { ctx, v -> $toZ3Fun(ctx, v as $name) },
-        |        { e -> $fromZ3Fun(e) },
-        |    )
-        |}
+        |val $typeVal = ObjClassType(
+        |    "$name",
+        |    listOf($fieldsStr),
+        |    { value, ctx -> $toZ3Fun(ctx, value.value as $name) },
+        |    { expr -> $fromZ3Fun(expr) },
+        |)
     """.trimMargin()
 }
 

@@ -109,7 +109,10 @@ private class ObjClassResolver(
         if (failed) {
             return ObjClassResolveResult.Failed
         }
-        val objClassType = ObjClassType(name, fields)
+        val objClassType = ObjClassType(name, fields,
+            { _, _ -> throw RuntimeException("valueToZ3 not available on compiler-resolved ObjClassType $name") },
+            { _ -> throw RuntimeException("valueFromZ3 not available on compiler-resolved ObjClassType $name") },
+        )
         resolved[name] = objClassType
         return ObjClassResolveResult.Success(objClassType)
     }

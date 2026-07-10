@@ -14,6 +14,8 @@ class JulangDatatypeMetadata(
 class ObjClassType(
     val name: String,
     val fields: List<Variable>,
+    private val valueToZ3: (Value, Context) -> Expr<*>,
+    private val valueFromZ3: (Expr<*>) -> Any,
 ) : Type {
     private val objClassCtx = Context()
     private val metadata : JulangDatatypeMetadata
@@ -40,21 +42,11 @@ class ObjClassType(
         return ctx.mkConst(variable.name, metadata.sort.translate(ctx))
     }
 
-    override fun toZ3Expr(value: Value, ctx: Context): Expr<*> {
-        return kotlinObjClassToZ3(ctx, value.value)
-    }
+    override fun toZ3Expr(value: Value, ctx: Context): Expr<*> =
+        valueToZ3(value, ctx)
 
-    override fun fromZ3Expr(expr: Expr<*>): Any {
-        specializedFromZ3?.let { return it(expr) }
-        val fieldExprs = deconstructFieldExprs(expr, metadata)
-        val fieldValues = fields.mapIndexed { index, field ->
-            when (val fieldType = field.type) {
-                is ObjClassType -> fieldType.fromZ3Expr(fieldExprs[index])
-                else -> fieldType.fromZ3Expr(fieldExprs[index])
-            }
-        }
-        return instantiateDataClass(fieldValues)
-    }
+    override fun fromZ3Expr(expr: Expr<*>): Any =
+        valueFromZ3(expr)
 
     override fun isOfType(obj: Any): Boolean = obj.javaClass.simpleName == name
 
@@ -74,29 +66,6 @@ class ObjClassType(
     fun fieldAccessZ3(ctx: Context, recordExpr: Expr<*>, fieldIndex: Int): Expr<*> {
         val meta = metadataFor(ctx)
         return meta.accessors[fieldIndex].apply(recordExpr) as Expr<*>
-    }
-
-    // Optional codegen-installed converters that avoid reflection for known o-classes.
-    private var specializedToZ3: ((Context, Any) -> Expr<*>)? = null
-    private var specializedFromZ3: ((Expr<*>) -> Any)? = null
-
-    fun installConverters(
-        toZ3: (Context, Any) -> Expr<*>,
-        fromZ3: (Expr<*>) -> Any,
-    ) {
-        specializedToZ3 = toZ3
-        specializedFromZ3 = fromZ3
-    }
-
-    // Expects value to be a Kotlin data class instance for this o-class (e.g. Point(3, 7) for Point).
-    fun kotlinObjClassToZ3(ctx: Context, value: Any): Expr<*> {
-        specializedToZ3?.let { return it(ctx, value) }
-        val meta = metadataFor(ctx)
-        val fieldExprs = fields.map { field ->
-            val fieldValue = readFieldValue(value, field.name)
-            field.type.toZ3Expr(Value(fieldValue, field.type), ctx)
-        }
-        return meta.constructorDecl.apply(*fieldExprs.toTypedArray()) as Expr<*>
     }
 
     // Unpack a Z3 record into one expr per field (constructor args when possible).
@@ -144,32 +113,6 @@ class ObjClassType(
         return Array(fields.size) { index ->
             meta.accessors[index].apply(localExpr) as Expr<*>
         }
-    }
-
-    // Expects value to be a Kotlin data class instance; reads a field via its getter.
-    private fun readFieldValue(value: Any, fieldName: String): Any {
-        val getter = value.javaClass.methods.first { it.name == "get${fieldName.replaceFirstChar { c -> c.uppercase() }}" }
-        return getter.invoke(value)
-    }
-
-    private fun instantiateDataClass(fieldValues: List<Any>): Any {
-        val clazz = loadDataClass(name)
-        val paramTypes = fields.map { field -> kotlinTypeToJavaClass(field.type) }.toTypedArray()
-        return clazz.getConstructor(*paramTypes).newInstance(*fieldValues.toTypedArray())
-    }
-
-    private fun loadDataClass(className: String): Class<*> = try {
-        Class.forName(className)
-    } catch (_: ClassNotFoundException) {
-        Class.forName("julay.program.$className")
-    }
-
-    private fun kotlinTypeToJavaClass(type: Type): Class<*> = when (type) {
-        is BoolType -> Boolean::class.javaPrimitiveType!!
-        is IntType -> Int::class.javaPrimitiveType!!
-        is StringType -> String::class.java
-        is ObjClassType -> loadDataClass(type.name)
-        else -> throw RuntimeException("Invalid field type: $type")
     }
 
     companion object {
