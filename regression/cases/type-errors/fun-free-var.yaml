@@ -1,0 +1,5 @@
+source: regression/input/type-errors/fun-free-var.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Unknown variable \"x\""
+  - "Found type errors; exiting."

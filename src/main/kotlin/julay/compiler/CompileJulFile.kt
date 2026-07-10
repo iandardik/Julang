@@ -24,7 +24,7 @@ fun compileJulFile(
     val procDecls = ast.resolvedProcPass(unit)
     val programs = procDecls.filter { it.type == ProcDeclType.Program }
 
-    val typeErrors = ast.typePass()
+    val typeErrors = ast.typePass(unit)
     if (typeErrors.isNotEmpty()) {
         typeErrors.forEach { println(it) }
         println("Found type errors; exiting.")

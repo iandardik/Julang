@@ -65,6 +65,18 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
+	@Override public void enterFun_decl(JulayParser.Fun_declContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitFun_decl(JulayParser.Fun_declContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
 	@Override public void enterPclass(JulayParser.PclassContext ctx) { }
 	/**
 	 * {@inheritDoc}
@@ -384,6 +396,18 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 * <p>The default implementation does nothing.</p>
 	 */
 	@Override public void exitValue(JulayParser.ValueContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void enterFun_call(JulayParser.Fun_callContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitFun_call(JulayParser.Fun_callContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *

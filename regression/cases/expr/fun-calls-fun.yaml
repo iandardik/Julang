@@ -1,0 +1,7 @@
+source: regression/input/expr/fun-calls-fun.jul
+programs:
+  - name: FunCallsFunTest
+    run:
+      timeoutMs: 60000
+      expectStdoutLinesUnordered:
+        - "2"

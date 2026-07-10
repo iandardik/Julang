@@ -1,0 +1,5 @@
+source: regression/input/type-errors/fun-mutual-recursive.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Recursive function calls are not allowed"
+  - "Found type errors; exiting."

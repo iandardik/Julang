@@ -1,0 +1,19 @@
+fun fact(n : Int) : Int = if (n = 0) { 1 } else { n * fact(n - 1) }
+
+p-class S {
+    var x : Int
+
+    constructor initially() {
+        transit:
+            x := 0
+    }
+
+    transition tick() {
+        guard:
+            fact(x) > 0
+        transit:
+            x := fact(x)
+    }
+}
+
+program P := S

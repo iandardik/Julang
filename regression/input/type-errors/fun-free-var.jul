@@ -1,0 +1,19 @@
+fun bad(n : Int) : Int = n + x
+
+p-class S {
+    var x : Int
+
+    constructor initially() {
+        transit:
+            x := 0
+    }
+
+    transition tick() {
+        guard:
+            bad(x) > 0
+        transit:
+            x := bad(x)
+    }
+}
+
+program P := S

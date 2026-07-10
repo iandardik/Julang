@@ -52,8 +52,42 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
     }
 
     override fun visitDecl(ctx: JulayParser.DeclContext?): ASTNode {
-        val decl = oneChoice(ctx!!.pclass(), ctx.oclass(), ctx.proc(), ctx.program(), ctx.spec())
+        val decl = oneChoice(
+            ctx!!.pclass(),
+            ctx.oclass(),
+            ctx.proc(),
+            ctx.program(),
+            ctx.spec(),
+            ctx.fun_decl(),
+        )
         return visit(decl)
+    }
+
+    override fun visitFun_decl(ctx: JulayParser.Fun_declContext?): ASTNode {
+        val name = ctx!!.ID(0).text
+        val args = visit(ctx.args()).let { argsNode ->
+            if (argsNode !is ArgsNode) {
+                throw RuntimeException("Expected ArgsNode but got $argsNode")
+            }
+            argsNode
+        }
+        val returnTypeName = ctx.ID(1).text
+        val body = visit(ctx.expr())
+        if (body !is ExprNode) {
+            throw RuntimeException("Expected function body to be an expression")
+        }
+        return FunNode(name, args, returnTypeName, body, sourceLocation(ctx))
+    }
+
+    override fun visitFun_call(ctx: JulayParser.Fun_callContext?): ASTNode {
+        val name = ctx!!.ID().text
+        val args = ctx.expr().map { visit(it) }.map {
+            if (it !is ExprNode) {
+                throw RuntimeException("Expected function call arguments to be expressions")
+            }
+            it
+        }
+        return FunCallExprNode(name, args, sourceLocation(ctx))
     }
 
     override fun visitOclass(ctx: JulayParser.OclassContext?): ASTNode {
@@ -481,6 +515,8 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
     override fun visitValue(ctx: JulayParser.ValueContext?): ASTNode {
         return if (ctx!!.struct_literal() != null) {
             visit(ctx.struct_literal())
+        } else if (ctx.fun_call() != null) {
+            visit(ctx.fun_call())
         } else if (ctx.field_access() != null) {
             visit(ctx.field_access())
         } else if (ctx.INT() != null) {

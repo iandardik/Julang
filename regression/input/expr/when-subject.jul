@@ -5,17 +5,19 @@ p-class S {
     var key : String
     var x : Int
     var print : Boolean
+    var numAssign : Int
 
     constructor initially() {
         transit:
             key := "B"
             x := 0
             print := true
+            numAssign := 0
     }
 
     transition assign() {
         guard:
-            print
+            print & numAssign < 10
         transit:
             x := when (key) {
                 "A" -> 1
@@ -23,6 +25,7 @@ p-class S {
                 else -> 0
             }
             print := false
+            numAssign := numAssign + 1
     }
 
     p2p-consumer transition println(msg : String) {

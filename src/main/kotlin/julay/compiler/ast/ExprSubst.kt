@@ -62,6 +62,12 @@ fun substituteExpr(expr: ExprNode, name: String, replacement: ExprNode): ExprNod
             expr.leafType,
         )
         is ObjClassLiteralExprNode -> substituteObjClassLiteral(expr, name, replacement)
+        is FunCallExprNode -> FunCallExprNode(
+            expr.callName(),
+            expr.callArgs().map { substituteExpr(it, name, replacement) },
+            expr.programLocation(),
+            expr.resolvedFunOrNull(),
+        ).withTypeOf(expr)
         else -> throw RuntimeException("Unexpected expression node ${expr.javaClass.simpleName} during substitution")
     }
 }
@@ -110,7 +116,45 @@ fun exprReferencesSymbol(expr: ExprNode, symbol: String): Boolean {
         is FieldAccessExprNode -> expr.baseSymbol == symbol
         is FieldAccessOnExprNode -> exprReferencesSymbol(expr.baseExpr, symbol)
         is ObjClassLiteralExprNode -> expr.fieldEntries.any { exprReferencesSymbol(it.second, symbol) }
+        is FunCallExprNode -> expr.callArgs().any { exprReferencesSymbol(it, symbol) }
         else -> throw RuntimeException("Unexpected expression node ${expr.javaClass.simpleName} during symbol reference check")
+    }
+}
+
+fun collectFunCallNames(expr: ExprNode): Set<String> {
+    return when (expr) {
+        is FunCallExprNode -> setOf(expr.callName()) + expr.callArgs().flatMap { collectFunCallNames(it) }
+        is UnaryOpExprNode -> collectFunCallNames(expr.operand())
+        is BinaryOpExprNode ->
+            collectFunCallNames(expr.lhsOperand()) + collectFunCallNames(expr.rhsOperand())
+        is IfElseExprNode ->
+            collectFunCallNames(expr.condExpr()) +
+                collectFunCallNames(expr.thenExpr()) +
+                collectFunCallNames(expr.elseExpr())
+        is LetExprNode ->
+            collectFunCallNames(expr.letInitExpr()) + collectFunCallNames(expr.bodyExpr())
+        is WhenExprNode -> {
+            val subjectCalls = expr.subjectExpr()?.let { collectFunCallNames(it) } ?: emptySet()
+            subjectCalls + expr.arms().flatMap { arm ->
+                when (arm) {
+                    is WhenArm.Subject -> {
+                        val patternCalls = when (val pattern = arm.pattern) {
+                            is WhenPattern.Primitive -> emptySet()
+                            is WhenPattern.Struct -> collectFunCallNames(pattern.literal)
+                        }
+                        patternCalls + collectFunCallNames(arm.expr)
+                    }
+                    is WhenArm.Guard -> collectFunCallNames(arm.cond) + collectFunCallNames(arm.expr)
+                    is WhenArm.Else -> collectFunCallNames(arm.expr)
+                }
+            }
+        }
+        is LiteralValueExprNode -> emptySet()
+        is FieldAccessExprNode -> emptySet()
+        is FieldAccessOnExprNode -> collectFunCallNames(expr.baseExpr)
+        is ObjClassLiteralExprNode -> expr.fieldEntries.flatMap { collectFunCallNames(it.second) }.toSet()
+        is SymbolValueExprNode -> emptySet()
+        else -> throw RuntimeException("Unexpected expression node ${expr.javaClass.simpleName} during fun-call collection")
     }
 }
 

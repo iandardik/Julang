@@ -1,0 +1,53 @@
+import julaylib.Println
+import julaylib.ExitSystem
+
+fun double(n : Int) : Int = n + n
+
+p-class S {
+    var x : Int
+    var print : Boolean
+
+    constructor initially() {
+        transit:
+            x := 0
+            print := false
+    }
+
+    transition increment(inc : Int) {
+        guard:
+            ~print & double(inc) > 0
+        transit:
+            x := double(inc)
+            print := true
+    }
+
+    p2p-consumer transition println(msg : String) {
+        guard:
+            print & (msg = x + "")
+        transit:
+            print := false
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard:
+            ~print & x > 0
+    }
+}
+
+p-class T {
+    var x : Int
+
+    constructor initially() {
+        transit:
+            x := 0
+    }
+
+    transition increment(inc : Int) {
+        guard:
+            inc > 0 & x <= 10
+        transit:
+            x := x + inc
+    }
+}
+
+program FunBasicTest := S || T || Println || ExitSystem

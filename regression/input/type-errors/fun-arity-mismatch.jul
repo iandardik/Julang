@@ -1,0 +1,19 @@
+fun add(x : Int, y : Int) : Int = x + y
+
+p-class S {
+    var x : Int
+
+    constructor initially() {
+        transit:
+            x := 0
+    }
+
+    transition tick() {
+        guard:
+            add(x) > 0
+        transit:
+            x := add(x)
+    }
+}
+
+program P := S

@@ -48,6 +48,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitDecl(JulayParser.DeclContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#fun_decl}.
+	 * @param ctx the parse tree
+	 */
+	void enterFun_decl(JulayParser.Fun_declContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#fun_decl}.
+	 * @param ctx the parse tree
+	 */
+	void exitFun_decl(JulayParser.Fun_declContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#pclass}.
 	 * @param ctx the parse tree
 	 */
@@ -317,6 +327,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 * @param ctx the parse tree
 	 */
 	void exitValue(JulayParser.ValueContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#fun_call}.
+	 * @param ctx the parse tree
+	 */
+	void enterFun_call(JulayParser.Fun_callContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#fun_call}.
+	 * @param ctx the parse tree
+	 */
+	void exitFun_call(JulayParser.Fun_callContext ctx);
 	/**
 	 * Enter a parse tree produced by {@link JulayParser#struct_literal}.
 	 * @param ctx the parse tree

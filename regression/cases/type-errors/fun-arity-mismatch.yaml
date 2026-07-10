@@ -1,0 +1,5 @@
+source: regression/input/type-errors/fun-arity-mismatch.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected function \"add\" to take 2 argument(s) but got 1"
+  - "Found type errors; exiting."

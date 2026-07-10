@@ -183,6 +183,85 @@ class FieldNode(
     override fun toString(): String = "$fieldName : $typeName"
 }
 
+class FunNode(
+    private val name: String,
+    private val args: ArgsNode,
+    private val returnTypeName: String,
+    private val body: ExprNode,
+    private val loc: ProgramLoc,
+) : DeclNode(listOf(args, body)) {
+    private var returnTypeResolution: TypeNameResolution = TypeNameResolution.Unresolved
+
+    val returnType: Type
+        get() = when (val resolution = returnTypeResolution) {
+            is TypeNameResolution.Resolved -> resolution.type
+            is TypeNameResolution.Unresolved ->
+                throw RuntimeException("Return type not resolved for function \"$name\"")
+        }
+
+    override fun programLocation() = loc
+    override fun name() = name
+    internal fun funArgs(): ArgsNode = args
+    internal fun funReturnTypeName(): String = returnTypeName
+    internal fun funBody(): ExprNode = body
+    internal fun resolveReturnType(type: Type) {
+        returnTypeResolution = TypeNameResolution.Resolved(type)
+    }
+    override fun toString(): String {
+        val displayReturn = when (val resolution = returnTypeResolution) {
+            is TypeNameResolution.Resolved -> resolution.type
+            is TypeNameResolution.Unresolved -> returnTypeName
+        }
+        return "fun $name($args) : $displayReturn = $body"
+    }
+}
+
+class FunCallExprNode(
+    private val name: String,
+    private val args: List<ExprNode>,
+    private val loc: ProgramLoc,
+    resolved: FunNode? = null,
+) : ExprNode(args) {
+    private var resolvedFun: FunNode? = resolved
+
+    override fun programLocation() = loc
+    fun callName(): String = name
+    fun callArgs(): List<ExprNode> = args
+    internal fun resolvedFunOrNull(): FunNode? = resolvedFun
+    internal fun resolveFun(funNode: FunNode) {
+        resolvedFun = funNode
+    }
+
+    private fun inlinedBody(): ExprNode {
+        val funNode = resolvedFun
+            ?: throw RuntimeException("Function call \"$name\" not resolved at $loc")
+        val params = funNode.funArgs().actionArgs()
+        return params.zip(args).fold(funNode.funBody()) { acc, (param, arg) ->
+            substituteExpr(acc, param.name, arg)
+        }
+    }
+
+    override fun toZ3GuardString(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+        forceString: Boolean,
+    ): String = inlinedBody().toZ3GuardString(symbolTypes, argSymbols, forceString)
+
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String =
+        inlinedBody().toTransitString(symbolTypes, argSymbols)
+
+    override fun inferType(symbolEnv: Map<String, Type>): Type {
+        val funNode = resolvedFun
+            ?: throw RuntimeException("Function call \"$name\" not resolved at $loc")
+        return funNode.returnType
+    }
+
+    override fun toString(): String {
+        val argsStr = args.joinToString(", ")
+        return "$name($argsStr)"
+    }
+}
+
 private sealed interface TypeNameResolution {
     data object Unresolved : TypeNameResolution
     data class Resolved(val type: Type) : TypeNameResolution

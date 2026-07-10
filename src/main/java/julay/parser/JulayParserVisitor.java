@@ -35,6 +35,12 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitDecl(JulayParser.DeclContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#fun_decl}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitFun_decl(JulayParser.Fun_declContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#pclass}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
@@ -196,6 +202,12 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 * @return the visitor result
 	 */
 	T visitValue(JulayParser.ValueContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#fun_call}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitFun_call(JulayParser.Fun_callContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link JulayParser#struct_literal}.
 	 * @param ctx the parse tree

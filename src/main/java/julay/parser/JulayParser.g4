@@ -19,6 +19,11 @@ decl
     | proc
     | program
     | spec
+    | fun_decl
+    ;
+
+fun_decl
+    : FUN ID args COLON ID EQ expr
     ;
 
 pclass
@@ -165,11 +170,16 @@ proc_expr
 
 value
     : struct_literal
+    | fun_call
     | field_access
     | INT
     | TRUE
     | FALSE
     | STRING
+    ;
+
+fun_call
+    : ID LPAREN (expr (COMMA expr)*)? RPAREN
     ;
 
 struct_literal
