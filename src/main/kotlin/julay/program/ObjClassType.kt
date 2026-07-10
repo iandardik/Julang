@@ -45,6 +45,7 @@ class ObjClassType(
     }
 
     override fun fromZ3Expr(expr: Expr<*>): Any {
+        specializedFromZ3?.let { return it(expr) }
         val fieldExprs = deconstructFieldExprs(expr, metadata)
         val fieldValues = fields.mapIndexed { index, field ->
             when (val fieldType = field.type) {
@@ -75,8 +76,21 @@ class ObjClassType(
         return meta.accessors[fieldIndex].apply(recordExpr) as Expr<*>
     }
 
+    // Optional codegen-installed converters that avoid reflection for known o-classes.
+    private var specializedToZ3: ((Context, Any) -> Expr<*>)? = null
+    private var specializedFromZ3: ((Expr<*>) -> Any)? = null
+
+    fun installConverters(
+        toZ3: (Context, Any) -> Expr<*>,
+        fromZ3: (Expr<*>) -> Any,
+    ) {
+        specializedToZ3 = toZ3
+        specializedFromZ3 = fromZ3
+    }
+
     // Expects value to be a Kotlin data class instance for this o-class (e.g. Point(3, 7) for Point).
     fun kotlinObjClassToZ3(ctx: Context, value: Any): Expr<*> {
+        specializedToZ3?.let { return it(ctx, value) }
         val meta = metadataFor(ctx)
         val fieldExprs = fields.map { field ->
             val fieldValue = readFieldValue(value, field.name)
@@ -84,6 +98,10 @@ class ObjClassType(
         }
         return meta.constructorDecl.apply(*fieldExprs.toTypedArray()) as Expr<*>
     }
+
+    // Unpack a Z3 record into one expr per field (constructor args when possible).
+    fun fieldExprsFromZ3(expr: Expr<*>): Array<out Expr<*>> =
+        deconstructFieldExprs(expr, metadata)
 
     fun literalToZ3Codegen(fieldExprStrs: List<String>): String {
         val args = fieldExprStrs.joinToString(", ")
@@ -160,8 +178,8 @@ class ObjClassType(
             return "ctx.mkConst(\"$escaped\", $typeValName.sort(ctx))"
         }
 
-        fun kotlinObjClassToZ3String(typeValName: String, varName: String): String {
-            return "$typeValName.kotlinObjClassToZ3(ctx, $varName)"
+        fun kotlinObjClassToZ3String(className: String, varName: String): String {
+            return "${objClassToZ3FunName(className)}(ctx, $varName)"
         }
 
         fun fieldAccessZ3Codegen(rootType: ObjClassType, recordExpr: String, fieldPath: List<String>): String {
@@ -202,6 +220,12 @@ class ObjClassType(
 
 fun objClassTypeValName(className: String): String =
     className.replaceFirstChar { it.lowercase() } + "Type"
+
+fun objClassToZ3FunName(className: String): String =
+    className.replaceFirstChar { it.lowercase() } + "ToZ3"
+
+fun objClassFromZ3FunName(className: String): String =
+    className.replaceFirstChar { it.lowercase() } + "FromZ3"
 
 fun String.toKotlinIdent(): String = this
 

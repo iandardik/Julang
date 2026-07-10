@@ -44,8 +44,17 @@ fun codegenPass(
         "import julay.tools.mkStringConst\n"
     val dataClassCode = objClassDecls.joinToString("\n\n") { it.kotlinDataClassString() }
     val dataClassSection = if (dataClassCode.isEmpty()) "" else "$dataClassCode\n\n"
-    val objClassCode = objClassDecls.joinToString("\n\n") { it.kotlinTypeValString() }
-    val objClassSection = if (objClassCode.isEmpty()) "" else "$objClassCode\n\n"
+    val conversionHelpers = objClassDecls.joinToString("\n\n") { it.kotlinConversionHelpersString() }
+    val objClassCode = objClassDecls.joinToString("\n\n") { it.kotlinTypeValWithConvertersString() }
+    val objClassSection = when {
+        objClassCode.isEmpty() -> ""
+        else -> buildString {
+            append(conversionHelpers)
+            append("\n\n")
+            append(objClassCode)
+            append("\n\n")
+        }
+    }
     val mainClassName = program.name.replaceFirstChar { it.uppercase() }
     val effectImports = if (procClasses.any { it.usesEffects() }) {
         EffectBuiltinRegistry.kotlinCodegenImports().joinToString("\n") { "import $it" } + "\n"
@@ -69,11 +78,60 @@ private fun ObjClassDecl.kotlinDataClassString(): String {
     return "data class $name($fieldsStr)"
 }
 
-private fun ObjClassDecl.kotlinTypeValString(): String {
+private fun ObjClassDecl.kotlinTypeValWithConvertersString(): String {
     val fieldsStr = fields.joinToString(", ") {
         "Variable(\"${it.name}\", ${it.type.toCodegenTypeVal()})"
     }
-    return "val ${objClassTypeValName(name)} = ObjClassType(\"$name\", listOf($fieldsStr))"
+    val typeVal = objClassTypeValName(name)
+    val toZ3Fun = objClassToZ3FunName(name)
+    val fromZ3Fun = objClassFromZ3FunName(name)
+    return """
+        |val $typeVal = ObjClassType("$name", listOf($fieldsStr)).also { type ->
+        |    type.installConverters(
+        |        { ctx, v -> $toZ3Fun(ctx, v as $name) },
+        |        { e -> $fromZ3Fun(e) },
+        |    )
+        |}
+    """.trimMargin()
+}
+
+private fun ObjClassDecl.kotlinConversionHelpersString(): String {
+    val typeVal = objClassTypeValName(name)
+    val toZ3Fun = objClassToZ3FunName(name)
+    val fromZ3Fun = objClassFromZ3FunName(name)
+    val toZ3Args = fields.joinToString(", ") { field ->
+        fieldToZ3ExprString("value.${field.name}", field.type)
+    }
+    val fromZ3Args = fields.mapIndexed { index, field ->
+        fieldFromZ3ExprString("fieldExprs[$index]", field.type)
+    }.joinToString(",\n")
+    return """
+        |fun $toZ3Fun(ctx: Context, value: $name): Expr<*> =
+        |    $typeVal.mkConstructorZ3(ctx, $toZ3Args)
+        |
+        |fun $fromZ3Fun(expr: Expr<*>): $name {
+        |    val fieldExprs = $typeVal.fieldExprsFromZ3(expr)
+        |    return $name(
+        |${fromZ3Args.prependIndent("        ")}
+        |    )
+        |}
+    """.trimMargin()
+}
+
+private fun fieldToZ3ExprString(valueExpr: String, type: Type): String = when (type) {
+    is BoolType -> "ctx.mkBool($valueExpr)"
+    is IntType -> "ctx.mkInt($valueExpr)"
+    is StringType -> "ctx.mkString($valueExpr)"
+    is ObjClassType -> "${objClassToZ3FunName(type.name)}(ctx, $valueExpr)"
+    else -> throw RuntimeException("Invalid field type for Z3 conversion: $type")
+}
+
+private fun fieldFromZ3ExprString(exprStr: String, type: Type): String = when (type) {
+    is BoolType -> "boolType.fromZ3Expr($exprStr) as Boolean"
+    is IntType -> "intType.fromZ3Expr($exprStr) as Int"
+    is StringType -> "stringType.fromZ3Expr($exprStr) as String"
+    is ObjClassType -> "${objClassFromZ3FunName(type.name)}($exprStr)"
+    else -> throw RuntimeException("Invalid field type for Z3 conversion: $type")
 }
 
 private fun ProcClassDecl.usesEffects(): Boolean =
