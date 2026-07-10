@@ -913,7 +913,7 @@ class FieldAccessExprNode(
         return if (baseSymbol in argSymbols) {
             ObjClassType.z3ConstString(baseSymbol, typeVal)
         } else {
-            ObjClassType.stateToZ3String(typeVal, baseSymbol)
+            ObjClassType.kotlinObjClassToZ3String(typeVal, baseSymbol)
         }
     }
 
@@ -962,7 +962,7 @@ class SymbolValueExprNode(
             return if (symbol in argSymbols) {
                 ObjClassType.z3ConstString(symbol, typeVal)
             } else {
-                ObjClassType.stateToZ3String(typeVal, symbol)
+                ObjClassType.kotlinObjClassToZ3String(typeVal, symbol)
             }
         }
         if (symbol in argSymbols) {

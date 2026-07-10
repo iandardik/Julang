@@ -36,25 +36,32 @@ class ObjClassType(
         )
     }
 
-    private fun metadataFor(ctx: Context): JulangDatatypeMetadata {
-        if (ctx === objClassCtx) {
-            return metadata
-        }
-        @Suppress("UNCHECKED_CAST")
-        return JulangDatatypeMetadata(
-            sort = metadata.sort.translate(ctx) as DatatypeSort<*>,
-            constructorDecl = metadata.constructorDecl.translate(ctx),
-            accessors = metadata.accessors.map { it.translate(ctx) }.toTypedArray(),
-        )
+    override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {
+        return ctx.mkConst(variable.name, metadata.sort.translate(ctx))
     }
 
-    private fun z3SortForField(type: Type, ctx: Context): Sort = when (type) {
-        is BoolType -> ctx.boolSort
-        is IntType -> ctx.intSort
-        is StringType -> ctx.stringSort
-        is ObjClassType -> type.metadataFor(ctx).sort
-        else -> throw RuntimeException("Invalid field type for Z3 datatype: $type")
+    override fun toZ3Expr(value: Value, ctx: Context): Expr<*> {
+        return kotlinObjClassToZ3(ctx, value.value)
     }
+
+    override fun fromZ3Expr(expr: Expr<*>): Any {
+        val fieldExprs = deconstructFieldExprs(expr, metadata)
+        val fieldValues = fields.mapIndexed { index, field ->
+            when (val fieldType = field.type) {
+                is ObjClassType -> fieldType.fromZ3Expr(fieldExprs[index])
+                else -> fieldType.fromZ3Expr(fieldExprs[index])
+            }
+        }
+        return instantiateDataClass(fieldValues)
+    }
+
+    override fun isOfType(obj: Any): Boolean = obj.javaClass.simpleName == name
+
+    override fun toString(): String = name
+
+    override fun equals(other: Any?): Boolean = other is ObjClassType && other.name == name && other.fields == fields
+
+    override fun hashCode(): Int = name.hashCode()
 
     fun sort(ctx: Context): DatatypeSort<*> = metadataFor(ctx).sort
 
@@ -69,7 +76,7 @@ class ObjClassType(
     }
 
     // Expects value to be a Kotlin data class instance for this o-class (e.g. Point(3, 7) for Point).
-    fun stateToZ3(ctx: Context, value: Any): Expr<*> {
+    fun kotlinObjClassToZ3(ctx: Context, value: Any): Expr<*> {
         val meta = metadataFor(ctx)
         val fieldExprs = fields.map { field ->
             val fieldValue = readFieldValue(value, field.name)
@@ -90,25 +97,24 @@ class ObjClassType(
         return "$name($args)"
     }
 
-    override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {
-        return ctx.mkConst(variable.name, sort(ctx))
-    }
-
-    override fun toZ3Expr(value: Value, ctx: Context): Expr<*> {
-        return stateToZ3(ctx, value.value)
-    }
-
-    fun fromZ3ExprWithContext(expr: Expr<*>, ctx: Context): Any {
-        val meta = metadataFor(ctx)
-        val localExpr = expr.translate(ctx) as Expr<*>
-        val fieldExprs = deconstructFieldExprs(localExpr, meta)
-        val fieldValues = fields.mapIndexed { index, field ->
-            when (val fieldType = field.type) {
-                is ObjClassType -> fieldType.fromZ3ExprWithContext(fieldExprs[index], ctx)
-                else -> fieldType.fromZ3Expr(fieldExprs[index])
-            }
+    private fun metadataFor(ctx: Context): JulangDatatypeMetadata {
+        if (ctx === objClassCtx) {
+            return metadata
         }
-        return instantiateDataClass(fieldValues)
+        @Suppress("UNCHECKED_CAST")
+        return JulangDatatypeMetadata(
+            sort = metadata.sort.translate(ctx) as DatatypeSort<*>,
+            constructorDecl = metadata.constructorDecl.translate(ctx),
+            accessors = metadata.accessors.map { it.translate(ctx) }.toTypedArray(),
+        )
+    }
+
+    private fun z3SortForField(type: Type, ctx: Context): Sort = when (type) {
+        is BoolType -> ctx.boolSort
+        is IntType -> ctx.intSort
+        is StringType -> ctx.stringSort
+        is ObjClassType -> type.metadataFor(ctx).sort
+        else -> throw RuntimeException("Invalid field type for Z3 datatype: $type")
     }
 
     private fun deconstructFieldExprs(localExpr: Expr<*>, meta: JulangDatatypeMetadata): Array<out Expr<*>> {
@@ -121,18 +127,6 @@ class ObjClassType(
             meta.accessors[index].apply(localExpr) as Expr<*>
         }
     }
-
-    override fun fromZ3Expr(expr: Expr<*>): Any {
-        throw RuntimeException("fromZ3Expr for o-class $name requires a Context; use fromZ3ExprWithContext")
-    }
-
-    override fun isOfType(obj: Any): Boolean = obj.javaClass.simpleName == name
-
-    override fun toString(): String = name
-
-    override fun equals(other: Any?): Boolean = other is ObjClassType && other.name == name && other.fields == fields
-
-    override fun hashCode(): Int = name.hashCode()
 
     // Expects value to be a Kotlin data class instance; reads a field via its getter.
     private fun readFieldValue(value: Any, fieldName: String): Any {
@@ -166,8 +160,8 @@ class ObjClassType(
             return "ctx.mkConst(\"$escaped\", $typeValName.sort(ctx))"
         }
 
-        fun stateToZ3String(typeValName: String, varName: String): String {
-            return "$typeValName.stateToZ3(ctx, $varName)"
+        fun kotlinObjClassToZ3String(typeValName: String, varName: String): String {
+            return "$typeValName.kotlinObjClassToZ3(ctx, $varName)"
         }
 
         fun fieldAccessZ3Codegen(rootType: ObjClassType, recordExpr: String, fieldPath: List<String>): String {
