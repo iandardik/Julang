@@ -58,23 +58,21 @@ class ObjClassType(
 
     fun sort(ctx: Context): DatatypeSort<*> = metadataFor(ctx).sort
 
-    fun mkConstructorZ3(ctx: Context, vararg fieldZ3: Expr<*>): Expr<*> {
-        val meta = metadataFor(ctx)
-        return meta.constructorDecl.apply(*fieldZ3) as Expr<*>
-    }
+    /** Constructor FuncDecl translated into [ctx] (callers apply field exprs). */
+    fun constructorDecl(ctx: Context): FuncDecl<*> = metadataFor(ctx).constructorDecl
 
-    fun fieldAccessZ3(ctx: Context, recordExpr: Expr<*>, fieldIndex: Int): Expr<*> {
-        val meta = metadataFor(ctx)
-        return meta.accessors[fieldIndex].apply(recordExpr) as Expr<*>
-    }
+    /** Field accessor FuncDecl translated into [ctx] (callers apply the record expr). */
+    fun accessor(ctx: Context, fieldIndex: Int): FuncDecl<*> = metadataFor(ctx).accessors[fieldIndex]
 
-    // Unpack a Z3 record into one expr per field (constructor args when possible).
-    fun fieldExprsFromZ3(expr: Expr<*>): Array<out Expr<*>> =
-        deconstructFieldExprs(expr, metadata)
+    /** Home-context constructor decl (for fromZ3 deconstruction without a target Context). */
+    fun homeConstructorDecl(): FuncDecl<*> = metadata.constructorDecl
+
+    /** Home-context accessor decl (for fromZ3 deconstruction without a target Context). */
+    fun homeAccessor(fieldIndex: Int): FuncDecl<*> = metadata.accessors[fieldIndex]
 
     fun literalToZ3Codegen(fieldExprStrs: List<String>): String {
         val args = fieldExprStrs.joinToString(", ")
-        return "${objClassTypeValName(name)}.mkConstructorZ3(ctx, $args)"
+        return "${objClassMkFunName(name)}(ctx, $args)"
     }
 
     fun literalToTransit(fieldExprStrs: List<String>): String {
@@ -104,17 +102,6 @@ class ObjClassType(
         else -> throw RuntimeException("Invalid field type for Z3 datatype: $type")
     }
 
-    private fun deconstructFieldExprs(localExpr: Expr<*>, meta: JulangDatatypeMetadata): Array<out Expr<*>> {
-        // Prefer constructor args when the term is already (mk-Name ...)
-        if (localExpr.isApp && localExpr.funcDecl.name == meta.constructorDecl.name) {
-            return localExpr.args
-        }
-        // otherwise use accessors for symbolic values. Accessors on ground constructors may not simplify to plain numerals.
-        return Array(fields.size) { index ->
-            meta.accessors[index].apply(localExpr) as Expr<*>
-        }
-    }
-
     companion object {
         fun z3ConstString(symbol: String, typeValName: String): String {
             val escaped = symbol.escapeKotlinStringLiteral()
@@ -137,9 +124,9 @@ class ObjClassType(
                 if (fieldIndex < 0) {
                     throw RuntimeException("Unknown field \"$segment\" on o-class ${objType.name}")
                 }
-                val typeVal = objClassTypeValName(objType.name)
-                expr = "$typeVal.fieldAccessZ3(ctx, $expr, $fieldIndex)"
-                currentType = objType.fields[fieldIndex].type
+                val field = objType.fields[fieldIndex]
+                expr = "${objClassAccessorFunName(objType.name, field.name)}(ctx, $expr)"
+                currentType = field.type
             }
             return expr
         }
@@ -169,6 +156,12 @@ fun objClassToZ3FunName(className: String): String =
 
 fun objClassFromZ3FunName(className: String): String =
     className.replaceFirstChar { it.lowercase() } + "FromZ3"
+
+fun objClassMkFunName(className: String): String =
+    className.replaceFirstChar { it.lowercase() } + "Mk"
+
+fun objClassAccessorFunName(className: String, fieldName: String): String =
+    className.replaceFirstChar { it.lowercase() } + fieldName.replaceFirstChar { it.uppercase() }
 
 fun String.toKotlinIdent(): String = this
 

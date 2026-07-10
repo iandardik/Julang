@@ -97,20 +97,46 @@ private fun ObjClassDecl.kotlinTypeValWithConvertersString(): String {
 
 private fun ObjClassDecl.kotlinConversionHelpersString(): String {
     val typeVal = objClassTypeValName(name)
+    val mkFun = objClassMkFunName(name)
     val toZ3Fun = objClassToZ3FunName(name)
     val fromZ3Fun = objClassFromZ3FunName(name)
+    val mkParams = fields.joinToString(", ") { field ->
+        "${field.name}: Expr<*>"
+    }
+    val mkArgs = fields.joinToString(", ") { it.name }
+    val accessorFuns = fields.mapIndexed { index, field ->
+        val accFun = objClassAccessorFunName(name, field.name)
+        """
+            |fun $accFun(ctx: Context, record: Expr<*>): Expr<*> =
+            |    $typeVal.accessor(ctx, $index).apply(record) as Expr<*>
+        """.trimMargin()
+    }.joinToString("\n\n")
     val toZ3Args = fields.joinToString(", ") { field ->
         fieldToZ3ExprString("value.${field.name}", field.type)
     }
+    val fromZ3FieldExprs = fields.mapIndexed { index, _ ->
+        "$typeVal.homeAccessor($index).apply(expr) as Expr<*>"
+    }.joinToString(",\n")
     val fromZ3Args = fields.mapIndexed { index, field ->
         fieldFromZ3ExprString("fieldExprs[$index]", field.type)
     }.joinToString(",\n")
     return """
+        |fun $mkFun(ctx: Context, $mkParams): Expr<*> =
+        |    $typeVal.constructorDecl(ctx).apply($mkArgs) as Expr<*>
+        |
+        |$accessorFuns
+        |
         |fun $toZ3Fun(ctx: Context, value: $name): Expr<*> =
-        |    $typeVal.mkConstructorZ3(ctx, $toZ3Args)
+        |    $mkFun(ctx, $toZ3Args)
         |
         |fun $fromZ3Fun(expr: Expr<*>): $name {
-        |    val fieldExprs = $typeVal.fieldExprsFromZ3(expr)
+        |    val fieldExprs = if (expr.isApp && expr.funcDecl.name == $typeVal.homeConstructorDecl().name) {
+        |        expr.args
+        |    } else {
+        |        arrayOf(
+        |${fromZ3FieldExprs.prependIndent("            ")}
+        |        )
+        |    }
         |    return $name(
         |${fromZ3Args.prependIndent("        ")}
         |    )

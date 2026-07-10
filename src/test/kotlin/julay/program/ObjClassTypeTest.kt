@@ -36,22 +36,48 @@ class ObjClassTypeTest {
         )
     }
 
+    private fun pointMk(ctx: Context, x: Expr<*>, y: Expr<*>): Expr<*> =
+        pointType.constructorDecl(ctx).apply(x, y) as Expr<*>
+
+    private fun pointX(ctx: Context, record: Expr<*>): Expr<*> =
+        pointType.accessor(ctx, 0).apply(record) as Expr<*>
+
+    private fun pointY(ctx: Context, record: Expr<*>): Expr<*> =
+        pointType.accessor(ctx, 1).apply(record) as Expr<*>
+
     private fun pointToZ3(ctx: Context, value: Point): Expr<*> =
-        pointType.mkConstructorZ3(ctx, ctx.mkInt(value.x), ctx.mkInt(value.y))
+        pointMk(ctx, ctx.mkInt(value.x), ctx.mkInt(value.y))
 
     private fun pointFromZ3(expr: Expr<*>): Point {
-        val fieldExprs = pointType.fieldExprsFromZ3(expr)
+        val fieldExprs = if (expr.isApp && expr.funcDecl.name == pointType.homeConstructorDecl().name) {
+            expr.args
+        } else {
+            arrayOf(
+                pointType.homeAccessor(0).apply(expr) as Expr<*>,
+                pointType.homeAccessor(1).apply(expr) as Expr<*>,
+            )
+        }
         return Point(
             intType.fromZ3Expr(fieldExprs[0]) as Int,
             intType.fromZ3Expr(fieldExprs[1]) as Int,
         )
     }
 
+    private fun lineMk(ctx: Context, start: Expr<*>, end: Expr<*>): Expr<*> =
+        lineType.constructorDecl(ctx).apply(start, end) as Expr<*>
+
     private fun lineToZ3(ctx: Context, value: Line): Expr<*> =
-        lineType.mkConstructorZ3(ctx, pointToZ3(ctx, value.start), pointToZ3(ctx, value.end))
+        lineMk(ctx, pointToZ3(ctx, value.start), pointToZ3(ctx, value.end))
 
     private fun lineFromZ3(expr: Expr<*>): Line {
-        val fieldExprs = lineType.fieldExprsFromZ3(expr)
+        val fieldExprs = if (expr.isApp && expr.funcDecl.name == lineType.homeConstructorDecl().name) {
+            expr.args
+        } else {
+            arrayOf(
+                lineType.homeAccessor(0).apply(expr) as Expr<*>,
+                lineType.homeAccessor(1).apply(expr) as Expr<*>,
+            )
+        }
         return Line(
             pointFromZ3(fieldExprs[0]),
             pointFromZ3(fieldExprs[1]),
@@ -90,6 +116,17 @@ class ObjClassTypeTest {
         val model = solver.model
         val value = pointType.fromZ3Expr(model.eval(p2, true)) as Point
         assertEquals(Point(9, 10), value)
+    }
+
+    @Test
+    fun accessorHelpersReadFields() {
+        val ctx = Context()
+        val p = ctx.mkConst("p", pointType.sort(ctx))
+        val solver = ctx.mkSolver()
+        solver.add(ctx.mkEq(p, pointToZ3(ctx, Point(4, 5))))
+        solver.add(ctx.mkEq(pointX(ctx, p) as com.microsoft.z3.IntExpr, ctx.mkInt(4)))
+        solver.add(ctx.mkEq(pointY(ctx, p) as com.microsoft.z3.IntExpr, ctx.mkInt(5)))
+        assertEquals(Status.SATISFIABLE, solver.check())
     }
 
     @Test
