@@ -1,8 +1,9 @@
 import julaylib.Println
 import julaylib.ExitSystem
 import funmath.add
+import funmath.id
 
-fun double(n : Int) : Int = add(n, n)
+fun double(n : Int) : Int = add(id(n), id(n))
 
 p-class S {
     var x : Int

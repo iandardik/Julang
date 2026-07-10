@@ -1,0 +1,5 @@
+source: regression/input/type-errors/poly-dup-type-param.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Duplicate type parameter"
+  - "Found type errors; exiting."

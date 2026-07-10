@@ -18,9 +18,10 @@ class ObjClassType(
     private val valueFromZ3: (Expr<*>) -> Any,
 ) : Type {
     private val objClassCtx = Context()
-    private val metadata : JulangDatatypeMetadata
-
-    init {
+    // Lazy so polymorphic o-class instantiations (fields still typed as TypeVar) can be
+    // constructed during type checking without calling z3SortForField on TypeVars.
+    // Concrete monomorphized types force this on first Z3 use; TypeVar schemas never should.
+    private val metadata : JulangDatatypeMetadata by lazy {
         val fieldNames = fields.map { it.name }.toTypedArray()
         val fieldSorts = fields.map { field -> z3SortForField(field.type, objClassCtx) }.toTypedArray()
         val constructor = objClassCtx.mkConstructor<Any>(
@@ -31,7 +32,7 @@ class ObjClassType(
             null,
         )
         val sort: DatatypeSort<*> = objClassCtx.mkDatatypeSort(name, arrayOf(constructor))
-        metadata = JulangDatatypeMetadata(
+        JulangDatatypeMetadata(
             sort = sort,
             constructorDecl = constructor.ConstructorDecl(),
             accessors = constructor.accessorDecls,
@@ -99,6 +100,7 @@ class ObjClassType(
         is IntType -> ctx.intSort
         is StringType -> ctx.stringSort
         is ObjClassType -> type.metadataFor(ctx).sort
+        is TypeVar -> throw RuntimeException("TypeVar \"${type.name}\" must not reach Z3 datatype construction")
         else -> throw RuntimeException("Invalid field type for Z3 datatype: $type")
     }
 
@@ -173,6 +175,7 @@ fun Type.toKotlinTypeString(): String = when (this) {
     is IntType -> "Int"
     is StringType -> "String"
     is ObjClassType -> name
+    is TypeVar -> throw RuntimeException("TypeVar \"$name\" must not reach Kotlin codegen")
     else -> throw RuntimeException("Invalid type: $this")
 }
 
@@ -181,6 +184,7 @@ fun Type.toCodegenTypeVal(): String = when (this) {
     is IntType -> "intType"
     is StringType -> "stringType"
     is ObjClassType -> objClassTypeValName(name)
+    is TypeVar -> throw RuntimeException("TypeVar \"$name\" must not reach Kotlin codegen")
     else -> throw RuntimeException("Invalid type: $this")
 }
 

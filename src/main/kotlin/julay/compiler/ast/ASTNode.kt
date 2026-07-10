@@ -89,12 +89,18 @@ class RootNode(
     private val declNodes : List<DeclNode>,
     private val loc : ProgramLoc
 ) : ASTNode(importNodes + declNodes) {
+    private var cachedObjClassRegistry: julay.compiler.decl.ObjClassRegistry? = null
+
     override fun programLocation(): ProgramLoc = loc
     internal fun importNodes(): List<ImportNode> = importNodes
     internal fun declNodes(): List<DeclNode> = declNodes
     fun withDeclNodes(decls: List<DeclNode>): RootNode = RootNode(importNodes, decls, programLocation())
     fun withImportsAndDecls(imports: List<ImportNode>, decls: List<DeclNode>): RootNode =
         RootNode(imports, decls, programLocation())
+    fun cacheObjClassRegistry(registry: julay.compiler.decl.ObjClassRegistry) {
+        cachedObjClassRegistry = registry
+    }
+    fun cachedObjClassRegistry(): julay.compiler.decl.ObjClassRegistry? = cachedObjClassRegistry
     override fun toString(): String {
         return (importNodes + declNodes).joinToString("\n\n") { it.toString() }
     }
@@ -161,32 +167,38 @@ class SpecNode(
 
 class ObjClassNode(
     private val name: String,
+    val typeParams: List<String>,
     val fields: List<FieldNode>,
     private val loc: ProgramLoc,
 ) : DeclNode(fields) {
     override fun programLocation() = loc
     override fun name() = name
     internal fun objClassNodeName() = name
+    internal fun objClassTypeParams(): List<String> = typeParams
     internal fun objClassFields(): List<FieldNode> = fields
     override fun toString(): String {
+        val params = if (typeParams.isEmpty()) "" else typeParams.joinToString(", ", "<", ">")
         val body = fields.joinToString("\n") { "$it".prependIndent() }
-        return "o-class $name {\n$body\n}"
+        return "o-class $name$params {\n$body\n}"
     }
 }
 
 class FieldNode(
     val fieldName: String,
-    val typeName: String,
+    val typeExpr: TypeExpr,
     private val loc: ProgramLoc,
 ) : ASTNode(listOf()) {
     override fun programLocation() = loc
-    override fun toString(): String = "$fieldName : $typeName"
+    @Deprecated("Use typeExpr", ReplaceWith("typeExpr.toString()"))
+    val typeName: String get() = typeExpr.toString()
+    override fun toString(): String = "$fieldName : $typeExpr"
 }
 
 class FunNode(
     private val name: String,
+    val typeParams: List<String>,
     private val args: ArgsNode,
-    private val returnTypeName: String,
+    private val returnTypeExpr: TypeExpr,
     private val body: ExprNode,
     private val loc: ProgramLoc,
 ) : DeclNode(listOf(args, body)) {
@@ -201,18 +213,21 @@ class FunNode(
 
     override fun programLocation() = loc
     override fun name() = name
+    internal fun funTypeParams(): List<String> = typeParams
     internal fun funArgs(): ArgsNode = args
-    internal fun funReturnTypeName(): String = returnTypeName
+    internal fun funReturnTypeExpr(): TypeExpr = returnTypeExpr
+    internal fun funReturnTypeName(): String = returnTypeExpr.toString()
     internal fun funBody(): ExprNode = body
     internal fun resolveReturnType(type: Type) {
         returnTypeResolution = TypeNameResolution.Resolved(type)
     }
     override fun toString(): String {
+        val params = if (typeParams.isEmpty()) "" else typeParams.joinToString(", ", "<", ">")
         val displayReturn = when (val resolution = returnTypeResolution) {
             is TypeNameResolution.Resolved -> resolution.type
-            is TypeNameResolution.Unresolved -> returnTypeName
+            is TypeNameResolution.Unresolved -> returnTypeExpr
         }
-        return "fun $name($args) : $displayReturn = $body"
+        return "fun $name$params($args) : $displayReturn = $body"
     }
 }
 
@@ -221,8 +236,10 @@ class FunCallExprNode(
     private val args: List<ExprNode>,
     private val loc: ProgramLoc,
     resolved: FunNode? = null,
+    private var instantiatedReturnType: Type? = null,
 ) : ExprNode(args) {
     private var resolvedFun: FunNode? = resolved
+    private var specializedBody: ExprNode? = null
 
     override fun programLocation() = loc
     fun callName(): String = name
@@ -231,8 +248,16 @@ class FunCallExprNode(
     internal fun resolveFun(funNode: FunNode) {
         resolvedFun = funNode
     }
+    internal fun resolveInstantiatedReturnType(type: Type) {
+        instantiatedReturnType = type
+    }
+    internal fun resolveSpecializedBody(body: ExprNode) {
+        specializedBody = body
+    }
+    internal fun specializedBodyOrNull(): ExprNode? = specializedBody
 
     private fun inlinedBody(): ExprNode {
+        specializedBody?.let { return it }
         val funNode = resolvedFun
             ?: throw RuntimeException("Function call \"$name\" not resolved at $loc")
         val params = funNode.funArgs().actionArgs()
@@ -251,6 +276,7 @@ class FunCallExprNode(
         inlinedBody().toTransitString(symbolTypes, argSymbols)
 
     override fun inferType(symbolEnv: Map<String, Type>): Type {
+        instantiatedReturnType?.let { return it }
         val funNode = resolvedFun
             ?: throw RuntimeException("Function call \"$name\" not resolved at $loc")
         return funNode.returnType
@@ -269,7 +295,7 @@ private sealed interface TypeNameResolution {
 
 class VarNode(
     val name : String,
-    val typeName : String,
+    val typeExpr : TypeExpr,
     private val loc : ProgramLoc
 ) : ProcClassDeclNode(listOf()) {
     private var typeResolution : TypeNameResolution = TypeNameResolution.Unresolved
@@ -279,6 +305,7 @@ class VarNode(
             is TypeNameResolution.Unresolved ->
                 throw RuntimeException("Type not resolved for state variable \"$name\"")
         }
+    val typeName: String get() = typeExpr.toString()
     override fun programLocation() = loc
     internal fun resolveType(type: Type) {
         typeResolution = TypeNameResolution.Resolved(type)
@@ -286,7 +313,7 @@ class VarNode(
     override fun stateVariables(): List<Variable> = listOf(Variable(name, type))
     companion object {
         fun primitive(name: String, type: Type, loc: ProgramLoc): VarNode {
-            val node = VarNode(name, primitiveTypeName(type), loc)
+            val node = VarNode(name, TypeExpr.Simple(primitiveTypeName(type)), loc)
             node.typeResolution = TypeNameResolution.Resolved(type)
             return node
         }
@@ -301,7 +328,7 @@ class VarNode(
     override fun toString(): String {
         val displayType = when (val resolution = typeResolution) {
             is TypeNameResolution.Resolved -> resolution.type
-            is TypeNameResolution.Unresolved -> typeName
+            is TypeNameResolution.Unresolved -> typeExpr
         }
         return "$name : $displayType"
     }
@@ -383,7 +410,7 @@ class TransitionNode(
 
 class ArgNode(
     private val name : String,
-    private val typeName : String,
+    private val typeExpr : TypeExpr,
     private val loc : ProgramLoc
 ) : ArgsNode(listOf(), loc) {
     private var typeResolution : TypeNameResolution = TypeNameResolution.Unresolved
@@ -395,7 +422,8 @@ class ArgNode(
         }
     override fun programLocation() = loc
     internal fun argName() = name
-    internal fun argTypeName() = typeName
+    internal fun argTypeExpr() = typeExpr
+    internal fun argTypeName() = typeExpr.toString()
     internal fun resolveArgType(type: Type) {
         typeResolution = TypeNameResolution.Resolved(type)
     }
@@ -405,7 +433,7 @@ class ArgNode(
     override fun toString(): String {
         val displayType = when (val resolution = typeResolution) {
             is TypeNameResolution.Resolved -> resolution.type
-            is TypeNameResolution.Unresolved -> typeName
+            is TypeNameResolution.Unresolved -> typeExpr
         }
         return "$name : $displayType"
     }
@@ -694,7 +722,7 @@ sealed interface WhenArm {
 
 class LetExprNode(
     private val name: String,
-    private val typeName: String,
+    private val typeExpr: TypeExpr,
     private val letInitExpr: ExprNode,
     private val bodyExpr: ExprNode,
     private val loc: ProgramLoc,
@@ -708,7 +736,8 @@ class LetExprNode(
 
     override fun programLocation() = loc
     internal fun letName(): String = name
-    internal fun letTypeName(): String = typeName
+    internal fun letTypeExpr(): TypeExpr = typeExpr
+    internal fun letTypeName(): String = typeExpr.toString()
     internal fun letInitExpr(): ExprNode = letInitExpr
     internal fun bodyExpr(): ExprNode = bodyExpr
     internal fun resolvedLetTypeOrNull(): Type? = letTypeResolution
@@ -740,7 +769,7 @@ class LetExprNode(
     override fun inferType(symbolEnv: Map<String, Type>): Type = bodyExpr.getType()
 
     override fun toString(): String {
-        return "let ($name : $typeName := $letInitExpr) { $bodyExpr }"
+        return "let ($name : $typeExpr := $letInitExpr) { $bodyExpr }"
     }
 }
 
@@ -876,7 +905,7 @@ private fun WhenLiteral.toLiteralExprNode(loc: ProgramLoc): LiteralValueExprNode
 }
 
 class ObjClassLiteralExprNode(
-    val className: String,
+    val typeExpr: TypeExpr,
     val fieldEntries: List<Pair<String, ExprNode>>,
     private val loc: ProgramLoc,
     resolvedType: ObjClassType? = null,
@@ -889,6 +918,8 @@ class ObjClassLiteralExprNode(
     private var objClassLiteralResolution: ObjClassLiteralResolution =
         if (resolvedType != null) ObjClassLiteralResolution.Resolved(resolvedType)
         else ObjClassLiteralResolution.Unresolved
+
+    val className: String get() = typeExpr.ctorName()
 
     val structType: ObjClassType
         get() = when (val resolution = objClassLiteralResolution) {
@@ -926,7 +957,7 @@ class ObjClassLiteralExprNode(
 
     override fun toString(): String {
         val fields = fieldEntries.joinToString(", ") { (name, expr) -> "$name := $expr" }
-        return "$className { $fields }"
+        return "$typeExpr { $fields }"
     }
 }
 

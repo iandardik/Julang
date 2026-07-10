@@ -1,0 +1,14 @@
+o-class Box<T> {
+    value : T
+}
+
+p-class Worker {
+    var x : Box
+
+    constructor initially() {
+        transit:
+            x := Box Int { value := 1 }
+    }
+}
+
+program PolyBareParametricTest := Worker

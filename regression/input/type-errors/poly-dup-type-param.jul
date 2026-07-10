@@ -1,0 +1,14 @@
+o-class Box<T, T> {
+    value : T
+}
+
+p-class Worker {
+    var n : Int
+
+    constructor initially() {
+        transit:
+            n := 0
+    }
+}
+
+program PolyDupTypeParamTest := Worker

@@ -1,0 +1,6 @@
+source: regression/input/poly/fun-wrap.jul
+programs:
+  - name: PolyFunWrapTest
+    run:
+      background: true
+      durationMs: 500

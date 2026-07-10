@@ -1,0 +1,5 @@
+source: regression/input/type-errors/poly-bare-parametric.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "expects 1 type argument"
+  - "Found type errors; exiting."

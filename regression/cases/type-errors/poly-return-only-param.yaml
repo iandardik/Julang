@@ -1,0 +1,5 @@
+source: regression/input/type-errors/poly-return-only-param.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "must appear in a value-parameter type"
+  - "Found type errors; exiting."

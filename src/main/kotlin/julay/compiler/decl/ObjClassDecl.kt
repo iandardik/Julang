@@ -8,7 +8,7 @@ import julay.program.*
  *
  * Field types are concrete [Type] values (primitives or [ObjClassType] for nested structs).
  * Produced by [ObjClassRegistry.build] after all cross-references between o-classes have
- * been resolved.
+ * been resolved. Includes nullary o-classes and monomorphized parametric instantiations.
  */
 data class ObjClassDecl(
     val name: String,
@@ -19,152 +19,307 @@ data class ObjClassDecl(
 /**
  * An unresolved o-class declaration collected from the AST.
  *
- * Field types are stored as strings (e.g. `"Int"`, `"Point"`) rather than [Type] objects
- * because the AST is built in a single pass and o-classes may reference one another in
- * any order — including forward references to o-classes defined later in the file.
- *
- * We need both [RawObjClassDecl] and [ObjClassDecl] because resolution is a separate phase:
- * [RawObjClassDecl] is what [julay.compiler.pass.objClassPass] emits from the parse tree, while
- * [ObjClassDecl] is the output of [ObjClassRegistry.build] once every field type name has
- * been looked up, nested structs expanded, and errors (unknown types, cycles) collected.
- * Type checking and codegen consume [ObjClassDecl]; they must not run on raw string types.
+ * Field types are [TypeExpr] trees. Parametric o-classes carry [typeParams]; nullary ones
+ * have an empty list. Resolution / monomorphization happens in [ObjClassRegistry].
  */
 data class RawObjClassDecl(
     val name: String,
-    val fields: List<Pair<String, String>>,
+    val typeParams: List<String>,
+    val fields: List<Pair<String, TypeExpr>>,
     val loc: ProgramLoc,
 )
 
 sealed interface TypeResolveResult {
     data class Found(val type: Type) : TypeResolveResult
-    data object NotFound : TypeResolveResult
+    data class Error(val message: String) : TypeResolveResult
 }
 
-private sealed interface FieldTypeResolveResult {
+internal sealed interface FieldTypeResolveResult {
     data class Success(val type: Type) : FieldTypeResolveResult
-    data object Failed : FieldTypeResolveResult
+    data class Failed(val message: String) : FieldTypeResolveResult
 }
 
-private sealed interface ObjClassResolveResult {
+internal sealed interface ObjClassResolveResult {
     data class Success(val type: ObjClassType) : ObjClassResolveResult
-    data object Failed : ObjClassResolveResult
+    data class Failed(val message: String) : ObjClassResolveResult
+}
+
+fun mangleTypeForName(type: Type): String = when (type) {
+    is BoolType -> "Boolean"
+    is IntType -> "Int"
+    is StringType -> "String"
+    is ObjClassType -> type.name
+    is TypeVar -> type.name
+    else -> throw RuntimeException("Cannot mangle type $type")
+}
+
+fun mangleInstantiation(ctor: String, argTypes: List<Type>): String =
+    (listOf(ctor) + argTypes.map { mangleTypeForName(it) }).joinToString("_")
+
+fun Type.containsTypeVar(): Boolean = when (this) {
+    is TypeVar -> true
+    is ObjClassType -> fields.any { it.type.containsTypeVar() }
+    else -> false
 }
 
 /**
- * Resolves [RawObjClassDecl] entries into [ObjClassType] values.
- *
- * O-classes can nest and refer to each other, so field-type resolution is mutually
- * recursive ([resolveObjClass] calls [resolveFieldType] and vice versa). This helper
- * class exists because Kotlin does not allow forward references between local functions.
- * It also tracks the [resolving] set to detect cyclic nesting (e.g. A contains B, B
- * contains A).
+ * Resolves [RawObjClassDecl] entries into concrete [ObjClassType] values, including
+ * on-demand monomorphization of parametric templates.
  */
-private class ObjClassResolver(
-    private val errors: MutableList<CompileError>,
+internal class ObjClassResolver(
     private val resolved: MutableMap<String, ObjClassType>,
     private val resolving: MutableSet<String>,
     private val declsByName: Map<String, RawObjClassDecl>,
+    private val instantiationLocs: MutableMap<String, ProgramLoc>,
 ) {
-    fun resolveFieldType(typeName: String, loc: ProgramLoc): FieldTypeResolveResult {
-        when (typeName) {
+    fun resolveTypeExpr(
+        expr: TypeExpr,
+        typeParamEnv: Map<String, Type> = emptyMap(),
+    ): FieldTypeResolveResult {
+        return when (expr) {
+            is TypeExpr.Simple -> resolveSimple(expr.name, typeParamEnv)
+            is TypeExpr.Parametric -> resolveParametric(expr, typeParamEnv)
+        }
+    }
+
+    private fun resolveSimple(
+        name: String,
+        typeParamEnv: Map<String, Type>,
+    ): FieldTypeResolveResult {
+        typeParamEnv[name]?.let { return FieldTypeResolveResult.Success(it) }
+        when (name) {
             "Boolean" -> return FieldTypeResolveResult.Success(boolType)
             "Int" -> return FieldTypeResolveResult.Success(intType)
             "String" -> return FieldTypeResolveResult.Success(stringType)
         }
-        if (typeName in resolved) {
-            return FieldTypeResolveResult.Success(resolved.getValue(typeName))
+        if (name in resolved) {
+            return FieldTypeResolveResult.Success(resolved.getValue(name))
         }
-        if (typeName !in declsByName) {
-            errors.add(OneLocCompileError(loc, "Unknown type \"$typeName\""))
-            return FieldTypeResolveResult.Failed
+        val raw = declsByName[name]
+        if (raw == null) {
+            return FieldTypeResolveResult.Failed("Unknown type \"$name\"")
         }
-        return when (val result = resolveObjClass(typeName)) {
+        if (raw.typeParams.isNotEmpty()) {
+            return FieldTypeResolveResult.Failed(
+                "Type \"$name\" expects ${raw.typeParams.size} type argument(s)",
+            )
+        }
+        return when (val result = resolveNullaryObjClass(name)) {
             is ObjClassResolveResult.Success -> FieldTypeResolveResult.Success(result.type)
-            is ObjClassResolveResult.Failed -> FieldTypeResolveResult.Failed
+            is ObjClassResolveResult.Failed -> FieldTypeResolveResult.Failed(result.message)
         }
     }
 
-    fun resolveObjClass(name: String): ObjClassResolveResult {
+    private fun resolveParametric(
+        expr: TypeExpr.Parametric,
+        typeParamEnv: Map<String, Type>,
+    ): FieldTypeResolveResult {
+        val ctor = expr.ctor
+        val raw = declsByName[ctor]
+        if (raw == null) {
+            if (ctor in resolved) {
+                return FieldTypeResolveResult.Failed("Type \"$ctor\" does not take type arguments")
+            }
+            return FieldTypeResolveResult.Failed("Unknown type \"$ctor\"")
+        }
+        val arity = raw.typeParams.size
+        if (arity == 0) {
+            return FieldTypeResolveResult.Failed("Type \"$ctor\" does not take type arguments")
+        }
+        val argExprs = collectTypeArgs(expr.arg, arity)
+            ?: return FieldTypeResolveResult.Failed(
+                "Type \"$ctor\" expects $arity type argument(s)",
+            )
+        val argTypes = mutableListOf<Type>()
+        for (argExpr in argExprs) {
+            when (val argResult = resolveTypeExpr(argExpr, typeParamEnv)) {
+                is FieldTypeResolveResult.Success -> argTypes.add(argResult.type)
+                is FieldTypeResolveResult.Failed -> return argResult
+            }
+        }
+        return when (val inst = instantiate(raw, argTypes, SourceLoc(Pair(0, 0)))) {
+            is ObjClassResolveResult.Success -> FieldTypeResolveResult.Success(inst.type)
+            is ObjClassResolveResult.Failed -> FieldTypeResolveResult.Failed(inst.message)
+        }
+    }
+
+    fun resolveNullaryObjClass(name: String): ObjClassResolveResult {
         if (name in resolved) {
             return ObjClassResolveResult.Success(resolved.getValue(name))
         }
-        if (name !in declsByName) {
-            return ObjClassResolveResult.Failed
+        val raw = declsByName[name] ?: return ObjClassResolveResult.Failed("Unknown type \"$name\"")
+        if (raw.typeParams.isNotEmpty()) {
+            return ObjClassResolveResult.Failed(
+                "Type \"$name\" expects ${raw.typeParams.size} type argument(s)",
+            )
         }
-        val raw = declsByName.getValue(name)
-        if (name in resolving) {
-            errors.add(OneLocCompileError(raw.loc, "Cyclic o-class nesting involving \"$name\""))
-            return ObjClassResolveResult.Failed
+        return buildConcrete(name, raw, emptyMap(), raw.loc)
+    }
+
+    fun instantiate(
+        raw: RawObjClassDecl,
+        argTypes: List<Type>,
+        loc: ProgramLoc,
+    ): ObjClassResolveResult {
+        if (argTypes.size != raw.typeParams.size) {
+            return ObjClassResolveResult.Failed(
+                "Type \"${raw.name}\" expects ${raw.typeParams.size} type argument(s)",
+            )
         }
-        resolving.add(name)
+        val mangled = mangleInstantiation(raw.name, argTypes)
+        if (mangled in resolved) {
+            return ObjClassResolveResult.Success(resolved.getValue(mangled))
+        }
+        val typeParamEnv = raw.typeParams.zip(argTypes).toMap()
+        val typeExprSubst = raw.typeParams.zip(argTypes).mapNotNull { (param, type) ->
+            if (type is TypeVar) null else param to typeToTypeExpr(type)
+        }.toMap()
+        return buildConcrete(mangled, raw, typeParamEnv, loc, typeExprSubst)
+    }
+
+    private fun typeToTypeExpr(type: Type): TypeExpr = when (type) {
+        is BoolType -> TypeExpr.Simple("Boolean")
+        is IntType -> TypeExpr.Simple("Int")
+        is StringType -> TypeExpr.Simple("String")
+        is TypeVar -> TypeExpr.Simple(type.name)
+        is ObjClassType -> TypeExpr.Simple(type.name)
+        else -> throw RuntimeException("Cannot convert type $type to TypeExpr")
+    }
+
+    private fun buildConcrete(
+        concreteName: String,
+        raw: RawObjClassDecl,
+        typeParamEnv: Map<String, Type>,
+        loc: ProgramLoc,
+        typeExprSubst: Map<String, TypeExpr> = emptyMap(),
+    ): ObjClassResolveResult {
+        if (concreteName in resolving) {
+            return ObjClassResolveResult.Failed("Cyclic o-class nesting involving \"${raw.name}\"")
+        }
+        resolving.add(concreteName)
         val fields = mutableListOf<Variable>()
-        var failed = false
-        for ((fieldName, typeName) in raw.fields) {
-            when (val fieldResult = resolveFieldType(typeName, raw.loc)) {
+        for ((fieldName, fieldTypeExpr) in raw.fields) {
+            val substituted = if (typeExprSubst.isEmpty()) {
+                fieldTypeExpr
+            } else {
+                substituteTypeExpr(fieldTypeExpr, typeExprSubst)
+            }
+            when (val fieldResult = resolveTypeExpr(substituted, typeParamEnv)) {
                 is FieldTypeResolveResult.Success -> fields.add(Variable(fieldName, fieldResult.type))
-                is FieldTypeResolveResult.Failed -> failed = true
+                is FieldTypeResolveResult.Failed -> {
+                    resolving.remove(concreteName)
+                    return ObjClassResolveResult.Failed(fieldResult.message)
+                }
             }
         }
-        resolving.remove(name)
-        if (failed) {
-            return ObjClassResolveResult.Failed
-        }
-        val objClassType = ObjClassType(name, fields,
-            { _, _ -> throw RuntimeException("valueToZ3 not available on compiler-resolved ObjClassType $name") },
-            { _ -> throw RuntimeException("valueFromZ3 not available on compiler-resolved ObjClassType $name") },
+        resolving.remove(concreteName)
+        val objClassType = ObjClassType(
+            concreteName,
+            fields,
+            { _, _ -> throw RuntimeException("valueToZ3 not available on compiler-resolved ObjClassType $concreteName") },
+            { _ -> throw RuntimeException("valueFromZ3 not available on compiler-resolved ObjClassType $concreteName") },
         )
-        resolved[name] = objClassType
+        resolved[concreteName] = objClassType
+        instantiationLocs[concreteName] = loc
         return ObjClassResolveResult.Success(objClassType)
     }
 }
 
 /**
- * The file-scoped registry of resolved o-class types.
- *
- * Built once per compilation unit from a list of [RawObjClassDecl] via [build]. The
- * registry is threaded through [julay.compiler.pass.typePass] so that [VarNode], [ArgNode], struct
- * literals, and field accesses can resolve type names like `"Point"` to [ObjClassType].
- * It also exposes [ObjClassDecl] list for o-class type val codegen in [julay.compiler.pass.codegenPass].
+ * The compilation-unit registry of resolved o-class types (nullary + monomorphized).
  */
-class ObjClassRegistry(
-    val types: Map<String, ObjClassType>,
-    val decls: List<ObjClassDecl>,
+class ObjClassRegistry private constructor(
+    private val resolvedTypes: MutableMap<String, ObjClassType>,
     val errors: List<CompileError>,
+    private val resolver: ObjClassResolver?,
+    private val declsByName: Map<String, RawObjClassDecl>,
+    private val instantiationLocs: MutableMap<String, ProgramLoc>,
 ) {
-    fun resolveTypeName(typeName: String): TypeResolveResult = when (typeName) {
-        "Boolean" -> TypeResolveResult.Found(boolType)
-        "Int" -> TypeResolveResult.Found(intType)
-        "String" -> TypeResolveResult.Found(stringType)
-        else -> if (typeName in types) {
-            TypeResolveResult.Found(types.getValue(typeName))
-        } else {
-            TypeResolveResult.NotFound
+    val types: Map<String, ObjClassType>
+        get() = resolvedTypes.toMap()
+
+    val decls: List<ObjClassDecl>
+        get() = concreteDecls()
+
+    fun resolveTypeName(typeName: String): TypeResolveResult =
+        resolveTypeExpr(TypeExpr.Simple(typeName))
+
+    fun resolveTypeExpr(
+        expr: TypeExpr,
+        typeParamEnv: Map<String, Type> = emptyMap(),
+        loc: ProgramLoc = SourceLoc(Pair(0, 0)),
+    ): TypeResolveResult {
+        val r = resolver
+        if (r == null) {
+            return when (expr) {
+                is TypeExpr.Simple -> when (expr.name) {
+                    "Boolean" -> TypeResolveResult.Found(boolType)
+                    "Int" -> TypeResolveResult.Found(intType)
+                    "String" -> TypeResolveResult.Found(stringType)
+                    else -> typeParamEnv[expr.name]?.let { TypeResolveResult.Found(it) }
+                        ?: resolvedTypes[expr.name]?.let { TypeResolveResult.Found(it) }
+                        ?: TypeResolveResult.Error("Unknown type \"${expr.name}\"")
+                }
+                is TypeExpr.Parametric ->
+                    TypeResolveResult.Error("Cannot resolve parametric type \"$expr\" without registry resolver")
+            }
+        }
+        return when (val result = r.resolveTypeExpr(expr, typeParamEnv)) {
+            is FieldTypeResolveResult.Success -> TypeResolveResult.Found(result.type)
+            is FieldTypeResolveResult.Failed -> TypeResolveResult.Error(result.message)
         }
     }
 
+    fun templateArity(name: String): Int? = declsByName[name]?.typeParams?.size
+
+    fun rawDecl(name: String): RawObjClassDecl? = declsByName[name]
+
+    /** Concrete decls for codegen: excludes instantiations that still contain type variables. */
+    fun concreteDecls(): List<ObjClassDecl> =
+        resolvedTypes.entries
+            .filter { !it.value.containsTypeVar() }
+            .map { (name, type) ->
+                val loc = declsByName[name]?.loc
+                    ?: instantiationLocs[name]
+                    ?: declsByName.entries.firstOrNull { name.startsWith(it.key + "_") }?.value?.loc
+                    ?: SourceLoc(Pair(0, 0))
+                ObjClassDecl(name, type.fields, loc)
+            }
+
     companion object {
-        val EMPTY = ObjClassRegistry(emptyMap(), emptyList(), emptyList())
+        val EMPTY = ObjClassRegistry(
+            mutableMapOf(),
+            emptyList(),
+            null,
+            emptyMap(),
+            mutableMapOf(),
+        )
 
         fun build(rawDecls: List<RawObjClassDecl>): ObjClassRegistry {
             val errors = mutableListOf<CompileError>()
+            for (raw in rawDecls) {
+                val dupParams = raw.typeParams.groupingBy { it }.eachCount().filter { it.value > 1 }.keys
+                for (dup in dupParams) {
+                    errors.add(
+                        OneLocCompileError(raw.loc, "Duplicate type parameter \"$dup\" on o-class \"${raw.name}\""),
+                    )
+                }
+            }
             val resolved = mutableMapOf<String, ObjClassType>()
             val resolving = mutableSetOf<String>()
             val declsByName = rawDecls.associateBy { it.name }
+            val instantiationLocs = mutableMapOf<String, ProgramLoc>()
 
-            val resolver = ObjClassResolver(errors, resolved, resolving, declsByName)
-            rawDecls.forEach { raw ->
-                resolver.resolveObjClass(raw.name)
-            }
-
-            val decls = rawDecls.flatMap { raw ->
-                if (raw.name in resolved) {
-                    val type = resolved.getValue(raw.name)
-                    listOf(ObjClassDecl(raw.name, type.fields, raw.loc))
-                } else {
-                    emptyList()
+            val resolver = ObjClassResolver(resolved, resolving, declsByName, instantiationLocs)
+            rawDecls.filter { it.typeParams.isEmpty() }.forEach { raw ->
+                when (val result = resolver.resolveNullaryObjClass(raw.name)) {
+                    is ObjClassResolveResult.Success -> {}
+                    is ObjClassResolveResult.Failed ->
+                        errors.add(OneLocCompileError(raw.loc, result.message))
                 }
             }
-            return ObjClassRegistry(resolved, decls, errors)
+
+            return ObjClassRegistry(resolved, errors, resolver, declsByName, instantiationLocs)
         }
     }
 }

@@ -28,7 +28,7 @@ fun substituteExpr(expr: ExprNode, name: String, replacement: ExprNode): ExprNod
             } else {
                 LetExprNode(
                     expr.letName(),
-                    expr.letTypeName(),
+                    expr.letTypeExpr(),
                     substituteExpr(expr.letInitExpr(), name, replacement),
                     substituteExpr(expr.bodyExpr(), name, replacement),
                     expr.programLocation(),
@@ -67,7 +67,15 @@ fun substituteExpr(expr: ExprNode, name: String, replacement: ExprNode): ExprNod
             expr.callArgs().map { substituteExpr(it, name, replacement) },
             expr.programLocation(),
             expr.resolvedFunOrNull(),
-        ).withTypeOf(expr)
+        ).also { copy ->
+            expr.specializedBodyOrNull()?.let { body ->
+                copy.resolveSpecializedBody(substituteExpr(body, name, replacement))
+            }
+            try {
+                copy.resolveInstantiatedReturnType(expr.getType())
+            } catch (_: RuntimeException) {
+            }
+        }.withTypeOf(expr)
         else -> throw RuntimeException("Unexpected expression node ${expr.javaClass.simpleName} during substitution")
     }
 }
@@ -181,7 +189,7 @@ private fun substituteObjClassLiteral(
         fieldName to substituteExpr(fieldExpr, name, replacement)
     }
     return ObjClassLiteralExprNode(
-        expr.className,
+        expr.typeExpr,
         newFields,
         expr.programLocation(),
         expr.resolvedStructTypeOrNull(),

@@ -22,8 +22,18 @@ decl
     | fun_decl
     ;
 
+typeExpr
+    : ID
+    | ID typeExpr
+    | LPAREN typeExpr RPAREN
+    ;
+
+typeParams
+    : LT ID (COMMA ID)* GT
+    ;
+
 fun_decl
-    : FUN ID args COLON ID EQ expr
+    : FUN ID typeParams? args COLON typeExpr EQ expr
     ;
 
 pclass
@@ -31,7 +41,7 @@ pclass
     ;
 
 oclass
-    : OCLASS ID LCURLY field* RCURLY
+    : OCLASS ID typeParams? LCURLY field* RCURLY
     ;
 
 proc
@@ -53,11 +63,11 @@ pclass_body
     ;
 
 field
-    : ID COLON ID
+    : ID COLON typeExpr
     ;
 
 var
-    : VAR ID COLON ID
+    : VAR ID COLON typeExpr
     ;
 
 constructor
@@ -73,7 +83,7 @@ args
     ;
 
 arg
-    : ID COLON ID
+    : ID COLON typeExpr
     ;
 
 action_body
@@ -134,7 +144,7 @@ expr
     | expr OR expr
     | expr IMPLIES expr
     | IF LPAREN expr RPAREN LCURLY expr RCURLY ELSE LCURLY expr RCURLY
-    | LET LPAREN ID COLON ID ASGN_EQ expr RPAREN LCURLY expr RCURLY
+    | LET LPAREN ID COLON typeExpr ASGN_EQ expr RPAREN LCURLY expr RCURLY
     | WHEN LPAREN expr RPAREN LCURLY when_subject_arm+ RCURLY
     | WHEN LCURLY when_guard_arm+ RCURLY
     ;
@@ -151,7 +161,7 @@ when_guard_arm
 
 when_pattern
     : when_literal
-    | struct_literal
+    | oclass_literal
     ;
 
 when_literal
@@ -169,7 +179,7 @@ proc_expr
     ;
 
 value
-    : struct_literal
+    : oclass_literal
     | fun_call
     | field_access
     | INT
@@ -182,8 +192,8 @@ fun_call
     : ID LPAREN (expr (COMMA expr)*)? RPAREN
     ;
 
-struct_literal
-    : ID LCURLY struct_field_assign (COMMA struct_field_assign)* RCURLY
+oclass_literal
+    : typeExpr LCURLY struct_field_assign (COMMA struct_field_assign)* RCURLY
     ;
 
 struct_field_assign

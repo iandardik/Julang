@@ -1,0 +1,14 @@
+o-class Box<T> {
+    value : T
+}
+
+p-class Worker {
+    var box : Box Int
+
+    constructor initially() {
+        transit:
+            box := Box Int { value := "nope" }
+    }
+}
+
+program PolyLiteralFieldMismatchTest := Worker

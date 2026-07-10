@@ -3,6 +3,8 @@ import julaylib.ExitSystem
 
 fun double(n : Int) : Int = n + n
 
+fun id<T>(x : T) : T = x
+
 p-class S {
     var x : Int
     var print : Boolean
@@ -15,9 +17,9 @@ p-class S {
 
     transition increment(inc : Int) {
         guard:
-            ~print & double(inc) > 0
+            ~print & double(id(inc)) > 0
         transit:
-            x := double(inc)
+            x := double(id(inc))
             print := true
     }
 

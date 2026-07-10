@@ -151,3 +151,29 @@ class StringType : Type {
         return toString().hashCode()
     }
 }
+
+/**
+ * Rigid type parameter used while checking polymorphic function / o-class template bodies.
+ * Must not reach codegen or Z3 emission.
+ */
+class TypeVar(val name: String) : Type {
+    override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {
+        throw RuntimeException("TypeVar \"$name\" must not reach Z3 codegen")
+    }
+
+    override fun toZ3Expr(value: Value, ctx: Context): Expr<*> {
+        throw RuntimeException("TypeVar \"$name\" must not reach Z3 codegen")
+    }
+
+    override fun fromZ3Expr(expr: Expr<*>): Any {
+        throw RuntimeException("TypeVar \"$name\" must not reach Z3 codegen")
+    }
+
+    override fun isOfType(obj: Any): Boolean = false
+
+    override fun toString(): String = name
+
+    override fun equals(other: Any?): Boolean = other is TypeVar && other.name == name
+
+    override fun hashCode(): Int = name.hashCode()
+}

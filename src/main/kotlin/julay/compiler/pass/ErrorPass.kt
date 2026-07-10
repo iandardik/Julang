@@ -136,6 +136,14 @@ private fun ProcClassNode.errorPassProcClass(procs: Set<String>, librariesInUse:
 }
 
 private fun ObjClassNode.errorPassObjClass(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
+    val dupTypeParamErrors = typeParams
+        .groupingBy { it }
+        .eachCount()
+        .filter { it.value > 1 }
+        .keys
+        .map { dup ->
+            OneLocCompileError(programLocation(), "Duplicate type parameter \"$dup\" on o-class \"${name()}\"")
+        }
     val repeatFieldErrors = objClassFields()
         .groupBy { it.fieldName }
         .flatMap { (_, nodes) ->
@@ -148,7 +156,7 @@ private fun ObjClassNode.errorPassObjClass(procs: Set<String>, librariesInUse: S
                 ),
             )
         }
-    return children.flatMap { it.errorPass(procs, librariesInUse) } + repeatFieldErrors
+    return children.flatMap { it.errorPass(procs, librariesInUse) } + dupTypeParamErrors + repeatFieldErrors
 }
 
 private fun duplicateAssignmentErrors(

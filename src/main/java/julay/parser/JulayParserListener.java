@@ -48,6 +48,26 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitDecl(JulayParser.DeclContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#typeExpr}.
+	 * @param ctx the parse tree
+	 */
+	void enterTypeExpr(JulayParser.TypeExprContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#typeExpr}.
+	 * @param ctx the parse tree
+	 */
+	void exitTypeExpr(JulayParser.TypeExprContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#typeParams}.
+	 * @param ctx the parse tree
+	 */
+	void enterTypeParams(JulayParser.TypeParamsContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#typeParams}.
+	 * @param ctx the parse tree
+	 */
+	void exitTypeParams(JulayParser.TypeParamsContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#fun_decl}.
 	 * @param ctx the parse tree
 	 */
@@ -338,15 +358,15 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitFun_call(JulayParser.Fun_callContext ctx);
 	/**
-	 * Enter a parse tree produced by {@link JulayParser#struct_literal}.
+	 * Enter a parse tree produced by {@link JulayParser#oclass_literal}.
 	 * @param ctx the parse tree
 	 */
-	void enterStruct_literal(JulayParser.Struct_literalContext ctx);
+	void enterOclass_literal(JulayParser.Oclass_literalContext ctx);
 	/**
-	 * Exit a parse tree produced by {@link JulayParser#struct_literal}.
+	 * Exit a parse tree produced by {@link JulayParser#oclass_literal}.
 	 * @param ctx the parse tree
 	 */
-	void exitStruct_literal(JulayParser.Struct_literalContext ctx);
+	void exitOclass_literal(JulayParser.Oclass_literalContext ctx);
 	/**
 	 * Enter a parse tree produced by {@link JulayParser#struct_field_assign}.
 	 * @param ctx the parse tree

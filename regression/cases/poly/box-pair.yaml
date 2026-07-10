@@ -1,0 +1,6 @@
+source: regression/input/poly/box-pair.jul
+programs:
+  - name: PolyBoxPairTest
+    run:
+      background: true
+      durationMs: 500

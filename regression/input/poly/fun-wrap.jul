@@ -1,0 +1,61 @@
+import julaylib.ExitSystem
+
+o-class Box<T> {
+    value : T
+}
+
+fun wrap<T>(x : T) : Box T = Box T { value := x }
+
+p-class Worker {
+    var box : Box Int
+    var steps : Int
+
+    constructor initially() {
+        transit:
+            steps := 0
+            box := Box Int { value := 0 }
+    }
+
+    transition go(n : Int) {
+        guard:
+            steps = 0 & n > 0
+        transit:
+            box := wrap(n)
+            steps := 1
+    }
+
+    transition check() {
+        guard:
+            steps = 1 & box.value = 5
+        transit:
+            steps := 2
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard:
+            steps = 2
+    }
+}
+
+p-class Driver {
+    var done : Boolean
+
+    constructor initially() {
+        transit:
+            done := false
+    }
+
+    transition kick() {
+        guard:
+            ~done
+        transit:
+            done := true
+    }
+
+    transition go(n : Int) {
+        guard:
+            done & n = 5
+    }
+}
+
+program PolyFunWrapTest := Worker || Driver || ExitSystem

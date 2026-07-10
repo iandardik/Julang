@@ -65,6 +65,30 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
+	@Override public void enterTypeExpr(JulayParser.TypeExprContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitTypeExpr(JulayParser.TypeExprContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void enterTypeParams(JulayParser.TypeParamsContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitTypeParams(JulayParser.TypeParamsContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
 	@Override public void enterFun_decl(JulayParser.Fun_declContext ctx) { }
 	/**
 	 * {@inheritDoc}
@@ -413,13 +437,13 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void enterStruct_literal(JulayParser.Struct_literalContext ctx) { }
+	@Override public void enterOclass_literal(JulayParser.Oclass_literalContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void exitStruct_literal(JulayParser.Struct_literalContext ctx) { }
+	@Override public void exitOclass_literal(JulayParser.Oclass_literalContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
