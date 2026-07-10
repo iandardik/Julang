@@ -1,6 +1,7 @@
 o-class Point {
     x : Int
     y : Int
+    label : String
 }
 
 p-class Worker {
@@ -21,6 +22,15 @@ p-class Worker {
     transition reportX(expected : Int) {
         guard:
             pos.x = expected
+        transit:
+            pos := pos
+    }
+
+    // String field access in concatenation must type as Expr<SeqSort<CharSort>>
+    // for ctx.mkConcat (otherwise Kotlin picks the BitVec overload).
+    transition reportLabel(msg : String) {
+        guard:
+            msg = "label:" + pos.label
         transit:
             pos := pos
     }

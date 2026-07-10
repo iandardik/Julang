@@ -888,7 +888,7 @@ class FieldAccessExprNode(
             return when (resolution.leafType) {
                 is BoolType -> throw RuntimeException("Cannot convert a Bool to a string")
                 is IntType -> "ctx.intToString($fieldZ3 as IntExpr)"
-                is StringType -> fieldZ3
+                is StringType -> "$fieldZ3 as Expr<SeqSort<CharSort>>"
                 is ObjClassType -> throw RuntimeException("Cannot convert o-class field to string")
                 else -> throw RuntimeException("Invalid field type: ${resolution.leafType}")
             }
@@ -899,7 +899,7 @@ class FieldAccessExprNode(
         return when (resolution.leafType) {
             is BoolType -> "$fieldZ3 as BoolExpr"
             is IntType -> "$fieldZ3 as IntExpr"
-            is StringType -> fieldZ3
+            is StringType -> "$fieldZ3 as Expr<SeqSort<CharSort>>"
             else -> throw RuntimeException("Invalid field type: ${resolution.leafType}")
         }
     }

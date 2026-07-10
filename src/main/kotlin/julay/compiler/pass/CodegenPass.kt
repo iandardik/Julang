@@ -106,9 +106,10 @@ private fun ObjClassDecl.kotlinConversionHelpersString(): String {
     val mkArgs = fields.joinToString(", ") { it.name }
     val accessorFuns = fields.mapIndexed { index, field ->
         val accFun = objClassAccessorFunName(name, field.name)
+        val returnType = field.type.toZ3ExprTypeString()
         """
-            |fun $accFun(ctx: Context, record: Expr<*>): Expr<*> =
-            |    $typeVal.accessor(ctx, $index).apply(record) as Expr<*>
+            |fun $accFun(ctx: Context, record: Expr<*>): $returnType =
+            |    $typeVal.accessor(ctx, $index).apply(record) as $returnType
         """.trimMargin()
     }.joinToString("\n\n")
     val toZ3Args = fields.joinToString(", ") { field ->
@@ -158,6 +159,14 @@ private fun fieldFromZ3ExprString(exprStr: String, type: Type): String = when (t
     is StringType -> "stringType.fromZ3Expr($exprStr) as String"
     is ObjClassType -> "${objClassFromZ3FunName(type.name)}($exprStr)"
     else -> throw RuntimeException("Invalid field type for Z3 conversion: $type")
+}
+
+private fun Type.toZ3ExprTypeString(): String = when (this) {
+    is BoolType -> "BoolExpr"
+    is IntType -> "IntExpr"
+    is StringType -> "Expr<SeqSort<CharSort>>"
+    is ObjClassType -> "Expr<*>"
+    else -> throw RuntimeException("Invalid field type for Z3 expr: $this")
 }
 
 private fun ProcClassDecl.usesEffects(): Boolean =
