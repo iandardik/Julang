@@ -1,0 +1,10 @@
+p-class S {
+    var list : List String
+
+    constructor initially() {
+        transit:
+            listt := []
+    }
+}
+
+program P := S

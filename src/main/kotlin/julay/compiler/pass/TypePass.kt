@@ -162,8 +162,13 @@ private fun VarTransitNode.typePassVarTransit(
     funBuiltinEnv: Map<String, FunBuiltin>,
 ): List<CompileError> {
     val varType = symbolEnv[varName]
+    // Undeclared targets take priority over RHS errors (e.g. untyped empty list literals).
+    if (varType == null) {
+        return listOf(
+            OneLocCompileError(programLocation(), "Unknown variable \"$varName\" in transit assignment"),
+        )
+    }
     val expectedType: Type? = when {
-        varType == null -> null
         fieldPath.isEmpty() -> varType
         else -> when (val result = resolveFieldPath(varType, fieldPath)) {
             is FieldPathResult.Resolved -> result.type
@@ -175,12 +180,7 @@ private fun VarTransitNode.typePassVarTransit(
     if (childrenErrors.isNotEmpty()) {
         return childrenErrors
     }
-    val varErrors = if (varType == null) {
-        assertOrCompileError(
-            false,
-            OneLocCompileError(programLocation(), "Unknown variable \"$varName\" in transit assignment"),
-        )
-    } else if (fieldPath.isEmpty()) {
+    val varErrors = if (fieldPath.isEmpty()) {
         assertOrCompileError(
             transitExpr().getType() == varType,
             OneLocCompileError(

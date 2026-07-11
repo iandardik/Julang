@@ -1,0 +1,5 @@
+source: regression/input/type-errors/transit-unknown-var-empty-list.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Unknown variable \"listt\" in transit assignment"
+  - "Found type errors; exiting."
