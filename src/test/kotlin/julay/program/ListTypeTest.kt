@@ -20,4 +20,28 @@ class ListTypeTest {
         val restored = nested.fromZ3Expr(model.eval(v, true), model)
         assertEquals(listOf(listOf(1, 2), listOf(3)), restored)
     }
+
+    @Test
+    fun emptyStringListRoundTrip() {
+        val ctx = Context()
+        val lt = listType(stringType)
+        val z3 = lt.toZ3Expr(Value(emptyList<String>(), lt), ctx)
+        val solver = ctx.mkSolver()
+        val v = ctx.mkConst("lst", lt.sort(ctx))
+        solver.add(ctx.mkEq(v, z3))
+        assertEquals(Status.SATISFIABLE, solver.check())
+        assertEquals(emptyList<String>(), lt.fromZ3Expr(solver.model.eval(v, true), solver.model))
+    }
+
+    @Test
+    fun emptyIntListRoundTrip() {
+        val ctx = Context()
+        val lt = listType(intType)
+        val z3 = lt.toZ3Expr(Value(emptyList<Int>(), lt), ctx)
+        val solver = ctx.mkSolver()
+        val v = ctx.mkConst("lst", lt.sort(ctx))
+        solver.add(ctx.mkEq(v, z3))
+        assertEquals(Status.SATISFIABLE, solver.check())
+        assertEquals(emptyList<Int>(), lt.fromZ3Expr(solver.model.eval(v, true), solver.model))
+    }
 }

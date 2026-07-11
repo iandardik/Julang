@@ -28,9 +28,8 @@ data class ListType(val elementType: Type) : Type {
     override fun toZ3Expr(value: Value, ctx: Context): Expr<*> {
         @Suppress("UNCHECKED_CAST")
         val elements = value.value as List<Any>
-        val elemSort = elementType.toZ3Sort(ctx)
         if (elements.isEmpty()) {
-            return ctx.mkEmptySeq(elemSort)
+            return ctx.mkEmptySeq(sort(ctx))
         }
         val units = elements.map { elem ->
             val elemValue = Value(elem, elementType)

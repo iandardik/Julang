@@ -1022,16 +1022,8 @@ class ListLiteralExprNode(
             return "ctx.mkString(${toTransitString(symbolTypes, argSymbols)}.toString())"
         }
         val ty = listType ?: throw RuntimeException("List literal type not resolved at $loc")
-        val elemSort = when (val elem = ty.elementType) {
-            is BoolType -> "ctx.boolSort"
-            is IntType -> "ctx.intSort"
-            is StringType -> "ctx.stringSort"
-            is ObjClassType -> "${objClassTypeValName(elem.name)}.sort(ctx)"
-            is ListType -> "${elem.toCodegenTypeVal()}.sort(ctx)"
-            else -> throw RuntimeException("Invalid list element type: $elem")
-        }
         if (elements.isEmpty()) {
-            return "ctx.mkEmptySeq($elemSort)"
+            return "ctx.mkEmptySeq(${ty.toCodegenTypeVal()}.sort(ctx))"
         }
         val units = elements.map { elem ->
             "ctx.mkUnit(${elem.toZ3GuardString(symbolTypes, argSymbols)})"

@@ -1,0 +1,26 @@
+import printer.Printer
+import server.ServerLogic
+
+p-class RunningList {
+    var list : List String
+    
+    constructor initially() {
+        transit: list := []
+    }
+
+    /*
+    p2p-service transition append(e : String) {
+        transit: list := list + [e]
+    }*/
+
+    p2p-service transition getList(lst : List String) {
+        guard: lst = list
+    }
+
+    p2p-service transition getAndAppend(e : String, lst : List String) {
+        guard: lst = list
+        transit: list := list + [e]
+    }
+}
+
+program ListServer := RunningList || Printer || ServerLogic

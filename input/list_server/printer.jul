@@ -1,0 +1,41 @@
+import julaylib.pclass.Println
+import julaylib.pclass.Timer
+
+/* prints the current value of the counter every 5 seconds
+*/
+p-class PeriodicPrint {
+    var list : List String
+    var step : String
+
+    constructor initially() {
+        transit:
+            list := []
+            step := "A"
+    }
+
+    constructor timeout() {
+        transit:
+            list := []
+            step := "A"
+    }
+
+    p2p-consumer transition getList(lst : List String) {
+        guard:
+            step = "A"
+        transit:
+            list := lst
+            step := "B"
+    }
+
+    p2p-consumer transition println(msg : String) {
+        guard:   step = "B" & (msg = list + "")
+        transit: step := "C"
+    }
+
+    transition timer(time : Int) {
+        guard:   step = "C" & time = 5 // seconds
+        transit: step := "D"
+    }
+}
+
+proc Printer := PeriodicPrint || Println || Timer

@@ -1,0 +1,35 @@
+import julaylib.pclass.HttpServer
+
+p-class IncReqHandler {
+    var req : String
+    var step : String
+    var list : List String
+
+    constructor receiveRequest(reqBody : String) {
+        transit:
+            step := "A"
+            req := reqBody
+            list := []
+    }
+
+    p2p-consumer transition getAndAppend(e : String, lst : List String) {
+        guard:
+            step = "A" & e = req
+        transit:
+            step := "B"
+            list := lst + [req]
+    }
+
+    transition sendResponse(respBody : String) {
+        guard:
+            step = "B" & respBody = list + ""
+        transit:
+            step := "C"
+    }
+
+    p2p-consumer transition close() {
+        guard: false // never close the server
+    }
+}
+
+proc ServerLogic := IncReqHandler || HttpServer
