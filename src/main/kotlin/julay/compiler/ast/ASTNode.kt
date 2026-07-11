@@ -657,6 +657,18 @@ class BinaryOpExprNode(
             "&" -> "($lhs && $rhs)"
             "|" -> "($lhs || $rhs)"
             "=>" -> "(!($lhs) || $rhs)"
+            "+" -> {
+                val lhsType = typeForTransit(lhsOperand, symbolTypes)
+                val rhsType = typeForTransit(rhsOperand, symbolTypes)
+                when {
+                    lhsType is StringType || rhsType is StringType -> {
+                        val lhsStr = if (lhsType is StringType) lhs else "($lhs).toString()"
+                        val rhsStr = if (rhsType is StringType) rhs else "($rhs).toString()"
+                        "($lhsStr + $rhsStr)"
+                    }
+                    else -> "($lhs + $rhs)"
+                }
+            }
             else -> "($lhs $op $rhs)"
         }
     }
@@ -780,7 +792,10 @@ class LetExprNode(
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
         val localBind = "${name.toKotlinIdent()}__let"
         val initStr = letInitExpr.toTransitString(symbolTypes, argSymbols)
-        val localBody = substituteExpr(bodyExpr, name, SymbolValueExprNode(localBind, programLocation()))
+        val replacement = SymbolValueExprNode(localBind, programLocation()).also {
+            it.setInferredType(TypePassType.Inferred(resolvedLetType))
+        }
+        val localBody = substituteExpr(bodyExpr, name, replacement)
         val bodyStr = localBody.toTransitString(
             symbolTypes + (localBind to resolvedLetType),
             argSymbols - name,
@@ -1003,6 +1018,9 @@ class ListLiteralExprNode(
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
+        if (forceString) {
+            return "ctx.mkString(${toTransitString(symbolTypes, argSymbols)}.toString())"
+        }
         val ty = listType ?: throw RuntimeException("List literal type not resolved at $loc")
         val elemSort = when (val elem = ty.elementType) {
             is BoolType -> "ctx.boolSort"
@@ -1159,6 +1177,12 @@ class FieldAccessExprNode(
         forceString: Boolean,
     ): String {
         val resolution = fieldResolution as FieldAccessResolution.Resolved
+        if (forceString && (resolution.leafType is ListType || resolution.leafType is ObjClassType)) {
+            if (baseSymbol in argSymbols) {
+                throw RuntimeException("Cannot convert symbolic ${resolution.leafType} to string")
+            }
+            return "ctx.mkString((${toTransitString(symbolTypes, argSymbols)}).toString())"
+        }
         val baseType = symbolTypes.getValue(baseSymbol) as ObjClassType
         val baseZ3 = recordZ3Expr(baseSymbol, baseType, argSymbols)
         val fieldZ3 = ObjClassType.fieldAccessZ3Codegen(baseType, baseZ3, fieldPath)
@@ -1206,6 +1230,9 @@ class FieldAccessOnExprNode(
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
+        if (forceString && (leafType is ListType || leafType is ObjClassType)) {
+            return "ctx.mkString((${toTransitString(symbolTypes, argSymbols)}).toString())"
+        }
         val baseType = baseExpr.getType() as ObjClassType
         val baseZ3 = baseExpr.toZ3GuardString(symbolTypes, argSymbols)
         val fieldZ3 = ObjClassType.fieldAccessZ3Codegen(baseType, baseZ3, fieldPath)
@@ -1222,13 +1249,26 @@ class FieldAccessOnExprNode(
     override fun toString(): String = fieldPath.joinToString(".", prefix = "($baseExpr).")
 }
 
+private fun typeForTransit(expr: ExprNode, symbolTypes: Map<String, Type>): Type? {
+    try {
+        return expr.getType()
+    } catch (_: RuntimeException) {
+        // Substituted let bindings may lack inferred types; fall back to the symbol env.
+    }
+    return when (expr) {
+        is SymbolValueExprNode -> symbolTypes[expr.symbol]
+        else -> null
+    }
+}
+
 private fun castFieldZ3(fieldZ3: String, leafType: Type, forceString: Boolean): String {
     if (forceString) {
         return when (leafType) {
             is BoolType -> throw RuntimeException("Cannot convert a Bool to a string")
             is IntType -> "ctx.intToString($fieldZ3 as IntExpr)"
             is StringType -> "$fieldZ3 as Expr<SeqSort<CharSort>>"
-            is ObjClassType -> throw RuntimeException("Cannot convert o-class field to string")
+            is ObjClassType, is ListType ->
+                throw RuntimeException("Cannot convert symbolic $leafType field to string")
             else -> throw RuntimeException("Invalid field type: $leafType")
         }
     }
@@ -1239,6 +1279,7 @@ private fun castFieldZ3(fieldZ3: String, leafType: Type, forceString: Boolean): 
         is BoolType -> "$fieldZ3 as BoolExpr"
         is IntType -> "$fieldZ3 as IntExpr"
         is StringType -> "$fieldZ3 as Expr<SeqSort<CharSort>>"
+        is ListType -> fieldZ3
         else -> throw RuntimeException("Invalid field type: $leafType")
     }
 }
@@ -1267,8 +1308,13 @@ class SymbolValueExprNode(
                         "ctx.mkString(${symbol.toKotlinIdent()})"
                     }
                 }
-                is ObjClassType -> throw RuntimeException("Cannot convert o-class type $type to string")
-                is ListType -> throw RuntimeException("Cannot convert list type $type to string")
+                is ObjClassType, is ListType -> {
+                    if (symbol in argSymbols) {
+                        throw RuntimeException("Cannot convert symbolic $type to string")
+                    } else {
+                        "ctx.mkString(${symbol.toKotlinIdent()}.toString())"
+                    }
+                }
                 else -> throw RuntimeException("Invalid type: $type")
             }
 

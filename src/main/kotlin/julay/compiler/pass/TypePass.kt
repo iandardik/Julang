@@ -320,7 +320,10 @@ private fun BinaryOpExprNode.typePassBinaryOp(
     }
     val lhsType = lhsOperand().getType()
     val rhsType = rhsOperand().getType()
-    val structOpErrors = if (lhsType is ObjClassType || rhsType is ObjClassType) {
+    // If either side of "+" is String, coerce the other via toString (string concat).
+    val structOpErrors = if (op() == "+" && (lhsType is StringType || rhsType is StringType)) {
+        emptyList()
+    } else if (lhsType is ObjClassType || rhsType is ObjClassType) {
         when (op()) {
             "=", "#" -> assertOrCompileError(
                 lhsType == rhsType,
