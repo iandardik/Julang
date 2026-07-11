@@ -43,20 +43,21 @@ data class CompilationUnit(
     }
 }
 
-fun emptyRootNode(): RootNode = RootNode(emptyList(), emptyList(), SourceLoc(Pair(1, 1)))
+fun emptyRootNode(sourcePath: Path? = null): RootNode =
+    RootNode(emptyList(), emptyList(), SourceLoc(Pair(1, 1), sourcePath))
 
 fun stubLoadedModule(modulePath: String, sourcePath: Path, isEntry: Boolean): LoadedModule =
     LoadedModule(
         modulePath = modulePath,
         sourcePath = sourcePath,
-        root = emptyRootNode(),
+        root = emptyRootNode(sourcePath),
         isEntry = isEntry,
         importTable = ImportTable(emptyMap()),
         isStub = true,
     )
 
 fun emptyCompilationUnit(entryPath: Path): CompilationUnit {
-    val emptyRoot = emptyRootNode()
+    val emptyRoot = emptyRootNode(entryPath)
     return CompilationUnit(
         entryPath = entryPath,
         root = emptyRoot,

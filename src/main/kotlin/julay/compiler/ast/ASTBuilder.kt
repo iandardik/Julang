@@ -10,14 +10,13 @@ import julay.program.intType
 import julay.program.stringType
 import julay.tools.assert
 import org.antlr.v4.runtime.ParserRuleContext
+import java.nio.file.Path
 
 fun oneChoice(vararg choices : ParserRuleContext?) : ParserRuleContext {
     val nonNullChoices = choices.filterNotNull()
     assert(nonNullChoices.size == 1, "Expected one choice but got: ${nonNullChoices.size}")
     return nonNullChoices[0]
 }
-
-fun sourceLocation(ctx : ParserRuleContext) = SourceLoc(Pair(ctx.getStart().line, ctx.getStop().line))
 
 private fun parseTypeExpr(ctx: JulayParser.TypeExprContext): TypeExpr {
     return when {
@@ -30,7 +29,10 @@ private fun parseTypeExpr(ctx: JulayParser.TypeExprContext): TypeExpr {
 private fun parseTypeParams(ctx: JulayParser.TypeParamsContext?): List<String> =
     ctx?.ID()?.map { it.text } ?: emptyList()
 
-class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
+class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>() {
+
+    private fun sourceLocation(ctx: ParserRuleContext) =
+        SourceLoc(Pair(ctx.getStart().line, ctx.getStop().line), sourcePath)
 
     override fun visitRoot(ctx: JulayParser.RootContext?): ASTNode {
         val importNodes = ctx!!.import_stmt().map {

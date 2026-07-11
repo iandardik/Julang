@@ -27,10 +27,10 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
         val parser = JulayParser(tokens)
         val parseRoot = parser.root()
         if (parser.numberOfSyntaxErrors > 0) {
-            errors.add(OneLocCompileError(SourceLoc(Pair(1, 1)), "Syntax errors in ${path.fileName}"))
-            return ParseResult(emptyRootNode(), ok = false)
+            errors.add(OneLocCompileError(SourceLoc(Pair(1, 1), path), "Syntax errors in ${path.fileName}"))
+            return ParseResult(emptyRootNode(path), ok = false)
         }
-        return ParseResult(ASTBuilder().visit(parseRoot) as RootNode, ok = true)
+        return ParseResult(ASTBuilder(path).visit(parseRoot) as RootNode, ok = true)
     }
 
     fun registerModuleSymbols(module: LoadedModule, symbols: MutableMap<String, ResolvedSymbol>) {
@@ -65,7 +65,7 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
         if (modulePath in loaded) return loaded.getValue(modulePath)
         if (modulePath in loadingStack) {
             val cycle = (loadingStack + modulePath).joinToString(" -> ") { "$it.jul" }
-            errors.add(OneLocCompileError(SourceLoc(Pair(1, 1)), "Circular import: $cycle"))
+            errors.add(OneLocCompileError(SourceLoc(Pair(1, 1), entryPath), "Circular import: $cycle"))
             return cacheStub(modulePath, entryPath, isEntry)
         }
 
@@ -75,7 +75,7 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
             resolveModuleSourcePath(modulePath, searchPath) ?: run {
                 errors.add(
                     OneLocCompileError(
-                        SourceLoc(Pair(1, 1)),
+                        SourceLoc(Pair(1, 1), entryPath),
                         "Cannot find module \"$modulePath\" (looked for ${moduleFileName(modulePath)} on module path)",
                     ),
                 )

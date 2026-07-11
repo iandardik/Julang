@@ -1,5 +1,8 @@
 package julay.compiler
 
+import java.nio.file.Path
+import kotlin.io.path.name
+
 interface CompileError {}
 
 fun assertOrCompileError(assertion : Boolean, error : CompileError) =
@@ -23,11 +26,15 @@ class TwoLocsCompileError(
 interface ProgramLoc {}
 
 class SourceLoc(
-    private val loc : Pair<Int,Int>
+    private val loc : Pair<Int,Int>,
+    private val file : Path? = null,
 ) : ProgramLoc {
-    override fun toString() = when {
-        loc.first == loc.second -> "line ${loc.first}"
-        else -> "lines ${loc.first}-${loc.second}"
+    override fun toString(): String {
+        val lines = when {
+            loc.first == loc.second -> "line ${loc.first}"
+            else -> "lines ${loc.first}-${loc.second}"
+        }
+        return if (file != null) "${file.name}:$lines" else lines
     }
 }
 
