@@ -13,6 +13,10 @@ sealed class ResolvedSymbol {
         override val flatName: String = lib.julName
     }
 
+    data class FunLib(val builtin: FunBuiltin) : ResolvedSymbol() {
+        override val flatName: String = builtin.name
+    }
+
     data class LocalDecl(val decl: DeclNode, val source: Path) : ResolvedSymbol() {
         override val flatName: String = decl.name()
     }
@@ -32,6 +36,7 @@ fun resolveQualifiedName(parts: List<String>, moduleSymbols: Map<String, Resolve
     if (parts.isEmpty()) return null
     val key = qualifiedKey(parts)
     moduleSymbols[key]?.let { return it }
+    FunBuiltinRegistry.resolveQualified(parts)?.let { return ResolvedSymbol.FunLib(it) }
     LibraryRegistry.resolveQualified(parts)?.let { return ResolvedSymbol.Library(it) }
     return null
 }
@@ -44,8 +49,8 @@ fun resolveImportTarget(
     val parts = qn.parts()
     if (parts.size < 2) return null
     resolveQualifiedName(parts, moduleSymbols)?.let { return it }
-    if (parts.first() == JULAYLIB_MODULE) {
-        LibraryRegistry.resolve(parts.first(), parts.last())?.let { return ResolvedSymbol.Library(it) }
+    if (LibraryRegistry.isPclassImport(parts)) {
+        LibraryRegistry.resolve(JULAYLIB_MODULE, parts[2])?.let { return ResolvedSymbol.Library(it) }
     }
     return null
 }
@@ -132,7 +137,7 @@ fun resolveProcLeaf(
     if (LibraryRegistry.isKnownJulaylibSymbol(name)) {
         return null to OneLocCompileError(
             node.programLocation(),
-            "Unknown process \"$name\"; did you mean to import julaylib.$name?",
+            "Unknown process \"$name\"; did you mean to import julaylib.pclass.$name?",
         )
     }
     return null to OneLocCompileError(

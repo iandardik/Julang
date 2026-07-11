@@ -48,7 +48,10 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
             }
         }
         LibraryRegistry.kotlinLibraries.forEach { lib ->
-            symbols[qualifiedKey(listOf(JULAYLIB_MODULE, lib.julName))] = ResolvedSymbol.Library(lib)
+            symbols[LibraryRegistry.pclassModulePath(lib.julName)] = ResolvedSymbol.Library(lib)
+        }
+        FunBuiltinRegistry.all.forEach { builtin ->
+            symbols[qualifiedKey(listOf(JULAYLIB_MODULE, "fun", builtin.name))] = ResolvedSymbol.FunLib(builtin)
         }
     }
 
@@ -103,7 +106,10 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
         root.importNodes().forEach { importNode ->
             val parts = importNode.qualifiedName().parts()
             if (parts.size >= 2) {
-                if (parts.first() == JULAYLIB_MODULE && LibraryRegistry.isKotlinLibrary(parts.last())) {
+                if (FunBuiltinRegistry.resolveQualified(parts) != null) {
+                    return@forEach
+                }
+                if (LibraryRegistry.isPclassImport(parts) && LibraryRegistry.isKotlinLibrary(parts[2])) {
                     return@forEach
                 }
                 val importedModule = if (parts.first() == JULAYLIB_MODULE) {
@@ -185,8 +191,8 @@ fun collectJulaylibStdlibModulePaths(node: ASTNode): Set<String> {
     fun walk(n: ASTNode) {
         if (n is ValueProcExprNode && n.isQualified()) {
             val parts = n.qualifiedParts()!!
-            if (parts.size == 2 && parts.first() == JULAYLIB_MODULE &&
-                LibraryRegistry.isJulayStdlib(parts.last())
+            if (LibraryRegistry.isPclassImport(parts) &&
+                LibraryRegistry.isJulayStdlib(parts[2])
             ) {
                 paths.add(parts.joinToString("."))
             }

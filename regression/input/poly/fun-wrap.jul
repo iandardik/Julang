@@ -1,4 +1,4 @@
-import julaylib.ExitSystem
+import julaylib.pclass.ExitSystem
 
 o-class Box<T> {
     value : T

@@ -1,0 +1,7 @@
+source: regression/input/list/list-int.jul
+programs:
+  - name: ListIntTest
+    run:
+      timeoutMs: 60000
+      expectStdoutContains:
+        - "1"

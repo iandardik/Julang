@@ -1,5 +1,5 @@
-import julaylib.Println
-import julaylib.Timer
+import julaylib.pclass.Println
+import julaylib.pclass.Timer
 
 /* prints the current value of the counter every 5 seconds
 */

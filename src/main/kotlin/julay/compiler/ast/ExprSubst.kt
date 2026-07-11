@@ -62,12 +62,23 @@ fun substituteExpr(expr: ExprNode, name: String, replacement: ExprNode): ExprNod
             expr.leafType,
         )
         is ObjClassLiteralExprNode -> substituteObjClassLiteral(expr, name, replacement)
+        is ListLiteralExprNode -> ListLiteralExprNode(
+            expr.elements.map { substituteExpr(it, name, replacement) },
+            expr.programLocation(),
+            expr.resolvedListTypeOrNull(),
+        ).withTypeOf(expr)
+        is IndexExprNode -> IndexExprNode(
+            substituteExpr(expr.base, name, replacement),
+            substituteExpr(expr.index, name, replacement),
+            expr.programLocation(),
+        ).withTypeOf(expr)
         is FunCallExprNode -> FunCallExprNode(
             expr.callName(),
             expr.callArgs().map { substituteExpr(it, name, replacement) },
             expr.programLocation(),
             expr.resolvedFunOrNull(),
         ).also { copy ->
+            expr.resolvedBuiltinOrNull()?.let { copy.resolveBuiltin(it) }
             expr.specializedBodyOrNull()?.let { body ->
                 copy.resolveSpecializedBody(substituteExpr(body, name, replacement))
             }
@@ -124,6 +135,9 @@ fun exprReferencesSymbol(expr: ExprNode, symbol: String): Boolean {
         is FieldAccessExprNode -> expr.baseSymbol == symbol
         is FieldAccessOnExprNode -> exprReferencesSymbol(expr.baseExpr, symbol)
         is ObjClassLiteralExprNode -> expr.fieldEntries.any { exprReferencesSymbol(it.second, symbol) }
+        is ListLiteralExprNode -> expr.elements.any { exprReferencesSymbol(it, symbol) }
+        is IndexExprNode ->
+            exprReferencesSymbol(expr.base, symbol) || exprReferencesSymbol(expr.index, symbol)
         is FunCallExprNode -> expr.callArgs().any { exprReferencesSymbol(it, symbol) }
         else -> throw RuntimeException("Unexpected expression node ${expr.javaClass.simpleName} during symbol reference check")
     }
@@ -161,6 +175,8 @@ fun collectFunCallNames(expr: ExprNode): Set<String> {
         is FieldAccessExprNode -> emptySet()
         is FieldAccessOnExprNode -> collectFunCallNames(expr.baseExpr)
         is ObjClassLiteralExprNode -> expr.fieldEntries.flatMap { collectFunCallNames(it.second) }.toSet()
+        is ListLiteralExprNode -> expr.elements.flatMap { collectFunCallNames(it) }.toSet()
+        is IndexExprNode -> collectFunCallNames(expr.base) + collectFunCallNames(expr.index)
         is SymbolValueExprNode -> emptySet()
         else -> throw RuntimeException("Unexpected expression node ${expr.javaClass.simpleName} during fun-call collection")
     }

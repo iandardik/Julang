@@ -41,7 +41,10 @@ fun codegenPass(
     val imports = "import com.microsoft.z3.*\n" +
         "import julay.program.*\n" +
         "import julay.program.library.*\n" +
-        "import julay.tools.mkStringConst\n"
+        "import julay.tools.mkStringConst\n" +
+        "import julay.tools.mkSeqLengthAny\n" +
+        "import julay.tools.mkSeqNthAny\n" +
+        "import julay.tools.mkSeqConcatAny\n"
     val dataClassCode = objClassDecls.joinToString("\n\n") { it.kotlinDataClassString() }
     val dataClassSection = if (dataClassCode.isEmpty()) "" else "$dataClassCode\n\n"
     val conversionHelpers = objClassDecls.joinToString("\n\n") { it.kotlinConversionHelpersString() }
@@ -90,7 +93,7 @@ private fun ObjClassDecl.kotlinTypeValWithConvertersString(): String {
         |    "$name",
         |    listOf($fieldsStr),
         |    { value, ctx -> $toZ3Fun(ctx, value.value as $name) },
-        |    { expr -> $fromZ3Fun(expr) },
+        |    { expr, model -> $fromZ3Fun(expr, model) },
         |)
     """.trimMargin()
 }
@@ -130,7 +133,7 @@ private fun ObjClassDecl.kotlinConversionHelpersString(): String {
         |fun $toZ3Fun(ctx: Context, value: $name): Expr<*> =
         |    $mkFun(ctx, $toZ3Args)
         |
-        |fun $fromZ3Fun(expr: Expr<*>): $name {
+        |fun $fromZ3Fun(expr: Expr<*>, model: Model): $name {
         |    val fieldExprs = if (expr.isApp && expr.funcDecl.name == $typeVal.homeConstructorDecl().name) {
         |        expr.args
         |    } else {
@@ -150,14 +153,17 @@ private fun fieldToZ3ExprString(valueExpr: String, type: Type): String = when (t
     is IntType -> "ctx.mkInt($valueExpr)"
     is StringType -> "ctx.mkString($valueExpr)"
     is ObjClassType -> "${objClassToZ3FunName(type.name)}(ctx, $valueExpr)"
+    is ListType -> "${type.toCodegenTypeVal()}.toZ3Expr(Value($valueExpr, ${type.toCodegenTypeVal()}), ctx)"
     else -> throw RuntimeException("Invalid field type for Z3 conversion: $type")
 }
 
 private fun fieldFromZ3ExprString(exprStr: String, type: Type): String = when (type) {
-    is BoolType -> "boolType.fromZ3Expr($exprStr) as Boolean"
-    is IntType -> "intType.fromZ3Expr($exprStr) as Int"
-    is StringType -> "stringType.fromZ3Expr($exprStr) as String"
-    is ObjClassType -> "${objClassFromZ3FunName(type.name)}($exprStr)"
+    is BoolType -> "boolType.fromZ3Expr($exprStr, model) as Boolean"
+    is IntType -> "intType.fromZ3Expr($exprStr, model) as Int"
+    is StringType -> "stringType.fromZ3Expr($exprStr, model) as String"
+    is ObjClassType -> "${objClassFromZ3FunName(type.name)}($exprStr, model)"
+    is ListType ->
+        "@Suppress(\"UNCHECKED_CAST\") (${type.toCodegenTypeVal()}.fromZ3Expr($exprStr, model) as ${type.toKotlinTypeString()})"
     else -> throw RuntimeException("Invalid field type for Z3 conversion: $type")
 }
 
@@ -166,6 +172,7 @@ private fun Type.toZ3ExprTypeString(): String = when (this) {
     is IntType -> "IntExpr"
     is StringType -> "Expr<SeqSort<CharSort>>"
     is ObjClassType -> "Expr<*>"
+    is ListType -> "Expr<*>"
     else -> throw RuntimeException("Invalid field type for Z3 expr: $this")
 }
 

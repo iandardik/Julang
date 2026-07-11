@@ -62,6 +62,12 @@ fun unifyTypes(schema: Type, concrete: Type, subst: MutableMap<String, Type> = m
             }
             return UnifyResult.Ok(subst)
         }
+        is ListType -> {
+            if (concrete !is ListType) {
+                return UnifyResult.Fail("Expected $schema but got $concrete")
+            }
+            return unifyTypes(schema.elementType, concrete.elementType, subst)
+        }
         else -> return UnifyResult.Fail("Cannot unify $schema with $concrete")
     }
 }
@@ -69,5 +75,6 @@ fun unifyTypes(schema: Type, concrete: Type, subst: MutableMap<String, Type> = m
 private fun Type.containsTypeVarRef(name: String): Boolean = when (this) {
     is TypeVar -> this.name == name
     is ObjClassType -> fields.any { it.type.containsTypeVarRef(name) }
+    is ListType -> elementType.containsTypeVarRef(name)
     else -> false
 }

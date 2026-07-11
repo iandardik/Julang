@@ -2,6 +2,7 @@ package julay.program
 
 import com.microsoft.z3.Context
 import com.microsoft.z3.Expr
+import com.microsoft.z3.Model
 import com.microsoft.z3.Status
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -23,7 +24,7 @@ class ObjClassTypeTest {
                 Variable("y", intType),
             ),
             { value, ctx -> pointToZ3(ctx, value.value as Point) },
-            { expr -> pointFromZ3(expr) },
+            { expr, model -> pointFromZ3(expr, model) },
         )
         lineType = ObjClassType(
             "Line",
@@ -32,8 +33,14 @@ class ObjClassTypeTest {
                 Variable("end", pointType),
             ),
             { value, ctx -> lineToZ3(ctx, value.value as Line) },
-            { expr -> lineFromZ3(expr) },
+            { expr, model -> lineFromZ3(expr, model) },
         )
+    }
+
+    private fun emptyModel(ctx: Context): Model {
+        val solver = ctx.mkSolver()
+        assertEquals(Status.SATISFIABLE, solver.check())
+        return solver.model
     }
 
     private fun pointMk(ctx: Context, x: Expr<*>, y: Expr<*>): Expr<*> =
@@ -48,7 +55,7 @@ class ObjClassTypeTest {
     private fun pointToZ3(ctx: Context, value: Point): Expr<*> =
         pointMk(ctx, ctx.mkInt(value.x), ctx.mkInt(value.y))
 
-    private fun pointFromZ3(expr: Expr<*>): Point {
+    private fun pointFromZ3(expr: Expr<*>, model: Model): Point {
         val fieldExprs = if (expr.isApp && expr.funcDecl.name == pointType.homeConstructorDecl().name) {
             expr.args
         } else {
@@ -58,8 +65,8 @@ class ObjClassTypeTest {
             )
         }
         return Point(
-            intType.fromZ3Expr(fieldExprs[0]) as Int,
-            intType.fromZ3Expr(fieldExprs[1]) as Int,
+            intType.fromZ3Expr(fieldExprs[0], model) as Int,
+            intType.fromZ3Expr(fieldExprs[1], model) as Int,
         )
     }
 
@@ -69,7 +76,7 @@ class ObjClassTypeTest {
     private fun lineToZ3(ctx: Context, value: Line): Expr<*> =
         lineMk(ctx, pointToZ3(ctx, value.start), pointToZ3(ctx, value.end))
 
-    private fun lineFromZ3(expr: Expr<*>): Line {
+    private fun lineFromZ3(expr: Expr<*>, model: Model): Line {
         val fieldExprs = if (expr.isApp && expr.funcDecl.name == lineType.homeConstructorDecl().name) {
             expr.args
         } else {
@@ -79,8 +86,8 @@ class ObjClassTypeTest {
             )
         }
         return Line(
-            pointFromZ3(fieldExprs[0]),
-            pointFromZ3(fieldExprs[1]),
+            pointFromZ3(fieldExprs[0], model),
+            pointFromZ3(fieldExprs[1], model),
         )
     }
 
@@ -89,7 +96,7 @@ class ObjClassTypeTest {
         val ctx = Context()
         val original = Point(3, 7)
         val z3Value = pointToZ3(ctx, original)
-        val restored = pointType.fromZ3Expr(z3Value) as Point
+        val restored = pointType.fromZ3Expr(z3Value, emptyModel(ctx)) as Point
         assertEquals(original, restored)
     }
 
@@ -98,7 +105,7 @@ class ObjClassTypeTest {
         val ctx = Context()
         val original = Line(Point(1, 2), Point(3, 4))
         val z3Value = lineToZ3(ctx, original)
-        val restored = lineType.fromZ3Expr(z3Value) as Line
+        val restored = lineType.fromZ3Expr(z3Value, emptyModel(ctx)) as Line
         assertEquals(original, restored)
     }
 
@@ -114,7 +121,7 @@ class ObjClassTypeTest {
         solver.add(ctx2.mkEq(p2, pointToZ3(ctx2, Point(9, 10))))
         assertEquals(Status.SATISFIABLE, solver.check())
         val model = solver.model
-        val value = pointType.fromZ3Expr(model.eval(p2, true)) as Point
+        val value = pointType.fromZ3Expr(model.eval(p2, true), model) as Point
         assertEquals(Point(9, 10), value)
     }
 

@@ -38,6 +38,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitQualified_name(JulayParser.Qualified_nameContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#qual_segment}.
+	 * @param ctx the parse tree
+	 */
+	void enterQual_segment(JulayParser.Qual_segmentContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#qual_segment}.
+	 * @param ctx the parse tree
+	 */
+	void exitQual_segment(JulayParser.Qual_segmentContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#decl}.
 	 * @param ctx the parse tree
 	 */
@@ -347,6 +357,26 @@ public interface JulayParserListener extends ParseTreeListener {
 	 * @param ctx the parse tree
 	 */
 	void exitValue(JulayParser.ValueContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#list_literal}.
+	 * @param ctx the parse tree
+	 */
+	void enterList_literal(JulayParser.List_literalContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#list_literal}.
+	 * @param ctx the parse tree
+	 */
+	void exitList_literal(JulayParser.List_literalContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#index_expr}.
+	 * @param ctx the parse tree
+	 */
+	void enterIndex_expr(JulayParser.Index_exprContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#index_expr}.
+	 * @param ctx the parse tree
+	 */
+	void exitIndex_expr(JulayParser.Index_exprContext ctx);
 	/**
 	 * Enter a parse tree produced by {@link JulayParser#fun_call}.
 	 * @param ctx the parse tree

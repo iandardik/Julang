@@ -2,14 +2,13 @@ package julay.program
 
 import com.microsoft.z3.Context
 import com.microsoft.z3.Expr
+import com.microsoft.z3.Model
 import julay.tools.assert
 
 data class Value(
     val value : Any,
     val type : Type
 ) {
-    constructor(z3Value : Expr<*>, ty : Type) : this(ty.fromZ3Expr(z3Value), ty) {}
-
     init {
         assert(type.isOfType(value), "Value constructed with mismatched value and type: $value : $type")
     }

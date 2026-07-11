@@ -1,5 +1,5 @@
-import julaylib.Println
-import julaylib.ExitSystem
+import julaylib.pclass.Println
+import julaylib.pclass.ExitSystem
 
 fun add(x : Int, y : Int) : Int = x + y
 

@@ -1,0 +1,5 @@
+source: regression/input/list/list-oclass.jul
+programs:
+  - name: ListOClassTest
+    run:
+      timeoutMs: 60000

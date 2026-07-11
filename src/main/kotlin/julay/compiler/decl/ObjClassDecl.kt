@@ -49,6 +49,7 @@ fun mangleTypeForName(type: Type): String = when (type) {
     is IntType -> "Int"
     is StringType -> "String"
     is ObjClassType -> type.name
+    is ListType -> "List_${mangleTypeForName(type.elementType)}"
     is TypeVar -> type.name
     else -> throw RuntimeException("Cannot mangle type $type")
 }
@@ -59,6 +60,7 @@ fun mangleInstantiation(ctor: String, argTypes: List<Type>): String =
 fun Type.containsTypeVar(): Boolean = when (this) {
     is TypeVar -> true
     is ObjClassType -> fields.any { it.type.containsTypeVar() }
+    is ListType -> elementType.containsTypeVar()
     else -> false
 }
 
@@ -91,6 +93,7 @@ internal class ObjClassResolver(
             "Boolean" -> return FieldTypeResolveResult.Success(boolType)
             "Int" -> return FieldTypeResolveResult.Success(intType)
             "String" -> return FieldTypeResolveResult.Success(stringType)
+            "List" -> return FieldTypeResolveResult.Failed("Type \"List\" expects 1 type argument")
         }
         if (name in resolved) {
             return FieldTypeResolveResult.Success(resolved.getValue(name))
@@ -115,6 +118,15 @@ internal class ObjClassResolver(
         typeParamEnv: Map<String, Type>,
     ): FieldTypeResolveResult {
         val ctor = expr.ctor
+        if (ctor == "List") {
+            val argExprs = collectTypeArgs(expr.arg, 1)
+                ?: return FieldTypeResolveResult.Failed("Type \"List\" expects 1 type argument")
+            return when (val argResult = resolveTypeExpr(argExprs[0], typeParamEnv)) {
+                is FieldTypeResolveResult.Success ->
+                    FieldTypeResolveResult.Success(listType(argResult.type))
+                is FieldTypeResolveResult.Failed -> argResult
+            }
+        }
         val raw = declsByName[ctor]
         if (raw == null) {
             if (ctor in resolved) {
@@ -183,6 +195,7 @@ internal class ObjClassResolver(
         is StringType -> TypeExpr.Simple("String")
         is TypeVar -> TypeExpr.Simple(type.name)
         is ObjClassType -> TypeExpr.Simple(type.name)
+        is ListType -> TypeExpr.Parametric("List", typeToTypeExpr(type.elementType))
         else -> throw RuntimeException("Cannot convert type $type to TypeExpr")
     }
 
@@ -217,7 +230,7 @@ internal class ObjClassResolver(
             concreteName,
             fields,
             { _, _ -> throw RuntimeException("valueToZ3 not available on compiler-resolved ObjClassType $concreteName") },
-            { _ -> throw RuntimeException("valueFromZ3 not available on compiler-resolved ObjClassType $concreteName") },
+            { _, _ -> throw RuntimeException("valueFromZ3 not available on compiler-resolved ObjClassType $concreteName") },
         )
         resolved[concreteName] = objClassType
         instantiationLocs[concreteName] = loc
@@ -260,8 +273,17 @@ class ObjClassRegistry private constructor(
                         ?: resolvedTypes[expr.name]?.let { TypeResolveResult.Found(it) }
                         ?: TypeResolveResult.Error("Unknown type \"${expr.name}\"")
                 }
-                is TypeExpr.Parametric ->
+                is TypeExpr.Parametric -> {
+                    if (expr.ctor == "List") {
+                        val argExprs = collectTypeArgs(expr.arg, 1)
+                            ?: return TypeResolveResult.Error("Type \"List\" expects 1 type argument")
+                        return when (val arg = resolveTypeExpr(argExprs[0], typeParamEnv, loc)) {
+                            is TypeResolveResult.Found -> TypeResolveResult.Found(listType(arg.type))
+                            is TypeResolveResult.Error -> arg
+                        }
+                    }
                     TypeResolveResult.Error("Cannot resolve parametric type \"$expr\" without registry resolver")
+                }
             }
         }
         return when (val result = r.resolveTypeExpr(expr, typeParamEnv)) {

@@ -15,8 +15,8 @@ class Julayc : CliktCommand(name = "julayc") {
           JULAY_PATH  Colon-separated list of directories searched for imported .jul modules
                       (after the entry file's directory, any -L paths, and the embedded stdlib).
 
-        Stdlib: julaylib.Println, ExitSystem, Readln, and Timer are Julay modules shipped in the
-        compiler jar. julaylib.HttpServer and julaylib.HttpClient remain Kotlin-native libraries.
+        Stdlib: julaylib.pclass.Println, ExitSystem, Readln, and Timer are Julay modules shipped in the
+        compiler jar. julaylib.pclass.HttpServer and julaylib.pclass.HttpClient remain Kotlin-native libraries.
     """.trimIndent()
 
     private val keepBuild by option(

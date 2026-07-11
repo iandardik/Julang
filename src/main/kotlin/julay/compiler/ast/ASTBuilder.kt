@@ -59,7 +59,10 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
     }
 
     override fun visitQualified_name(ctx: JulayParser.Qualified_nameContext?): ASTNode {
-        val parts = ctx!!.ID().map { it.text }
+        val parts = mutableListOf(ctx!!.ID().text)
+        ctx.qual_segment().forEach { seg ->
+            parts.add(seg.ID()?.text ?: seg.FUN().text)
+        }
         return QualifiedNameNode(parts, sourceLocation(ctx))
     }
 
@@ -527,7 +530,11 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
     }
 
     override fun visitValue(ctx: JulayParser.ValueContext?): ASTNode {
-        return if (ctx!!.oclass_literal() != null) {
+        return if (ctx!!.list_literal() != null) {
+            visit(ctx.list_literal())
+        } else if (ctx.index_expr() != null) {
+            visit(ctx.index_expr())
+        } else if (ctx.oclass_literal() != null) {
             visit(ctx.oclass_literal())
         } else if (ctx.fun_call() != null) {
             visit(ctx.fun_call())
@@ -546,5 +553,23 @@ class ASTBuilder : JulayParserBaseVisitor<ASTNode>() {
         } else {
             throw RuntimeException("Invalid visitValue: invalid expression found: ${ctx.text}")
         }
+    }
+
+    override fun visitList_literal(ctx: JulayParser.List_literalContext?): ASTNode {
+        val elements = ctx!!.expr().map { visit(it) as ExprNode }
+        return ListLiteralExprNode(elements, sourceLocation(ctx))
+    }
+
+    override fun visitIndex_expr(ctx: JulayParser.Index_exprContext?): ASTNode {
+        val indexExpr = visit(ctx!!.expr(ctx.expr().size - 1)) as ExprNode
+        val base: ExprNode = when {
+            ctx.index_expr() != null -> visit(ctx.index_expr()) as ExprNode
+            ctx.fun_call() != null -> visit(ctx.fun_call()) as ExprNode
+            ctx.field_access() != null -> visit(ctx.field_access()) as ExprNode
+            ctx.list_literal() != null -> visit(ctx.list_literal()) as ExprNode
+            ctx.expr().size >= 2 -> visit(ctx.expr(0)) as ExprNode
+            else -> throw RuntimeException("Invalid index_expr at ${ctx.text}")
+        }
+        return IndexExprNode(base, indexExpr, sourceLocation(ctx))
     }
 }

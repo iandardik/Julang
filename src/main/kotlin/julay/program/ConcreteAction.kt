@@ -11,7 +11,7 @@ class ConcreteAction {
         symAction = sig
         argAssignments = sig.args.associateWith { v ->
             val z3Value = model.eval(v.toZ3Expr(ctx), true)
-            val kotlinValue = v.type.fromZ3Expr(z3Value)
+            val kotlinValue = v.type.fromZ3Expr(z3Value, model)
             Value(kotlinValue, v.type)
         }
     }

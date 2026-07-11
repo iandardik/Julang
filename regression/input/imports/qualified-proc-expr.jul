@@ -17,4 +17,4 @@ p-class S {
     }
 }
 
-program QualifiedProcExprTest := S || julaylib.Println || julaylib.ExitSystem
+program QualifiedProcExprTest := S || julaylib.pclass.Println || julaylib.pclass.ExitSystem

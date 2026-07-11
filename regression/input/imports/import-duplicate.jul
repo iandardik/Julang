@@ -1,5 +1,5 @@
-import julaylib.Println
-import julaylib.Println
+import julaylib.pclass.Println
+import julaylib.pclass.Println
 
 p-class S {
     var x : Int

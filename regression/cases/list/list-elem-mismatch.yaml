@@ -1,0 +1,4 @@
+source: regression/input/list/list-elem-mismatch.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected list elements to have type Int but got Boolean"

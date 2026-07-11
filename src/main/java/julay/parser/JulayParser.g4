@@ -10,7 +10,12 @@ import_stmt
     ;
 
 qualified_name
-    : ID (DOT ID)+
+    : ID (DOT qual_segment)+
+    ;
+
+qual_segment
+    : ID
+    | FUN
     ;
 
 decl
@@ -179,13 +184,24 @@ proc_expr
     ;
 
 value
-    : oclass_literal
+    : list_literal
+    | index_expr
+    | oclass_literal
     | fun_call
     | field_access
     | INT
     | TRUE
     | FALSE
     | STRING
+    ;
+
+list_literal
+    : LBRACK (expr (COMMA expr)*)? RBRACK
+    ;
+
+index_expr
+    : index_expr LBRACK expr RBRACK
+    | (fun_call | field_access | list_literal | LPAREN expr RPAREN) LBRACK expr RBRACK
     ;
 
 fun_call

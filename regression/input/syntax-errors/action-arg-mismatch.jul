@@ -1,4 +1,4 @@
-import julaylib.Println
+import julaylib.pclass.Println
 
 p-class Producer {
     var x : Int

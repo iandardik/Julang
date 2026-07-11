@@ -239,14 +239,21 @@ class FunCallExprNode(
     private var instantiatedReturnType: Type? = null,
 ) : ExprNode(args) {
     private var resolvedFun: FunNode? = resolved
+    private var resolvedBuiltin: FunBuiltin? = null
     private var specializedBody: ExprNode? = null
 
     override fun programLocation() = loc
     fun callName(): String = name
     fun callArgs(): List<ExprNode> = args
     internal fun resolvedFunOrNull(): FunNode? = resolvedFun
+    internal fun resolvedBuiltinOrNull(): FunBuiltin? = resolvedBuiltin
     internal fun resolveFun(funNode: FunNode) {
         resolvedFun = funNode
+        resolvedBuiltin = null
+    }
+    internal fun resolveBuiltin(builtin: FunBuiltin) {
+        resolvedBuiltin = builtin
+        resolvedFun = null
     }
     internal fun resolveInstantiatedReturnType(type: Type) {
         instantiatedReturnType = type
@@ -270,13 +277,25 @@ class FunCallExprNode(
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
         forceString: Boolean,
-    ): String = inlinedBody().toZ3GuardString(symbolTypes, argSymbols, forceString)
+    ): String {
+        resolvedBuiltin?.let { builtin ->
+            val argStrs = args.map { it.toZ3GuardString(symbolTypes, argSymbols, forceString) }
+            return builtin.z3Codegen(argStrs)
+        }
+        return inlinedBody().toZ3GuardString(symbolTypes, argSymbols, forceString)
+    }
 
-    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String =
-        inlinedBody().toTransitString(symbolTypes, argSymbols)
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        resolvedBuiltin?.let { builtin ->
+            val argStrs = args.map { it.toTransitString(symbolTypes, argSymbols) }
+            return builtin.kotlinCodegen(argStrs)
+        }
+        return inlinedBody().toTransitString(symbolTypes, argSymbols)
+    }
 
     override fun inferType(symbolEnv: Map<String, Type>): Type {
         instantiatedReturnType?.let { return it }
+        resolvedBuiltin?.let { return it.returnType }
         val funNode = resolvedFun
             ?: throw RuntimeException("Function call \"$name\" not resolved at $loc")
         return funNode.returnType
@@ -619,6 +638,8 @@ class BinaryOpExprNode(
             "+" -> {
                 when {
                     lhsType is IntType && rhsType is IntType -> "ctx.mkAdd($lhsGuardStr,$rhsGuardStr)"
+                    lhsType is ListType && rhsType is ListType ->
+                        "ctx.mkSeqConcatAny($lhsGuardStr, $rhsGuardStr)"
                     lhsType is StringType || rhsType is StringType -> "ctx.mkConcat($lhsGuardStr,$rhsGuardStr)"
                     else -> throw RuntimeException("Cannot add types: $lhsType and $rhsType")
                 }
@@ -658,6 +679,7 @@ class BinaryOpExprNode(
                 val rhsType = rhsOperand.getType()
                 when {
                     lhsType is IntType && rhsType is IntType -> intType
+                    lhsType is ListType && rhsType is ListType && lhsType == rhsType -> lhsType
                     lhsType is StringType || rhsType is StringType -> stringType
                     else -> throw RuntimeException("Cannot add types: $lhsType and $rhsType")
                 }
@@ -961,6 +983,97 @@ class ObjClassLiteralExprNode(
     }
 }
 
+class ListLiteralExprNode(
+    val elements: List<ExprNode>,
+    private val loc: ProgramLoc,
+    resolvedType: ListType? = null,
+) : ExprNode(elements) {
+    private var listType: ListType? = resolvedType
+
+    override fun programLocation() = loc
+
+    internal fun resolveListType(type: ListType) {
+        listType = type
+    }
+
+    internal fun resolvedListTypeOrNull(): ListType? = listType
+
+    override fun toZ3GuardString(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+        forceString: Boolean,
+    ): String {
+        val ty = listType ?: throw RuntimeException("List literal type not resolved at $loc")
+        val elemSort = when (val elem = ty.elementType) {
+            is BoolType -> "ctx.boolSort"
+            is IntType -> "ctx.intSort"
+            is StringType -> "ctx.stringSort"
+            is ObjClassType -> "${objClassTypeValName(elem.name)}.sort(ctx)"
+            is ListType -> "${elem.toCodegenTypeVal()}.sort(ctx)"
+            else -> throw RuntimeException("Invalid list element type: $elem")
+        }
+        if (elements.isEmpty()) {
+            return "ctx.mkEmptySeq($elemSort)"
+        }
+        val units = elements.map { elem ->
+            "ctx.mkUnit(${elem.toZ3GuardString(symbolTypes, argSymbols)})"
+        }
+        return if (units.size == 1) {
+            units[0]
+        } else {
+            "ctx.mkConcat(${units.joinToString(", ")})"
+        }
+    }
+
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        if (elements.isEmpty()) {
+            return "emptyList()"
+        }
+        val elems = elements.joinToString(", ") { it.toTransitString(symbolTypes, argSymbols) }
+        return "listOf($elems)"
+    }
+
+    override fun inferType(symbolEnv: Map<String, Type>): Type {
+        return listType ?: throw RuntimeException("List literal type not resolved at $loc")
+    }
+
+    override fun toString(): String = elements.joinToString(", ", prefix = "[", postfix = "]")
+}
+
+class IndexExprNode(
+    val base: ExprNode,
+    val index: ExprNode,
+    private val loc: ProgramLoc,
+) : ExprNode(listOf(base, index)) {
+    override fun programLocation() = loc
+
+    override fun toZ3GuardString(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+        forceString: Boolean,
+    ): String {
+        val baseStr = base.toZ3GuardString(symbolTypes, argSymbols)
+        val indexStr = index.toZ3GuardString(symbolTypes, argSymbols)
+        return "ctx.mkSeqNthAny($baseStr, $indexStr)"
+    }
+
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        val baseStr = base.toTransitString(symbolTypes, argSymbols)
+        val indexStr = index.toTransitString(symbolTypes, argSymbols)
+        return "$baseStr[$indexStr]"
+    }
+
+    override fun inferType(symbolEnv: Map<String, Type>): Type {
+        val baseType = base.getType()
+        if (baseType !is ListType) {
+            throw RuntimeException("Cannot index non-list type $baseType at $loc")
+        }
+        return baseType.elementType
+    }
+
+    override fun toString(): String = "$base[$index]"
+}
+
 class LiteralValueExprNode(
     private val value : String,
     private val type : Type,
@@ -1155,6 +1268,7 @@ class SymbolValueExprNode(
                     }
                 }
                 is ObjClassType -> throw RuntimeException("Cannot convert o-class type $type to string")
+                is ListType -> throw RuntimeException("Cannot convert list type $type to string")
                 else -> throw RuntimeException("Invalid type: $type")
             }
 
@@ -1165,6 +1279,14 @@ class SymbolValueExprNode(
                 ObjClassType.z3ConstString(symbol, typeVal)
             } else {
                 ObjClassType.kotlinObjClassToZ3String(type.name, symbol)
+            }
+        }
+        if (type is ListType) {
+            val typeVal = type.toCodegenTypeVal()
+            return if (symbol in argSymbols) {
+                "ctx.mkConst(\"${symbol.escapeKotlinStringLiteral()}\", $typeVal.sort(ctx))"
+            } else {
+                "$typeVal.toZ3Expr(Value(${symbol.toKotlinIdent()}, $typeVal), ctx)"
             }
         }
         if (symbol in argSymbols) {

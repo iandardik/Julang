@@ -15,7 +15,7 @@ class ObjClassType(
     val name: String,
     val fields: List<Variable>,
     private val valueToZ3: (Value, Context) -> Expr<*>,
-    private val valueFromZ3: (Expr<*>) -> Any,
+    private val valueFromZ3: (Expr<*>, Model) -> Any,
 ) : Type {
     private val objClassCtx = Context()
     // Lazy so polymorphic o-class instantiations (fields still typed as TypeVar) can be
@@ -46,8 +46,8 @@ class ObjClassType(
     override fun toZ3Expr(value: Value, ctx: Context): Expr<*> =
         valueToZ3(value, ctx)
 
-    override fun fromZ3Expr(expr: Expr<*>): Any =
-        valueFromZ3(expr)
+    override fun fromZ3Expr(expr: Expr<*>, model: Model): Any =
+        valueFromZ3(expr, model)
 
     override fun isOfType(obj: Any): Boolean = obj.javaClass.simpleName == name
 
@@ -95,14 +95,7 @@ class ObjClassType(
         )
     }
 
-    private fun z3SortForField(type: Type, ctx: Context): Sort = when (type) {
-        is BoolType -> ctx.boolSort
-        is IntType -> ctx.intSort
-        is StringType -> ctx.stringSort
-        is ObjClassType -> type.metadataFor(ctx).sort
-        is TypeVar -> throw RuntimeException("TypeVar \"${type.name}\" must not reach Z3 datatype construction")
-        else -> throw RuntimeException("Invalid field type for Z3 datatype: $type")
-    }
+    private fun z3SortForField(type: Type, ctx: Context): Sort = type.toZ3Sort(ctx)
 
     companion object {
         fun z3ConstString(symbol: String, typeValName: String): String {
@@ -175,6 +168,7 @@ fun Type.toKotlinTypeString(): String = when (this) {
     is IntType -> "Int"
     is StringType -> "String"
     is ObjClassType -> name
+    is ListType -> "List<${elementType.toKotlinTypeString()}>"
     is TypeVar -> throw RuntimeException("TypeVar \"$name\" must not reach Kotlin codegen")
     else -> throw RuntimeException("Invalid type: $this")
 }
@@ -184,6 +178,7 @@ fun Type.toCodegenTypeVal(): String = when (this) {
     is IntType -> "intType"
     is StringType -> "stringType"
     is ObjClassType -> objClassTypeValName(name)
+    is ListType -> "listType(${elementType.toCodegenTypeVal()})"
     is TypeVar -> throw RuntimeException("TypeVar \"$name\" must not reach Kotlin codegen")
     else -> throw RuntimeException("Invalid type: $this")
 }

@@ -1,5 +1,5 @@
-import julaylib.HttpClient
-import julaylib.Println
+import julaylib.pclass.HttpClient
+import julaylib.pclass.Println
 
 p-class ClientDispatcher {
     var numReqs : Int

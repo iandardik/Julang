@@ -29,6 +29,12 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitQualified_name(JulayParser.Qualified_nameContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#qual_segment}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitQual_segment(JulayParser.Qual_segmentContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#decl}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
@@ -214,6 +220,18 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 * @return the visitor result
 	 */
 	T visitValue(JulayParser.ValueContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#list_literal}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitList_literal(JulayParser.List_literalContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#index_expr}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitIndex_expr(JulayParser.Index_exprContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link JulayParser#fun_call}.
 	 * @param ctx the parse tree

@@ -1,4 +1,4 @@
-import julaylib.HttpServer
+import julaylib.pclass.HttpServer
 
 p-class IncReqHandler {
     var localCounter : Int

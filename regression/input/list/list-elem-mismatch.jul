@@ -1,0 +1,16 @@
+import julaylib.pclass.ExitSystem
+
+p-class BadList {
+    var xs : List Int
+
+    constructor initially() {
+        transit:
+            xs := [1, true]
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard: true
+    }
+}
+
+program BadListTest := BadList || ExitSystem

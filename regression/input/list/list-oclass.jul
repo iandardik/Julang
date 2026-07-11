@@ -1,0 +1,31 @@
+import julaylib.pclass.ExitSystem
+
+o-class Point {
+    x : Int
+    y : Int
+}
+
+p-class ListOClassDemo {
+    var pts : List Point
+    var done : Boolean
+
+    constructor initially() {
+        transit:
+            pts := [Point { x := 1, y := 2 }, Point { x := 3, y := 4 }]
+            done := false
+    }
+
+    transition check() {
+        guard:
+            ~done & pts[0] = Point { x := 1, y := 2 } & pts[1] = Point { x := 3, y := 4 }
+        transit:
+            done := true
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard:
+            done
+    }
+}
+
+program ListOClassTest := ListOClassDemo || ExitSystem

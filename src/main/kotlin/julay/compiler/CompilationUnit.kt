@@ -85,6 +85,7 @@ fun declFromResolvedSymbol(symbol: ResolvedSymbol): DeclNode? = when (symbol) {
     is ResolvedSymbol.LocalDecl -> symbol.decl
     is ResolvedSymbol.ImportedDecl -> symbol.decl
     is ResolvedSymbol.Library -> null
+    is ResolvedSymbol.FunLib -> null
 }
 
 fun callableFuns(module: LoadedModule): Map<String, FunNode> {
@@ -95,3 +96,9 @@ fun callableFuns(module: LoadedModule): Map<String, FunNode> {
     }.toMap()
     return local + imported
 }
+
+fun callableFunBuiltins(module: LoadedModule): Map<String, FunBuiltin> =
+    module.importTable.shortNames.mapNotNull { (name, symbol) ->
+        if (symbol is ResolvedSymbol.FunLib) name to symbol.builtin else null
+    }.toMap()
+

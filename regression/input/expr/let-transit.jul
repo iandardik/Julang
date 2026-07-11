@@ -1,19 +1,21 @@
-import julaylib.Println
-import julaylib.ExitSystem
+import julaylib.pclass.Println
+import julaylib.pclass.ExitSystem
 
 p-class S {
     var x : Int
+    var nested : List (List Int)
     var print : Boolean
 
     constructor initially() {
         transit:
             x := let (inc : Int := 2) { inc + 3 }
+            nested := let (ys : List (List Int) := [[1], [2, 3]]) { ys }
             print := true
     }
 
     p2p-consumer transition println(msg : String) {
         guard:
-            print & (msg = x + "")
+            print & (msg = x + "") & nested[1][0] = 2
         transit:
             print := false
     }

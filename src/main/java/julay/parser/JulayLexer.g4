@@ -5,6 +5,8 @@ DOT : '.' ;
 COLON : ':' ;
 LPAREN : '(' ;
 RPAREN : ')' ;
+LBRACK : '[' ;
+RBRACK : ']' ;
 LCURLY : '{' ;
 RCURLY : '}' ;
 PARALLEL : '||' ;

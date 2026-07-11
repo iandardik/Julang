@@ -3,6 +3,7 @@ package julay.program
 import com.microsoft.z3.Context
 import com.microsoft.z3.Expr
 import com.microsoft.z3.IntNum
+import com.microsoft.z3.Model
 import julay.tools.mkStringConst
 
 val boolType = BoolType()
@@ -22,7 +23,7 @@ fun parseType(strType : String) : Type {
 interface Type {
     fun toZ3Expr(variable : Variable, ctx : Context) : Expr<*>
     fun toZ3Expr(value : Value, ctx : Context) : Expr<*>
-    fun fromZ3Expr(expr : Expr<*>) : Any
+    fun fromZ3Expr(expr : Expr<*>, model : Model) : Any
     fun isOfType(obj : Any) : Boolean
 }
 
@@ -38,7 +39,7 @@ class InvalidType : Type {
         throw RuntimeException("Invalid type")
     }
 
-    override fun fromZ3Expr(expr: Expr<*>): Any {
+    override fun fromZ3Expr(expr: Expr<*>, model: Model): Any {
         throw RuntimeException("Invalid type")
     }
 
@@ -68,7 +69,7 @@ class BoolType : Type {
         return ctx.mkBool(value.value as Boolean)
     }
 
-    override fun fromZ3Expr(expr: Expr<*>): Any {
+    override fun fromZ3Expr(expr: Expr<*>, model: Model): Any {
         return expr.string.lowercase() == "true"
     }
 
@@ -98,7 +99,7 @@ class IntType : Type {
         return ctx.mkInt(value.value as Int)
     }
 
-    override fun fromZ3Expr(expr: Expr<*>): Any {
+    override fun fromZ3Expr(expr: Expr<*>, model: Model): Any {
         if (expr is IntNum) {
             return expr.int
         }
@@ -131,7 +132,7 @@ class StringType : Type {
         return ctx.mkString(value.value as String)
     }
 
-    override fun fromZ3Expr(expr: Expr<*>): Any {
+    override fun fromZ3Expr(expr: Expr<*>, model: Model): Any {
         return expr.string
     }
 
@@ -165,7 +166,7 @@ class TypeVar(val name: String) : Type {
         throw RuntimeException("TypeVar \"$name\" must not reach Z3 codegen")
     }
 
-    override fun fromZ3Expr(expr: Expr<*>): Any {
+    override fun fromZ3Expr(expr: Expr<*>, model: Model): Any {
         throw RuntimeException("TypeVar \"$name\" must not reach Z3 codegen")
     }
 
