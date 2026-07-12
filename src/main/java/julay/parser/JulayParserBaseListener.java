@@ -401,18 +401,6 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void enterWhen_literal(JulayParser.When_literalContext ctx) { }
-	/**
-	 * {@inheritDoc}
-	 *
-	 * <p>The default implementation does nothing.</p>
-	 */
-	@Override public void exitWhen_literal(JulayParser.When_literalContext ctx) { }
-	/**
-	 * {@inheritDoc}
-	 *
-	 * <p>The default implementation does nothing.</p>
-	 */
 	@Override public void enterProc_expr(JulayParser.Proc_exprContext ctx) { }
 	/**
 	 * {@inheritDoc}
@@ -425,13 +413,13 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void enterValue(JulayParser.ValueContext ctx) { }
+	@Override public void enterLiteral(JulayParser.LiteralContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void exitValue(JulayParser.ValueContext ctx) { }
+	@Override public void exitLiteral(JulayParser.LiteralContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
@@ -497,13 +485,13 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void enterStruct_field_assign(JulayParser.Struct_field_assignContext ctx) { }
+	@Override public void enterOclass_field_assign(JulayParser.Oclass_field_assignContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void exitStruct_field_assign(JulayParser.Struct_field_assignContext ctx) { }
+	@Override public void exitOclass_field_assign(JulayParser.Oclass_field_assignContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *

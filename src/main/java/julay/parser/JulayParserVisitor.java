@@ -203,23 +203,17 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitWhen_pattern(JulayParser.When_patternContext ctx);
 	/**
-	 * Visit a parse tree produced by {@link JulayParser#when_literal}.
-	 * @param ctx the parse tree
-	 * @return the visitor result
-	 */
-	T visitWhen_literal(JulayParser.When_literalContext ctx);
-	/**
 	 * Visit a parse tree produced by {@link JulayParser#proc_expr}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
 	T visitProc_expr(JulayParser.Proc_exprContext ctx);
 	/**
-	 * Visit a parse tree produced by {@link JulayParser#value}.
+	 * Visit a parse tree produced by {@link JulayParser#literal}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
-	T visitValue(JulayParser.ValueContext ctx);
+	T visitLiteral(JulayParser.LiteralContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link JulayParser#list_literal}.
 	 * @param ctx the parse tree
@@ -251,11 +245,11 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitOclass_literal(JulayParser.Oclass_literalContext ctx);
 	/**
-	 * Visit a parse tree produced by {@link JulayParser#struct_field_assign}.
+	 * Visit a parse tree produced by {@link JulayParser#oclass_field_assign}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
-	T visitStruct_field_assign(JulayParser.Struct_field_assignContext ctx);
+	T visitOclass_field_assign(JulayParser.Oclass_field_assignContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link JulayParser#field_access}.
 	 * @param ctx the parse tree

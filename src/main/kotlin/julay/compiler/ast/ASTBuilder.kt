@@ -375,11 +375,16 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             }
         }
         return when {
-            ctx.value() != null -> {
-                val valueNode = visit(ctx.value())
+            ctx.literal() != null -> {
+                val valueNode = visit(ctx.literal())
                 assert(valueNode is ExprNode, "Expected expr children to be ExprNodes")
                 valueNode
             }
+            ctx.list_literal() != null -> visit(ctx.list_literal())
+            ctx.index_expr() != null -> visit(ctx.index_expr())
+            ctx.field_access() != null -> visit(ctx.field_access())
+            ctx.oclass_literal() != null -> visit(ctx.oclass_literal())
+            ctx.fun_call() != null -> visit(ctx.fun_call())
             unaryOpMapper() != "N/A" -> {
                 val innerNode = visit(ctx.expr(0))
                 if (innerNode !is ExprNode) {
@@ -451,7 +456,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
 
     private fun parseWhenPattern(ctx: JulayParser.When_patternContext): WhenPattern {
         return when {
-            ctx.when_literal() != null -> WhenPattern.Primitive(parseWhenLiteral(ctx.when_literal()))
+            ctx.literal() != null -> WhenPattern.Primitive(parseWhenLiteral(ctx.literal()))
             ctx.oclass_literal() != null -> {
                 val literal = visit(ctx.oclass_literal())
                 if (literal !is ObjClassLiteralExprNode) {
@@ -480,7 +485,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         }
     }
 
-    private fun parseWhenLiteral(ctx: JulayParser.When_literalContext): WhenLiteral {
+    private fun parseWhenLiteral(ctx: JulayParser.LiteralContext): WhenLiteral {
         return when {
             ctx.INT() != null -> WhenLiteral.IntLit(ctx.INT().text)
             ctx.STRING() != null -> {
@@ -512,7 +517,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
 
     override fun visitOclass_literal(ctx: JulayParser.Oclass_literalContext?): ASTNode {
         val typeExpr = parseTypeExpr(ctx!!.typeExpr())
-        val fieldEntries = ctx.struct_field_assign().map { assign ->
+        val fieldEntries = ctx.oclass_field_assign().map { assign ->
             val fieldName = assign.ID().text
             val expr = visit(assign.expr())
             if (expr !is ExprNode) {
@@ -531,18 +536,8 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         return FieldAccessExprNode(ids[0], ids.drop(1), sourceLocation(ctx))
     }
 
-    override fun visitValue(ctx: JulayParser.ValueContext?): ASTNode {
-        return if (ctx!!.list_literal() != null) {
-            visit(ctx.list_literal())
-        } else if (ctx.index_expr() != null) {
-            visit(ctx.index_expr())
-        } else if (ctx.oclass_literal() != null) {
-            visit(ctx.oclass_literal())
-        } else if (ctx.fun_call() != null) {
-            visit(ctx.fun_call())
-        } else if (ctx.field_access() != null) {
-            visit(ctx.field_access())
-        } else if (ctx.INT() != null) {
+    override fun visitLiteral(ctx: JulayParser.LiteralContext?): ASTNode {
+        return if (ctx!!.INT() != null) {
             LiteralValueExprNode(ctx.INT().text, intType, sourceLocation(ctx))
         } else if (ctx.TRUE() != null) {
             LiteralValueExprNode(ctx.TRUE().text, boolType, sourceLocation(ctx))
@@ -553,7 +548,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             val unquotedStr = rawStr.substring(1,rawStr.length-1)
             LiteralValueExprNode(unquotedStr, stringType, sourceLocation(ctx))
         } else {
-            throw RuntimeException("Invalid visitValue: invalid expression found: ${ctx.text}")
+            throw RuntimeException("Invalid visitLiteral: invalid expression found: ${ctx.text}")
         }
     }
 

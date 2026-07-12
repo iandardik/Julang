@@ -127,10 +127,15 @@ effect_call
     : ID LPAREN (expr (COMMA expr)*)? RPAREN
     ;
 
-// order according to the Java rules: https://introcs.cs.princeton.edu/java/11precedence/
+// order approximately according to the Java rules: https://introcs.cs.princeton.edu/java/11precedence/
 expr
-    : value
+    : literal
     | LPAREN expr RPAREN
+    | list_literal
+    | index_expr
+    | field_access
+    | oclass_literal
+    | fun_call
     | NOT expr
     | BANG expr
     | expr TIMES expr
@@ -165,15 +170,8 @@ when_guard_arm
     ;
 
 when_pattern
-    : when_literal
+    : literal
     | oclass_literal
-    ;
-
-when_literal
-    : INT
-    | STRING
-    | TRUE
-    | FALSE
     ;
 
 proc_expr
@@ -183,13 +181,8 @@ proc_expr
     | proc_expr PARALLEL proc_expr
     ;
 
-value
-    : list_literal
-    | index_expr
-    | oclass_literal
-    | fun_call
-    | field_access
-    | INT
+literal
+    : INT
     | TRUE
     | FALSE
     | STRING
@@ -214,10 +207,10 @@ fun_call
     ;
 
 oclass_literal
-    : typeExpr LCURLY struct_field_assign (COMMA struct_field_assign)* RCURLY
+    : typeExpr LCURLY oclass_field_assign (COMMA oclass_field_assign)* RCURLY
     ;
 
-struct_field_assign
+oclass_field_assign
     : ID ASGN_EQ expr
     ;
 
