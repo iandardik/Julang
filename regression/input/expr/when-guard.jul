@@ -1,41 +1,32 @@
-import julaylib.pclass.Println
-import julaylib.pclass.ExitSystem
-
 p-class S {
-    var key : String
-    var ok : Boolean
+    var step : String
     var print : Boolean
 
     constructor initially() {
         transit:
-            key := "B"
-            ok := false
+            step := "A"
             print := true
     }
 
-    transition check() {
+    transition step() {
         guard:
-            print
+            step = "A" | step = "B"
         transit:
-            ok := when {
-                key = "A" -> true
-                key = "B" -> true
-                else -> false
+            step := when {
+                step = "A" -> "B"
+                step = "B" -> "C"
+                else -> "oops!"
             }
-            print := false
+        effect:
+            println(step)
     }
 
-    p2p-consumer transition println(msg : String) {
+    transition exitSystem() {
         guard:
-            ~print & ok & (msg = "ok")
-        transit:
-            print := true
-    }
-
-    p2p-consumer transition exitSystem() {
-        guard:
-            print
+            step = "C"
+        effect:
+            exitProcess()
     }
 }
 
-program P := S || Println || ExitSystem
+program P := S

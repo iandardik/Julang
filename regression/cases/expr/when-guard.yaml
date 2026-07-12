@@ -4,4 +4,5 @@ programs:
     run:
       timeoutMs: 60000
       expectStdoutLinesUnordered:
-        - "ok"
+        - "A"
+        - "B"

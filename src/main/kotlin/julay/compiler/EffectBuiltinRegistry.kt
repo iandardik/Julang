@@ -3,7 +3,6 @@ package julay.compiler
 import julay.compiler.ast.EffectAssignNode
 import julay.compiler.ast.EffectCallNode
 import julay.compiler.ast.EffectStmtNode
-import julay.compiler.ast.ExprNode
 import julay.program.*
 
 data class EffectBuiltin(
@@ -62,28 +61,27 @@ object EffectBuiltinRegistry {
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
         assignPrefix: String = "",
-    ): String = when (stmt) {
-        is EffectCallNode -> callKotlinString(stmt.callName(), stmt.callArgs(), symbolTypes, argSymbols)
-        is EffectAssignNode -> {
-            val rhs = callKotlinString(stmt.callName(), stmt.callArgs(), symbolTypes, argSymbols)
-            "${assignPrefix}${stmt.assignKey().toKotlinIdent()} = $rhs"
+        argStrings: List<String>? = null,
+    ): String {
+        val resolvedArgs = argStrings
+            ?: stmt.callArgs().map { it.toTransitString(symbolTypes, argSymbols) }
+        return when (stmt) {
+            is EffectCallNode -> callKotlinString(stmt.callName(), resolvedArgs)
+            is EffectAssignNode -> {
+                val rhs = callKotlinString(stmt.callName(), resolvedArgs)
+                "${assignPrefix}${stmt.assignKey().toKotlinIdent()} = $rhs"
+            }
         }
     }
 
-    private fun callKotlinString(
-        name: String,
-        args: List<ExprNode>,
-        symbolTypes: Map<String, Type>,
-        argSymbols: Set<String>,
-    ): String {
+    private fun callKotlinString(name: String, argStrings: List<String>): String {
         val builtin = lookup(name)
             ?: throw RuntimeException("Unknown effect builtin \"$name\"")
-        if (builtin.paramTypes.size != args.size) {
+        if (builtin.paramTypes.size != argStrings.size) {
             throw RuntimeException(
-                "Expected effect \"$name\" to take ${builtin.paramTypes.size} argument(s) but got ${args.size}",
+                "Expected effect \"$name\" to take ${builtin.paramTypes.size} argument(s) but got ${argStrings.size}",
             )
         }
-        val argStrings = args.map { it.toTransitString(symbolTypes, argSymbols) }
         return builtin.kotlinCodegen(argStrings)
     }
 }

@@ -300,10 +300,29 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
         val rhs = e.toTransitString(symbolTypes, argSymbols)
         copyAssignmentString(rootVar, rootType, fieldPath, rhs)
     }
-    val effectLines = effects.map {
-        EffectBuiltinRegistry.effectStmtKotlinString(it, symbolTypes, argSymbols)
+    // Snapshot all effect args from the pre-transit state before any effect runs.
+    // e.g. println(step) prints the pre-transit value. Effects themselves still run
+    // after transit so blocking effects like readln() see updated state.
+    // Args do not see earlier assignments in the same effect block, so:
+    //   effect:
+    //     a := readln()
+    //     println(a)
+    // evaluates a in the pre-state on the second line.
+    val effectArgSnapshots = mutableListOf<String>()
+    val effectLines = effects.mapIndexed { i, stmt ->
+        val argTemps = stmt.callArgs().mapIndexed { j, arg ->
+            val temp = "__effectArg_${i}_$j"
+            effectArgSnapshots += "val $temp = ${arg.toTransitString(symbolTypes, argSymbols)}"
+            temp
+        }
+        EffectBuiltinRegistry.effectStmtKotlinString(
+            stmt,
+            symbolTypes,
+            argSymbols,
+            argStrings = argTemps,
+        )
     }
-    return (transitLines + effectLines).joinToString("\n")
+    return (effectArgSnapshots + transitLines + effectLines).joinToString("\n")
 }
 
 private fun ActionDecl.kotlinStaticInfoString(): String {
