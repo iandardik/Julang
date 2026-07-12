@@ -95,6 +95,9 @@ internal class ObjClassResolver(
             "String" -> return FieldTypeResolveResult.Success(stringType)
             "List" -> return FieldTypeResolveResult.Failed("Type \"List\" expects 1 type argument")
         }
+        ObjClassBuiltinRegistry.lookup(name)?.let {
+            return FieldTypeResolveResult.Success(it)
+        }
         if (name in resolved) {
             return FieldTypeResolveResult.Success(resolved.getValue(name))
         }
@@ -270,6 +273,7 @@ class ObjClassRegistry private constructor(
                     "Int" -> TypeResolveResult.Found(intType)
                     "String" -> TypeResolveResult.Found(stringType)
                     else -> typeParamEnv[expr.name]?.let { TypeResolveResult.Found(it) }
+                        ?: ObjClassBuiltinRegistry.lookup(expr.name)?.let { TypeResolveResult.Found(it) }
                         ?: resolvedTypes[expr.name]?.let { TypeResolveResult.Found(it) }
                         ?: TypeResolveResult.Error("Unknown type \"${expr.name}\"")
                 }
@@ -320,6 +324,14 @@ class ObjClassRegistry private constructor(
         fun build(rawDecls: List<RawObjClassDecl>): ObjClassRegistry {
             val errors = mutableListOf<CompileError>()
             for (raw in rawDecls) {
+                if (ObjClassBuiltinRegistry.isBuiltin(raw.name)) {
+                    errors.add(
+                        OneLocCompileError(
+                            raw.loc,
+                            "o-class \"${raw.name}\" conflicts with a builtin o-class type",
+                        ),
+                    )
+                }
                 val dupParams = raw.typeParams.groupingBy { it }.eachCount().filter { it.value > 1 }.keys
                 for (dup in dupParams) {
                     errors.add(

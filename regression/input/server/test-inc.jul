@@ -60,16 +60,29 @@ p-class PeriodicPrint {
     }
 }
 
+p-class ServerStarter {
+    var started : Boolean
+
+    constructor initially() {
+        transit: started := false
+    }
+
+    transition startServer(port : Int) {
+        guard: ~started & port = 8000
+        transit: started := true
+    }
+}
+
 p-class IncReqHandler {
     var localCounter : Int
     var step : String
     var exit : Boolean
 
-    constructor receiveRequest(reqBody : String) {
+    constructor receiveRequest(req : HttpServerRequest) {
         transit:
             localCounter := -1 // TODO the reverse order causes a compiler bug
             step := "A"
-            exit := (reqBody = "exit")
+            exit := (req.body = "exit")
     }
 
     p2p-consumer transition increment() {
@@ -84,9 +97,12 @@ p-class IncReqHandler {
             step := "C"
     }
 
-    transition sendResponse(respBody : String) {
+    transition sendResponse(resp : HttpServerResponse) {
         guard:
-            step = "C" & respBody = localCounter + ""
+            step = "C" & resp = HttpServerResponse {
+                body := localCounter + "",
+                code := 200
+            }
         transit:
             step := "D"
     }
@@ -97,5 +113,5 @@ p-class IncReqHandler {
 }
 
 proc Printer := PeriodicPrint || Println || Timer
-proc ServerLogic := IncReqHandler || HttpServer || ExitSystem
+proc ServerLogic := ServerStarter || IncReqHandler || HttpServer || ExitSystem
 program CounterServerTest := Counter || Printer || ServerLogic

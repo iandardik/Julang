@@ -16,7 +16,8 @@ class Julayc : CliktCommand(name = "julayc") {
                       (after the entry file's directory, any -L paths, and the embedded stdlib).
 
         Stdlib: julaylib.pclass.Println, ExitSystem, Readln, and Timer are Julay modules shipped in the
-        compiler jar. julaylib.pclass.HttpServer and julaylib.pclass.HttpClient remain Kotlin-native libraries.
+        compiler jar. julaylib.pclass.HttpServer and julaylib.pclass.HttpClient remain Kotlin-native libraries
+        (with builtin HttpServerRequest/Response and HttpClientRequest/Response o-classes).
     """.trimIndent()
 
     private val keepBuild by option(

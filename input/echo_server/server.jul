@@ -6,24 +6,40 @@ o-class ReqInfo {
     resp : String
 }
 
+p-class ServerStarter {
+    var started : Boolean
+
+    constructor initially() {
+        transit: started := false
+    }
+
+    transition startServer(port : Int) {
+        guard: ~started & port = 8000
+        transit: started := true
+    }
+}
+
 p-class EchoHandler {
     var info : ReqInfo
     var responded : Boolean
     var done : Boolean
 
-    constructor receiveRequest(reqBody : String) {
+    constructor receiveRequest(req : HttpServerRequest) {
         transit:
             info := ReqInfo {
-                req := reqBody,
-                resp := reqBody + " is a good point!"
+                req := req.body,
+                resp := req.body + " is a good point!"
             }
             responded := false
             done := false
     }
 
-    transition sendResponse(respBody : String) {
+    transition sendResponse(resp : HttpServerResponse) {
         guard:
-            ~responded & respBody = info.resp
+            ~responded & resp = HttpServerResponse {
+                body := info.resp,
+                code := 200
+            }
         transit:
             responded := true
     }
@@ -44,4 +60,4 @@ p-class EchoHandler {
     }
 }
 
-proc Server := EchoHandler || Println || HttpServer
+proc Server := ServerStarter || EchoHandler || Println || HttpServer

@@ -103,7 +103,7 @@ You do not need `background: true` when using `http`; the harness starts the ser
 
 ### HTTP checks (`http`)
 
-List of POST requests sent to **`http://localhost:8000/`** (plain text body). Julang’s `HttpServer` library listens on that port.
+List of POST requests sent to **`http://localhost:8000/`** (plain text body). Cases that use `HttpServer` should call `startServer` with port `8000` so the probe can connect.
 
 ```yaml
 http:
@@ -251,7 +251,7 @@ Capture once by running the program locally, or copy the stdout section from a f
 
 ## Limitations
 
-- **Port 8000** is fixed in the compiler libraries; only one HTTP case runs at a time.
+- **Port 8000** is what the HTTP probe uses; cases must `startServer` on that port. Only one HTTP case runs at a time.
 - **Compile failures** on positive cases are detected when no program JARs appear in the workspace (the compiler CLI may still exit 0 on semantic errors).
 - Programs that never exit need `background: true` or an `http`/`durationMs` capture path, not foreground `timeoutMs` alone (unless using `expectFailure: true` to assert a timeout).
 

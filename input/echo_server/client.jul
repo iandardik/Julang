@@ -22,33 +22,37 @@ p-class ClientDispatcher {
 p-class ClientLogic {
     var reqNum : Int
     var state : String
-    var resp : String
+    var respText : String
 
     constructor startReq(num : Int) {
         transit:
             reqNum := num
             state := "A"
-            resp := ""
+            respText := ""
     }
 
-    transition sendRequest(sendBody : String) {
+    transition sendRequest(req : HttpClientRequest) {
         guard:
-            state = "A" & sendBody = "ReqNum: " + reqNum
+            state = "A" & req = HttpClientRequest {
+                url := "http://localhost:8000",
+                method := "POST",
+                body := "ReqNum: " + reqNum
+            }
         transit:
             state := "B"
     }
 
-    transition receiveResponse(respBody : String) {
+    transition receiveResponse(resp : HttpClientResponse) {
         guard:
             state = "B"
         transit:
-            resp := respBody
+            respText := resp.body
             state := "C"
     }
 
     p2p-consumer transition println(msg : String) {
         guard:
-            state = "C" & msg = "response: " + resp
+            state = "C" & msg = "response: " + respText
         transit:
             state := "D"
     }

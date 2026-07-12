@@ -1,22 +1,18 @@
 package julay.program
 
 import com.microsoft.z3.Context
-import julay.program.library.JulHttpServer.Companion.reqBodyArg
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.*
-import java.util.*
 
 class ConstructorTransitionSystem(
-    private val initiallyAction : TSAction,
-    private val constructorsInfo : Set<TransitionSystemStaticInfo>,
-    private val program : Program,
-    private val ctx : Context,
+    private val initiallyAction: TSAction,
+    private val constructorsInfo: Set<TransitionSystemStaticInfo>,
+    private val program: Program,
+    private val ctx: Context,
     // TODO input the cli args into initially (accept them here as a constructor arg)
 ) : TransitionSystem {
-    companion object: StaticInfo {
+    companion object : StaticInfo {
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one
         // the alphabet info is not strictly correct, but it does not matter since it's never used
         override fun staticInfo() = TransitionSystemStaticInfo("ConstructorTS$", setOf(), mapOf())
@@ -43,8 +39,7 @@ class ConstructorTransitionSystem(
         return if (initially) {
             initially = false
             setOf(initiallyAction)
-        }
-        else {
+        } else {
             nonInitiallyConstructorActions
         }
     }

@@ -1,10 +1,23 @@
 import julaylib.pclass.HttpServer
 
+p-class ServerStarter {
+    var started : Boolean
+
+    constructor initially() {
+        transit: started := false
+    }
+
+    transition startServer(port : Int) {
+        guard: ~started & port = 8000
+        transit: started := true
+    }
+}
+
 p-class IncReqHandler {
     var localCounter : Int
     var step : String
 
-    constructor receiveRequest(reqBody : String) {
+    constructor receiveRequest(req : HttpServerRequest) {
         transit:
             step := "A"
             localCounter := -1
@@ -22,12 +35,15 @@ p-class IncReqHandler {
             step := "C"
     }
 
-    transition sendResponse(respBody : String) {
+    transition sendResponse(resp : HttpServerResponse) {
         guard:
-            step = "C" & respBody = localCounter + ""
+            step = "C" & resp = HttpServerResponse {
+                body := localCounter + "",
+                code := 200
+            }
         transit:
             step := "D"
     }
 }
 
-proc ServerLogic := IncReqHandler || HttpServer
+proc ServerLogic := ServerStarter || IncReqHandler || HttpServer
