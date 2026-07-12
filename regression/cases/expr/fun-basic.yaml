@@ -4,4 +4,4 @@ programs:
     run:
       timeoutMs: 60000
       expectStdoutLinesUnordered:
-        - "2"
+        - "2.0"

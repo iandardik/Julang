@@ -4,12 +4,14 @@ import com.microsoft.z3.Context
 import com.microsoft.z3.Expr
 import com.microsoft.z3.IntNum
 import com.microsoft.z3.Model
+import com.microsoft.z3.RatNum
 import julay.tools.mkStringConst
 
 val boolType = BoolType()
 val intType = IntType()
+val realType = RealType()
 val stringType = StringType()
-val baseTypes = listOf(boolType, intType, stringType)
+val baseTypes = listOf(boolType, intType, realType, stringType)
 
 fun parseType(strType : String) : Type {
     baseTypes.forEach { baseType ->
@@ -116,6 +118,50 @@ class IntType : Type {
 
     override fun equals(other: Any?): Boolean {
         return other is IntType
+    }
+
+    override fun hashCode(): Int {
+        return toString().hashCode()
+    }
+}
+
+class RealType : Type {
+    override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {
+        return ctx.mkRealConst(variable.name)
+    }
+
+    override fun toZ3Expr(value: Value, ctx: Context): Expr<*> {
+        return ctx.mkReal((value.value as Double).toString())
+    }
+
+    override fun fromZ3Expr(expr: Expr<*>, model: Model): Any {
+        return when (expr) {
+            is RatNum -> {
+                expr.numerator.bigInteger.toDouble() / expr.denominator.bigInteger.toDouble()
+            }
+            is IntNum -> expr.int.toDouble()
+            else -> {
+                val s = expr.toString()
+                if ('/' in s) {
+                    val parts = s.split('/')
+                    parts[0].toDouble() / parts[1].toDouble()
+                } else {
+                    s.toDouble()
+                }
+            }
+        }
+    }
+
+    override fun isOfType(obj: Any): Boolean {
+        return obj is Double
+    }
+
+    override fun toString(): String {
+        return "Real"
+    }
+
+    override fun equals(other: Any?): Boolean {
+        return other is RealType
     }
 
     override fun hashCode(): Int {

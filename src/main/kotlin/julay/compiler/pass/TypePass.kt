@@ -623,6 +623,7 @@ private fun WhenArm.branchExpr(): ExprNode = when (this) {
 
 private fun WhenLiteral.whenLiteralType(): Type = when (this) {
     is WhenLiteral.IntLit -> intType
+    is WhenLiteral.RealLit -> realType
     is WhenLiteral.StringLit -> stringType
     is WhenLiteral.BoolLit -> boolType
 }

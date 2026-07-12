@@ -341,6 +341,7 @@ class VarNode(
         private fun primitiveTypeName(type: Type): String = when (type) {
             is BoolType -> "Boolean"
             is IntType -> "Int"
+            is RealType -> "Real"
             is StringType -> "String"
             else -> throw RuntimeException("Cannot create flattened VarNode for type $type")
         }
@@ -636,81 +637,152 @@ class BinaryOpExprNode(
         val lhsGuardStr = lhsOperand.toZ3GuardString(symbolTypes, argSymbols, forceStringOperands)
         val rhsGuardStr = rhsOperand.toZ3GuardString(symbolTypes, argSymbols, forceStringOperands)
 
+        fun numericZ3(mkOp: (String, String) -> String): String {
+            val promoted = promoteNumeric(lhsType, rhsType)
+                ?: throw RuntimeException("Cannot apply \"$op\" to types $lhsType and $rhsType")
+            return if (promoted is RealType) {
+                mkOp(asZ3Real(lhsGuardStr, lhsType), asZ3Real(rhsGuardStr, rhsType))
+            } else {
+                mkOp(lhsGuardStr, rhsGuardStr)
+            }
+        }
+
         return when (op) {
-            "*" -> "ctx.mkMul($lhsGuardStr,$rhsGuardStr)"
-            "/" -> "ctx.mkDiv($lhsGuardStr,$rhsGuardStr)"
-            "%" -> "ctx.mkMod($lhsGuardStr,$rhsGuardStr)"
-            "<" -> "ctx.mkLt($lhsGuardStr,$rhsGuardStr)"
-            "<=" -> "ctx.mkLe($lhsGuardStr,$rhsGuardStr)"
-            ">" -> "ctx.mkGt($lhsGuardStr,$rhsGuardStr)"
-            ">=" -> "ctx.mkGe($lhsGuardStr,$rhsGuardStr)"
-            "=" -> "ctx.mkEq($lhsGuardStr,$rhsGuardStr)"
-            "#" -> "ctx.mkNot(ctx.mkEq($lhsGuardStr,$rhsGuardStr))"
+            "*" -> numericZ3 { l, r -> "ctx.mkMul($l,$r)" }
+            "/" -> numericZ3 { l, r -> "ctx.mkDiv($l,$r)" }
+            "%" -> {
+                if (lhsType !is IntType || rhsType !is IntType) {
+                    throw RuntimeException("Cannot apply \"%\" to types $lhsType and $rhsType")
+                }
+                "ctx.mkMod($lhsGuardStr,$rhsGuardStr)"
+            }
+            "<" -> numericZ3 { l, r -> "ctx.mkLt($l,$r)" }
+            "<=" -> numericZ3 { l, r -> "ctx.mkLe($l,$r)" }
+            ">" -> numericZ3 { l, r -> "ctx.mkGt($l,$r)" }
+            ">=" -> numericZ3 { l, r -> "ctx.mkGe($l,$r)" }
+            "=" -> {
+                val promoted = promoteNumeric(lhsType, rhsType)
+                if (promoted is RealType) {
+                    "ctx.mkEq(${asZ3Real(lhsGuardStr, lhsType)},${asZ3Real(rhsGuardStr, rhsType)})"
+                } else {
+                    "ctx.mkEq($lhsGuardStr,$rhsGuardStr)"
+                }
+            }
+            "#" -> {
+                val promoted = promoteNumeric(lhsType, rhsType)
+                if (promoted is RealType) {
+                    "ctx.mkNot(ctx.mkEq(${asZ3Real(lhsGuardStr, lhsType)},${asZ3Real(rhsGuardStr, rhsType)}))"
+                } else {
+                    "ctx.mkNot(ctx.mkEq($lhsGuardStr,$rhsGuardStr))"
+                }
+            }
             "&" -> "ctx.mkAnd($lhsGuardStr,$rhsGuardStr)"
             "|" -> "ctx.mkOr($lhsGuardStr,$rhsGuardStr)"
             "=>" -> "ctx.mkImplies($lhsGuardStr,$rhsGuardStr)"
             "+" -> {
                 when {
                     lhsType is IntType && rhsType is IntType -> "ctx.mkAdd($lhsGuardStr,$rhsGuardStr)"
+                    promoteNumeric(lhsType, rhsType) is RealType ->
+                        "ctx.mkAdd(${asZ3Real(lhsGuardStr, lhsType)},${asZ3Real(rhsGuardStr, rhsType)})"
                     lhsType is ListType && rhsType is ListType ->
                         "ctx.mkSeqConcatAny($lhsGuardStr, $rhsGuardStr)"
                     lhsType is StringType || rhsType is StringType -> "ctx.mkConcat($lhsGuardStr,$rhsGuardStr)"
                     else -> throw RuntimeException("Cannot add types: $lhsType and $rhsType")
                 }
             }
-            "-" -> "ctx.mkMinus($lhsGuardStr,$rhsGuardStr)"
+            "-" -> numericZ3 { l, r -> "ctx.mkMinus($l,$r)" }
             else -> throw RuntimeException("Invalid binary op: $op")
         }
     }
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
         val lhs = lhsOperand.toTransitString(symbolTypes, argSymbols)
         val rhs = rhsOperand.toTransitString(symbolTypes, argSymbols)
+        val lhsType = typeForTransit(lhsOperand, symbolTypes)
+        val rhsType = typeForTransit(rhsOperand, symbolTypes)
+
+        fun numericTransit(kotlinOp: String): String {
+            if (lhsType != null && rhsType != null && promoteNumeric(lhsType, rhsType) is RealType) {
+                return "(${asKotlinDouble(lhs, lhsType)} $kotlinOp ${asKotlinDouble(rhs, rhsType)})"
+            }
+            return "($lhs $kotlinOp $rhs)"
+        }
+
         return when (op) {
-            "=" -> "($lhs == $rhs)"
-            "#" -> "($lhs != $rhs)"
+            "=" -> {
+                if (lhsType != null && rhsType != null && promoteNumeric(lhsType, rhsType) is RealType) {
+                    "(${asKotlinDouble(lhs, lhsType)} == ${asKotlinDouble(rhs, rhsType)})"
+                } else {
+                    "($lhs == $rhs)"
+                }
+            }
+            "#" -> {
+                if (lhsType != null && rhsType != null && promoteNumeric(lhsType, rhsType) is RealType) {
+                    "(${asKotlinDouble(lhs, lhsType)} != ${asKotlinDouble(rhs, rhsType)})"
+                } else {
+                    "($lhs != $rhs)"
+                }
+            }
             "&" -> "($lhs && $rhs)"
             "|" -> "($lhs || $rhs)"
             "=>" -> "(!($lhs) || $rhs)"
             "+" -> {
-                val lhsType = typeForTransit(lhsOperand, symbolTypes)
-                val rhsType = typeForTransit(rhsOperand, symbolTypes)
                 when {
                     lhsType is StringType || rhsType is StringType -> {
                         val lhsStr = if (lhsType is StringType) lhs else "($lhs).toString()"
                         val rhsStr = if (rhsType is StringType) rhs else "($rhs).toString()"
                         "($lhsStr + $rhsStr)"
                     }
+                    lhsType != null && rhsType != null && promoteNumeric(lhsType, rhsType) is RealType ->
+                        "(${asKotlinDouble(lhs, lhsType)} + ${asKotlinDouble(rhs, rhsType)})"
                     else -> "($lhs + $rhs)"
                 }
             }
+            "*" -> numericTransit("*")
+            "/" -> numericTransit("/")
+            "%" -> "($lhs % $rhs)"
+            "-" -> numericTransit("-")
+            "<" -> numericTransit("<")
+            "<=" -> numericTransit("<=")
+            ">" -> numericTransit(">")
+            ">=" -> numericTransit(">=")
             else -> "($lhs $op $rhs)"
         }
     }
     override fun inferType(symbolEnv: Map<String, Type>): Type {
+        val lhsType = lhsOperand.getType()
+        val rhsType = rhsOperand.getType()
         return when (op) {
             "=" -> boolType
             "#" -> boolType
-            "*" -> intType
-            "/" -> intType
-            "%" -> intType
-            "<" -> boolType
-            "<=" -> boolType
-            ">" -> boolType
-            ">=" -> boolType
+            "*" -> promoteNumeric(lhsType, rhsType)
+                ?: throw RuntimeException("Cannot apply \"*\" to types $lhsType and $rhsType")
+            "/" -> promoteNumeric(lhsType, rhsType)
+                ?: throw RuntimeException("Cannot apply \"/\" to types $lhsType and $rhsType")
+            "%" -> {
+                if (lhsType !is IntType || rhsType !is IntType) {
+                    throw RuntimeException("Cannot apply \"%\" to types $lhsType and $rhsType")
+                }
+                intType
+            }
+            "<", "<=", ">", ">=" -> {
+                promoteNumeric(lhsType, rhsType)
+                    ?: throw RuntimeException("Cannot apply \"$op\" to types $lhsType and $rhsType")
+                boolType
+            }
             "&" -> boolType
             "|" -> boolType
             "=>" -> boolType
             "+" -> {
-                val lhsType = lhsOperand.getType()
-                val rhsType = rhsOperand.getType()
                 when {
                     lhsType is IntType && rhsType is IntType -> intType
+                    promoteNumeric(lhsType, rhsType) is RealType -> realType
                     lhsType is ListType && rhsType is ListType && lhsType == rhsType -> lhsType
                     lhsType is StringType || rhsType is StringType -> stringType
                     else -> throw RuntimeException("Cannot add types: $lhsType and $rhsType")
                 }
             }
-            "-" -> intType
+            "-" -> promoteNumeric(lhsType, rhsType)
+                ?: throw RuntimeException("Cannot apply \"-\" to types $lhsType and $rhsType")
             else -> throw RuntimeException("Invalid binary op: $op")
         }
     }
@@ -753,6 +825,7 @@ class IfElseExprNode(
 
 sealed interface WhenLiteral {
     data class IntLit(val value: String) : WhenLiteral
+    data class RealLit(val value: String) : WhenLiteral
     data class StringLit(val value: String) : WhenLiteral
     data class BoolLit(val value: String) : WhenLiteral
 }
@@ -951,6 +1024,7 @@ class WhenExprNode(
 
 private fun WhenLiteral.toLiteralExprNode(loc: ProgramLoc): LiteralValueExprNode = when (this) {
     is WhenLiteral.IntLit -> LiteralValueExprNode(value, intType, loc)
+    is WhenLiteral.RealLit -> LiteralValueExprNode(value, realType, loc)
     is WhenLiteral.StringLit -> LiteralValueExprNode(value, stringType, loc)
     is WhenLiteral.BoolLit -> LiteralValueExprNode(value, boolType, loc)
 }
@@ -1160,6 +1234,7 @@ class LiteralValueExprNode(
         return when (type) {
             is BoolType -> "ctx.mkBool($value)"
             is IntType -> "ctx.mkInt($value)"
+            is RealType -> "ctx.mkReal(\"$value\")"
             is StringType -> "ctx.mkString(\"$value\")"
             else -> throw RuntimeException("Invalid type: $type")
         }
@@ -1316,11 +1391,26 @@ private fun typeForTransit(expr: ExprNode, symbolTypes: Map<String, Type>): Type
     }
 }
 
+private fun Type.isNumeric(): Boolean = this is IntType || this is RealType
+
+private fun promoteNumeric(lhs: Type, rhs: Type): Type? = when {
+    lhs is IntType && rhs is IntType -> intType
+    lhs.isNumeric() && rhs.isNumeric() -> realType
+    else -> null
+}
+
+private fun asZ3Real(guardStr: String, type: Type): String =
+    if (type is IntType) "ctx.mkInt2Real($guardStr)" else guardStr
+
+private fun asKotlinDouble(exprStr: String, type: Type): String =
+    if (type is IntType) "($exprStr).toDouble()" else exprStr
+
 private fun castFieldZ3(fieldZ3: String, leafType: Type, forceString: Boolean): String {
     if (forceString) {
         return when (leafType) {
             is BoolType -> throw RuntimeException("Cannot convert a Bool to a string")
             is IntType -> "ctx.intToString($fieldZ3 as IntExpr)"
+            is RealType -> throw RuntimeException("Cannot convert a symbolic Real to a string")
             is StringType -> "$fieldZ3 as Expr<SeqSort<CharSort>>"
             is ObjClassType, is ListType ->
                 throw RuntimeException("Cannot convert symbolic $leafType field to string")
@@ -1333,6 +1423,7 @@ private fun castFieldZ3(fieldZ3: String, leafType: Type, forceString: Boolean): 
     return when (leafType) {
         is BoolType -> "$fieldZ3 as BoolExpr"
         is IntType -> "$fieldZ3 as IntExpr"
+        is RealType -> "$fieldZ3 as RealExpr"
         is StringType -> "$fieldZ3 as Expr<SeqSort<CharSort>>"
         is ListType -> fieldZ3
         else -> throw RuntimeException("Invalid field type: $leafType")
@@ -1352,6 +1443,13 @@ class SymbolValueExprNode(
                 is IntType -> {
                     if (symbol in argSymbols) {
                         "ctx.intToString(ctx.mkIntConst(\"${symbol.escapeKotlinStringLiteral()}\"))"
+                    } else {
+                        "ctx.mkString(${symbol.toKotlinIdent()}.toString())"
+                    }
+                }
+                is RealType -> {
+                    if (symbol in argSymbols) {
+                        throw RuntimeException("Cannot convert a symbolic Real to a string")
                     } else {
                         "ctx.mkString(${symbol.toKotlinIdent()}.toString())"
                     }
@@ -1394,6 +1492,7 @@ class SymbolValueExprNode(
             return when (type) {
                 is BoolType -> "ctx.mkBoolConst(\"${symbol.escapeKotlinStringLiteral()}\")"
                 is IntType -> "ctx.mkIntConst(\"${symbol.escapeKotlinStringLiteral()}\")"
+                is RealType -> "ctx.mkRealConst(\"${symbol.escapeKotlinStringLiteral()}\")"
                 is StringType -> "ctx.mkStringConst(\"${symbol.escapeKotlinStringLiteral()}\")"
                 else -> throw RuntimeException("Invalid type: $type")
             }
@@ -1401,6 +1500,7 @@ class SymbolValueExprNode(
         return when (type) {
             is BoolType -> "ctx.mkBool(${symbol.toKotlinIdent()})"
             is IntType -> "ctx.mkInt(${symbol.toKotlinIdent()})"
+            is RealType -> "ctx.mkReal(${symbol.toKotlinIdent()}.toString())"
             is StringType -> "ctx.mkString(${symbol.toKotlinIdent()})"
             else -> throw RuntimeException("Invalid type: $type")
         }

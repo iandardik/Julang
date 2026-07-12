@@ -1,0 +1,5 @@
+source: regression/input/type-errors/real-as-list-index.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected Int index but got Real"
+  - "Found type errors; exiting."

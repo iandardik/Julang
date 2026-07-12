@@ -1,0 +1,10 @@
+p-class S {
+    var x : Int
+
+    constructor initially(args : List String) {
+        transit:
+            x := 5 % 2.0
+    }
+}
+
+program BadMod := S

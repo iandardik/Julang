@@ -187,6 +187,7 @@ proc_expr
 
 literal
     : INT
+    | REAL
     | TRUE
     | FALSE
     | STRING

@@ -7,6 +7,7 @@ import julay.parser.JulayParserBaseVisitor
 import julay.program.TSAction
 import julay.program.boolType
 import julay.program.intType
+import julay.program.realType
 import julay.program.stringType
 import julay.tools.assert
 import org.antlr.v4.runtime.ParserRuleContext
@@ -506,6 +507,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     private fun parseWhenLiteral(ctx: JulayParser.LiteralContext): WhenLiteral {
         return when {
             ctx.INT() != null -> WhenLiteral.IntLit(ctx.INT().text)
+            ctx.REAL() != null -> WhenLiteral.RealLit(ctx.REAL().text)
             ctx.STRING() != null -> {
                 val rawStr = ctx.STRING().text
                 WhenLiteral.StringLit(rawStr.substring(1, rawStr.length - 1))
@@ -557,6 +559,8 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     override fun visitLiteral(ctx: JulayParser.LiteralContext?): ASTNode {
         return if (ctx!!.INT() != null) {
             LiteralValueExprNode(ctx.INT().text, intType, sourceLocation(ctx))
+        } else if (ctx.REAL() != null) {
+            LiteralValueExprNode(ctx.REAL().text, realType, sourceLocation(ctx))
         } else if (ctx.TRUE() != null) {
             LiteralValueExprNode(ctx.TRUE().text, boolType, sourceLocation(ctx))
         } else if (ctx.FALSE() != null) {

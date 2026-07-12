@@ -152,6 +152,7 @@ private fun ObjClassDecl.kotlinConversionHelpersString(): String {
 private fun fieldToZ3ExprString(valueExpr: String, type: Type): String = when (type) {
     is BoolType -> "ctx.mkBool($valueExpr)"
     is IntType -> "ctx.mkInt($valueExpr)"
+    is RealType -> "ctx.mkReal($valueExpr.toString())"
     is StringType -> "ctx.mkString($valueExpr)"
     is ObjClassType -> "${objClassToZ3FunName(type.name)}(ctx, $valueExpr)"
     is ListType -> "${type.toCodegenTypeVal()}.toZ3Expr(Value($valueExpr, ${type.toCodegenTypeVal()}), ctx)"
@@ -161,6 +162,7 @@ private fun fieldToZ3ExprString(valueExpr: String, type: Type): String = when (t
 private fun fieldFromZ3ExprString(exprStr: String, type: Type): String = when (type) {
     is BoolType -> "boolType.fromZ3Expr($exprStr, model) as Boolean"
     is IntType -> "intType.fromZ3Expr($exprStr, model) as Int"
+    is RealType -> "realType.fromZ3Expr($exprStr, model) as Double"
     is StringType -> "stringType.fromZ3Expr($exprStr, model) as String"
     is ObjClassType -> "${objClassFromZ3FunName(type.name)}($exprStr, model)"
     is ListType ->
@@ -171,6 +173,7 @@ private fun fieldFromZ3ExprString(exprStr: String, type: Type): String = when (t
 private fun Type.toZ3ExprTypeString(): String = when (this) {
     is BoolType -> "BoolExpr"
     is IntType -> "IntExpr"
+    is RealType -> "RealExpr"
     is StringType -> "Expr<SeqSort<CharSort>>"
     is ObjClassType -> "Expr<*>"
     is ListType -> "Expr<*>"

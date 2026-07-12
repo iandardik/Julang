@@ -166,6 +166,7 @@ fun String.escapeKotlinStringLiteral(): String =
 fun Type.toKotlinTypeString(): String = when (this) {
     is BoolType -> "Boolean"
     is IntType -> "Int"
+    is RealType -> "Double"
     is StringType -> "String"
     is ObjClassType -> name
     is ListType -> "List<${elementType.toKotlinTypeString()}>"
@@ -176,6 +177,7 @@ fun Type.toKotlinTypeString(): String = when (this) {
 fun Type.toCodegenTypeVal(): String = when (this) {
     is BoolType -> "boolType"
     is IntType -> "intType"
+    is RealType -> "realType"
     is StringType -> "stringType"
     is ObjClassType -> objClassTypeValName(name)
     is ListType -> "listType(${elementType.toCodegenTypeVal()})"

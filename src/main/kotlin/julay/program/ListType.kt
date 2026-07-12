@@ -71,6 +71,7 @@ fun listType(element: Type): ListType = ListType(element)
 fun Type.toZ3Sort(ctx: Context): Sort = when (this) {
     is BoolType -> ctx.boolSort
     is IntType -> ctx.intSort
+    is RealType -> ctx.realSort
     is StringType -> ctx.stringSort
     is ObjClassType -> sort(ctx)
     is ListType -> sort(ctx)

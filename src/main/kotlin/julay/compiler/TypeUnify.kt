@@ -31,7 +31,7 @@ fun unifyTypes(schema: Type, concrete: Type, subst: MutableMap<String, Type> = m
             subst[schema.name] = concrete
             return UnifyResult.Ok(subst)
         }
-        is BoolType, is IntType, is StringType -> {
+        is BoolType, is IntType, is RealType, is StringType -> {
             return if (schema == concrete) {
                 UnifyResult.Ok(subst)
             } else {

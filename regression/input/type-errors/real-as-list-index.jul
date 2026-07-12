@@ -1,0 +1,12 @@
+p-class S {
+    var xs : List Int
+    var n : Int
+
+    constructor initially(args : List String) {
+        transit:
+            xs := [1, 2, 3]
+            n := xs[1.0]
+    }
+}
+
+program BadIndex := S

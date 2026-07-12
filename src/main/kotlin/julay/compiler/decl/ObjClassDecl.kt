@@ -47,6 +47,7 @@ internal sealed interface ObjClassResolveResult {
 fun mangleTypeForName(type: Type): String = when (type) {
     is BoolType -> "Boolean"
     is IntType -> "Int"
+    is RealType -> "Real"
     is StringType -> "String"
     is ObjClassType -> type.name
     is ListType -> "List_${mangleTypeForName(type.elementType)}"
@@ -92,6 +93,7 @@ internal class ObjClassResolver(
         when (name) {
             "Boolean" -> return FieldTypeResolveResult.Success(boolType)
             "Int" -> return FieldTypeResolveResult.Success(intType)
+            "Real" -> return FieldTypeResolveResult.Success(realType)
             "String" -> return FieldTypeResolveResult.Success(stringType)
             "List" -> return FieldTypeResolveResult.Failed("Type \"List\" expects 1 type argument")
         }
@@ -195,6 +197,7 @@ internal class ObjClassResolver(
     private fun typeToTypeExpr(type: Type): TypeExpr = when (type) {
         is BoolType -> TypeExpr.Simple("Boolean")
         is IntType -> TypeExpr.Simple("Int")
+        is RealType -> TypeExpr.Simple("Real")
         is StringType -> TypeExpr.Simple("String")
         is TypeVar -> TypeExpr.Simple(type.name)
         is ObjClassType -> TypeExpr.Simple(type.name)
