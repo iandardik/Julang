@@ -3,5 +3,8 @@ programs:
   - name: ListIntTest
     run:
       timeoutMs: 60000
+      args:
+        - "cli"
       expectStdoutContains:
+        - "cli"
         - "1"

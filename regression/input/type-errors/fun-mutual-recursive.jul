@@ -5,7 +5,7 @@ fun odd(n : Int) : Boolean = if (n = 0) { false } else { even(n - 1) }
 p-class S {
     var x : Int
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             x := 0
     }

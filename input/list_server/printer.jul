@@ -7,7 +7,7 @@ p-class PeriodicPrint {
     var list : List String
     var step : String
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             list := []
             step := "A"

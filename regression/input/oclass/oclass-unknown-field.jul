@@ -5,9 +5,9 @@ o-class Point {
 p-class Bad {
     var pos : Point
 
-    constructor initially(p : Point) {
+    constructor initially(args : List String) {
         transit:
-            pos := p
+            pos := Point { x := 0 }
     }
 
     transition check() {

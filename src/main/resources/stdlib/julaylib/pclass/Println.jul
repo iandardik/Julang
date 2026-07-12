@@ -1,5 +1,5 @@
 p-class Println {
-    constructor initially() {}
+    constructor initially(args : List String) {}
 
     p2p-service transition println(msg : String) {
         effect:

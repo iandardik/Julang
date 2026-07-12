@@ -6,17 +6,21 @@ p-class ListIntDemo {
     var xs : List Int
     var n : Int
     var print : Boolean
+    var gotCli : Boolean
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             xs := [1, 2]
             n := 0
             print := false
+            gotCli := length(args) = 1
+        effect:
+            println(args[0])
     }
 
     transition step() {
         guard:
-            ~print & length(xs) = 2
+            ~print & length(xs) = 2 & gotCli
         transit:
             xs := xs + [3]
             n := xs[0]

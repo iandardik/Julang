@@ -15,7 +15,7 @@ p-class Worker {
     var segment : Line
     var done : Boolean
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             done := false
             pos := Point { x := 1, y := 1 }

@@ -15,7 +15,7 @@ p-class Worker {
     var pair : Pair Int Boolean
     var steps : Int
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             steps := 0
             box := Box Int { value := 7 }

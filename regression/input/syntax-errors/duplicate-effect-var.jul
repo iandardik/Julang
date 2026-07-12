@@ -2,7 +2,7 @@ p-class S {
     var x : Int
     var y : Int
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             x := 0
             y := 0

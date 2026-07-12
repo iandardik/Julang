@@ -1,7 +1,7 @@
 p-class ConsumerOnly {
     var x : Int
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             x := 0
     }
@@ -17,7 +17,7 @@ p-class ConsumerOnly {
 p-class ServiceOnly {
     var y : Int
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             y := 0
     }

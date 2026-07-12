@@ -1,7 +1,7 @@
 p-class S {
     var msg : String
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             msg := ""
     }

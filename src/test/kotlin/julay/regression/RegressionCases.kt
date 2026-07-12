@@ -65,6 +65,7 @@ object RegressionCases {
         val durationMs = (map["durationMs"] as? Number)?.toLong()
             ?.coerceAtMost(RegressionTimeouts.CASE_MS)
         val stdin = (map["stdin"] as? List<*>)?.map { it.toString() } ?: emptyList()
+        val args = (map["args"] as? List<*>)?.map { it.toString() } ?: emptyList()
         val background = map["background"] as? Boolean ?: false
         val expectStdout = map["expectStdout"] as? String
         val expectStdoutContains = (map["expectStdoutContains"] as? List<*>)?.map { it.toString() } ?: emptyList()
@@ -74,7 +75,7 @@ object RegressionCases {
             HttpCheck(m["post"] as String, m["expectBody"] as String)
         } ?: emptyList()
         return RunConfig(
-            timeoutMs, durationMs, stdin, background, expectStdout,
+            timeoutMs, durationMs, stdin, args, background, expectStdout,
             expectStdoutContains, expectStdoutLinesUnordered, expectStdoutMatches, http,
         )
     }

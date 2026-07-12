@@ -33,7 +33,7 @@ fun codegenPass(
     val staticInfo = "val tsInfo = setOf(\n" + staticInfoBody.prependIndent() + "\n)"
     val objClassDecls = ast.resolvedObjClassDecls()
         .filterNot { ObjClassBuiltinRegistry.isBuiltin(it.name) }
-    val runProgram = "Program(tsInfo).run()"
+    val runProgram = "Program(tsInfo, args.toList()).run()"
     val mainFunction = "suspend fun main(args : Array<String>) {" +
         "\n$staticInfo".prependIndent() +
         "\n$runProgram".prependIndent() +

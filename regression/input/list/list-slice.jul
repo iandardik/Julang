@@ -11,7 +11,7 @@ p-class ListSliceDemo {
     var nested : Int
     var phase : Int
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             xs := [10, 20, 30, 40]
             mid := []

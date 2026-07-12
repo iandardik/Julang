@@ -127,7 +127,7 @@ object RegressionRunner {
             val stdout = when {
                 capped.http.isNotEmpty() -> {
                     activeBackground?.destroy()
-                    activeBackground = JulProcess.startBackground(jar, workspace, capped.stdin)
+                    activeBackground = JulProcess.startBackground(jar, workspace, capped.stdin, capped.args)
                     HttpProbe.waitForPort(portWaitMs(deadlineMs))
                     capped.http.forEach { HttpProbe.postExpectBody(it.post, it.expectBody) }
                     val captureMs = capped.durationMs ?: 3_000L
@@ -135,7 +135,7 @@ object RegressionRunner {
                 }
                 capped.background -> {
                     activeBackground?.destroy()
-                    activeBackground = JulProcess.startBackground(jar, workspace, capped.stdin)
+                    activeBackground = JulProcess.startBackground(jar, workspace, capped.stdin, capped.args)
                     if (capped.http.isNotEmpty() || case.tags.contains("http")) {
                         HttpProbe.waitForPort(portWaitMs(deadlineMs))
                     }

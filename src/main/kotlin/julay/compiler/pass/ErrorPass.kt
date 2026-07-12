@@ -205,7 +205,21 @@ private fun ConstructorNode.errorPassConstructor(procs: Set<String>, librariesIn
         body().flatMap { it.guards() }.isEmpty(),
         OneLocCompileError(programLocation(), "Expected constructors not to have guards"),
     )
-    return children.flatMap { it.errorPass(procs, librariesInUse) } + assignmentErrors + noGuardErrors
+    val initiallyArgs = actionArgs()
+    val expectedInitiallyArgs = listOf(Variable("args", listType(stringType)))
+    val initiallySignatureErrors = if (constructors().single().action.name != "initially") {
+        emptyList()
+    } else {
+        assertOrCompileError(
+            initiallyArgs == expectedInitiallyArgs,
+            OneLocCompileError(
+                programLocation(),
+                "Expected constructor \"initially\" to have signature initially(args : List String)",
+            ),
+        )
+    }
+    return children.flatMap { it.errorPass(procs, librariesInUse) } + assignmentErrors + noGuardErrors +
+        initiallySignatureErrors
 }
 
 private fun TransitionNode.errorPassTransition(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {

@@ -29,6 +29,7 @@ data class RunConfig(
     val timeoutMs: Long,
     val durationMs: Long?,
     val stdin: List<String>,
+    val args: List<String>,
     val background: Boolean,
     val expectStdout: String?,
     val expectStdoutContains: List<String>,

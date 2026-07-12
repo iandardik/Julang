@@ -7,7 +7,7 @@ p-class PeriodicPrint {
     var localCounter : Int
     var step : String
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             localCounter := -1
             step := "A"

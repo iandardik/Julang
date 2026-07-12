@@ -7,7 +7,7 @@ p-class Worker {
     var pos : Point
     var steps : Int
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             steps := 0
             pos := Point { x := 0, y := 0 }

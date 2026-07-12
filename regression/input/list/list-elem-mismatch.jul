@@ -3,7 +3,7 @@ import julaylib.pclass.ExitSystem
 p-class BadList {
     var xs : List Int
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             xs := [1, true]
     }

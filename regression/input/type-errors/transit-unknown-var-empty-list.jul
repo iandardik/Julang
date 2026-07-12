@@ -1,7 +1,7 @@
 p-class S {
     var list : List String
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             listt := []
     }

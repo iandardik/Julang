@@ -16,6 +16,15 @@ class ConcreteAction {
         }
     }
 
+    constructor(sig : SymbolicAction, assignments : Map<Variable, Value>) {
+        julay.tools.assert(
+            sig.args.toSet() == assignments.keys,
+            "ConcreteAction: assignment keys must match symbolic action args exactly",
+        )
+        symAction = sig
+        argAssignments = assignments
+    }
+
     fun hasArg(arg : Variable) : Boolean {
         return arg in argAssignments
     }

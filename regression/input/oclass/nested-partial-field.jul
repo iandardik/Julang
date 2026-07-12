@@ -14,7 +14,7 @@ p-class Worker {
     var segment : Line
     var steps : Int
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             steps := 0
             segment := Line {

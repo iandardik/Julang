@@ -10,7 +10,7 @@ p-class Worker {
     var box : Box Int
     var steps : Int
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             steps := 0
             box := Box Int { value := 0 }
@@ -40,7 +40,7 @@ p-class Worker {
 p-class Driver {
     var done : Boolean
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             done := false
     }

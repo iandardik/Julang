@@ -4,7 +4,7 @@ import julaylib.pclass.Println
 p-class S {
     var x : Int
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit: x := 0
     }
 

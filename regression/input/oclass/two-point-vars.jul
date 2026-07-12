@@ -10,7 +10,7 @@ p-class Worker {
     var backup : Point
     var steps : Int
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             steps := 0
             current := Point { x := 1, y := 2 }

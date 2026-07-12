@@ -10,7 +10,6 @@ class ConstructorTransitionSystem(
     private val constructorsInfo: Set<TransitionSystemStaticInfo>,
     private val program: Program,
     private val ctx: Context,
-    // TODO input the cli args into initially (accept them here as a constructor arg)
 ) : TransitionSystem {
     companion object : StaticInfo {
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one

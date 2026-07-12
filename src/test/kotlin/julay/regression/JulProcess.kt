@@ -23,8 +23,8 @@ object JulProcess {
         }
     }
 
-    fun startBackground(jar: File, workspace: File, stdin: List<String>): Running {
-        val pb = ProcessBuilder("java", "-jar", jar.absolutePath)
+    fun startBackground(jar: File, workspace: File, stdin: List<String>, args: List<String> = emptyList()): Running {
+        val pb = ProcessBuilder(listOf("java", "-jar", jar.absolutePath) + args)
             .directory(workspace)
             .redirectErrorStream(true)
         val process = pb.start()
@@ -45,7 +45,7 @@ object JulProcess {
     }
 
     fun runToCompletion(jar: File, workspace: File, run: RunConfig, timeoutMs: Long = run.timeoutMs): ProcessResult {
-        val pb = ProcessBuilder("java", "-jar", jar.absolutePath)
+        val pb = ProcessBuilder(listOf("java", "-jar", jar.absolutePath) + run.args)
             .directory(workspace)
             .redirectErrorStream(true)
         val process = pb.start()

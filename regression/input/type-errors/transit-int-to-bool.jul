@@ -1,7 +1,7 @@
 p-class S {
     var flag : Boolean
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             flag := 0
     }

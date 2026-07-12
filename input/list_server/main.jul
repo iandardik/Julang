@@ -4,7 +4,7 @@ import server.ServerLogic
 p-class RunningList {
     var list : List String
     
-    constructor initially() {
+    constructor initially(args : List String) {
         transit: list := []
     }
 

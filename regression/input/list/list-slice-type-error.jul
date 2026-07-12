@@ -4,7 +4,7 @@ p-class BadSlice {
     var xs : List Int
     var ys : List Int
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             xs := [1, 2, 3]
             ys := xs[true:2]

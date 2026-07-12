@@ -1,0 +1,5 @@
+source: regression/input/syntax-errors/initially-bad-signature.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected constructor \"initially\" to have signature initially(args : List String)"
+  - "Found errors while compiling the program \"P\"; exiting."

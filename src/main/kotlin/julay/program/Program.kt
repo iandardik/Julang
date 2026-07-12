@@ -17,7 +17,7 @@ class Program {
      * The constructor sets up a channel for each TSAction so that each process that engages in the action can
      * communicate (synchronize on args) over the channel.
      */
-    constructor(componentInfo : Set<TransitionSystemStaticInfo>) {
+    constructor(componentInfo : Set<TransitionSystemStaticInfo>, cliArgs : List<String> = emptyList()) {
         // assumpmtions/requirements:
         // - all action signatures that have the same name should have the same param
         // - no transition should be for initially (only constructors)
@@ -27,8 +27,13 @@ class Program {
         // TODO add a sanity check for each of the above requirements
 
         val constructorCtx = Context()
-        val initially = SymbolicAction("initially", listOf(), SymbolicAction.SyncType.CSP)
+        val argsVar = Variable("args", listType(stringType))
+        val initially = SymbolicAction("initially", listOf(argsVar), SymbolicAction.SyncType.CSP)
         val initiallyAction = TSAction(initially, constructorCtx.mkTrue(), TSAction.SyncRole.CSP)
+        val initiallyConcrete = ConcreteAction(
+            initially,
+            mapOf(argsVar to Value(cliArgs, listType(stringType))),
+        )
         val deadlock = SymbolicAction("deadlock", listOf(), SymbolicAction.SyncType.CSP)
 
         // create a SyncChannel for each action
@@ -50,15 +55,21 @@ class Program {
         val channelTable = actionCounts.keys.associateWith { act ->
             val syncSize = actionCounts[act]!!
             val ctx = Context() // one Context per channel
-            SyncChannel<ConcreteAction,BoolExpr>(syncSize) { constraints ->
-                val solver = ctx.mkSolver()
-                // c.translate(ctx) is key because each constraint will come from a different thread, and hence are
-                // created by different Contexts.
-                constraints.forEach { c -> solver.add(c.translate(ctx)) }
-                if (solver.check() == Status.SATISFIABLE) {
-                    Optional.of(ConcreteAction(act, ctx, solver.model))
-                } else {
-                    Optional.empty()
+            if (act == initially) {
+                SyncChannel<ConcreteAction,BoolExpr>(syncSize) { _ ->
+                    Optional.of(initiallyConcrete)
+                }
+            } else {
+                SyncChannel<ConcreteAction,BoolExpr>(syncSize) { constraints ->
+                    val solver = ctx.mkSolver()
+                    // c.translate(ctx) is key because each constraint will come from a different thread, and hence are
+                    // created by different Contexts.
+                    constraints.forEach { c -> solver.add(c.translate(ctx)) }
+                    if (solver.check() == Status.SATISFIABLE) {
+                        Optional.of(ConcreteAction(act, ctx, solver.model))
+                    } else {
+                        Optional.empty()
+                    }
                 }
             }
         }

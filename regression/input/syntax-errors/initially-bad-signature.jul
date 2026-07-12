@@ -1,10 +1,9 @@
 p-class S {
     var x : Int
 
-    constructor initially(args : List String) {
+    constructor initially() {
         transit:
             x := 0
-            x := 1
     }
 }
 

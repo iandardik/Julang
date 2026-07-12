@@ -7,7 +7,7 @@ p-class S {
     var print : Boolean
     var numAssign : Int
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             key := "B"
             x := 0

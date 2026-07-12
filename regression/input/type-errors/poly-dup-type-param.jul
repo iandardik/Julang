@@ -5,7 +5,7 @@ o-class Box<T, T> {
 p-class Worker {
     var n : Int
 
-    constructor initially() {
+    constructor initially(args : List String) {
         transit:
             n := 0
     }
