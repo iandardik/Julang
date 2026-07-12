@@ -155,6 +155,12 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitError(JulayParser.ErrorContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#error_arm}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitError_arm(JulayParser.Error_armContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#var_transit}.
 	 * @param ctx the parse tree
 	 * @return the visitor result

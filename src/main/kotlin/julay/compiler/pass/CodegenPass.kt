@@ -200,6 +200,23 @@ private fun ActionDecl.kotlinEffectString(
     }
 }
 
+private fun ActionDecl.kotlinErrorString(
+    stateVarTypes: Map<String, Type>,
+): String {
+    if (errors.isEmpty()) {
+        return ""
+    }
+    val symbolTypes = stateVarTypes + actionArgEnv(action.args)
+    val argSymbols = actionArgSymbols(action.args)
+    // Error checks run before transits and effects so they see pre-state variables
+    // and no effect happens upon an error.
+    return errors.joinToString("\n") { arm ->
+        val cond = arm.condExpr().toTransitString(symbolTypes, argSymbols)
+        val msg = arm.msgExpr().toTransitString(symbolTypes, argSymbols)
+        "if ($cond) throw JulayException(($msg).toString())"
+    }
+}
+
 private fun ProcClassDecl.kotlinClassString(objClassDecls: List<ObjClassDecl>): String {
     val stateVarTypes = stateVars.associate { Pair(it.name, it.type) }
     val stateVarsStr = stateVars.joinToString(",\n") {
@@ -241,11 +258,19 @@ private fun ProcClassDecl.kotlinStaticInfoString(): String {
                     "${transitRootVar(k).toKotlinIdent()} = ${v.toTransitString(symbolTypes, argSymbols)}"
                 }
             val constructor = "$name($constructorArgs)"
+            // Error checks run before transits and effects so they see pre-state variables
+            // and no effect happens upon an error.
+            val errorStr = ctor.kotlinErrorString(stateVarTypes)
             val effectStr = ctor.kotlinEffectString(stateVarTypes, "result.")
-            val constructStr = if (effectStr.isEmpty()) {
-                "{ _,act -> $constructor }"
-            } else {
-                "{ _,act ->\nval result = $constructor\n$effectStr\nresult\n}"
+            val constructStr = when {
+                errorStr.isEmpty() && effectStr.isEmpty() ->
+                    "{ _,act -> $constructor }"
+                errorStr.isEmpty() ->
+                    "{ _,act ->\nval result = $constructor\n$effectStr\nresult\n}"
+                effectStr.isEmpty() ->
+                    "{ _,act ->\n$errorStr\n$constructor\n}"
+                else ->
+                    "{ _,act ->\n$errorStr\nval result = $constructor\n$effectStr\nresult\n}"
             }
             "Pair($actSigStr, $constructStr)".prependIndent()
         }
@@ -293,6 +318,9 @@ private fun ActionDecl.kotlinActionString(stateVarTypes: Map<String, Type>): Str
 private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): String {
     val symbolTypes = stateVarTypes + actionArgEnv(action.args)
     val argSymbols = actionArgSymbols(action.args)
+    // Error checks run before transits and effects so they see pre-state variables
+    // and no effect happens upon an error.
+    val errorStr = kotlinErrorString(stateVarTypes)
     val transitLines = transits.map { (k, e) ->
         val rootVar = transitRootVar(k)
         val rootType = stateVarTypes.getValue(rootVar)
@@ -322,7 +350,11 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
             argStrings = argTemps,
         )
     }
-    return (effectArgSnapshots + transitLines + effectLines).joinToString("\n")
+    return listOfNotNull(errorStr.takeIf { it.isNotEmpty() })
+        .plus(effectArgSnapshots)
+        .plus(transitLines)
+        .plus(effectLines)
+        .joinToString("\n")
 }
 
 private fun ActionDecl.kotlinStaticInfoString(): String {

@@ -248,6 +248,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitError(JulayParser.ErrorContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#error_arm}.
+	 * @param ctx the parse tree
+	 */
+	void enterError_arm(JulayParser.Error_armContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#error_arm}.
+	 * @param ctx the parse tree
+	 */
+	void exitError_arm(JulayParser.Error_armContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#var_transit}.
 	 * @param ctx the parse tree
 	 */

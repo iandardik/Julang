@@ -56,6 +56,7 @@ fun ASTNode.typePass(
     is ArgNode -> typePassArgNode(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is GuardNode -> typePassGuard(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is VarTransitNode -> typePassVarTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    is ErrorNode -> typePassError(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is EffectNode -> typePassEffect(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is EffectCallNode -> typePassEffectCall(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is EffectAssignNode -> typePassEffectAssign(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
@@ -153,6 +154,26 @@ private fun GuardNode.typePassGuard(symbolEnv: Map<String, Type>, registry: ObjC
         OneLocCompileError(programLocation(), "Expected guards to be Boolean-valued expressions"),
     )
     return childrenErrors + guardTypeErrors
+}
+
+private fun ErrorNode.typePassError(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+): List<CompileError> {
+    val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    if (childrenErrors.isNotEmpty()) {
+        return childrenErrors
+    }
+    val condTypeErrors = errors().flatMap { arm ->
+        assertOrCompileError(
+            arm.condExpr().getType() is BoolType,
+            OneLocCompileError(arm.programLocation(), "Expected error conditions to be Boolean-valued expressions"),
+        )
+    }
+    return childrenErrors + condTypeErrors
 }
 
 private fun VarTransitNode.typePassVarTransit(

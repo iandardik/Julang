@@ -1,0 +1,21 @@
+p-class S {
+    var x : Int
+
+    constructor initially() {
+        transit:
+            x := 0
+    }
+
+    transition tick() {
+        guard:
+            true
+        error:
+            x = 0 -> "tick boom"
+        transit:
+            x := x + 1
+        effect:
+            exitProcess()
+    }
+}
+
+program P := S

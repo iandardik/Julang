@@ -107,7 +107,11 @@ transit
     ;
 
 error
-    : ERROR COLON expr
+    : ERROR COLON error_arm+
+    ;
+
+error_arm
+    : expr ARROW expr
     ;
 
 var_transit

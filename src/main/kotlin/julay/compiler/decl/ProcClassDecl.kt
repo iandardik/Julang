@@ -2,6 +2,7 @@ package julay.compiler.decl
 
 import julay.compiler.ProgramLoc
 import julay.compiler.ast.EffectStmtNode
+import julay.compiler.ast.ErrorArmNode
 import julay.compiler.ast.ExprNode
 import julay.program.*
 
@@ -19,4 +20,5 @@ data class ActionDecl(
     val modifier: TSAction.SyncRole,
     val loc: ProgramLoc,
     val effects : List<EffectStmtNode> = emptyList(),
+    val errors : List<ErrorArmNode> = emptyList(),
 )

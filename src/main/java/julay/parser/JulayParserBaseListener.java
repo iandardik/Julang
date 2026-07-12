@@ -305,6 +305,18 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
+	@Override public void enterError_arm(JulayParser.Error_armContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitError_arm(JulayParser.Error_armContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
 	@Override public void enterVar_transit(JulayParser.Var_transitContext ctx) { }
 	/**
 	 * {@inheritDoc}

@@ -1,0 +1,5 @@
+source: regression/input/type-errors/error-cond-not-boolean.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected error conditions to be Boolean-valued expressions"
+  - "Found type errors; exiting."

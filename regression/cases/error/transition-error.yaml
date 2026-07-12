@@ -1,0 +1,9 @@
+source: regression/input/error/transition-error.jul
+programs:
+  - name: P
+    expectFailure: true
+    expectFailureOutputContains:
+      - "JulayException"
+      - "tick boom"
+    run:
+      timeoutMs: 10000

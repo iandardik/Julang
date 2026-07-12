@@ -45,6 +45,7 @@ abstract class ActionBodyNode(
     open fun transitVars() : List<Pair<String, ProgramLoc>> = body.flatMap { it.transitVars() }
     open fun effects() : List<EffectStmtNode> = body.flatMap { it.effects() }
     open fun effectAssignVars() : List<Pair<String, ProgramLoc>> = body.flatMap { it.effectAssignVars() }
+    open fun errors() : List<ErrorArmNode> = body.flatMap { it.errors() }
 }
 
 abstract class ExprNode(children : List<ASTNode>) : ASTNode(children) {
@@ -370,6 +371,7 @@ class ConstructorNode(
                 TSAction.SyncRole.CSP,
                 loc,
                 body.flatMap { it.effects() },
+                body.flatMap { it.errors() },
             )
         )
     }
@@ -407,6 +409,7 @@ class TransitionNode(
                 modifier,
                 loc,
                 body.flatMap { it.effects() },
+                body.flatMap { it.errors() },
             )
         )
     }
@@ -484,14 +487,25 @@ class TransitNode(
     }
 }
 
-class ErrorNode(
-    private val expr : ExprNode,
+class ErrorArmNode(
+    private val cond : ExprNode,
+    private val msg : ExprNode,
     private val loc : ProgramLoc
-) : ActionBodyNode(listOf(), listOf(expr)) {
+) : ASTNode(listOf(cond, msg)) {
     override fun programLocation() = loc
+    fun condExpr() = cond
+    fun msgExpr() = msg
+    override fun toString(): String = "$cond -> $msg"
+}
+
+class ErrorNode(
+    private val arms : List<ErrorArmNode>,
+    private val loc : ProgramLoc
+) : ActionBodyNode(listOf(), arms.flatMap { listOf(it.condExpr(), it.msgExpr()) }) {
+    override fun programLocation() = loc
+    override fun errors(): List<ErrorArmNode> = arms
     override fun toString(): String {
-        val exprStr = "$expr".prependIndent()
-        return "error:\n$exprStr"
+        return "error:\n${arms.joinToString("\n") { "$it".prependIndent() }}"
     }
 }
 

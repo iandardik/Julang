@@ -260,14 +260,32 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     }
 
     override fun visitError(ctx: JulayParser.ErrorContext?): ASTNode {
-        val errExpr = visit(ctx!!.expr())
-            .let {
-                if (it !is ExprNode) {
-                    throw RuntimeException("Expected ExprNode but got $it")
+        val arms = ctx!!.error_arm()
+            .map { visit(it) }
+            .map {
+                if (it !is ErrorArmNode) {
+                    throw RuntimeException("Expected ErrorArmNode but got $it")
                 }
                 it
             }
-        return ErrorNode(errExpr, sourceLocation(ctx))
+        return ErrorNode(arms, sourceLocation(ctx))
+    }
+
+    override fun visitError_arm(ctx: JulayParser.Error_armContext?): ASTNode {
+        val exprs = ctx!!.expr()
+        val cond = visit(exprs[0]).let {
+            if (it !is ExprNode) {
+                throw RuntimeException("Expected ExprNode but got $it")
+            }
+            it
+        }
+        val msg = visit(exprs[1]).let {
+            if (it !is ExprNode) {
+                throw RuntimeException("Expected ExprNode but got $it")
+            }
+            it
+        }
+        return ErrorArmNode(cond, msg, sourceLocation(ctx))
     }
 
     override fun visitEffect(ctx: JulayParser.EffectContext?): ASTNode {
