@@ -1,0 +1,3 @@
+import parseintdep.ParseIntDepProc
+
+program ParseIntImportTest := ParseIntDepProc

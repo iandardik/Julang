@@ -1,0 +1,9 @@
+source: regression/input/imports/parseintimport.jul
+programs:
+  - name: ParseIntImportTest
+    run:
+      timeoutMs: 60000
+      args:
+        - "7"
+      expectStdoutContains:
+        - "7"

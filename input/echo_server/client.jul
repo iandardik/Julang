@@ -1,21 +1,41 @@
 import julaylib.pclass.HttpClient
 import julaylib.pclass.Println
+import julaylib.fun.length
+import julaylib.fun.parseInt
 
 p-class ClientDispatcher {
     var numReqs : Int
-    var maxNumReqs : Int
+    var numResps : Int
+    var targetNumReqs : Int
 
     constructor initially(args : List String) {
         transit:
             numReqs := 1
-            maxNumReqs := 25
+            numResps := 0
+            targetNumReqs := if (length(args) > 0) {
+                parseInt(args[0])
+            } else {
+                25
+            }
     }
 
     transition startReq(num : Int) {
         guard:
-            numReqs <= maxNumReqs & num = numReqs
+            numReqs <= targetNumReqs & num = numReqs
         transit:
             numReqs := numReqs + 1
+    }
+
+    transition gotResp() {
+        transit:
+            numResps := numResps + 1
+    }
+
+    transition finish() {
+        guard:
+            numResps = targetNumReqs
+        effect:
+            exitProcess()
     }
 }
 
@@ -55,6 +75,13 @@ p-class ClientLogic {
             state = "C" & msg = "response: " + respText
         transit:
             state := "D"
+    }
+
+    transition gotResp() {
+        guard:
+            state = "D"
+        transit:
+            state := "E"
     }
 }
 

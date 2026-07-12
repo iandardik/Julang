@@ -1,0 +1,5 @@
+source: regression/input/type-errors/parse-int-non-string.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected argument of \"parseInt\" to have a String type but got Int"
+  - "Found type errors; exiting."

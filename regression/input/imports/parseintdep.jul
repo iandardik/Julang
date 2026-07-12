@@ -1,0 +1,32 @@
+import julaylib.pclass.Println
+import julaylib.pclass.ExitSystem
+import julaylib.fun.parseInt
+
+p-class ParseIntDep {
+    var n : Int
+    var print : Boolean
+
+    constructor initially(args : List String) {
+        transit:
+            n := if (true) {
+                parseInt(args[0])
+            } else {
+                0
+            }
+            print := true
+    }
+
+    p2p-consumer transition println(msg : String) {
+        guard:
+            print & (msg = n + "")
+        transit:
+            print := false
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard:
+            ~print & n = 7
+    }
+}
+
+proc ParseIntDepProc := ParseIntDep || Println || ExitSystem

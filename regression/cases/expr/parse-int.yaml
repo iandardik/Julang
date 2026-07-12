@@ -1,0 +1,9 @@
+source: regression/input/expr/parse-int.jul
+programs:
+  - name: ParseIntTest
+    run:
+      timeoutMs: 60000
+      args:
+        - "42"
+      expectStdoutContains:
+        - "42"

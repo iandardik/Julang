@@ -25,9 +25,13 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
         val lexer = JulayLexer(input)
         val tokens = CommonTokenStream(lexer)
         val parser = JulayParser(tokens)
+        lexer.removeErrorListeners()
+        parser.removeErrorListeners()
+        val syntaxListener = CollectingSyntaxErrorListener(path, errors)
+        lexer.addErrorListener(syntaxListener)
+        parser.addErrorListener(syntaxListener)
         val parseRoot = parser.root()
         if (parser.numberOfSyntaxErrors > 0) {
-            errors.add(OneLocCompileError(SourceLoc(Pair(1, 1), path), "Syntax errors in ${path.fileName}"))
             return ParseResult(emptyRootNode(path), ok = false)
         }
         return ParseResult(ASTBuilder(path).visit(parseRoot) as RootNode, ok = true)

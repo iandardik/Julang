@@ -1,6 +1,7 @@
 package julay.compiler
 
 import julay.program.ListType
+import julay.program.StringType
 import julay.program.Type
 import julay.program.intType
 
@@ -33,7 +34,25 @@ object FunBuiltinRegistry {
         z3Codegen = { args -> "ctx.mkSeqLengthAny(${args[0]})" },
     )
 
-    private val builtins = mapOf(lengthBuiltin.name to lengthBuiltin)
+    private val parseIntBuiltin = FunBuiltin(
+        name = "parseInt",
+        arity = 1,
+        returnType = intType,
+        checkArgs = { argTypes ->
+            when {
+                argTypes.size != 1 -> "Expected function \"parseInt\" to take 1 argument(s) but got ${argTypes.size}"
+                argTypes[0] !is StringType -> "Expected argument of \"parseInt\" to have a String type but got ${argTypes[0]}"
+                else -> null
+            }
+        },
+        kotlinCodegen = { args -> "${args[0]}.toInt()" },
+        z3Codegen = { args -> "ctx.stringToInt(${args[0]} as Expr<SeqSort<CharSort>>)" },
+    )
+
+    private val builtins = mapOf(
+        lengthBuiltin.name to lengthBuiltin,
+        parseIntBuiltin.name to parseIntBuiltin,
+    )
 
     val all: Collection<FunBuiltin> get() = builtins.values
 

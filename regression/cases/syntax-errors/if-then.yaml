@@ -1,0 +1,5 @@
+source: regression/input/syntax-errors/if-then.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Unexpected \"then\" after if-condition"
+  - "Found compile errors, exiting."

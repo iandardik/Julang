@@ -32,13 +32,15 @@ fun RootNode.typePass(unit: CompilationUnit): List<CompileError> {
             funNode.typePassFunBody(callable, built, builtins)
         }
     }
-    val entryModule = unit.modules.firstOrNull { it.isEntry }
-        ?: return built.errors + signatureErrors + recursionErrors + funBodyErrors
-    val entryCallable = callableFuns(entryModule)
-    val entryBuiltins = callableFunBuiltins(entryModule)
-    val otherErrors = declNodes()
-        .filter { it !is FunNode }
-        .flatMap { it.typePass(emptyMap(), built, entryCallable, emptyMap(), entryBuiltins) }
+    // Typecheck each module with that module's imports so julaylib.fun.* (and imported
+    // user funs) resolve in dependency modules, not only in the entry file.
+    val otherErrors = unit.modules.flatMap { module ->
+        val callable = callableFuns(module)
+        val builtins = callableFunBuiltins(module)
+        module.root.declNodes()
+            .filter { it !is FunNode }
+            .flatMap { it.typePass(emptyMap(), built, callable, emptyMap(), builtins) }
+    }
     return built.errors + signatureErrors + recursionErrors + funBodyErrors + otherErrors
 }
 
@@ -391,8 +393,11 @@ private fun BinaryOpExprNode.typePassBinaryOp(
 private fun IfElseExprNode.typePassIfElse(symbolEnv: Map<String, Type>, registry: ObjClassRegistry, funEnv: Map<String, FunNode>, typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>): List<CompileError> {
     val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    if (childErrors.isNotEmpty()) {
+        return childErrors
+    }
     inferExprType(symbolEnv)
-    return childErrors + ifElseTypeErrors()
+    return ifElseTypeErrors()
 }
 
 private fun IfElseExprNode.ifElseTypeErrors(): List<CompileError> {
