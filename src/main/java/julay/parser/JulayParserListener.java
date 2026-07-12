@@ -378,6 +378,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitIndex_expr(JulayParser.Index_exprContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#index_or_slice}.
+	 * @param ctx the parse tree
+	 */
+	void enterIndex_or_slice(JulayParser.Index_or_sliceContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#index_or_slice}.
+	 * @param ctx the parse tree
+	 */
+	void exitIndex_or_slice(JulayParser.Index_or_sliceContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#fun_call}.
 	 * @param ctx the parse tree
 	 */

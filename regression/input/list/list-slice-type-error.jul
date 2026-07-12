@@ -1,0 +1,18 @@
+import julaylib.pclass.ExitSystem
+
+p-class BadSlice {
+    var xs : List Int
+    var ys : List Int
+
+    constructor initially() {
+        transit:
+            xs := [1, 2, 3]
+            ys := xs[true:2]
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard: true
+    }
+}
+
+program BadSliceTest := BadSlice || ExitSystem

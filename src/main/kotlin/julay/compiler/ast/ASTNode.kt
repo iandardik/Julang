@@ -1084,6 +1084,55 @@ class IndexExprNode(
     override fun toString(): String = "$base[$index]"
 }
 
+class SliceExprNode(
+    val base: ExprNode,
+    val start: ExprNode,
+    val end: ExprNode,
+    private val loc: ProgramLoc,
+) : ExprNode(listOf(base, start, end)) {
+    override fun programLocation() = loc
+
+    override fun toZ3GuardString(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+        forceString: Boolean,
+    ): String {
+        if (forceString) {
+            return "ctx.mkString(${toTransitString(symbolTypes, argSymbols)}.toString())"
+        }
+        val baseType = base.getType()
+        if (baseType !is ListType) {
+            throw RuntimeException("Cannot slice non-list type $baseType at $loc")
+        }
+        val baseStr = base.toZ3GuardString(symbolTypes, argSymbols)
+        val startStr = start.toZ3GuardString(symbolTypes, argSymbols)
+        val endStr = end.toZ3GuardString(symbolTypes, argSymbols)
+        val empty = "ctx.mkEmptySeq(${baseType.toCodegenTypeVal()}.sort(ctx))"
+        val extract = "ctx.mkSeqExtractAny($baseStr, $startStr, ctx.mkSub($endStr, $startStr))"
+        return "ctx.mkITE(ctx.mkGt($endStr, $startStr), $extract, $empty)"
+    }
+
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        val baseStr = base.toTransitString(symbolTypes, argSymbols)
+        val startStr = start.toTransitString(symbolTypes, argSymbols)
+        val endStr = end.toTransitString(symbolTypes, argSymbols)
+        return "run { val __xs = $baseStr; val __s = $startStr; val __e = $endStr; " +
+            "require(__s >= 0 && __e >= 0) { \"slice bounds must be non-negative\" }; " +
+            "val __lo = minOf(__s, __xs.size); val __hi = minOf(__e, __xs.size); " +
+            "if (__lo >= __hi) emptyList() else __xs.subList(__lo, __hi).toList() }"
+    }
+
+    override fun inferType(symbolEnv: Map<String, Type>): Type {
+        val baseType = base.getType()
+        if (baseType !is ListType) {
+            throw RuntimeException("Cannot slice non-list type $baseType at $loc")
+        }
+        return baseType
+    }
+
+    override fun toString(): String = "$base[$start:$end]"
+}
+
 class LiteralValueExprNode(
     private val value : String,
     private val type : Type,

@@ -67,6 +67,7 @@ fun ASTNode.typePass(
     is FieldAccessExprNode -> typePassFieldAccess(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is ListLiteralExprNode -> typePassListLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is IndexExprNode -> typePassIndex(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    is SliceExprNode -> typePassSlice(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is FunCallExprNode -> typePassFunCall(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is SymbolValueExprNode -> typePassSymbol(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is ExprNode -> typePassExpr(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
@@ -964,6 +965,34 @@ private fun IndexExprNode.typePassIndex(
     }
     if (index.getType() !is IntType) {
         errors.add(OneLocCompileError(index.programLocation(), "Expected Int index but got ${index.getType()}"))
+    }
+    if (errors.isEmpty()) {
+        inferExprType(symbolEnv)
+    }
+    return errors
+}
+
+private fun SliceExprNode.typePassSlice(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+): List<CompileError> {
+    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    if (childErrors.isNotEmpty()) {
+        return childErrors
+    }
+    val errors = mutableListOf<CompileError>()
+    val baseType = base.getType()
+    if (baseType !is ListType) {
+        errors.add(OneLocCompileError(base.programLocation(), "Expected list type for slice base but got $baseType"))
+    }
+    if (start.getType() !is IntType) {
+        errors.add(OneLocCompileError(start.programLocation(), "Expected Int slice start but got ${start.getType()}"))
+    }
+    if (end.getType() !is IntType) {
+        errors.add(OneLocCompileError(end.programLocation(), "Expected Int slice end but got ${end.getType()}"))
     }
     if (errors.isEmpty()) {
         inferExprType(symbolEnv)

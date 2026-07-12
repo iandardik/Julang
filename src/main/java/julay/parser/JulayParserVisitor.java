@@ -233,6 +233,12 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitIndex_expr(JulayParser.Index_exprContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#index_or_slice}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitIndex_or_slice(JulayParser.Index_or_sliceContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#fun_call}.
 	 * @param ctx the parse tree
 	 * @return the visitor result

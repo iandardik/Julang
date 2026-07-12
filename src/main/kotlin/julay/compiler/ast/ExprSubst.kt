@@ -72,6 +72,12 @@ fun substituteExpr(expr: ExprNode, name: String, replacement: ExprNode): ExprNod
             substituteExpr(expr.index, name, replacement),
             expr.programLocation(),
         ).withTypeOf(expr)
+        is SliceExprNode -> SliceExprNode(
+            substituteExpr(expr.base, name, replacement),
+            substituteExpr(expr.start, name, replacement),
+            substituteExpr(expr.end, name, replacement),
+            expr.programLocation(),
+        ).withTypeOf(expr)
         is FunCallExprNode -> FunCallExprNode(
             expr.callName(),
             expr.callArgs().map { substituteExpr(it, name, replacement) },
@@ -138,6 +144,10 @@ fun exprReferencesSymbol(expr: ExprNode, symbol: String): Boolean {
         is ListLiteralExprNode -> expr.elements.any { exprReferencesSymbol(it, symbol) }
         is IndexExprNode ->
             exprReferencesSymbol(expr.base, symbol) || exprReferencesSymbol(expr.index, symbol)
+        is SliceExprNode ->
+            exprReferencesSymbol(expr.base, symbol) ||
+                exprReferencesSymbol(expr.start, symbol) ||
+                exprReferencesSymbol(expr.end, symbol)
         is FunCallExprNode -> expr.callArgs().any { exprReferencesSymbol(it, symbol) }
         else -> throw RuntimeException("Unexpected expression node ${expr.javaClass.simpleName} during symbol reference check")
     }
@@ -177,6 +187,8 @@ fun collectFunCallNames(expr: ExprNode): Set<String> {
         is ObjClassLiteralExprNode -> expr.fieldEntries.flatMap { collectFunCallNames(it.second) }.toSet()
         is ListLiteralExprNode -> expr.elements.flatMap { collectFunCallNames(it) }.toSet()
         is IndexExprNode -> collectFunCallNames(expr.base) + collectFunCallNames(expr.index)
+        is SliceExprNode ->
+            collectFunCallNames(expr.base) + collectFunCallNames(expr.start) + collectFunCallNames(expr.end)
         is SymbolValueExprNode -> emptySet()
         else -> throw RuntimeException("Unexpected expression node ${expr.javaClass.simpleName} during fun-call collection")
     }

@@ -200,8 +200,13 @@ list_literal
     ;
 
 index_expr
-    : index_expr LBRACK expr RBRACK
-    | (fun_call | field_access | list_literal | LPAREN expr RPAREN) LBRACK expr RBRACK
+    : index_expr LBRACK index_or_slice RBRACK
+    | (fun_call | field_access | list_literal | LPAREN expr RPAREN) LBRACK index_or_slice RBRACK
+    ;
+
+index_or_slice
+    : expr COLON expr
+    | expr
     ;
 
 fun_call

@@ -1,0 +1,64 @@
+import julaylib.pclass.Println
+import julaylib.pclass.ExitSystem
+import julaylib.fun.length
+
+p-class ListSliceDemo {
+    var xs : List Int
+    var mid : List Int
+    var emptyEq : List Int
+    var emptyRev : List Int
+    var clamped : List Int
+    var nested : Int
+    var phase : Int
+
+    constructor initially() {
+        transit:
+            xs := [10, 20, 30, 40]
+            mid := []
+            emptyEq := [1]
+            emptyRev := [1]
+            clamped := []
+            nested := 0
+            phase := 0
+    }
+
+    transition sliceMid() {
+        guard:
+            phase = 0
+        transit:
+            mid := xs[1:3]
+            phase := 1
+    }
+
+    transition sliceEmpty() {
+        guard:
+            phase = 1 & mid = [20, 30] & length(mid) = 2
+        transit:
+            emptyEq := xs[2:2]
+            emptyRev := xs[3:1]
+            phase := 2
+    }
+
+    transition sliceClampAndNest() {
+        guard:
+            phase = 2 & length(emptyEq) = 0 & length(emptyRev) = 0
+        transit:
+            clamped := xs[2:99]
+            nested := xs[1:3][0]
+            phase := 3
+    }
+
+    p2p-consumer transition println(msg : String) {
+        guard:
+            phase = 3 & clamped = [30, 40] & nested = 20 & (msg = mid + "")
+        transit:
+            phase := 4
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard:
+            phase = 4
+    }
+}
+
+program ListSliceTest := ListSliceDemo || Println || ExitSystem

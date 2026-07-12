@@ -1,0 +1,7 @@
+source: regression/input/list/list-slice.jul
+programs:
+  - name: ListSliceTest
+    run:
+      timeoutMs: 60000
+      expectStdoutContains:
+        - "[20, 30]"

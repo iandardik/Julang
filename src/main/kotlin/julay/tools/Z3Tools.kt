@@ -22,3 +22,7 @@ fun Context.mkSeqNthAny(seq: Expr<*>, index: Expr<*>): Expr<*> =
 fun Context.mkSeqConcatAny(lhs: Expr<*>, rhs: Expr<*>): Expr<*> =
     mkConcat(lhs as Expr<SeqSort<Sort>>, rhs as Expr<SeqSort<Sort>>)
 
+@Suppress("UNCHECKED_CAST")
+fun Context.mkSeqExtractAny(seq: Expr<*>, offset: Expr<*>, length: Expr<*>): Expr<*> =
+    mkExtract(seq as Expr<SeqSort<Sort>>, offset as IntExpr, length as IntExpr)
+
