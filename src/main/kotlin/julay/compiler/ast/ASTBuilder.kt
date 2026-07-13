@@ -176,7 +176,15 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     }
 
     override fun visitConstructor(ctx: JulayParser.ConstructorContext?): ASTNode {
-        val name = ctx!!.ID().text
+        val isService = ctx!!.SERVICE() != null
+        val isConsumer = ctx.CONSUMER() != null
+        assert(!isService || !isConsumer, "A constructor cannot be both a service and consumer")
+        val modifier = when {
+            isService -> TSAction.SyncRole.P2PService
+            isConsumer -> TSAction.SyncRole.P2PConsumer
+            else -> TSAction.SyncRole.CSP
+        }
+        val name = ctx.ID().text
         val args = visit(ctx.args()).let { argsNode ->
             if (argsNode !is ArgsNode) {
                 throw RuntimeException("Expected ArgsNode but got $argsNode")
@@ -191,7 +199,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 }
                 it
             }
-        return ConstructorNode(name, args, body, sourceLocation(ctx))
+        return ConstructorNode(modifier, name, args, body, sourceLocation(ctx))
     }
 
     override fun visitTransition(ctx: JulayParser.TransitionContext?): ASTNode {

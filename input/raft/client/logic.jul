@@ -35,7 +35,7 @@ p-class RaftClientLogic {
             step := "send"
     }
 
-    transition sendRequest(req : HttpClientRequest) {
+    p2p-consumer transition sendRequest(req : HttpClientRequest) {
         guard:
             & step = "send"
             & req = HttpClientRequest {
@@ -46,7 +46,7 @@ p-class RaftClientLogic {
         transit: step := "recv"
     }
 
-    transition receiveResponse(resp : HttpClientResponse) {
+    p2p-consumer transition receiveResponse(resp : HttpClientResponse) {
         guard: step = "recv"
         transit:
             respBody := resp.body

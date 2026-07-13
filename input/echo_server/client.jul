@@ -51,7 +51,7 @@ p-class ClientLogic {
             respText := ""
     }
 
-    transition sendRequest(req : HttpClientRequest) {
+    p2p-consumer transition sendRequest(req : HttpClientRequest) {
         guard:
             state = "A" & req = HttpClientRequest {
                 url := "http://localhost:8000",
@@ -62,7 +62,7 @@ p-class ClientLogic {
             state := "B"
     }
 
-    transition receiveResponse(resp : HttpClientResponse) {
+    p2p-consumer transition receiveResponse(resp : HttpClientResponse) {
         guard:
             state = "B"
         transit:

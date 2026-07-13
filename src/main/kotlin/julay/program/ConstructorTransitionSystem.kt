@@ -29,7 +29,13 @@ class ConstructorTransitionSystem(
         .asSequence()
         .flatMap { info -> info.constructors.keys }
         .filter { act -> act != initiallyAction.symAction }
-        .map { act -> TSAction(act, z3True) }
+        .map { act ->
+            val role = when (act.syncType) {
+                SymbolicAction.SyncType.P2P -> TSAction.SyncRole.P2PService
+                SymbolicAction.SyncType.CSP -> TSAction.SyncRole.CSP
+            }
+            TSAction(act, z3True, role)
+        }
         .toSet()
         .plus(TSAction(deadlockAct, ctx.mkFalse()))
     private var initially = true

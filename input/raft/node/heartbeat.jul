@@ -1,0 +1,135 @@
+import julaylib.fun.length
+import julaylib.fun.split
+import julaylib.fun.parseInt
+import node.lib.fieldValue
+import node.lib.encodeAppendEntries
+import node.lib.parseBool
+
+/*
+ * Leader heartbeats: while Leader, send empty AppendEntries to each peer.
+ */
+
+p-class HeartbeatDriver {
+    var step : String
+    var myId : Int
+    var curPeer : Int
+    var peer : String
+    var reqBody : String
+    var respBody : String
+    var clusterN : Int
+    var respTerm : Int
+    var respSuccess : Boolean
+    var respMatch : Int
+    var lastRespCode : Int
+
+    constructor startRaft(urls : List<String>, id : Int) {
+        transit:
+            step := "checkLeader"
+            myId := id
+            curPeer := 0
+            peer := ""
+            reqBody := ""
+            respBody := ""
+            clusterN := length(urls)
+            respTerm := 0
+            respSuccess := false
+            respMatch := 0
+            lastRespCode := 0
+    }
+
+    p2p-consumer transition isLeader(currentlyLeader : Boolean) {
+        guard: step = "checkLeader"
+        transit: step := if (currentlyLeader) { "hbNeedN" } else { "waitNotLeader" }
+    }
+
+    transition waitNotLeader() {
+        guard: step = "waitNotLeader"
+        transit: step := "checkLeader"
+        effect: delaySeconds(1)
+    }
+
+    p2p-consumer transition getClusterSize(size : Int) {
+        guard: step = "hbNeedN"
+        transit:
+            clusterN := size
+            curPeer := 0
+            step := "hbPeers"
+    }
+
+    transition hbSkipSelf() {
+        guard: step = "hbPeers" & curPeer = myId & curPeer < clusterN
+        transit: curPeer := curPeer + 1
+    }
+
+    transition hbPeersDone() {
+        guard: step = "hbPeers" & curPeer >= clusterN
+        transit: step := "hbWait"
+    }
+
+    p2p-consumer transition getLogMetadata(
+        peerId : Int, term : Int, leaderId : Int, prevLogIndex : Int, prevLogTerm : Int,
+        entryTerm : Int, entryValue : String, entriesLen : Int, leaderCommit : Int, peerUrlOut : String
+    ) {
+        guard: step = "hbPeers" & peerId = curPeer & curPeer ~= myId & curPeer < clusterN
+        transit:
+            peer := peerUrlOut
+            reqBody := encodeAppendEntries(
+                term, leaderId, prevLogIndex, prevLogTerm,
+                entryTerm, entryValue, entriesLen, leaderCommit
+            )
+            step := "sendAE"
+    }
+
+    p2p-consumer transition sendRequest(req : HttpClientRequest) {
+        guard:
+            & step = "sendAE"
+            & req = HttpClientRequest {
+                url := peer + "/raft/appendEntries", method := "POST", body := reqBody
+            }
+        transit: step := "recvAE"
+    }
+
+    p2p-consumer transition receiveResponse(resp : HttpClientResponse) {
+        guard: step = "recvAE"
+        transit:
+            respBody := resp.body
+            lastRespCode := resp.code
+            step := if (resp.code = 200) { "parseAE" } else { "skipPeer" }
+    }
+
+    transition skipFailedPeer() {
+        guard: step = "skipPeer"
+        transit:
+            curPeer := curPeer + 1
+            step := "hbPeers"
+    }
+
+    transition parseAEResp() {
+        guard: step = "parseAE"
+        transit:
+            respTerm := parseInt(fieldValue(split(respBody, "|")[0]))
+            respSuccess := parseBool(fieldValue(split(respBody, "|")[1]))
+            respMatch := parseInt(fieldValue(split(respBody, "|")[2]))
+            step := "applyAE"
+    }
+
+    transition handleAppendEntriesResp(
+        peerId : Int, inTerm : Int, success : Boolean, matchIdx : Int
+    ) {
+        guard:
+            & step = "applyAE"
+            & peerId = curPeer
+            & inTerm = respTerm
+            & success = respSuccess
+            & matchIdx = respMatch
+        transit:
+            curPeer := curPeer + 1
+            step := "hbPeers"
+    }
+
+    transition waitHeartbeat() {
+        guard: step = "hbWait"
+        transit: step := "checkLeader"
+        effect: delaySeconds(1)
+    }
+}

@@ -1,0 +1,10 @@
+p-class S {
+    var x : Int
+
+    p2p-service constructor initially(args : List<String>) {
+        transit: x := 0
+    }
+}
+
+proc P := S
+program Main := P

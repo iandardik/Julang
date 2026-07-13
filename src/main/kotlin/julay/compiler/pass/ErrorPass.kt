@@ -21,14 +21,13 @@ private fun RootNode.errorPassRoot(procs: Set<String>, librariesInUse: Set<Strin
         overlappingDeclNamesErrors()
 
 private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
-    val progTransitions = declNodes()
-        .flatMap { it.procClassPass(procs) }
-        .flatMap { it.transitions }
-    val libTransitions = librariesInUse
+    val progClasses = declNodes().flatMap { it.procClassPass(procs) }
+    val progActions = progClasses.flatMap { it.transitions + it.constructors }
+    val libActions = librariesInUse
         .filter { it in procs }
         .flatMap { LibraryRegistry.actionDecls(it) }
-    val allTransitions = progTransitions + libTransitions
-    val actionOccurrences = allTransitions.groupBy { it.action.name }
+    val allActions = progActions + libActions
+    val actionOccurrences = allActions.groupBy { it.action.name }
     return actionOccurrences.entries.flatMap { (name, actions) ->
         val refAction = actions[0]
         val argMismatches = actions.flatMap { act ->
@@ -52,17 +51,22 @@ private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse:
             )
         }
         val p2pMissingASide = actions.let { actionList ->
-            val isP2P = actionList.any { act -> act.action.syncType == SymbolicAction.SyncType.P2P }
-            val hasService = actionList.any { act -> act.modifier == TSAction.SyncRole.P2PService }
-            val hasConsumer = actionList.any { act -> act.modifier == TSAction.SyncRole.P2PConsumer }
-            val missingType = if (hasService) "p2p-consumer" else "p2p-service"
-            assertOrCompileError(
-                !isP2P || (hasService && hasConsumer),
-                OneLocCompileError(
-                    refAction.loc,
-                    "Expected action \"$name\" to have at least one corresponding \"$missingType\" action",
-                ),
-            )
+            // Skip bootstrap initially: it is checked separately and must remain CSP-only.
+            if (name == "initially") {
+                emptyList()
+            } else {
+                val isP2P = actionList.any { act -> act.action.syncType == SymbolicAction.SyncType.P2P }
+                val hasService = actionList.any { act -> act.modifier == TSAction.SyncRole.P2PService }
+                val hasConsumer = actionList.any { act -> act.modifier == TSAction.SyncRole.P2PConsumer }
+                val missingType = if (hasService) "p2p-consumer" else "p2p-service"
+                assertOrCompileError(
+                    !isP2P || (hasService && hasConsumer),
+                    OneLocCompileError(
+                        refAction.loc,
+                        "Expected action \"$name\" to have at least one corresponding \"$missingType\" action",
+                    ),
+                )
+            }
         }
         argMismatches + inconsistentSyncTypes + p2pMissingASide
     }
@@ -256,7 +260,8 @@ private fun ConstructorNode.errorPassConstructor(procs: Set<String>, librariesIn
     )
     val initiallyArgs = actionArgs()
     val expectedInitiallyArgs = listOf(Variable("args", listType(stringType)))
-    val initiallySignatureErrors = if (constructors().single().action.name != "initially") {
+    val ctorName = constructors().single().action.name
+    val initiallySignatureErrors = if (ctorName != "initially") {
         emptyList()
     } else {
         assertOrCompileError(
@@ -267,8 +272,20 @@ private fun ConstructorNode.errorPassConstructor(procs: Set<String>, librariesIn
             ),
         )
     }
+    // initially is a program bootstrap CSP self-sync; it cannot be a p2p constructor.
+    val initiallyCspErrors = if (ctorName != "initially") {
+        emptyList()
+    } else {
+        assertOrCompileError(
+            constructorModifier() == TSAction.SyncRole.CSP,
+            OneLocCompileError(
+                programLocation(),
+                "Expected constructor \"initially\" not to have a p2p modifier",
+            ),
+        )
+    }
     return children.flatMap { it.errorPass(procs, librariesInUse) } + assignmentErrors + noGuardErrors +
-        initiallySignatureErrors
+        initiallySignatureErrors + initiallyCspErrors
 }
 
 private fun TransitionNode.errorPassTransition(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {

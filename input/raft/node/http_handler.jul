@@ -134,11 +134,11 @@ p-class NodeHttpHandler {
             step := "resp"
     }
 
-    transition clientGet(body : String, ok : Boolean) {
+    p2p-consumer transition getStateMachine(body : String, isLeader : Boolean) {
         guard: step = "cg"
         transit:
             respBody := body
-            step := if (ok) { "cgOk" } else { "redir" }
+            step := if (isLeader) { "cgOk" } else { "redir" }
     }
 
     transition finishGetOk() {
@@ -148,7 +148,7 @@ p-class NodeHttpHandler {
             step := "resp"
     }
 
-    transition redirectBody(body : String, code : Int) {
+    p2p-consumer transition getRedirectBody(body : String, code : Int) {
         guard: step = "redir"
         transit:
             respBody := body

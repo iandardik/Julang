@@ -373,6 +373,7 @@ class VarNode(
 }
 
 class ConstructorNode(
+    private val modifier : TSAction.SyncRole,
     private val name : String,
     private val args : ArgsNode,
     private val body : List<ActionBodyNode>,
@@ -381,12 +382,17 @@ class ConstructorNode(
     override fun programLocation() = loc
     override fun transitVars() = body.flatMap { it.transitVars() }
     override fun constructors(): List<ActionDecl> {
+        val syncType = when (modifier) {
+            TSAction.SyncRole.CSP -> SymbolicAction.SyncType.CSP
+            TSAction.SyncRole.P2PService -> SymbolicAction.SyncType.P2P
+            TSAction.SyncRole.P2PConsumer -> SymbolicAction.SyncType.P2P
+        }
         return listOf(
             ActionDecl(
-                SymbolicAction(name, args.actionArgs(), SymbolicAction.SyncType.CSP),
+                SymbolicAction(name, args.actionArgs(), syncType),
                 body.flatMap { it.guards() },
                 body.flatMap { it.transits() },
-                TSAction.SyncRole.CSP,
+                modifier,
                 loc,
                 body.flatMap { it.effects() },
                 body.flatMap { it.errors() },
@@ -396,11 +402,17 @@ class ConstructorNode(
     internal fun body(): List<ActionBodyNode> = body
     internal fun constructorArgs(): ArgsNode = args
     internal fun actionArgs(): List<Variable> = args.actionArgs()
+    internal fun constructorModifier(): TSAction.SyncRole = modifier
     internal fun withBody(newBody: List<ActionBodyNode>): ConstructorNode =
-        ConstructorNode(name, args, newBody, programLocation())
+        ConstructorNode(modifier, name, args, newBody, programLocation())
     override fun toString(): String {
+        val modifierStr = when (modifier) {
+            TSAction.SyncRole.CSP -> ""
+            TSAction.SyncRole.P2PService -> "p2p-service "
+            TSAction.SyncRole.P2PConsumer -> "p2p-consumer "
+        }
         val bodyStr = body.joinToString("\n") { "$it".prependIndent() }
-        return "constructor $name($args) {\n$bodyStr\n}"
+        return "${modifierStr}constructor $name($args) {\n$bodyStr\n}"
     }
 }
 

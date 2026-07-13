@@ -24,14 +24,14 @@ class JulHttpClient(
         override val julName = "HttpClient"
         val reqArg = Variable("req", httpClientRequestType)
         val respArg = Variable("resp", httpClientResponseType)
-        val sendRequestAct = SymbolicAction("sendRequest", listOf(reqArg))
+        val sendRequestAct = SymbolicAction("sendRequest", listOf(reqArg), SymbolicAction.SyncType.P2P)
         val sendRequestCtor: Pair<SymbolicAction, suspend (Program, ConcreteAction) -> JulHttpClient> = Pair(
             sendRequestAct,
         ) { _, act ->
             val req = act.lookup(reqArg).value as HttpClientRequest
             JulHttpClient(req)
         }
-        val receiveResponseAct = SymbolicAction("receiveResponse", listOf(respArg))
+        val receiveResponseAct = SymbolicAction("receiveResponse", listOf(respArg), SymbolicAction.SyncType.P2P)
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one
         override fun staticInfo() = TransitionSystemStaticInfo(
             "JulHttpClient$",
@@ -39,8 +39,8 @@ class JulHttpClient(
             mapOf(sendRequestCtor),
         )
         override val actionDecls = listOf(
-            ActionDecl(sendRequestAct, listOf(), emptyList(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
-            ActionDecl(receiveResponseAct, listOf(), emptyList(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
+            ActionDecl(sendRequestAct, listOf(), emptyList(), TSAction.SyncRole.P2PService, LibraryLoc(julName)),
+            ActionDecl(receiveResponseAct, listOf(), emptyList(), TSAction.SyncRole.P2PService, LibraryLoc(julName)),
         )
     }
 
@@ -56,8 +56,13 @@ class JulHttpClient(
             "GET", "HEAD" -> builder.method(method, BodyPublishers.noBody()).build()
             else -> builder.method(method, BodyPublishers.ofString(request.body)).build()
         }
-        val jdkResponse = client.send(jdkRequest, BodyHandlers.ofString())
-        response = HttpClientResponse(jdkResponse.body(), jdkResponse.statusCode())
+        response = try {
+            val jdkResponse = client.send(jdkRequest, BodyHandlers.ofString())
+            HttpClientResponse(jdkResponse.body(), jdkResponse.statusCode())
+        } catch (_: Exception) {
+            // Deliver a syncable failure response so peers are not stuck in receiveResponse.
+            HttpClientResponse("", 0)
+        }
     }
 
     override suspend fun actions(): Set<TSAction> {
@@ -70,6 +75,7 @@ class JulHttpClient(
                         respArg.toZ3Expr(ctx),
                         httpClientResponseType.toZ3Expr(Value(response, httpClientResponseType), ctx),
                     ),
+                    TSAction.SyncRole.P2PService,
                 ),
             )
         } else {

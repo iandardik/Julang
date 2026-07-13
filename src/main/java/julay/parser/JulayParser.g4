@@ -79,7 +79,7 @@ var
     ;
 
 constructor
-    : CONSTRUCTOR ID args LCURLY action_body* RCURLY
+    : (SERVICE | CONSUMER)? CONSTRUCTOR ID args LCURLY action_body* RCURLY
     ;
 
 transition

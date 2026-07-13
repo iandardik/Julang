@@ -1,0 +1,4 @@
+source: regression/input/syntax-errors/initially-p2p-modifier.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected constructor \"initially\" not to have a p2p modifier"

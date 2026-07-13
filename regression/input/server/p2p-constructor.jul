@@ -1,0 +1,42 @@
+import julaylib.pclass.ExitSystem
+
+/*
+ * Example: p2p-service constructor paired with a p2p-consumer transition.
+ */
+
+p-class Maker {
+    var x : Int
+
+    p2p-service constructor make(v : Int) {
+        transit: x := v
+    }
+
+    transition idle() {
+        guard: true
+    }
+}
+
+p-class User {
+    var y : Int
+    var step : String
+
+    constructor initially(args : List<String>) {
+        transit:
+            y := 0
+            step := "go"
+    }
+
+    p2p-consumer transition make(v : Int) {
+        guard: step = "go" & v = 1
+        transit:
+            y := v
+            step := "done"
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard: step = "done"
+    }
+}
+
+proc P := Maker || User || ExitSystem
+program Main := P

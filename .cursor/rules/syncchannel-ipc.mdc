@@ -8,6 +8,7 @@ alwaysApply: false
 
 All inter-process communication in Julay must go exclusively through `SyncChannel` (CSP or p2p action rendezvous). Do not add shared caches, mutable statics, or other cross-process shortcuts.
 
-- Pairwise 1:1 sync → p2p actions (sync size 2)
+- Pairwise 1:1 sync → p2p actions (sync size 2), including p2p constructors (`p2p-service` / `p2p-consumer constructor`)
 - CSP sync size → full alphabet/constructor peer set for that action
+- `initially` remains CSP-only (program bootstrap); do not mark it p2p
 - Do not reintroduce type-factory interning/caching in `ListType` / `MapType` / `SetType` as an optimization that blurs process isolation assumptions
