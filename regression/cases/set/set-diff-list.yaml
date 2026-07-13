@@ -1,0 +1,4 @@
+source: regression/input/set/set-diff-list.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Cannot apply \"-\" to list type Set<Int>"

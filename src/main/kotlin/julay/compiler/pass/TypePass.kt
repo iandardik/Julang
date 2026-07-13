@@ -58,6 +58,7 @@ fun ASTNode.typePass(
     is ArgNode -> typePassArgNode(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is GuardNode -> typePassGuard(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is VarTransitNode -> typePassVarTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    is MapIndexTransitNode -> typePassMapIndexTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is ErrorNode -> typePassError(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is EffectNode -> typePassEffect(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is EffectCallNode -> typePassEffectCall(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
@@ -69,6 +70,9 @@ fun ASTNode.typePass(
     is ObjClassLiteralExprNode -> typePassObjClassLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is FieldAccessExprNode -> typePassFieldAccess(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is ListLiteralExprNode -> typePassListLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    is EmptyBracketLiteralExprNode -> typePassEmptyBracketLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    is SetLiteralExprNode -> typePassSetLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    is MapLiteralExprNode -> typePassMapLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is IndexExprNode -> typePassIndex(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is SliceExprNode -> typePassSlice(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is FunCallExprNode -> typePassFunCall(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
@@ -199,7 +203,7 @@ private fun VarTransitNode.typePassVarTransit(
             is FieldPathResult.Error -> null
         }
     }
-    expectedType?.let { applyExpectedListType(transitExpr(), it) }
+    expectedType?.let { applyExpectedCollectionType(transitExpr(), it) }
     val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
     if (childrenErrors.isNotEmpty()) {
         return childrenErrors
@@ -374,8 +378,60 @@ private fun BinaryOpExprNode.typePassBinaryOp(
                     "Expected both sides of \"+\" to have the same list type, got $lhsType and $rhsType",
                 ),
             )
+            "in" -> assertOrCompileError(
+                rhsType is ListType && lhsType == (rhsType as ListType).elementType,
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected \"in\" list element type $lhsType to match ${(rhsType as ListType).elementType}",
+                ),
+            )
             else -> listOf(OneLocCompileError(programLocation(), "Cannot apply \"${op()}\" to list type $lhsType"))
         }
+    } else if (lhsType is SetType || rhsType is SetType) {
+        when (op()) {
+            "=", "#" -> assertOrCompileError(
+                lhsType == rhsType,
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected both sides of \"${op()}\" to have the same set type, got $lhsType and $rhsType",
+                ),
+            )
+            "+", "-" -> assertOrCompileError(
+                lhsType is SetType && rhsType is SetType && lhsType == rhsType,
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected both sides of \"${op()}\" to have the same set type, got $lhsType and $rhsType",
+                ),
+            )
+            "in" -> assertOrCompileError(
+                rhsType is SetType && lhsType == (rhsType as SetType).elementType,
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected \"in\" set element type $lhsType to match ${(rhsType as SetType).elementType}",
+                ),
+            )
+            else -> listOf(OneLocCompileError(programLocation(), "Cannot apply \"${op()}\" to set type $lhsType"))
+        }
+    } else if (lhsType is MapType || rhsType is MapType) {
+        when (op()) {
+            "=", "#" -> assertOrCompileError(
+                lhsType == rhsType,
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected both sides of \"${op()}\" to have the same map type, got $lhsType and $rhsType",
+                ),
+            )
+            "in" -> assertOrCompileError(
+                rhsType is MapType && lhsType == (rhsType as MapType).keyType,
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected \"in\" map key type $lhsType to match ${(rhsType as MapType).keyType}",
+                ),
+            )
+            else -> listOf(OneLocCompileError(programLocation(), "Cannot apply \"${op()}\" to map type $lhsType"))
+        }
+    } else if (op() == "in") {
+        listOf(OneLocCompileError(programLocation(), "Cannot apply \"in\" to types $lhsType and $rhsType"))
     } else {
         emptyList()
     }
@@ -450,7 +506,7 @@ private fun LetExprNode.typePassLet(symbolEnv: Map<String, Type>, registry: ObjC
     }
 
     val declaredType = resolvedLetType
-    applyExpectedListType(letInitExpr(), declaredType)
+    applyExpectedCollectionType(letInitExpr(), declaredType)
     val initErrors = letInitExpr().typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     if (initErrors.isNotEmpty()) {
         return initErrors
@@ -930,10 +986,42 @@ private fun FunNode.typePassFunSignature(registry: ObjClassRegistry): List<Compi
     return returnOnlyErrors + argErrors + returnErrors
 }
 
-private fun applyExpectedListType(expr: ExprNode, expected: Type) {
-    if (expr is ListLiteralExprNode && expr.elements.isEmpty() && expected is ListType) {
-        expr.resolveListType(expected)
+private fun applyExpectedCollectionType(expr: ExprNode, expected: Type) {
+    when {
+        expr is ListLiteralExprNode && expr.elements.isEmpty() && expected is ListType ->
+            expr.resolveListType(expected)
+        expr is EmptyBracketLiteralExprNode && expected is ListType ->
+            expr.resolveListType(expected)
+        expr is EmptyBracketLiteralExprNode && expected is MapType ->
+            expr.resolveMapType(expected)
+        expr is SetLiteralExprNode && expr.elements.isEmpty() && expected is SetType ->
+            expr.resolveSetType(expected)
+        expr is MapLiteralExprNode && expr.entries.isEmpty() && expected is MapType ->
+            expr.resolveMapType(expected)
     }
+}
+
+private fun EmptyBracketLiteralExprNode.typePassEmptyBracketLiteral(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+): List<CompileError> {
+    resolvedListTypeOrNull()?.let {
+        inferExprType(symbolEnv)
+        return emptyList()
+    }
+    resolvedMapTypeOrNull()?.let {
+        inferExprType(symbolEnv)
+        return emptyList()
+    }
+    return listOf(
+        OneLocCompileError(
+            programLocation(),
+            "Empty [] literal requires a known List or Map target type",
+        ),
+    )
 }
 
 private fun ListLiteralExprNode.typePassListLiteral(
@@ -987,16 +1075,160 @@ private fun IndexExprNode.typePassIndex(
     }
     val errors = mutableListOf<CompileError>()
     val baseType = base.getType()
-    if (baseType !is ListType) {
-        errors.add(OneLocCompileError(base.programLocation(), "Expected list type for index base but got $baseType"))
-    }
-    if (index.getType() !is IntType) {
-        errors.add(OneLocCompileError(index.programLocation(), "Expected Int index but got ${index.getType()}"))
+    when (baseType) {
+        is ListType -> {
+            if (index.getType() !is IntType) {
+                errors.add(OneLocCompileError(index.programLocation(), "Expected Int index but got ${index.getType()}"))
+            }
+        }
+        is MapType -> {
+            if (index.getType() != baseType.keyType) {
+                errors.add(
+                    OneLocCompileError(
+                        index.programLocation(),
+                        "Expected map key type ${baseType.keyType} but got ${index.getType()}",
+                    ),
+                )
+            }
+        }
+        else -> errors.add(OneLocCompileError(base.programLocation(), "Expected list or map type for index base but got $baseType"))
     }
     if (errors.isEmpty()) {
         inferExprType(symbolEnv)
     }
     return errors
+}
+
+private fun MapIndexTransitNode.typePassMapIndexTransit(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+): List<CompileError> {
+    val mapVarType = symbolEnv[mapVar]
+    if (mapVarType == null) {
+        return listOf(OneLocCompileError(programLocation(), "Unknown variable \"$mapVar\" in transit assignment"))
+    }
+    if (mapVarType !is MapType) {
+        return listOf(
+            OneLocCompileError(
+                programLocation(),
+                "Expected map variable for index assignment but \"$mapVar\" has type $mapVarType",
+            ),
+        )
+    }
+    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    if (childErrors.isNotEmpty()) {
+        return childErrors
+    }
+    val errors = mutableListOf<CompileError>()
+    if (key.getType() != mapVarType.keyType) {
+        errors.add(
+            OneLocCompileError(
+                key.programLocation(),
+                "Expected map key type ${mapVarType.keyType} but got ${key.getType()}",
+            ),
+        )
+    }
+    if (value.getType() != mapVarType.valueType) {
+        errors.add(
+            OneLocCompileError(
+                value.programLocation(),
+                "Expected map value type ${mapVarType.valueType} but got ${value.getType()}",
+            ),
+        )
+    }
+    return errors
+}
+
+private fun SetLiteralExprNode.typePassSetLiteral(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+): List<CompileError> {
+    val childErrors = elements.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    if (childErrors.isNotEmpty()) {
+        return childErrors
+    }
+    resolvedSetTypeOrNull()?.let {
+        inferExprType(symbolEnv)
+        return emptyList()
+    }
+    if (elements.isEmpty()) {
+        return listOf(
+            OneLocCompileError(
+                programLocation(),
+                "Empty set literal requires a known Set target type",
+            ),
+        )
+    }
+    val elemType = elements[0].getType()
+    val mismatch = elements.drop(1).filter { it.getType() != elemType }
+    if (mismatch.isNotEmpty()) {
+        return mismatch.map {
+            OneLocCompileError(
+                it.programLocation(),
+                "Expected set elements to have type $elemType but got ${it.getType()}",
+            )
+        }
+    }
+    resolveSetType(setType(elemType))
+    inferExprType(symbolEnv)
+    return emptyList()
+}
+
+private fun MapLiteralExprNode.typePassMapLiteral(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+): List<CompileError> {
+    val childErrors = entries.flatMap { (k, v) ->
+        k.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) +
+            v.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    }
+    if (childErrors.isNotEmpty()) {
+        return childErrors
+    }
+    resolvedMapTypeOrNull()?.let {
+        inferExprType(symbolEnv)
+        return emptyList()
+    }
+    if (entries.isEmpty()) {
+        return listOf(
+            OneLocCompileError(
+                programLocation(),
+                "Empty map literal requires a known Map target type",
+            ),
+        )
+    }
+    val keyType = entries[0].first.getType()
+    val valueType = entries[0].second.getType()
+    val keyMismatch = entries.drop(1).filter { it.first.getType() != keyType }
+    if (keyMismatch.isNotEmpty()) {
+        return keyMismatch.map {
+            OneLocCompileError(
+                it.first.programLocation(),
+                "Expected map keys to have type $keyType but got ${it.first.getType()}",
+            )
+        }
+    }
+    val valueMismatch = entries.filter { it.second.getType() != valueType }
+    if (valueMismatch.isNotEmpty()) {
+        return valueMismatch.map {
+            OneLocCompileError(
+                it.second.programLocation(),
+                "Expected map values to have type $valueType but got ${it.second.getType()}",
+            )
+        }
+    }
+    resolveMapType(mapType(keyType, valueType))
+    inferExprType(symbolEnv)
+    return emptyList()
 }
 
 private fun SliceExprNode.typePassSlice(

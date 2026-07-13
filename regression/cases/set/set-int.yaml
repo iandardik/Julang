@@ -1,0 +1,10 @@
+source: regression/input/set/set-int.jul
+programs:
+  - name: SetIntTest
+    run:
+      timeoutMs: 60000
+      args:
+        - "cli"
+      expectStdoutContains:
+        - "cli"
+        - "2"

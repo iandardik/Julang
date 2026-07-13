@@ -39,8 +39,8 @@ class JulHttpClient(
             mapOf(sendRequestCtor),
         )
         override val actionDecls = listOf(
-            ActionDecl(sendRequestAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
-            ActionDecl(receiveResponseAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
+            ActionDecl(sendRequestAct, listOf(), emptyList(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
+            ActionDecl(receiveResponseAct, listOf(), emptyList(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
         )
     }
 

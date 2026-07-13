@@ -1,0 +1,4 @@
+source: regression/input/set/set-in-wrong.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Cannot apply \"in\""

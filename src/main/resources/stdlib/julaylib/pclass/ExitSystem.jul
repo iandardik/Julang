@@ -1,5 +1,5 @@
 p-class ExitSystem {
-    constructor initially(args : List String) {}
+    constructor initially(args : List<String>) {}
 
     p2p-service transition exitSystem() {
         effect:

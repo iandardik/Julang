@@ -2,7 +2,7 @@ p-class S {
     var x : Int
     var print : Boolean
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             x := 0
             print := true
@@ -35,7 +35,7 @@ p-class S {
 p-class T {
     var x : Int
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             x := 0
     }

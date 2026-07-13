@@ -1,0 +1,5 @@
+source: regression/input/set/set-empty.jul
+programs:
+  - name: SetEmptyTest
+    run:
+      timeoutMs: 60000

@@ -170,6 +170,8 @@ fun Type.toKotlinTypeString(): String = when (this) {
     is StringType -> "String"
     is ObjClassType -> name
     is ListType -> "List<${elementType.toKotlinTypeString()}>"
+    is SetType -> "Set<${elementType.toKotlinTypeString()}>"
+    is MapType -> "Map<${keyType.toKotlinTypeString()}, ${valueType.toKotlinTypeString()}>"
     is TypeVar -> throw RuntimeException("TypeVar \"$name\" must not reach Kotlin codegen")
     else -> throw RuntimeException("Invalid type: $this")
 }
@@ -181,6 +183,8 @@ fun Type.toCodegenTypeVal(): String = when (this) {
     is StringType -> "stringType"
     is ObjClassType -> objClassTypeValName(name)
     is ListType -> "listType(${elementType.toCodegenTypeVal()})"
+    is SetType -> "setType(${elementType.toCodegenTypeVal()})"
+    is MapType -> "mapType(${keyType.toCodegenTypeVal()}, ${valueType.toCodegenTypeVal()})"
     is TypeVar -> throw RuntimeException("TypeVar \"$name\" must not reach Kotlin codegen")
     else -> throw RuntimeException("Invalid type: $this")
 }

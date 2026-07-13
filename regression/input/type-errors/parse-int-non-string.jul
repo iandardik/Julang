@@ -3,7 +3,7 @@ import julaylib.fun.parseInt
 p-class Bad {
     var n : Int
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             n := parseInt(1)
     }

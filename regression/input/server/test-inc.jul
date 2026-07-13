@@ -6,7 +6,7 @@ import julaylib.pclass.ExitSystem
 p-class Counter {
     var counter : Int
     
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit: counter := 0
     }
 
@@ -29,7 +29,7 @@ p-class PeriodicPrint {
     var localCounter : Int
     var step : String
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             localCounter := -1
             step := "A"
@@ -63,7 +63,7 @@ p-class PeriodicPrint {
 p-class ServerStarter {
     var started : Boolean
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit: started := false
     }
 

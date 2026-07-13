@@ -8,7 +8,7 @@ p-class ClientDispatcher {
     var numResps : Int
     var targetNumReqs : Int
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             numReqs := 1
             numResps := 0

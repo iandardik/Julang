@@ -7,7 +7,7 @@ fun const<T>(x : Int) : T = x
 p-class Worker {
     var n : Int
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             n := 0
     }

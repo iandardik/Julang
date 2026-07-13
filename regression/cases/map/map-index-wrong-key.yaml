@@ -1,0 +1,4 @@
+source: regression/input/map/map-index-wrong-key.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected map key type String but got Int"

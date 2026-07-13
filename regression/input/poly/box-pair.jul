@@ -10,17 +10,17 @@ o-class Pair<A, B> {
 }
 
 p-class Worker {
-    var box : Box Int
-    var nested : Box (Box Int)
-    var pair : Pair Int Boolean
+    var box : Box<Int>
+    var nested : Box<Box<Int>>
+    var pair : Pair<Int, Boolean>
     var steps : Int
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             steps := 0
-            box := Box Int { value := 7 }
-            nested := Box (Box Int) { value := Box Int { value := 3 } }
-            pair := Pair Int Boolean { left := 1, right := true }
+            box := Box<Int> { value := 7 }
+            nested := Box<Box<Int>> { value := Box<Int> { value := 3 } }
+            pair := Pair<Int, Boolean> { left := 1, right := true }
     }
 
     transition checkBox() {

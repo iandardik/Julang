@@ -35,6 +35,7 @@ IF : 'if' ;
 ELSE : 'else' ;
 LET : 'let' ;
 WHEN : 'when' ;
+IN : 'in' ;
 ARROW : '->' ;
 IMPORT : 'import' ;
 

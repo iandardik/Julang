@@ -28,9 +28,12 @@ decl
     ;
 
 typeExpr
-    : ID
-    | ID typeExpr
+    : ID typeArgs?
     | LPAREN typeExpr RPAREN
+    ;
+
+typeArgs
+    : LT typeExpr (COMMA typeExpr)* GT
     ;
 
 typeParams
@@ -116,6 +119,7 @@ error_arm
 
 var_transit
     : field_access ASGN_EQ expr
+    | ID LBRACK expr RBRACK ASGN_EQ expr
     ;
 
 effect
@@ -135,7 +139,8 @@ effect_call
 expr
     : literal
     | LPAREN expr RPAREN
-    | list_literal
+    | bracket_literal
+    | set_literal
     | index_expr
     | field_access
     | oclass_literal
@@ -151,6 +156,7 @@ expr
     | expr LTE expr
     | expr GT expr
     | expr GTE expr
+    | expr IN expr
     | expr EQ expr
     | expr NEQ expr
     | expr BANG_NEQ expr
@@ -193,13 +199,23 @@ literal
     | STRING
     ;
 
-list_literal
-    : LBRACK (expr (COMMA expr)*)? RBRACK
+bracket_literal
+    : LBRACK RBRACK
+    | LBRACK map_entry (COMMA map_entry)* RBRACK
+    | LBRACK expr (COMMA expr)* RBRACK
+    ;
+
+map_entry
+    : expr ARROW expr
+    ;
+
+set_literal
+    : LCURLY (expr (COMMA expr)*)? RCURLY
     ;
 
 index_expr
     : index_expr LBRACK index_or_slice RBRACK
-    | (fun_call | field_access | list_literal | LPAREN expr RPAREN) LBRACK index_or_slice RBRACK
+    | (fun_call | field_access | bracket_literal | set_literal | LPAREN expr RPAREN) LBRACK index_or_slice RBRACK
     ;
 
 index_or_slice

@@ -1,10 +1,10 @@
 import julaylib.pclass.ExitSystem
 
 p-class BadSlice {
-    var xs : List Int
-    var ys : List Int
+    var xs : List<Int>
+    var ys : List<Int>
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             xs := [1, 2, 3]
             ys := xs[true:2]

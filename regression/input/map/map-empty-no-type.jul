@@ -1,0 +1,10 @@
+p-class BadEmptyBracket {
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            n := length([])
+    }
+}
+
+program P := BadEmptyBracket

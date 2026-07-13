@@ -67,6 +67,22 @@ fun substituteExpr(expr: ExprNode, name: String, replacement: ExprNode): ExprNod
             expr.programLocation(),
             expr.resolvedListTypeOrNull(),
         ).withTypeOf(expr)
+        is EmptyBracketLiteralExprNode -> EmptyBracketLiteralExprNode(
+            expr.programLocation(),
+        ).also { node ->
+            expr.resolvedListTypeOrNull()?.let { node.resolveListType(it) }
+            expr.resolvedMapTypeOrNull()?.let { node.resolveMapType(it) }
+        }.withTypeOf(expr)
+        is SetLiteralExprNode -> SetLiteralExprNode(
+            expr.elements.map { substituteExpr(it, name, replacement) },
+            expr.programLocation(),
+            expr.resolvedSetTypeOrNull(),
+        ).withTypeOf(expr)
+        is MapLiteralExprNode -> MapLiteralExprNode(
+            expr.entries.map { (k, v) -> substituteExpr(k, name, replacement) to substituteExpr(v, name, replacement) },
+            expr.programLocation(),
+            expr.resolvedMapTypeOrNull(),
+        ).withTypeOf(expr)
         is IndexExprNode -> IndexExprNode(
             substituteExpr(expr.base, name, replacement),
             substituteExpr(expr.index, name, replacement),
@@ -142,6 +158,8 @@ fun exprReferencesSymbol(expr: ExprNode, symbol: String): Boolean {
         is FieldAccessOnExprNode -> exprReferencesSymbol(expr.baseExpr, symbol)
         is ObjClassLiteralExprNode -> expr.fieldEntries.any { exprReferencesSymbol(it.second, symbol) }
         is ListLiteralExprNode -> expr.elements.any { exprReferencesSymbol(it, symbol) }
+        is SetLiteralExprNode -> expr.elements.any { exprReferencesSymbol(it, symbol) }
+        is MapLiteralExprNode -> expr.entries.any { exprReferencesSymbol(it.first, symbol) || exprReferencesSymbol(it.second, symbol) }
         is IndexExprNode ->
             exprReferencesSymbol(expr.base, symbol) || exprReferencesSymbol(expr.index, symbol)
         is SliceExprNode ->
@@ -186,6 +204,8 @@ fun collectFunCallNames(expr: ExprNode): Set<String> {
         is FieldAccessOnExprNode -> collectFunCallNames(expr.baseExpr)
         is ObjClassLiteralExprNode -> expr.fieldEntries.flatMap { collectFunCallNames(it.second) }.toSet()
         is ListLiteralExprNode -> expr.elements.flatMap { collectFunCallNames(it) }.toSet()
+        is SetLiteralExprNode -> expr.elements.flatMap { collectFunCallNames(it) }.toSet()
+        is MapLiteralExprNode -> expr.entries.flatMap { collectFunCallNames(it.first) + collectFunCallNames(it.second) }.toSet()
         is IndexExprNode -> collectFunCallNames(expr.base) + collectFunCallNames(expr.index)
         is SliceExprNode ->
             collectFunCallNames(expr.base) + collectFunCallNames(expr.start) + collectFunCallNames(expr.end)

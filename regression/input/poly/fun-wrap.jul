@@ -4,16 +4,16 @@ o-class Box<T> {
     value : T
 }
 
-fun wrap<T>(x : T) : Box T = Box T { value := x }
+fun wrap<T>(x : T) : Box<T> = Box<T> { value := x }
 
 p-class Worker {
-    var box : Box Int
+    var box : Box<Int>
     var steps : Int
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             steps := 0
-            box := Box Int { value := 0 }
+            box := Box<Int> { value := 0 }
     }
 
     transition go(n : Int) {
@@ -40,7 +40,7 @@ p-class Worker {
 p-class Driver {
     var done : Boolean
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             done := false
     }

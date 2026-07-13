@@ -1,0 +1,16 @@
+import julaylib.pclass.ExitSystem
+
+p-class BadSet {
+    var s : Set<Int>
+
+    constructor initially(args : List<String>) {
+        transit:
+            s := {1, true}
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard: true
+    }
+}
+
+program BadSetTest := BadSet || ExitSystem

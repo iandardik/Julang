@@ -9,7 +9,7 @@ o-class ReqInfo {
 p-class ServerStarter {
     var started : Boolean
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit: started := false
     }
 

@@ -38,10 +38,10 @@ class JulHttpServer(
             mapOf(startServerCtor),
         )
         override val actionDecls = listOf(
-            ActionDecl(startServerAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
-            ActionDecl(receiveRequestAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
-            ActionDecl(sendResponseAct, listOf(), mapOf(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
-            ActionDecl(closeAct, listOf(), mapOf(), TSAction.SyncRole.P2PService, LibraryLoc(julName)),
+            ActionDecl(startServerAct, listOf(), emptyList(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
+            ActionDecl(receiveRequestAct, listOf(), emptyList(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
+            ActionDecl(sendResponseAct, listOf(), emptyList(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
+            ActionDecl(closeAct, listOf(), emptyList(), TSAction.SyncRole.P2PService, LibraryLoc(julName)),
         )
     }
 

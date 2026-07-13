@@ -9,7 +9,7 @@ p-class Worker {
     var pos : Point
     var count : Int
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             count := 0
             pos := Point { x := 0, y := 0 }

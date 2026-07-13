@@ -2,7 +2,11 @@ package julay.compiler.pass
 
 import julay.compiler.*
 import julay.compiler.ast.*
-import julay.compiler.decl.*
+import julay.compiler.decl.ActionDecl
+import julay.compiler.decl.ObjClassDecl
+import julay.compiler.decl.ProcClassDecl
+import julay.compiler.decl.ProcDecl
+import julay.compiler.decl.TransitUpdate
 import julay.program.*
 import julay.program.library.LibraryRegistry
 
@@ -45,7 +49,22 @@ fun codegenPass(
         "import julay.tools.mkStringConst\n" +
         "import julay.tools.mkSeqLengthAny\n" +
         "import julay.tools.mkSeqNthAny\n" +
-        "import julay.tools.mkSeqConcatAny\n"
+        "import julay.tools.mkSeqConcatAny\n" +
+        "import julay.tools.mkListMemberAny\n" +
+        "import julay.tools.mkSetMemberAny\n" +
+        "import julay.tools.mkSetUnionAny\n" +
+        "import julay.tools.mkSetDifferenceAny\n" +
+        "import julay.tools.mkSetAddAny\n" +
+        "import julay.tools.setCellArrExpr\n" +
+        "import julay.tools.setCellSizeExpr\n" +
+        "import julay.tools.setMkCellExpr\n" +
+        "import julay.tools.mapCellArrExpr\n" +
+        "import julay.tools.mapCellKeysExpr\n" +
+        "import julay.tools.mapCellSizeExpr\n" +
+        "import julay.tools.mapSelectExpr\n" +
+        "import julay.tools.mapStoreExpr\n" +
+        "import julay.tools.mapSetAddExpr\n" +
+        "import julay.tools.mapMkCellExpr\n"
     val dataClassCode = objClassDecls.joinToString("\n\n") { it.kotlinDataClassString() }
     val dataClassSection = if (dataClassCode.isEmpty()) "" else "$dataClassCode\n\n"
     val conversionHelpers = objClassDecls.joinToString("\n\n") { it.kotlinConversionHelpersString() }
@@ -256,9 +275,10 @@ private fun ProcClassDecl.kotlinStaticInfoString(): String {
             val argSymbols = actionArgSymbols(ctor.action.args)
             val stateVarTypes = stateVars.associate { Pair(it.name, it.type) }
             val symbolTypes = stateVarTypes + actionArgEnv(ctor.action.args)
-            val constructorArgs = ctor.transits.entries
-                .joinToString(", ") { (k, v) ->
-                    "${transitRootVar(k).toKotlinIdent()} = ${v.toTransitString(symbolTypes, argSymbols)}"
+            val constructorArgs = ctor.transits
+                .filterIsInstance<TransitUpdate.Assign>()
+                .joinToString(", ") { assign ->
+                    "${transitRootVar(assign.key).toKotlinIdent()} = ${assign.expr.toTransitString(symbolTypes, argSymbols)}"
                 }
             val constructor = "$name($constructorArgs)"
             // Error checks run before transits and effects so they see pre-state variables
@@ -324,12 +344,22 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
     // Error checks run before transits and effects so they see pre-state variables
     // and no effect happens upon an error.
     val errorStr = kotlinErrorString(stateVarTypes)
-    val transitLines = transits.map { (k, e) ->
-        val rootVar = transitRootVar(k)
-        val rootType = stateVarTypes.getValue(rootVar)
-        val fieldPath = if (k.contains('.')) k.substringAfter('.').split('.') else emptyList()
-        val rhs = e.toTransitString(symbolTypes, argSymbols)
-        copyAssignmentString(rootVar, rootType, fieldPath, rhs)
+    val transitLines = transits.map { update ->
+        when (update) {
+            is TransitUpdate.Assign -> {
+                val rootVar = transitRootVar(update.key)
+                val rootType = stateVarTypes.getValue(rootVar)
+                val fieldPath = if (update.key.contains('.')) update.key.substringAfter('.').split('.') else emptyList()
+                val rhs = update.expr.toTransitString(symbolTypes, argSymbols)
+                copyAssignmentString(rootVar, rootType, fieldPath, rhs)
+            }
+            is TransitUpdate.MapPut -> {
+                val mapVar = update.mapVar.toKotlinIdent()
+                val keyStr = update.key.toTransitString(symbolTypes, argSymbols)
+                val valStr = update.value.toTransitString(symbolTypes, argSymbols)
+                "$mapVar = $mapVar + ($keyStr to $valStr)"
+            }
+        }
     }
     // Snapshot all effect args from the pre-transit state before any effect runs.
     // e.g. println(step) prints the pre-transit value. Effects themselves still run

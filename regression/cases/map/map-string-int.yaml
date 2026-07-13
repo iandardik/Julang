@@ -1,0 +1,10 @@
+source: regression/input/map/map-string-int.jul
+programs:
+  - name: MapStringIntTest
+    run:
+      timeoutMs: 60000
+      args:
+        - "cli"
+      expectStdoutContains:
+        - "cli"
+        - "3"

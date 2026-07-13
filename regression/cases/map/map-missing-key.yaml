@@ -1,0 +1,8 @@
+source: regression/input/map/map-missing-key.jul
+programs:
+  - name: MapMissingKeyTest
+    expectFailure: true
+    expectFailureOutputContains:
+      - "Key missing is missing in the map"
+    run:
+      timeoutMs: 60000

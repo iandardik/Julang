@@ -1,0 +1,4 @@
+source: regression/input/map/map-whole-and-put.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected not to assign whole map \"mp\" and update entries in the same action"

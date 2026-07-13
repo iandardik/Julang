@@ -68,6 +68,21 @@ fun unifyTypes(schema: Type, concrete: Type, subst: MutableMap<String, Type> = m
             }
             return unifyTypes(schema.elementType, concrete.elementType, subst)
         }
+        is SetType -> {
+            if (concrete !is SetType) {
+                return UnifyResult.Fail("Expected $schema but got $concrete")
+            }
+            return unifyTypes(schema.elementType, concrete.elementType, subst)
+        }
+        is MapType -> {
+            if (concrete !is MapType) {
+                return UnifyResult.Fail("Expected $schema but got $concrete")
+            }
+            return when (val key = unifyTypes(schema.keyType, concrete.keyType, subst)) {
+                is UnifyResult.Fail -> key
+                is UnifyResult.Ok -> unifyTypes(schema.valueType, concrete.valueType, subst)
+            }
+        }
         else -> return UnifyResult.Fail("Cannot unify $schema with $concrete")
     }
 }
@@ -76,5 +91,7 @@ private fun Type.containsTypeVarRef(name: String): Boolean = when (this) {
     is TypeVar -> this.name == name
     is ObjClassType -> fields.any { it.type.containsTypeVarRef(name) }
     is ListType -> elementType.containsTypeVarRef(name)
+    is SetType -> elementType.containsTypeVarRef(name)
+    is MapType -> keyType.containsTypeVarRef(name) || valueType.containsTypeVarRef(name)
     else -> false
 }

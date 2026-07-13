@@ -1,0 +1,10 @@
+p-class BadBracket {
+    var xs : List<Int>
+
+    constructor initially(args : List<String>) {
+        transit:
+            xs := ["a" -> 1]
+    }
+}
+
+program P := BadBracket

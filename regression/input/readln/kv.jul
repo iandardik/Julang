@@ -3,7 +3,7 @@ p-class FrontEnd {
     var keyReq : String
     var valReq : String
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             state := "A"
             keyReq := ""
@@ -51,7 +51,7 @@ p-class FrontEnd {
 }
 
 p-class DB {
-    constructor initially(args : List String) {}
+    constructor initially(args : List<String>) {}
 
     transition readDB(key : String, val : String) {
         guard:
@@ -66,7 +66,7 @@ p-class DB {
 }
 
 p-class DB2 {
-    constructor initially(args : List String) {}
+    constructor initially(args : List<String>) {}
 
     transition readDB(key : String, val : String) {
         guard:
@@ -81,7 +81,7 @@ p-class Readln {
     var prompt : Boolean
     var readMsg : String
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             prompt := true
             readMsg := ""

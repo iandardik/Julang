@@ -5,9 +5,9 @@ o-class Box<T> {
 p-class Worker {
     var x : Box
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
-            x := Box Int { value := 1 }
+            x := Box<Int> { value := 1 }
     }
 }
 

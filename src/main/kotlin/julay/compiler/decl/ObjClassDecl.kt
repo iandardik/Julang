@@ -51,6 +51,8 @@ fun mangleTypeForName(type: Type): String = when (type) {
     is StringType -> "String"
     is ObjClassType -> type.name
     is ListType -> "List_${mangleTypeForName(type.elementType)}"
+    is SetType -> "Set_${mangleTypeForName(type.elementType)}"
+    is MapType -> "Map_${mangleTypeForName(type.keyType)}_${mangleTypeForName(type.valueType)}"
     is TypeVar -> type.name
     else -> throw RuntimeException("Cannot mangle type $type")
 }
@@ -62,6 +64,8 @@ fun Type.containsTypeVar(): Boolean = when (this) {
     is TypeVar -> true
     is ObjClassType -> fields.any { it.type.containsTypeVar() }
     is ListType -> elementType.containsTypeVar()
+    is SetType -> elementType.containsTypeVar()
+    is MapType -> keyType.containsTypeVar() || valueType.containsTypeVar()
     else -> false
 }
 
@@ -96,6 +100,8 @@ internal class ObjClassResolver(
             "Real" -> return FieldTypeResolveResult.Success(realType)
             "String" -> return FieldTypeResolveResult.Success(stringType)
             "List" -> return FieldTypeResolveResult.Failed("Type \"List\" expects 1 type argument")
+            "Set" -> return FieldTypeResolveResult.Failed("Type \"Set\" expects 1 type argument")
+            "Map" -> return FieldTypeResolveResult.Failed("Type \"Map\" expects 2 type arguments")
         }
         ObjClassBuiltinRegistry.lookup(name)?.let {
             return FieldTypeResolveResult.Success(it)
@@ -124,12 +130,38 @@ internal class ObjClassResolver(
     ): FieldTypeResolveResult {
         val ctor = expr.ctor
         if (ctor == "List") {
-            val argExprs = collectTypeArgs(expr.arg, 1)
-                ?: return FieldTypeResolveResult.Failed("Type \"List\" expects 1 type argument")
-            return when (val argResult = resolveTypeExpr(argExprs[0], typeParamEnv)) {
+            if (expr.args.size != 1) {
+                return FieldTypeResolveResult.Failed("Type \"List\" expects 1 type argument")
+            }
+            return when (val argResult = resolveTypeExpr(expr.args[0], typeParamEnv)) {
                 is FieldTypeResolveResult.Success ->
                     FieldTypeResolveResult.Success(listType(argResult.type))
                 is FieldTypeResolveResult.Failed -> argResult
+            }
+        }
+        if (ctor == "Set") {
+            if (expr.args.size != 1) {
+                return FieldTypeResolveResult.Failed("Type \"Set\" expects 1 type argument")
+            }
+            return when (val argResult = resolveTypeExpr(expr.args[0], typeParamEnv)) {
+                is FieldTypeResolveResult.Success ->
+                    FieldTypeResolveResult.Success(setType(argResult.type))
+                is FieldTypeResolveResult.Failed -> argResult
+            }
+        }
+        if (ctor == "Map") {
+            if (expr.args.size != 2) {
+                return FieldTypeResolveResult.Failed("Type \"Map\" expects 2 type arguments")
+            }
+            return when (val keyResult = resolveTypeExpr(expr.args[0], typeParamEnv)) {
+                is FieldTypeResolveResult.Success -> when (
+                    val valResult = resolveTypeExpr(expr.args[1], typeParamEnv)
+                ) {
+                    is FieldTypeResolveResult.Success ->
+                        FieldTypeResolveResult.Success(mapType(keyResult.type, valResult.type))
+                    is FieldTypeResolveResult.Failed -> valResult
+                }
+                is FieldTypeResolveResult.Failed -> keyResult
             }
         }
         val raw = declsByName[ctor]
@@ -143,10 +175,12 @@ internal class ObjClassResolver(
         if (arity == 0) {
             return FieldTypeResolveResult.Failed("Type \"$ctor\" does not take type arguments")
         }
-        val argExprs = collectTypeArgs(expr.arg, arity)
-            ?: return FieldTypeResolveResult.Failed(
+        val argExprs = expr.args
+        if (argExprs.size != arity) {
+            return FieldTypeResolveResult.Failed(
                 "Type \"$ctor\" expects $arity type argument(s)",
             )
+        }
         val argTypes = mutableListOf<Type>()
         for (argExpr in argExprs) {
             when (val argResult = resolveTypeExpr(argExpr, typeParamEnv)) {
@@ -201,7 +235,12 @@ internal class ObjClassResolver(
         is StringType -> TypeExpr.Simple("String")
         is TypeVar -> TypeExpr.Simple(type.name)
         is ObjClassType -> TypeExpr.Simple(type.name)
-        is ListType -> TypeExpr.Parametric("List", typeToTypeExpr(type.elementType))
+        is ListType -> TypeExpr.Parametric("List", listOf(typeToTypeExpr(type.elementType)))
+        is SetType -> TypeExpr.Parametric("Set", listOf(typeToTypeExpr(type.elementType)))
+        is MapType -> TypeExpr.Parametric(
+            "Map",
+            listOf(typeToTypeExpr(type.keyType), typeToTypeExpr(type.valueType)),
+        )
         else -> throw RuntimeException("Cannot convert type $type to TypeExpr")
     }
 
@@ -281,15 +320,42 @@ class ObjClassRegistry private constructor(
                         ?: TypeResolveResult.Error("Unknown type \"${expr.name}\"")
                 }
                 is TypeExpr.Parametric -> {
-                    if (expr.ctor == "List") {
-                        val argExprs = collectTypeArgs(expr.arg, 1)
-                            ?: return TypeResolveResult.Error("Type \"List\" expects 1 type argument")
-                        return when (val arg = resolveTypeExpr(argExprs[0], typeParamEnv, loc)) {
-                            is TypeResolveResult.Found -> TypeResolveResult.Found(listType(arg.type))
-                            is TypeResolveResult.Error -> arg
+                    when (expr.ctor) {
+                        "List" -> {
+                            if (expr.args.size != 1) {
+                                return TypeResolveResult.Error("Type \"List\" expects 1 type argument")
+                            }
+                            return when (val arg = resolveTypeExpr(expr.args[0], typeParamEnv, loc)) {
+                                is TypeResolveResult.Found -> TypeResolveResult.Found(listType(arg.type))
+                                is TypeResolveResult.Error -> arg
+                            }
                         }
+                        "Set" -> {
+                            if (expr.args.size != 1) {
+                                return TypeResolveResult.Error("Type \"Set\" expects 1 type argument")
+                            }
+                            return when (val arg = resolveTypeExpr(expr.args[0], typeParamEnv, loc)) {
+                                is TypeResolveResult.Found -> TypeResolveResult.Found(setType(arg.type))
+                                is TypeResolveResult.Error -> arg
+                            }
+                        }
+                        "Map" -> {
+                            if (expr.args.size != 2) {
+                                return TypeResolveResult.Error("Type \"Map\" expects 2 type arguments")
+                            }
+                            return when (val key = resolveTypeExpr(expr.args[0], typeParamEnv, loc)) {
+                                is TypeResolveResult.Found -> when (
+                                    val value = resolveTypeExpr(expr.args[1], typeParamEnv, loc)
+                                ) {
+                                    is TypeResolveResult.Found ->
+                                        TypeResolveResult.Found(mapType(key.type, value.type))
+                                    is TypeResolveResult.Error -> value
+                                }
+                                is TypeResolveResult.Error -> key
+                            }
+                        }
+                        else -> TypeResolveResult.Error("Cannot resolve parametric type \"$expr\" without registry resolver")
                     }
-                    TypeResolveResult.Error("Cannot resolve parametric type \"$expr\" without registry resolver")
                 }
             }
         }

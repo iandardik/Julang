@@ -1,0 +1,4 @@
+source: regression/input/set/set-elem-mismatch.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected set elements to have type Int but got Boolean"

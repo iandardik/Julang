@@ -22,7 +22,10 @@ fun oneChoice(vararg choices : ParserRuleContext?) : ParserRuleContext {
 private fun parseTypeExpr(ctx: JulayParser.TypeExprContext): TypeExpr {
     return when {
         ctx.LPAREN() != null -> parseTypeExpr(ctx.typeExpr())
-        ctx.typeExpr() != null -> TypeExpr.Parametric(ctx.ID().text, parseTypeExpr(ctx.typeExpr()))
+        ctx.typeArgs() != null -> {
+            val args = ctx.typeArgs().typeExpr().map { parseTypeExpr(it) }
+            TypeExpr.Parametric(ctx.ID().text, args)
+        }
         else -> TypeExpr.Simple(ctx.ID().text)
     }
 }
@@ -344,8 +347,17 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     }
 
     override fun visitVar_transit(ctx: JulayParser.Var_transitContext?): ASTNode {
-        val lhs = visit(ctx!!.field_access())
-        val transit = visit(ctx.expr())
+        if (ctx!!.ID() != null && ctx.LBRACK() != null) {
+            val mapVar = ctx.ID().text
+            val key = visit(ctx.expr(0))
+            val value = visit(ctx.expr(1))
+            if (key !is ExprNode || value !is ExprNode) {
+                throw RuntimeException("Expected expressions in map transit assignment")
+            }
+            return MapIndexTransitNode(mapVar, key, value, sourceLocation(ctx))
+        }
+        val lhs = visit(ctx.field_access())
+        val transit = visit(ctx.expr(0))
         if (transit !is ExprNode) {
             throw RuntimeException("Expected transit to be assigned an expr")
         }
@@ -380,6 +392,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 ctx.AND() != null -> "&"
                 ctx.OR() != null -> "|"
                 ctx.IMPLIES() != null -> "=>"
+                ctx.IN() != null -> "in"
                 ctx.PLUS() != null -> "+"
                 ctx.MINUS() != null -> "-"
                 else -> "N/A"
@@ -399,7 +412,8 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 assert(valueNode is ExprNode, "Expected expr children to be ExprNodes")
                 valueNode
             }
-            ctx.list_literal() != null -> visit(ctx.list_literal())
+            ctx.bracket_literal() != null -> visit(ctx.bracket_literal())
+            ctx.set_literal() != null -> visit(ctx.set_literal())
             ctx.index_expr() != null -> visit(ctx.index_expr())
             ctx.field_access() != null -> visit(ctx.field_access())
             ctx.oclass_literal() != null -> visit(ctx.oclass_literal())
@@ -574,9 +588,25 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         }
     }
 
-    override fun visitList_literal(ctx: JulayParser.List_literalContext?): ASTNode {
-        val elements = ctx!!.expr().map { visit(it) as ExprNode }
+    override fun visitBracket_literal(ctx: JulayParser.Bracket_literalContext?): ASTNode {
+        if (ctx!!.map_entry().isNotEmpty()) {
+            val entries = ctx.map_entry().map { entry ->
+                val key = visit(entry.expr(0)) as ExprNode
+                val value = visit(entry.expr(1)) as ExprNode
+                key to value
+            }
+            return MapLiteralExprNode(entries, sourceLocation(ctx))
+        }
+        if (ctx.expr().isEmpty()) {
+            return EmptyBracketLiteralExprNode(sourceLocation(ctx))
+        }
+        val elements = ctx.expr().map { visit(it) as ExprNode }
         return ListLiteralExprNode(elements, sourceLocation(ctx))
+    }
+
+    override fun visitSet_literal(ctx: JulayParser.Set_literalContext?): ASTNode {
+        val elements = ctx!!.expr().map { visit(it) as ExprNode }
+        return SetLiteralExprNode(elements, sourceLocation(ctx))
     }
 
     override fun visitIndex_expr(ctx: JulayParser.Index_exprContext?): ASTNode {
@@ -585,7 +615,8 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             ctx.index_expr() != null -> visit(ctx.index_expr()) as ExprNode
             ctx.fun_call() != null -> visit(ctx.fun_call()) as ExprNode
             ctx.field_access() != null -> visit(ctx.field_access()) as ExprNode
-            ctx.list_literal() != null -> visit(ctx.list_literal()) as ExprNode
+            ctx.bracket_literal() != null -> visit(ctx.bracket_literal()) as ExprNode
+            ctx.set_literal() != null -> visit(ctx.set_literal()) as ExprNode
             ctx.expr() != null -> visit(ctx.expr()) as ExprNode
             else -> throw RuntimeException("Invalid index_expr at ${ctx.text}")
         }

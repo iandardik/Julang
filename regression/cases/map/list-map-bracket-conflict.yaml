@@ -1,0 +1,4 @@
+source: regression/input/map/list-map-bracket-conflict.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected assignment to \"xs\" (List<Int>) but got expression of type Map<String, Int>"

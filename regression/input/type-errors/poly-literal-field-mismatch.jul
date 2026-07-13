@@ -3,11 +3,11 @@ o-class Box<T> {
 }
 
 p-class Worker {
-    var box : Box Int
+    var box : Box<Int>
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
-            box := Box Int { value := "nope" }
+            box := Box<Int> { value := "nope" }
     }
 }
 

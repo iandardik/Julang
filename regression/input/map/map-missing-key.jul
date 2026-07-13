@@ -1,0 +1,26 @@
+import julaylib.pclass.ExitSystem
+
+p-class MapMissingKey {
+    var mp : Map<String, Int>
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            mp := ["a" -> 1]
+            n := 0
+    }
+
+    transition bad() {
+        guard:
+            n = 0
+        transit:
+            n := mp["missing"]
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard:
+            false
+    }
+}
+
+program MapMissingKeyTest := MapMissingKey || ExitSystem

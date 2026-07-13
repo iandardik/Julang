@@ -2,7 +2,7 @@ p-class S {
     var step : String
     var print : Boolean
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             step := "A"
             print := true

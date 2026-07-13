@@ -1,7 +1,7 @@
 p-class S {
     var x : Int
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             x := let (n : Int := n) { n }
     }

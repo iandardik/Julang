@@ -7,7 +7,7 @@ o-class Point {
 p-class Worker {
     var pos : Point
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             pos := Point { x := 0, y := 0, label := "" }
     }

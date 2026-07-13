@@ -1,0 +1,10 @@
+p-class BadSetOp {
+    var s : Set<Int>
+
+    constructor initially(args : List<String>) {
+        transit:
+            s := {1} - [1]
+    }
+}
+
+program P := BadSetOp

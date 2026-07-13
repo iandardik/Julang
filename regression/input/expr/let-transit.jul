@@ -3,13 +3,13 @@ import julaylib.pclass.ExitSystem
 
 p-class S {
     var x : Int
-    var nested : List (List Int)
+    var nested : List<List<Int>>
     var print : Boolean
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             x := let (inc : Int := 2) { inc + 3 }
-            nested := let (ys : List (List Int) := [[1], [2, 3]]) { ys }
+            nested := let (ys : List<List<Int>> := [[1], [2, 3]]) { ys }
             print := true
     }
 

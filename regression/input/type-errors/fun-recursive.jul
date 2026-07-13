@@ -3,7 +3,7 @@ fun fact(n : Int) : Int = if (n = 0) { 1 } else { n * fact(n - 1) }
 p-class S {
     var x : Int
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             x := 0
     }

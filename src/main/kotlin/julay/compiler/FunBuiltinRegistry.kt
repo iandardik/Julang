@@ -1,6 +1,8 @@
 package julay.compiler
 
 import julay.program.ListType
+import julay.program.MapType
+import julay.program.SetType
 import julay.program.StringType
 import julay.program.Type
 import julay.program.intType
@@ -26,12 +28,17 @@ object FunBuiltinRegistry {
         checkArgs = { argTypes ->
             when {
                 argTypes.size != 1 -> "Expected function \"length\" to take 1 argument(s) but got ${argTypes.size}"
-                argTypes[0] !is ListType -> "Expected argument of \"length\" to have a List type but got ${argTypes[0]}"
+                argTypes[0] !is ListType && argTypes[0] !is SetType && argTypes[0] !is MapType ->
+                    "Expected argument of \"length\" to have a List, Set, or Map type but got ${argTypes[0]}"
                 else -> null
             }
         },
         kotlinCodegen = { args -> "${args[0]}.size" },
-        z3Codegen = { args -> "ctx.mkSeqLengthAny(${args[0]})" },
+        z3Codegen = { args ->
+            val argType = args[0] // placeholder - resolved at call site via type on FunCallExprNode
+            // Actual Z3 codegen is overridden in FunCallExprNode using argument type
+            "ctx.mkSeqLengthAny(${args[0]})"
+        },
     )
 
     private val parseIntBuiltin = FunBuiltin(

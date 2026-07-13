@@ -12,7 +12,7 @@ p-class Worker {
     var pos : Point
     var segment : Line
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             pos := Point { x := 0, y := 0 }
             segment := Line {

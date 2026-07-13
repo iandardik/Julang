@@ -68,6 +68,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitTypeExpr(JulayParser.TypeExprContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#typeArgs}.
+	 * @param ctx the parse tree
+	 */
+	void enterTypeArgs(JulayParser.TypeArgsContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#typeArgs}.
+	 * @param ctx the parse tree
+	 */
+	void exitTypeArgs(JulayParser.TypeArgsContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#typeParams}.
 	 * @param ctx the parse tree
 	 */
@@ -358,15 +368,35 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitLiteral(JulayParser.LiteralContext ctx);
 	/**
-	 * Enter a parse tree produced by {@link JulayParser#list_literal}.
+	 * Enter a parse tree produced by {@link JulayParser#bracket_literal}.
 	 * @param ctx the parse tree
 	 */
-	void enterList_literal(JulayParser.List_literalContext ctx);
+	void enterBracket_literal(JulayParser.Bracket_literalContext ctx);
 	/**
-	 * Exit a parse tree produced by {@link JulayParser#list_literal}.
+	 * Exit a parse tree produced by {@link JulayParser#bracket_literal}.
 	 * @param ctx the parse tree
 	 */
-	void exitList_literal(JulayParser.List_literalContext ctx);
+	void exitBracket_literal(JulayParser.Bracket_literalContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#map_entry}.
+	 * @param ctx the parse tree
+	 */
+	void enterMap_entry(JulayParser.Map_entryContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#map_entry}.
+	 * @param ctx the parse tree
+	 */
+	void exitMap_entry(JulayParser.Map_entryContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#set_literal}.
+	 * @param ctx the parse tree
+	 */
+	void enterSet_literal(JulayParser.Set_literalContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#set_literal}.
+	 * @param ctx the parse tree
+	 */
+	void exitSet_literal(JulayParser.Set_literalContext ctx);
 	/**
 	 * Enter a parse tree produced by {@link JulayParser#index_expr}.
 	 * @param ctx the parse tree

@@ -1,0 +1,10 @@
+p-class BadEmptySet {
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            n := length({})
+    }
+}
+
+program P := BadEmptySet

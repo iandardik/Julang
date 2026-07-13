@@ -47,6 +47,12 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitTypeExpr(JulayParser.TypeExprContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#typeArgs}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitTypeArgs(JulayParser.TypeArgsContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#typeParams}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
@@ -221,11 +227,23 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitLiteral(JulayParser.LiteralContext ctx);
 	/**
-	 * Visit a parse tree produced by {@link JulayParser#list_literal}.
+	 * Visit a parse tree produced by {@link JulayParser#bracket_literal}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
-	T visitList_literal(JulayParser.List_literalContext ctx);
+	T visitBracket_literal(JulayParser.Bracket_literalContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#map_entry}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitMap_entry(JulayParser.Map_entryContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#set_literal}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitSet_literal(JulayParser.Set_literalContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link JulayParser#index_expr}.
 	 * @param ctx the parse tree

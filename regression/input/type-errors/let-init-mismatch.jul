@@ -6,7 +6,7 @@ o-class Point {
 p-class S {
     var p : Point
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             p := let (n : Point := true) { n }
     }

@@ -1,0 +1,27 @@
+import julaylib.pclass.ExitSystem
+import julaylib.fun.length
+
+p-class MapEmptyDemo {
+    var mp : Map<String, Int>
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            mp := []
+            done := false
+    }
+
+    transition check() {
+        guard:
+            ~done
+        transit:
+            done := length(mp) = 0
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard:
+            done
+    }
+}
+
+program MapEmptyTest := MapEmptyDemo || ExitSystem

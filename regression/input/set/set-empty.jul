@@ -1,0 +1,27 @@
+import julaylib.pclass.ExitSystem
+import julaylib.fun.length
+
+p-class SetEmptyDemo {
+    var s : Set<Int>
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            s := {}
+            done := false
+    }
+
+    transition check() {
+        guard:
+            ~done
+        transit:
+            done := length(s) = 0
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard:
+            done
+    }
+}
+
+program SetEmptyTest := SetEmptyDemo || ExitSystem

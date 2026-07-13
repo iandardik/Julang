@@ -3,7 +3,7 @@ import julaylib.pclass.Println
 p-class Producer {
     var x : Int
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             x := 0
     }
@@ -19,7 +19,7 @@ p-class Producer {
 p-class Other {
     var y : Int
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             y := 0
     }

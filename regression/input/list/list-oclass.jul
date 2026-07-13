@@ -6,10 +6,10 @@ o-class Point {
 }
 
 p-class ListOClassDemo {
-    var pts : List Point
+    var pts : List<Point>
     var done : Boolean
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             pts := [Point { x := 1, y := 2 }, Point { x := 3, y := 4 }]
             done := false

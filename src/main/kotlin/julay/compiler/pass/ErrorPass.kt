@@ -189,14 +189,36 @@ private fun transitEffectOverlapErrors(
         }
     }
 
+private fun transitAssignmentNodes(body: List<ActionBodyNode>): List<ActionBodyNode> =
+    body.flatMap { node ->
+        when (node) {
+            is TransitNode -> node.transitBodies()
+            else -> emptyList()
+        }
+    }
+
 private fun actionBodyAssignmentErrors(body: List<ActionBodyNode>): List<CompileError> {
-    val transitAssignments = body.flatMap { it.transitVars() }
     val effectAssignments = body.flatMap { it.effectAssignVars() }
-    return duplicateAssignmentErrors(transitAssignments) { name ->
+    val transitNodes = transitAssignmentNodes(body)
+    val varTransitAssignments = transitNodes.flatMap { it.transitVars() }
+    val wholeMapAssigns = transitNodes.filterIsInstance<VarTransitNode>()
+        .filter { it.fieldPath.isEmpty() }
+        .map { it.varName to it.programLocation() }
+    val mapPutNodes = transitNodes.filterIsInstance<MapIndexTransitNode>()
+    val overlapErrors = wholeMapAssigns.flatMap { (varName, loc) ->
+        mapPutNodes.filter { it.mapVar == varName }.map { put ->
+            TwoLocsCompileError(
+                loc,
+                put.programLocation(),
+                "Expected not to assign whole map \"$varName\" and update entries in the same action",
+            )
+        }
+    }
+    return duplicateAssignmentErrors(varTransitAssignments) { name ->
         "Expected at most one assignment per variable, but found multiple assignments for \"$name\""
     } + duplicateAssignmentErrors(effectAssignments) { name ->
         "Expected at most one assignment per variable in effect, but found multiple assignments for \"$name\""
-    } + transitEffectOverlapErrors(transitAssignments, effectAssignments)
+    } + transitEffectOverlapErrors(varTransitAssignments, effectAssignments) + overlapErrors
 }
 
 private fun ConstructorNode.errorPassConstructor(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
@@ -214,7 +236,7 @@ private fun ConstructorNode.errorPassConstructor(procs: Set<String>, librariesIn
             initiallyArgs == expectedInitiallyArgs,
             OneLocCompileError(
                 programLocation(),
-                "Expected constructor \"initially\" to have signature initially(args : List String)",
+                "Expected constructor \"initially\" to have signature initially(args : List<String>)",
             ),
         )
     }

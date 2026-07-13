@@ -1,6 +1,7 @@
 package julay.compiler.ast
 
 import julay.compiler.decl.ActionDecl
+import julay.compiler.decl.TransitUpdate
 import julay.compiler.ProgramLoc
 import julay.compiler.*
 import julay.compiler.pass.TypePassType
@@ -41,7 +42,7 @@ abstract class ActionBodyNode(
     exprs : List<ExprNode>
 ) : ASTNode(body + exprs) {
     open fun guards() : List<ExprNode> = body.flatMap { it.guards() }
-    open fun transits() : Map<String,ExprNode> = body.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() }
+    open fun transits() : List<TransitUpdate> = body.flatMap { it.transits() }
     open fun transitVars() : List<Pair<String, ProgramLoc>> = body.flatMap { it.transitVars() }
     open fun effects() : List<EffectStmtNode> = body.flatMap { it.effects() }
     open fun effectAssignVars() : List<Pair<String, ProgramLoc>> = body.flatMap { it.effectAssignVars() }
@@ -281,6 +282,20 @@ class FunCallExprNode(
     ): String {
         resolvedBuiltin?.let { builtin ->
             val argStrs = args.map { it.toZ3GuardString(symbolTypes, argSymbols, forceString) }
+            if (builtin.name == "length" && args.isNotEmpty()) {
+                return when (val argType = args[0].getType()) {
+                    is ListType -> "ctx.mkSeqLengthAny(${argStrs[0]})"
+                    is SetType -> {
+                        val meta = "${argType.toCodegenTypeVal()}.cellMetadata(ctx)"
+                        "setCellSizeExpr(ctx, ${argStrs[0]}, $meta.sizeAccessor)"
+                    }
+                    is MapType -> {
+                        val meta = "${argType.toCodegenTypeVal()}.cellMetadata(ctx)"
+                        "mapCellSizeExpr(ctx, ${argStrs[0]}, $meta.sizeAccessor)"
+                    }
+                    else -> builtin.z3Codegen(argStrs)
+                }
+            }
             return builtin.z3Codegen(argStrs)
         }
         return inlinedBody().toZ3GuardString(symbolTypes, argSymbols, forceString)
@@ -368,7 +383,7 @@ class ConstructorNode(
             ActionDecl(
                 SymbolicAction(name, args.actionArgs(), SymbolicAction.SyncType.CSP),
                 body.flatMap { it.guards() },
-                body.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() },
+                body.flatMap { it.transits() },
                 TSAction.SyncRole.CSP,
                 loc,
                 body.flatMap { it.effects() },
@@ -406,7 +421,7 @@ class TransitionNode(
             ActionDecl(
                 SymbolicAction(name, args.actionArgs(), syncType),
                 body.flatMap { it.guards() },
-                body.fold(emptyMap()) { acc, astNode -> acc + astNode.transits() },
+                body.flatMap { it.transits() },
                 modifier,
                 loc,
                 body.flatMap { it.effects() },
@@ -565,6 +580,22 @@ class EffectNode(
     }
 }
 
+class MapIndexTransitNode(
+    val mapVar: String,
+    val key: ExprNode,
+    val value: ExprNode,
+    private val loc: ProgramLoc,
+) : ActionBodyNode(listOf(), listOf(key, value)) {
+    override fun programLocation() = loc
+
+    override fun transitVars(): List<Pair<String, ProgramLoc>> = emptyList()
+
+    override fun transits(): List<TransitUpdate> =
+        listOf(TransitUpdate.MapPut(mapVar, key, value))
+
+    override fun toString(): String = "$mapVar[$key] := $value"
+}
+
 class VarTransitNode(
     val varName : String,
     val fieldPath : List<String> = emptyList(),
@@ -579,8 +610,8 @@ class VarTransitNode(
     internal fun transitExpr() = expr
 
     override fun transitVars() = listOf(Pair(transitKey(), loc))
-    override fun transits(): Map<String, ExprNode> {
-        return mapOf(Pair(transitKey(), expr))
+    override fun transits(): List<TransitUpdate> {
+        return listOf(TransitUpdate.Assign(transitKey(), expr))
     }
     override fun toString(): String {
         return "${transitKey()} := $expr"
@@ -686,11 +717,44 @@ class BinaryOpExprNode(
                         "ctx.mkAdd(${asZ3Real(lhsGuardStr, lhsType)},${asZ3Real(rhsGuardStr, rhsType)})"
                     lhsType is ListType && rhsType is ListType ->
                         "ctx.mkSeqConcatAny($lhsGuardStr, $rhsGuardStr)"
+                    lhsType is SetType && rhsType is SetType -> {
+                        val setVal = lhsType.toCodegenTypeVal()
+                        val meta = "$setVal.cellMetadata(ctx)"
+                        "run { val __l = $lhsGuardStr; val __r = $rhsGuardStr; " +
+                            "val __la = setCellArrExpr(ctx, __l, $meta.arrAccessor); " +
+                            "val __ra = setCellArrExpr(ctx, __r, $meta.arrAccessor); " +
+                            "val __arr = ctx.mkSetUnionAny(__la, __ra); " +
+                            "val __sz = ctx.mkAdd(setCellSizeExpr(ctx, __l, $meta.sizeAccessor), setCellSizeExpr(ctx, __r, $meta.sizeAccessor)); " +
+                            "setMkCellExpr(ctx, $meta.constructorDecl, __arr, __sz) }"
+                    }
                     lhsType is StringType || rhsType is StringType -> "ctx.mkConcat($lhsGuardStr,$rhsGuardStr)"
                     else -> throw RuntimeException("Cannot add types: $lhsType and $rhsType")
                 }
             }
-            "-" -> numericZ3 { l, r -> "ctx.mkMinus($l,$r)" }
+            "-" -> {
+                when {
+                    lhsType is SetType && rhsType is SetType -> {
+                        val setVal = lhsType.toCodegenTypeVal()
+                        val meta = "$setVal.cellMetadata(ctx)"
+                        "run { val __l = $lhsGuardStr; val __r = $rhsGuardStr; " +
+                            "val __la = setCellArrExpr(ctx, __l, $meta.arrAccessor); " +
+                            "val __ra = setCellArrExpr(ctx, __r, $meta.arrAccessor); " +
+                            "val __arr = ctx.mkSetDifferenceAny(__la, __ra); " +
+                            "val __sz = ctx.mkSub(setCellSizeExpr(ctx, __l, $meta.sizeAccessor), setCellSizeExpr(ctx, __r, $meta.sizeAccessor)); " +
+                            "setMkCellExpr(ctx, $meta.constructorDecl, __arr, __sz) }"
+                    }
+                    else -> numericZ3 { l, r -> "ctx.mkMinus($l,$r)" }
+                }
+            }
+            "in" -> when (rhsType) {
+                is ListType -> "ctx.mkListMemberAny($lhsGuardStr, $rhsGuardStr)"
+                is SetType -> "ctx.mkSetMemberAny($lhsGuardStr, setCellArrExpr(ctx, $rhsGuardStr, ${rhsType.toCodegenTypeVal()}.cellMetadata(ctx).arrAccessor))"
+                is MapType -> {
+                    val mapVal = rhsType.toCodegenTypeVal()
+                    "ctx.mkSetMemberAny($lhsGuardStr, mapCellKeysExpr(ctx, $rhsGuardStr, $mapVal.cellMetadata(ctx).keysAccessor))"
+                }
+                else -> throw RuntimeException("Cannot apply \"in\" to type $rhsType")
+            }
             else -> throw RuntimeException("Invalid binary op: $op")
         }
     }
@@ -740,7 +804,13 @@ class BinaryOpExprNode(
             "*" -> numericTransit("*")
             "/" -> numericTransit("/")
             "%" -> "($lhs % $rhs)"
-            "-" -> numericTransit("-")
+            "-" -> {
+                when {
+                    lhsType is SetType && rhsType is SetType -> "($lhs - $rhs)"
+                    else -> numericTransit("-")
+                }
+            }
+            "in" -> "($lhs in $rhs)"
             "<" -> numericTransit("<")
             "<=" -> numericTransit("<=")
             ">" -> numericTransit(">")
@@ -777,12 +847,19 @@ class BinaryOpExprNode(
                     lhsType is IntType && rhsType is IntType -> intType
                     promoteNumeric(lhsType, rhsType) is RealType -> realType
                     lhsType is ListType && rhsType is ListType && lhsType == rhsType -> lhsType
+                    lhsType is SetType && rhsType is SetType && lhsType == rhsType -> lhsType
                     lhsType is StringType || rhsType is StringType -> stringType
                     else -> throw RuntimeException("Cannot add types: $lhsType and $rhsType")
                 }
             }
-            "-" -> promoteNumeric(lhsType, rhsType)
-                ?: throw RuntimeException("Cannot apply \"-\" to types $lhsType and $rhsType")
+            "-" -> {
+                when {
+                    lhsType is SetType && rhsType is SetType && lhsType == rhsType -> lhsType
+                    else -> promoteNumeric(lhsType, rhsType)
+                        ?: throw RuntimeException("Cannot apply \"-\" to types $lhsType and $rhsType")
+                }
+            }
+            "in" -> boolType
             else -> throw RuntimeException("Invalid binary op: $op")
         }
     }
@@ -1138,6 +1215,173 @@ class ListLiteralExprNode(
     override fun toString(): String = elements.joinToString(", ", prefix = "[", postfix = "]")
 }
 
+class EmptyBracketLiteralExprNode(
+    private val loc: ProgramLoc,
+) : ExprNode(emptyList()) {
+    private var listType: ListType? = null
+    private var mapType: MapType? = null
+
+    override fun programLocation() = loc
+
+    internal fun resolveListType(type: ListType) {
+        listType = type
+        mapType = null
+    }
+
+    internal fun resolveMapType(type: MapType) {
+        mapType = type
+        listType = null
+    }
+
+    internal fun resolvedListTypeOrNull(): ListType? = listType
+    internal fun resolvedMapTypeOrNull(): MapType? = mapType
+
+    override fun toZ3GuardString(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+        forceString: Boolean,
+    ): String {
+        if (forceString) {
+            return "ctx.mkString(${toTransitString(symbolTypes, argSymbols)}.toString())"
+        }
+        mapType?.let { ty ->
+            return MapLiteralExprNode(emptyList(), loc, ty).toZ3GuardString(symbolTypes, argSymbols, forceString)
+        }
+        listType?.let { ty ->
+            return ListLiteralExprNode(emptyList(), loc, ty).toZ3GuardString(symbolTypes, argSymbols, forceString)
+        }
+        throw RuntimeException("Empty bracket literal type not resolved at $loc")
+    }
+
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        return when {
+            mapType != null -> "emptyMap()"
+            else -> "emptyList()"
+        }
+    }
+
+    override fun inferType(symbolEnv: Map<String, Type>): Type {
+        return mapType ?: listType ?: throw RuntimeException("Empty bracket literal type not resolved at $loc")
+    }
+
+    override fun toString(): String = "[]"
+}
+
+class MapLiteralExprNode(
+    val entries: List<Pair<ExprNode, ExprNode>>,
+    private val loc: ProgramLoc,
+    resolvedType: MapType? = null,
+) : ExprNode(entries.flatMap { listOf(it.first, it.second) }) {
+    private var mapType: MapType? = resolvedType
+
+    override fun programLocation() = loc
+
+    internal fun resolveMapType(type: MapType) {
+        mapType = type
+    }
+
+    internal fun resolvedMapTypeOrNull(): MapType? = mapType
+
+    override fun toZ3GuardString(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+        forceString: Boolean,
+    ): String {
+        if (forceString) {
+            return "ctx.mkString(${toTransitString(symbolTypes, argSymbols)}.toString())"
+        }
+        val ty = mapType ?: throw RuntimeException("Map literal type not resolved at $loc")
+        val mapVal = ty.toCodegenTypeVal()
+        val meta = "$mapVal.cellMetadata(ctx)"
+        val domain = "${mapVal}.cellMetadata(ctx).domainSort"
+        if (entries.isEmpty()) {
+            return "mapMkCellExpr(ctx, $meta.constructorDecl, ctx.mkConstArray($domain, ctx.mkInt(0)), ctx.mkEmptySet($domain), ctx.mkInt(0))"
+        }
+        var arr = "ctx.mkConstArray($domain, ctx.mkInt(0))"
+        var keys = "ctx.mkEmptySet($domain)"
+        var size = "ctx.mkInt(0)"
+        for ((k, v) in entries) {
+            val keyStr = k.toZ3GuardString(symbolTypes, argSymbols)
+            val valStr = v.toZ3GuardString(symbolTypes, argSymbols)
+            val wasMember = "ctx.mkSetMemberAny($keyStr, $keys)"
+            arr = "mapStoreExpr(ctx, $arr, $keyStr, $valStr)"
+            keys = "mapSetAddExpr(ctx, $keys, $keyStr)"
+            size = "ctx.mkITE($wasMember, $size, ctx.mkAdd($size, ctx.mkInt(1)))"
+        }
+        return "mapMkCellExpr(ctx, $meta.constructorDecl, $arr, $keys, $size)"
+    }
+
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        if (entries.isEmpty()) {
+            return "emptyMap()"
+        }
+        val pairs = entries.joinToString(", ") { (k, v) ->
+            "${k.toTransitString(symbolTypes, argSymbols)} to ${v.toTransitString(symbolTypes, argSymbols)}"
+        }
+        return "mapOf($pairs)"
+    }
+
+    override fun inferType(symbolEnv: Map<String, Type>): Type {
+        return mapType ?: throw RuntimeException("Map literal type not resolved at $loc")
+    }
+
+    override fun toString(): String =
+        entries.joinToString(", ", prefix = "[", postfix = "]") { (k, v) -> "$k -> $v" }
+}
+
+class SetLiteralExprNode(
+    val elements: List<ExprNode>,
+    private val loc: ProgramLoc,
+    resolvedType: SetType? = null,
+) : ExprNode(elements) {
+    private var setType: SetType? = resolvedType
+
+    override fun programLocation() = loc
+
+    internal fun resolveSetType(type: SetType) {
+        setType = type
+    }
+
+    internal fun resolvedSetTypeOrNull(): SetType? = setType
+
+    override fun toZ3GuardString(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+        forceString: Boolean,
+    ): String {
+        if (forceString) {
+            return "ctx.mkString(${toTransitString(symbolTypes, argSymbols)}.toString())"
+        }
+        val ty = setType ?: throw RuntimeException("Set literal type not resolved at $loc")
+        val setVal = ty.toCodegenTypeVal()
+        val meta = "$setVal.cellMetadata(ctx)"
+        val domain = "$setVal.cellMetadata(ctx).domainSort"
+        if (elements.isEmpty()) {
+            return "setMkCellExpr(ctx, $meta.constructorDecl, ctx.mkEmptySet($domain), ctx.mkInt(0))"
+        }
+        var arr = "ctx.mkEmptySet($domain)"
+        for (elem in elements) {
+            val elemStr = elem.toZ3GuardString(symbolTypes, argSymbols)
+            arr = "ctx.mkSetAddAny($arr, $elemStr)"
+        }
+        return "setMkCellExpr(ctx, $meta.constructorDecl, $arr, ctx.mkInt(${elements.size}))"
+    }
+
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        if (elements.isEmpty()) {
+            return "emptySet()"
+        }
+        val elems = elements.joinToString(", ") { it.toTransitString(symbolTypes, argSymbols) }
+        return "setOf($elems)"
+    }
+
+    override fun inferType(symbolEnv: Map<String, Type>): Type {
+        return setType ?: throw RuntimeException("Set literal type not resolved at $loc")
+    }
+
+    override fun toString(): String = elements.joinToString(", ", prefix = "{", postfix = "}")
+}
+
 class IndexExprNode(
     val base: ExprNode,
     val index: ExprNode,
@@ -1152,21 +1396,35 @@ class IndexExprNode(
     ): String {
         val baseStr = base.toZ3GuardString(symbolTypes, argSymbols)
         val indexStr = index.toZ3GuardString(symbolTypes, argSymbols)
-        return "ctx.mkSeqNthAny($baseStr, $indexStr)"
+        return when (val baseType = base.getType()) {
+            is ListType -> "ctx.mkSeqNthAny($baseStr, $indexStr)"
+            is MapType -> {
+                val mapVal = baseType.toCodegenTypeVal()
+                val meta = "$mapVal.cellMetadata(ctx)"
+                "run { val __cell = $baseStr; val __keys = mapCellKeysExpr(ctx, __cell, $meta.keysAccessor); " +
+                    "val __arr = mapCellArrExpr(ctx, __cell, $meta.arrAccessor); " +
+                    "ctx.mkITE(ctx.mkSetMemberAny($indexStr, __keys), mapSelectExpr(ctx, __arr, $indexStr), " +
+                    "${baseType.valueType.toCodegenTypeVal()}.toZ3Expr(Value(0, ${baseType.valueType.toCodegenTypeVal()}), ctx)) }"
+            }
+            else -> throw RuntimeException("Cannot index type $baseType at $loc")
+        }
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
         val baseStr = base.toTransitString(symbolTypes, argSymbols)
         val indexStr = index.toTransitString(symbolTypes, argSymbols)
-        return "$baseStr[$indexStr]"
+        return when (typeForTransit(base, symbolTypes)) {
+            is MapType -> "($baseStr.getValue($indexStr))"
+            else -> "$baseStr[$indexStr]"
+        }
     }
 
     override fun inferType(symbolEnv: Map<String, Type>): Type {
-        val baseType = base.getType()
-        if (baseType !is ListType) {
-            throw RuntimeException("Cannot index non-list type $baseType at $loc")
+        return when (val baseType = base.getType()) {
+            is ListType -> baseType.elementType
+            is MapType -> baseType.valueType
+            else -> throw RuntimeException("Cannot index type $baseType at $loc")
         }
-        return baseType.elementType
     }
 
     override fun toString(): String = "$base[$index]"
@@ -1461,7 +1719,7 @@ class SymbolValueExprNode(
                         "ctx.mkString(${symbol.toKotlinIdent()})"
                     }
                 }
-                is ObjClassType, is ListType -> {
+                is ObjClassType, is ListType, is SetType, is MapType -> {
                     if (symbol in argSymbols) {
                         throw RuntimeException("Cannot convert symbolic $type to string")
                     } else {
@@ -1484,6 +1742,22 @@ class SymbolValueExprNode(
             val typeVal = type.toCodegenTypeVal()
             return if (symbol in argSymbols) {
                 "ctx.mkConst(\"${symbol.escapeKotlinStringLiteral()}\", $typeVal.sort(ctx))"
+            } else {
+                "$typeVal.toZ3Expr(Value(${symbol.toKotlinIdent()}, $typeVal), ctx)"
+            }
+        }
+        if (type is SetType) {
+            val typeVal = type.toCodegenTypeVal()
+            return if (symbol in argSymbols) {
+                "ctx.mkConst(\"${symbol.escapeKotlinStringLiteral()}\", $typeVal.cellMetadata(ctx).sort)"
+            } else {
+                "$typeVal.toZ3Expr(Value(${symbol.toKotlinIdent()}, $typeVal), ctx)"
+            }
+        }
+        if (type is MapType) {
+            val typeVal = type.toCodegenTypeVal()
+            return if (symbol in argSymbols) {
+                "ctx.mkConst(\"${symbol.escapeKotlinStringLiteral()}\", $typeVal.cellMetadata(ctx).sort)"
             } else {
                 "$typeVal.toZ3Expr(Value(${symbol.toKotlinIdent()}, $typeVal), ctx)"
             }

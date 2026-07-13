@@ -1,0 +1,4 @@
+source: regression/input/set/set-empty-no-type.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Empty set literal requires a known Set target type"

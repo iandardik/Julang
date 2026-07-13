@@ -1,0 +1,16 @@
+import julaylib.pclass.ExitSystem
+
+p-class BadMap {
+    var mp : Map<String, Int>
+
+    constructor initially(args : List<String>) {
+        transit:
+            mp := ["a" -> 1, "b" -> true]
+    }
+
+    p2p-consumer transition exitSystem() {
+        guard: true
+    }
+}
+
+program BadMapTest := BadMap || ExitSystem

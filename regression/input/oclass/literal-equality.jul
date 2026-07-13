@@ -9,7 +9,7 @@ p-class Worker {
     var pos : Point
     var matched : Boolean
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             pos := Point { x := 5, y := 6 }
             matched := false

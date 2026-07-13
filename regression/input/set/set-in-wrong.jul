@@ -1,0 +1,10 @@
+p-class BadIn {
+    var b : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            b := 1 in 2
+    }
+}
+
+program P := BadIn

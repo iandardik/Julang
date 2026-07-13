@@ -81,7 +81,7 @@ All fields under `run` are optional except that each program should have a `run`
 | Field | Default | Description |
 |-------|---------|-------------|
 | `stdin` | `[]` | Lines fed to the process stdin. A newline is appended to each entry if it does not already end with `\n`. Used with `Readln` and similar. |
-| `args` | `[]` | Command-line arguments passed after the JAR path (`java -jar Prog.jar …`). Bound to `initially(args : List String)`. |
+| `args` | `[]` | Command-line arguments passed after the JAR path (`java -jar Prog.jar …`). Bound to `initially(args : List<String>)`. |
 
 Example:
 

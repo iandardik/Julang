@@ -1,0 +1,4 @@
+source: regression/input/map/map-empty-no-type.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Empty [] literal requires a known List or Map target type"

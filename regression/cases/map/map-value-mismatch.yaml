@@ -1,0 +1,4 @@
+source: regression/input/map/map-value-mismatch.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected map values to have type Int but got Boolean"

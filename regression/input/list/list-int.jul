@@ -3,12 +3,12 @@ import julaylib.pclass.ExitSystem
 import julaylib.fun.length
 
 p-class ListIntDemo {
-    var xs : List Int
+    var xs : List<Int>
     var n : Int
     var print : Boolean
     var gotCli : Boolean
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             xs := [1, 2]
             n := 0

@@ -6,7 +6,7 @@ p-class ParseIntDemo {
     var n : Int
     var print : Boolean
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             n := parseInt(args[0])
             print := true

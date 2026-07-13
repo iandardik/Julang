@@ -1,0 +1,5 @@
+source: regression/input/map/map-empty.jul
+programs:
+  - name: MapEmptyTest
+    run:
+      timeoutMs: 60000

@@ -7,7 +7,7 @@ p-class S {
     var p : Point
     var x : Int
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             p := Point { x := 0, y := 0 }
             x := when (p) {

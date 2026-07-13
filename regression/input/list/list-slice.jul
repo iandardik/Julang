@@ -3,15 +3,15 @@ import julaylib.pclass.ExitSystem
 import julaylib.fun.length
 
 p-class ListSliceDemo {
-    var xs : List Int
-    var mid : List Int
-    var emptyEq : List Int
-    var emptyRev : List Int
-    var clamped : List Int
+    var xs : List<Int>
+    var mid : List<Int>
+    var emptyEq : List<Int>
+    var emptyRev : List<Int>
+    var clamped : List<Int>
     var nested : Int
     var phase : Int
 
-    constructor initially(args : List String) {
+    constructor initially(args : List<String>) {
         transit:
             xs := [10, 20, 30, 40]
             mid := []

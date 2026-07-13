@@ -56,14 +56,7 @@ data class ListType(val elementType: Type) : Type {
         return obj.all { it != null && elementType.isOfType(it) }
     }
 
-    override fun toString(): String {
-        val elem = elementType.toString()
-        return if (elementType is ListType || ' ' in elem) {
-            "List ($elem)"
-        } else {
-            "List $elem"
-        }
-    }
+    override fun toString(): String = "List<${elementType}>"
 }
 
 fun listType(element: Type): ListType = ListType(element)
@@ -75,6 +68,8 @@ fun Type.toZ3Sort(ctx: Context): Sort = when (this) {
     is StringType -> ctx.stringSort
     is ObjClassType -> sort(ctx)
     is ListType -> sort(ctx)
+    is SetType -> cellMetadata(ctx).sort
+    is MapType -> cellMetadata(ctx).sort
     is TypeVar -> throw RuntimeException("TypeVar \"$name\" must not reach Z3 sort construction")
     else -> throw RuntimeException("Cannot build Z3 sort for type $this")
 }
