@@ -34,7 +34,7 @@ p-class Worker {
 
     transition confirm(newLine : Line) {
         guard:
-              steps = 1
+            & steps = 1
             & segment.start.x = newLine.start.x
             & segment.start.y = newLine.start.y
         transit:

@@ -107,7 +107,7 @@ p-class RaftCore {
 
     p2p-service transition hasQuorum(flag : Boolean) {
         guard:
-            state = "Candidate"
+            & state = "Candidate"
             & ((flag & voteCount * 2 > n) | (~flag & voteCount * 2 <= n))
     }
 
@@ -120,7 +120,7 @@ p-class RaftCore {
         role : String
     ) {
         guard:
-            ready
+            & ready
             & epoch = electionEpoch
             & term = currentTerm
             & candId = selfId
@@ -151,9 +151,9 @@ p-class RaftCore {
 
     p2p-service transition clientAppend(value : String, ok : Boolean, idx : Int) {
         guard:
-            ready
+            & ready
             & (
-                (state = "Leader" & ok & idx = logLen + 1)
+                | (state = "Leader" & ok & idx = logLen + 1)
                 | (state != "Leader" & ~ok & idx = 0)
             )
         transit:
@@ -169,18 +169,18 @@ p-class RaftCore {
 
     p2p-service transition clientGet(body : String, ok : Boolean) {
         guard:
-            ready
+            & ready
             & (
-                (state = "Leader" & ok & body = sm + "")
+                | (state = "Leader" & ok & body = sm + "")
                 | (state != "Leader" & ~ok & body = "")
             )
     }
 
     p2p-service transition redirectBody(body : String, code : Int) {
         guard:
-            ready & state != "Leader"
+            & ready & state != "Leader"
             & (
-                (leaderUrl != "" & code = 303 & body = "LEADER " + leaderUrl)
+                | (leaderUrl != "" & code = 303 & body = "LEADER " + leaderUrl)
                 | (leaderUrl = "" & code = 503 & body = "NO_LEADER")
             )
     }
@@ -195,21 +195,21 @@ p-class RaftCore {
         voteGranted : Boolean
     ) {
         guard:
-            ready & candidateId >= 0 & candidateId < n
+            & ready & candidateId >= 0 & candidateId < n
             & (
-                (
-                    inTerm > currentTerm
+                | (
+                    & inTerm > currentTerm
                     & outTerm = inTerm
                     & (
-                        (voteGranted & lastLogIndex >= logLen)
+                        | (voteGranted & lastLogIndex >= logLen)
                         | (~voteGranted & lastLogIndex < logLen)
                     )
                 )
                 | (
-                    inTerm = currentTerm
+                    & inTerm = currentTerm
                     & outTerm = currentTerm
                     & (
-                        (voteGranted & (votedFor = -1 | votedFor = candidateId) & lastLogIndex >= logLen)
+                        | (voteGranted & (votedFor = -1 | votedFor = candidateId) & lastLogIndex >= logLen)
                         | (~voteGranted & ~((votedFor = -1 | votedFor = candidateId) & lastLogIndex >= logLen))
                     )
                 )
@@ -237,7 +237,7 @@ p-class RaftCore {
         peerUrlOut : String
     ) {
         guard:
-            state = "Leader"
+            & state = "Leader"
             & peerId >= 0 & peerId < n & peerId != selfId
             & term = currentTerm
             & leaderId = selfId
@@ -276,11 +276,11 @@ p-class RaftCore {
         matchIdx : Int
     ) {
         guard:
-            ready & leaderId >= 0 & leaderId < n
+            & ready & leaderId >= 0 & leaderId < n
             & (
-                (inTerm < currentTerm & outTerm = currentTerm & ~success & matchIdx = 0)
+                | (inTerm < currentTerm & outTerm = currentTerm & ~success & matchIdx = 0)
                 | (
-                    inTerm >= currentTerm
+                    & inTerm >= currentTerm
                     & outTerm = inTerm
                     & success
                     & matchIdx = logLen
@@ -443,7 +443,7 @@ p-class NodeHttpHandler {
         outTerm : Int, voteGranted : Boolean
     ) {
         guard:
-            step = "rvHandle"
+            & step = "rvHandle"
             & inTerm = rvTerm & candidateId = rvCand
             & lastLogIndex = rvLastIdx & lastLogTerm = rvLastTerm
         transit:
@@ -472,7 +472,7 @@ p-class NodeHttpHandler {
         outTerm : Int, success : Boolean, matchIdx : Int
     ) {
         guard:
-            step = "aeHandle"
+            & step = "aeHandle"
             & inTerm = aeTerm & leaderId = aeLeaderId
             & prevLogIndex = aePrevIdx & prevLogTerm = aePrevTerm
             & entriesLen = aeEntriesLen & entryTerm = aeEntryTerm
@@ -652,7 +652,7 @@ p-class ElectionDriver {
 
     transition sendRequest(req : HttpClientRequest) {
         guard:
-            (step = "sendRV" & req = HttpClientRequest {
+            | (step = "sendRV" & req = HttpClientRequest {
                 url := peer + "/raft/requestVote", method := "POST", body := reqBody
             })
             | (step = "sendAE" & req = HttpClientRequest {
@@ -731,7 +731,7 @@ p-class ElectionDriver {
         peerId : Int, inTerm : Int, success : Boolean, matchIdx : Int
     ) {
         guard:
-            step = "applyAE" & peerId = curPeer
+            & step = "applyAE" & peerId = curPeer
             & inTerm = respTerm & success = respSuccess & matchIdx = respMatch
         transit:
             curPeer := curPeer + 1

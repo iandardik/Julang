@@ -389,8 +389,9 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 ctx.LTE() != null -> "<="
                 ctx.GT() != null -> ">"
                 ctx.GTE() != null -> ">="
-                ctx.AND() != null -> "&"
-                ctx.OR() != null -> "|"
+                // Binary & / | require two operands; prefix forms are handled below
+                ctx.AND() != null && ctx.expr().size == 2 -> "&"
+                ctx.OR() != null && ctx.expr().size == 2 -> "|"
                 ctx.IMPLIES() != null -> "=>"
                 ctx.IN() != null -> "in"
                 ctx.PLUS() != null -> "+"
@@ -418,6 +419,14 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             ctx.field_access() != null -> visit(ctx.field_access())
             ctx.oclass_literal() != null -> visit(ctx.oclass_literal())
             ctx.fun_call() != null -> visit(ctx.fun_call())
+            // Prefix & / | have no semantic effect (TLA+ style guard formatting)
+            (ctx.AND() != null || ctx.OR() != null) && ctx.expr().size == 1 -> {
+                val innerNode = visit(ctx.expr(0))
+                if (innerNode !is ExprNode) {
+                    throw RuntimeException("Expected expr children to be ExprNodes")
+                }
+                innerNode
+            }
             unaryOpMapper() != "N/A" -> {
                 val innerNode = visit(ctx.expr(0))
                 if (innerNode !is ExprNode) {

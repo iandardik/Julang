@@ -25,7 +25,7 @@ p-class Worker {
 
     transition moveUp(newPos : Point) {
         guard:
-              newPos.y > 0
+            & newPos.y > 0
             & count < 5
         transit:
             pos.y := newPos.y
@@ -34,7 +34,7 @@ p-class Worker {
 
     transition moveLeft(newPos : Point) {
         guard:
-              newPos.x < 0
+            & newPos.x < 0
             & count < 5
         transit:
             pos.x := newPos.x

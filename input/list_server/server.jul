@@ -37,7 +37,7 @@ p-class IncReqHandler {
 
     transition sendResponse(req : HttpServerRequest, resp : HttpServerResponse) {
         guard:
-            step = "B"
+            & step = "B"
             & req = httpReq
             & resp = HttpServerResponse {
                 body := list + "",

@@ -28,7 +28,7 @@ p-class Worker {
 
     transition restore() {
         guard:
-              steps = 1
+            & steps = 1
             & current.x = 9
             & current.y = 9
         transit:
@@ -38,7 +38,7 @@ p-class Worker {
 
     p2p-consumer transition exitSystem() {
         guard:
-              steps = 2
+            & steps = 2
             & current.x = 1
             & current.y = 2
     }

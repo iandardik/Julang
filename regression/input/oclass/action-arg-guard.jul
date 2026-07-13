@@ -17,7 +17,7 @@ p-class Worker {
 
     transition accept(target : Point) {
         guard:
-              target.x = 11
+            & target.x = 11
             & target.y = 22
             & ~seen
         transit:
@@ -27,7 +27,7 @@ p-class Worker {
 
     p2p-consumer transition exitSystem() {
         guard:
-              seen
+            & seen
             & pos.x = 11
             & pos.y = 22
     }

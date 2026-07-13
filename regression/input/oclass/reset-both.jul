@@ -39,7 +39,7 @@ p-class Worker {
 
     p2p-consumer transition exitSystem() {
         guard:
-              done
+            & done
             & pos.x = 0
             & segment.end.y = 0
     }

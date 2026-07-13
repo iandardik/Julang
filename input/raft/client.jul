@@ -37,7 +37,7 @@ p-class RaftClientLogic {
 
     transition sendRequest(req : HttpClientRequest) {
         guard:
-            step = "send"
+            & step = "send"
             & req = HttpClientRequest {
                 url := targetUrl + path,
                 method := "POST",
@@ -63,7 +63,7 @@ p-class RaftClientLogic {
 
     transition retryLeader() {
         guard:
-            step = "afterPrint"
+            & step = "afterPrint"
             & ~retried
             & respCode = 303
             & startsWith(respBody, "LEADER ")
@@ -75,7 +75,7 @@ p-class RaftClientLogic {
 
     transition doneOk() {
         guard:
-            step = "afterPrint"
+            & step = "afterPrint"
             & (respCode = 200 | retried | respCode = 503 | ~(startsWith(respBody, "LEADER ")))
         effect:
             exitProcess()

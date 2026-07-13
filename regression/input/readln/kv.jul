@@ -58,7 +58,7 @@ p-class DB {
             if (~(key = "A" | key = "B" | key = "C")) {
                 val = "N/A"
             } else {
-                  (key = "A" & val = "apple")
+                | (key = "A" & val = "apple")
                 | (key = "B" & val = "banana")
                 | (key = "C" & val = "cherry")
             }
@@ -70,7 +70,7 @@ p-class DB2 {
 
     transition readDB(key : String, val : String) {
         guard:
-              (key = "A" & val = "ants")
+            | (key = "A" & val = "ants")
             | (key = "B" & val = "bats")
             | (key = "C" & val = "cows")
             | (~(key = "A" | key = "B" | key = "C") & val = "N/A")

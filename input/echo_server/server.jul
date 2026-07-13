@@ -38,7 +38,7 @@ p-class EchoHandler {
 
     transition sendResponse(req : HttpServerRequest, resp : HttpServerResponse) {
         guard:
-            ~responded
+            & ~responded
             & req = httpReq
             & resp = HttpServerResponse {
                 body := info.resp,
@@ -50,7 +50,7 @@ p-class EchoHandler {
 
     p2p-consumer transition println(msg : String) {
         guard:
-              responded
+            & responded
             & ~done
             & msg = "Req: '" + info.req + "', I responded: '" + info.resp + "'"
         transit:

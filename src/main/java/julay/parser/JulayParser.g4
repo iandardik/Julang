@@ -147,6 +147,9 @@ expr
     | fun_call
     | NOT expr
     | BANG expr
+    // Prefix & / | are no-ops (TLA+ style formatting); same precedence as ~ / !
+    | AND expr
+    | OR expr
     | expr TIMES expr
     | expr DIV expr
     | expr MOD expr

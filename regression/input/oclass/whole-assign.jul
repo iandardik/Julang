@@ -23,7 +23,7 @@ p-class Worker {
 
     transition verify(newPos : Point) {
         guard:
-              steps = 2
+            & steps = 2
             & pos.x = newPos.x
             & pos.y = newPos.y
         transit:

@@ -17,7 +17,7 @@ p-class Worker {
 
     transition setX(newPos : Point) {
         guard:
-              newPos.x = 42
+            & newPos.x = 42
             & steps = 0
         transit:
             pos.x := newPos.x
@@ -26,7 +26,7 @@ p-class Worker {
 
     transition confirm() {
         guard:
-              pos.x = 42
+            & pos.x = 42
             & pos.y = 10
             & steps = 1
         transit:

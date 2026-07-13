@@ -101,7 +101,7 @@ p-class IncReqHandler {
 
     transition sendResponse(req : HttpServerRequest, resp : HttpServerResponse) {
         guard:
-            step = "C"
+            & step = "C"
             & req = httpReq
             & resp = HttpServerResponse {
                 body := localCounter + "",
