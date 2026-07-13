@@ -331,7 +331,8 @@ private sealed interface TypeNameResolution {
 class VarNode(
     val name : String,
     val typeExpr : TypeExpr,
-    private val loc : ProgramLoc
+    private val loc : ProgramLoc,
+    val isConst : Boolean = false,
 ) : ProcClassDeclNode(listOf()) {
     private var typeResolution : TypeNameResolution = TypeNameResolution.Unresolved
     val type : Type
@@ -366,7 +367,8 @@ class VarNode(
             is TypeNameResolution.Resolved -> resolution.type
             is TypeNameResolution.Unresolved -> typeExpr
         }
-        return "$name : $displayType"
+        val keyword = if (isConst) "const" else "var"
+        return "$keyword $name : $displayType"
     }
 }
 

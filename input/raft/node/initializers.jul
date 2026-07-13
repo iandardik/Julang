@@ -10,8 +10,8 @@ import node.lib.isBlankOrComment
  */
 
 p-class RaftInitializer {
-    var path : String
-    var selfId : Int
+    const path : String
+    const selfId : Int
     var rawLines : List<String>
     var idx : Int
     var acc : List<String>

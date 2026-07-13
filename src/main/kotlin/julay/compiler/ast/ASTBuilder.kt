@@ -171,7 +171,8 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     override fun visitVar(ctx: JulayParser.VarContext?): ASTNode {
         val name = ctx!!.ID().text
         val typeExpr = parseTypeExpr(ctx.typeExpr())
-        return VarNode(name, typeExpr, sourceLocation(ctx))
+        val isConst = ctx.CONST() != null
+        return VarNode(name, typeExpr, sourceLocation(ctx), isConst = isConst)
     }
 
     override fun visitConstructor(ctx: JulayParser.ConstructorContext?): ASTNode {

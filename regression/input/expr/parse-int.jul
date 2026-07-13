@@ -3,7 +3,7 @@ import julaylib.pclass.ExitSystem
 import julaylib.fun.parseInt
 
 p-class ParseIntDemo {
-    var n : Int
+    const n : Int
     var print : Boolean
 
     constructor initially(args : List<String>) {

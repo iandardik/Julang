@@ -6,7 +6,7 @@ p-class ListIntDemo {
     var xs : List<Int>
     var n : Int
     var print : Boolean
-    var gotCli : Boolean
+    const gotCli : Boolean
 
     constructor initially(args : List<String>) {
         transit:

@@ -1,0 +1,15 @@
+p-class S {
+    const mp : Map<String, Int>
+
+    constructor initially(args : List<String>) {
+        transit:
+            mp := ["a" -> 1]
+    }
+
+    transition update() {
+        transit:
+            mp["b"] := 2
+    }
+}
+
+program P := S

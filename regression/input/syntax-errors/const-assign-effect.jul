@@ -1,0 +1,15 @@
+p-class S {
+    const msg : String
+
+    constructor initially(args : List<String>) {
+        transit:
+            msg := ""
+    }
+
+    transition read() {
+        effect:
+            msg := readln()
+    }
+}
+
+program P := S

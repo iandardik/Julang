@@ -4,9 +4,9 @@ import julaylib.fun.length
 import julaylib.fun.parseInt
 
 p-class ClientDispatcher {
+    const targetNumReqs : Int
     var numReqs : Int
     var numResps : Int
-    var targetNumReqs : Int
 
     constructor initially(args : List<String>) {
         transit:
@@ -40,7 +40,7 @@ p-class ClientDispatcher {
 }
 
 p-class ClientLogic {
-    var reqNum : Int
+    const reqNum : Int
     var state : String
     var respText : String
 

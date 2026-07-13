@@ -103,8 +103,11 @@ private fun ProcClassNode.errorPassProcClass(procs: Set<String>, librariesInUse:
         .filterIsInstance<ConstructorNode>()
         .flatMap { ctorNode ->
             val stateVarSet = stateVars.toSet()
-            val transitVarSet = ctorNode.transitVars().map { transitRootVar(it.first) }.toSet()
-            val missingStateVars = stateVarSet.minus(transitVarSet)
+            val assignedVarSet = (
+                ctorNode.transitVars().map { transitRootVar(it.first) } +
+                    ctorNode.body().flatMap { it.effectAssignVars() }.map { transitRootVar(it.first) }
+                ).toSet()
+            val missingStateVars = stateVarSet.minus(assignedVarSet)
             assertOrCompileError(
                 missingStateVars.isEmpty(),
                 OneLocCompileError(
@@ -113,6 +116,14 @@ private fun ProcClassNode.errorPassProcClass(procs: Set<String>, librariesInUse:
                 ),
             )
         }
+    val constVarNames = localDecls
+        .filterIsInstance<VarNode>()
+        .filter { it.isConst }
+        .map { it.name }
+        .toSet()
+    val constAssignInTransitionErrors = localDecls
+        .filterIsInstance<TransitionNode>()
+        .flatMap { transNode -> constAssignmentErrors(transNode, constVarNames) }
     val atLeastOneConstructorErrors = assertOrCompileError(
         localDecls.flatMap { it.constructors() }.isNotEmpty(),
         OneLocCompileError(programLocation(), "Expected \"${procClassNodeName()}\" to have at least one constructor"),
@@ -132,7 +143,23 @@ private fun ProcClassNode.errorPassProcClass(procs: Set<String>, librariesInUse:
         }
     }
     return children.flatMap { it.errorPass(procs, librariesInUse) } + repeatStateVarNameErrors + ctorsCompleteAssgnErrors +
-        atLeastOneConstructorErrors + ctorTransActionNotMutexErrors
+        constAssignInTransitionErrors + atLeastOneConstructorErrors + ctorTransActionNotMutexErrors
+}
+
+private fun constAssignmentErrors(transNode: TransitionNode, constVarNames: Set<String>): List<CompileError> {
+    if (constVarNames.isEmpty()) return emptyList()
+    val assignments = transNode.transitVars() +
+        transNode.body().flatMap { it.effectAssignVars() } +
+        transitAssignmentNodes(transNode.body())
+            .filterIsInstance<MapIndexTransitNode>()
+            .map { it.mapVar to it.programLocation() }
+    return assignments.flatMap { (key, loc) ->
+        val root = transitRootVar(key)
+        assertOrCompileError(
+            root !in constVarNames,
+            OneLocCompileError(loc, "Cannot assign to const variable \"$root\""),
+        )
+    }
 }
 
 private fun ObjClassNode.errorPassObjClass(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {

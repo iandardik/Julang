@@ -12,12 +12,12 @@ import julaylib.fun.startsWith
  */
 
 p-class RaftClientLogic {
+    const command : String
+    const value : String
+    const path : String
+    const reqBody : String
     var step : String
     var targetUrl : String
-    var command : String
-    var value : String
-    var path : String
-    var reqBody : String
     var respBody : String
     var respCode : Int
     var retried : Boolean

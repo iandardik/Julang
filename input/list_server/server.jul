@@ -14,8 +14,8 @@ p-class ServerStarter {
 }
 
 p-class IncReqHandler {
-    var httpReq : HttpServerRequest
-    var reqBody : String
+    const httpReq : HttpServerRequest
+    const reqBody : String
     var step : String
     var list : List<String>
 

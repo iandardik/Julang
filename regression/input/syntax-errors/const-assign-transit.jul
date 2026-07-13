@@ -1,0 +1,15 @@
+p-class S {
+    const x : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            x := 0
+    }
+
+    transition bump() {
+        transit:
+            x := x + 1
+    }
+}
+
+program P := S

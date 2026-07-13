@@ -8,11 +8,11 @@ import node.lib.entryValueAt
  */
 
 p-class RaftCore {
-    var selfId : Int
-    var clusterSize : Int
-    var clusterUrls : List<String>
-    var selfUrl : String
-    var selfPort : Int
+    const selfId : Int
+    const clusterSize : Int
+    const clusterUrls : List<String>
+    const selfUrl : String
+    const selfPort : Int
     var currentTerm : Int
     var state : String
     var votedFor : Int

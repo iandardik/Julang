@@ -9,10 +9,10 @@ import node.lib.encodeAppendEntriesResp
  */
 
 p-class NodeHttpHandler {
+    const httpReq : HttpServerRequest
+    const path : String
+    const reqBody : String
     var step : String
-    var httpReq : HttpServerRequest
-    var path : String
-    var reqBody : String
     var respBody : String
     var respCode : Int
     var rvTerm : Int

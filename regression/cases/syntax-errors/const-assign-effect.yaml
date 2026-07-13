@@ -1,0 +1,5 @@
+source: regression/input/syntax-errors/const-assign-effect.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Cannot assign to const variable \"msg\""
+  - "Found errors while compiling the program \"P\"; exiting."

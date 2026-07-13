@@ -2,7 +2,7 @@ o-class Box<T> {
     value : T
 }
 
-fun const<T>(x : Int) : T = x
+fun constFn<T>(x : Int) : T = x
 
 p-class Worker {
     var n : Int

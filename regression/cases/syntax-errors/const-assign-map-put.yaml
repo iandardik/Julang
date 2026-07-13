@@ -1,0 +1,5 @@
+source: regression/input/syntax-errors/const-assign-map-put.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Cannot assign to const variable \"mp\""
+  - "Found errors while compiling the program \"P\"; exiting."

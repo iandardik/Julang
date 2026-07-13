@@ -44,6 +44,7 @@ PROC : 'proc' ;
 PROGRAM : 'program' ;
 SPEC : 'spec' ;
 VAR : 'var' ;
+CONST : 'const' ;
 CONSTRUCTOR : 'constructor' ;
 TRANSITION : 'transition' ;
 SERVICE : 'p2p-service' ;

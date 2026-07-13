@@ -20,8 +20,8 @@ p-class ServerStarter {
 }
 
 p-class EchoHandler {
-    var info : ReqInfo
-    var httpReq : HttpServerRequest
+    const info : ReqInfo
+    const httpReq : HttpServerRequest
     var responded : Boolean
     var done : Boolean
 

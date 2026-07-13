@@ -75,7 +75,7 @@ field
     ;
 
 var
-    : VAR ID COLON typeExpr
+    : (VAR | CONST) ID COLON typeExpr
     ;
 
 constructor

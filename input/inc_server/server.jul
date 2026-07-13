@@ -14,7 +14,7 @@ p-class ServerStarter {
 }
 
 p-class IncReqHandler {
-    var httpReq : HttpServerRequest
+    const httpReq : HttpServerRequest
     var localCounter : Int
     var step : String
 
