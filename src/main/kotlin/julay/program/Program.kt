@@ -37,11 +37,17 @@ class Program {
         val deadlock = SymbolicAction("deadlock", listOf(), SymbolicAction.SyncType.CSP)
 
         // create a SyncChannel for each action
-        val actionBag = componentInfo.flatMap { it.alphabet union it.constructors.keys }
-        val actionCounts = actionBag.toSet()
+        // ConstructorTS offers each constructor action once and spawns every matching p-class,
+        // so multiple constructor declarations of the same action count as 1 toward sync size.
+        val allActions = componentInfo
+            .flatMap { it.alphabet union it.constructors.keys }
+            .toSet()
+        val actionCounts = allActions
             .associateWith { setAct ->
                 if (setAct.syncType == SymbolicAction.SyncType.CSP) {
-                    actionBag.count { bagAct -> bagAct == setAct }
+                    val transitionOffers = componentInfo.count { setAct in it.alphabet }
+                    val constructorOffer = if (componentInfo.any { setAct in it.constructors }) 1 else 0
+                    transitionOffers + constructorOffer
                 } else {
                     2
                 }

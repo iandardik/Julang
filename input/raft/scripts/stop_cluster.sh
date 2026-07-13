@@ -6,7 +6,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CONFIG="${1:-$SCRIPT_DIR/cluster.conf}"
+RAFT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+CONFIG="${1:-$RAFT_DIR/cluster.conf}"
 PIDFILE="$(dirname "$CONFIG")/.raft-pids"
 
 if [[ -f "$PIDFILE" ]]; then

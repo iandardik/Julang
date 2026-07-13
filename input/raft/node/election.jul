@@ -1,0 +1,212 @@
+import julaylib.fun.length
+import julaylib.fun.split
+import julaylib.fun.parseInt
+import node.lib.fieldValue
+import node.lib.encodeRequestVote
+import node.lib.encodeAppendEntries
+import node.lib.parseBool
+
+/*
+ * Election timeout, RequestVote to peers, leadership, and heartbeats.
+ */
+
+p-class ElectionDriver {
+    var step : String
+    var myId : Int
+    var curPeer : Int
+    var peer : String
+    var reqBody : String
+    var respBody : String
+    var voteTerm : Int
+    var voteGrantedFlag : Boolean
+    var clusterN : Int
+    var respTerm : Int
+    var respSuccess : Boolean
+    var respMatch : Int
+    var electTimeout : Int
+    var armedEpoch : Int
+
+    constructor startRaft(urls : List<String>, id : Int) {
+        transit:
+            step := "arm"
+            myId := id
+            curPeer := 0
+            peer := ""
+            reqBody := ""
+            respBody := ""
+            voteTerm := 0
+            voteGrantedFlag := false
+            clusterN := length(urls)
+            respTerm := 0
+            respSuccess := false
+            respMatch := 0
+            electTimeout := 2 + id
+            armedEpoch := 0
+    }
+
+    transition getSelfId(id : Int) {
+        guard: step = "hbSelf"
+        transit:
+            myId := id
+            electTimeout := 2 + id
+            step := "hbNeedN"
+    }
+
+    transition getElectionSnapshot(
+        epoch : Int, term : Int, candId : Int, lastIdx : Int, lastT : Int, role : String
+    ) {
+        guard: step = "arm" | step = "checkEpoch" | step = "snap"
+        transit:
+            armedEpoch := if (step = "arm") { epoch } else { armedEpoch }
+            myId := if (step = "snap") { candId } else { myId }
+            electTimeout := if (step = "snap") { 2 + candId } else { electTimeout }
+            curPeer := if (step = "snap") { 0 } else { curPeer }
+            reqBody := if (step = "snap") {
+                encodeRequestVote(term, candId, lastIdx, lastT)
+            } else {
+                reqBody
+            }
+            step := if (step = "arm") {
+                "waitTimer"
+            } else {
+                if (step = "checkEpoch") {
+                    if (epoch = armedEpoch) { "doElect" } else { "arm" }
+                } else {
+                    "needN"
+                }
+            }
+    }
+
+    transition timer(time : Int) {
+        guard: (step = "waitTimer" & time = electTimeout) | (step = "hbWait" & time = 1)
+        transit: step := "armed"
+    }
+
+    transition timeout() {
+        guard: step = "armed"
+        transit: step := "dispatch"
+    }
+
+    transition isLeader(flag : Boolean) {
+        guard: step = "dispatch"
+        transit: step := if (flag) { "hbSelf" } else { "checkEpoch" }
+    }
+
+    transition startElection(epoch : Int) {
+        guard: step = "doElect" & epoch = armedEpoch
+        transit: step := "snap"
+    }
+
+    transition getClusterSize(size : Int) {
+        guard: step = "needN" | step = "hbNeedN"
+        transit:
+            clusterN := size
+            curPeer := 0
+            step := if (step = "hbNeedN") { "hbPeers" } else { "peers" }
+    }
+
+    transition skipSelf() {
+        guard: step = "peers" & curPeer = myId & curPeer < clusterN
+        transit: curPeer := curPeer + 1
+    }
+
+    transition peersDone() {
+        guard: step = "peers" & curPeer >= clusterN
+        transit: step := "checkQ"
+    }
+
+    transition getPeerUrl(peerId : Int, url : String) {
+        guard: step = "peers" & peerId = curPeer & curPeer != myId & curPeer < clusterN
+        transit:
+            peer := url
+            step := "sendRV"
+    }
+
+    transition sendRequest(req : HttpClientRequest) {
+        guard:
+            | (step = "sendRV" & req = HttpClientRequest {
+                url := peer + "/raft/requestVote", method := "POST", body := reqBody
+            })
+            | (step = "sendAE" & req = HttpClientRequest {
+                url := peer + "/raft/appendEntries", method := "POST", body := reqBody
+            })
+        transit:
+            step := if (step = "sendRV") { "recvRV" } else { "recvAE" }
+    }
+
+    transition receiveResponse(resp : HttpClientResponse) {
+        guard: step = "recvRV" | step = "recvAE"
+        transit:
+            respBody := resp.body
+            step := if (step = "recvRV") { "parseVote" } else { "parseAE" }
+    }
+
+    transition parseVote() {
+        guard: step = "parseVote"
+        transit:
+            voteTerm := parseInt(fieldValue(split(respBody, "|")[0]))
+            voteGrantedFlag := parseBool(fieldValue(split(respBody, "|")[1]))
+            step := "tally"
+    }
+
+    transition recordVote(peerId : Int, term : Int, granted : Boolean) {
+        guard: step = "tally" & peerId = curPeer & term = voteTerm & granted = voteGrantedFlag
+        transit:
+            curPeer := curPeer + 1
+            step := "peers"
+    }
+
+    transition hasQuorum(flag : Boolean) {
+        guard: step = "checkQ"
+        transit: step := if (flag) { "doLeader" } else { "arm" }
+    }
+
+    transition becomeLeader() {
+        guard: step = "doLeader"
+        transit: step := "hbWait"
+    }
+
+    transition hbSkipSelf() {
+        guard: step = "hbPeers" & curPeer = myId & curPeer < clusterN
+        transit: curPeer := curPeer + 1
+    }
+
+    transition hbPeersDone() {
+        guard: step = "hbPeers" & curPeer >= clusterN
+        transit: step := "hbWait"
+    }
+
+    transition getLogMetadata(
+        peerId : Int, term : Int, leaderId : Int, prevLogIndex : Int, prevLogTerm : Int,
+        entryTerm : Int, entryValue : String, entriesLen : Int, leaderCommit : Int, peerUrlOut : String
+    ) {
+        guard: step = "hbPeers" & peerId = curPeer & curPeer != myId & curPeer < clusterN
+        transit:
+            peer := peerUrlOut
+            reqBody := encodeAppendEntries(
+                term, leaderId, prevLogIndex, prevLogTerm,
+                entryTerm, entryValue, entriesLen, leaderCommit
+            )
+            step := "sendAE"
+    }
+
+    transition parseAEResp() {
+        guard: step = "parseAE"
+        transit:
+            respTerm := parseInt(fieldValue(split(respBody, "|")[0]))
+            respSuccess := parseBool(fieldValue(split(respBody, "|")[1]))
+            respMatch := parseInt(fieldValue(split(respBody, "|")[2]))
+            step := "applyAE"
+    }
+
+    transition handleAppendEntriesResp(
+        peerId : Int, inTerm : Int, success : Boolean, matchIdx : Int
+    ) {
+        guard:
+            & step = "applyAE" & peerId = curPeer
+            & inTerm = respTerm & success = respSuccess & matchIdx = respMatch
+        transit:
+            curPeer := curPeer + 1
+            step := "hbPeers"
+    }
+}

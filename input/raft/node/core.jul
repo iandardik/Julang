@@ -1,0 +1,278 @@
+import julaylib.fun.length
+import julaylib.fun.portFromUrl
+import node.lib.Entry
+import node.lib.entryValueAt
+
+/*
+ * Local Raft state and Ongaro-style transitions for one node.
+ */
+
+p-class RaftCore {
+    var selfId : Int
+    var clusterSize : Int
+    var clusterUrls : List<String>
+    var selfUrl : String
+    var selfPort : Int
+    var currentTerm : Int
+    var state : String
+    var votedFor : Int
+    var log : List<Entry>
+    var lastLogTermVar : Int
+    var commitIndex : Int
+    var lastApplied : Int
+    var stateMachine : List<String>
+    var votesGranted : Set<Int>
+    var voteCount : Int
+    var leaderUrl : String
+    var electionEpoch : Int
+
+    constructor startRaft(urls : List<String>, id : Int) {
+        transit:
+            selfId := id
+            clusterSize := length(urls)
+            clusterUrls := urls
+            selfUrl := urls[id]
+            selfPort := portFromUrl(urls[id])
+            currentTerm := 0
+            state := "Follower"
+            votedFor := -1
+            log := []
+            lastLogTermVar := 0
+            commitIndex := 0
+            lastApplied := 0
+            stateMachine := []
+            votesGranted := {}
+            voteCount := 0
+            leaderUrl := ""
+            electionEpoch := 0
+    }
+
+    transition getListenPort(port : Int) {
+        guard: port = selfPort
+    }
+
+    transition startElection(epoch : Int) {
+        guard:
+            (state = "Follower" | state = "Candidate") & epoch = electionEpoch
+        transit:
+            state := "Candidate"
+            currentTerm := currentTerm + 1
+            votedFor := selfId
+            votesGranted := {selfId}
+            voteCount := 1
+            electionEpoch := electionEpoch + 1
+            leaderUrl := ""
+    }
+
+    transition getClusterSize(size : Int) {
+        guard: size = clusterSize
+    }
+
+    transition getSelfId(id : Int) {
+        guard: id = selfId
+    }
+
+    transition isLeader(flag : Boolean) {
+        guard: (flag & state = "Leader") | (~flag & state != "Leader")
+    }
+
+    transition hasQuorum(flag : Boolean) {
+        guard:
+            state = "Candidate"
+            & ((flag & voteCount * 2 > clusterSize) | (~flag & voteCount * 2 <= clusterSize))
+    }
+
+    transition getElectionSnapshot(
+        epoch : Int,
+        term : Int,
+        candId : Int,
+        lastIdx : Int,
+        lastT : Int,
+        role : String
+    ) {
+        guard:
+            epoch = electionEpoch
+            & term = currentTerm
+            & candId = selfId
+            & lastIdx = length(log)
+            & lastT = lastLogTermVar
+            & role = state
+    }
+
+    transition getPeerUrl(peerId : Int, url : String) {
+        guard:
+            peerId >= 0 & peerId < clusterSize & peerId != selfId & url = clusterUrls[peerId]
+    }
+
+    transition recordVote(peerId : Int, term : Int, granted : Boolean) {
+        guard: state = "Candidate" & term = currentTerm & peerId >= 0 & peerId < clusterSize
+        transit:
+            votesGranted := if (granted) { votesGranted + {peerId} } else { votesGranted }
+            voteCount := if (granted) { voteCount + 1 } else { voteCount }
+    }
+
+    transition becomeLeader() {
+        guard: state = "Candidate" & voteCount * 2 > clusterSize
+        transit:
+            state := "Leader"
+            leaderUrl := selfUrl
+            electionEpoch := electionEpoch + 1
+    }
+
+    transition clientAppend(value : String, ok : Boolean, idx : Int) {
+        guard:
+            let (newLogLen : Int := length(log) + 1) {
+                | (state = "Leader" & ok & idx = newLogLen)
+                | (state != "Leader" & ~ok & idx = 0)
+            }
+        transit:
+            log := if (state = "Leader") {
+                log + [Entry { term := currentTerm, value := value }]
+            } else {
+                log
+            }
+            lastLogTermVar := if (state = "Leader") { currentTerm } else { lastLogTermVar }
+            commitIndex := if (state = "Leader") {
+                let (newLogLen : Int := length(log) + 1) { newLogLen }
+            } else {
+                commitIndex
+            }
+    }
+
+    transition clientGet(body : String, ok : Boolean) {
+        guard:
+            | (state = "Leader" & ok & body = stateMachine + "")
+            | (state != "Leader" & ~ok & body = "")
+    }
+
+    transition redirectBody(body : String, code : Int) {
+        guard:
+            state != "Leader"
+            & (
+                | (leaderUrl != "" & code = 303 & body = "LEADER " + leaderUrl)
+                | (leaderUrl = "" & code = 503 & body = "NO_LEADER")
+            )
+    }
+
+    /* Simplified RequestVote: grant if term ok and log at least as long */
+    transition handleRequestVote(
+        inTerm : Int,
+        candidateId : Int,
+        lastLogIndex : Int,
+        lastLogTerm : Int,
+        outTerm : Int,
+        voteGranted : Boolean
+    ) {
+        guard:
+            candidateId >= 0 & candidateId < clusterSize
+            & (
+                | (
+                    & inTerm > currentTerm
+                    & outTerm = inTerm
+                    & (
+                        | (voteGranted & lastLogIndex >= length(log))
+                        | (~voteGranted & lastLogIndex < length(log))
+                    )
+                )
+                | (
+                    & inTerm = currentTerm
+                    & outTerm = currentTerm
+                    & (
+                        | (voteGranted & (votedFor = -1 | votedFor = candidateId) & lastLogIndex >= length(log))
+                        | (~voteGranted & ~((votedFor = -1 | votedFor = candidateId) & lastLogIndex >= length(log)))
+                    )
+                )
+                | (inTerm < currentTerm & outTerm = currentTerm & ~voteGranted)
+            )
+        transit:
+            votedFor := if (voteGranted) { candidateId } else { if (inTerm > currentTerm) { -1 } else { votedFor } }
+            state := if (inTerm > currentTerm) { "Follower" } else { state }
+            leaderUrl := if (inTerm > currentTerm) { "" } else { leaderUrl }
+            electionEpoch := if (inTerm > currentTerm) { electionEpoch + 1 } else { electionEpoch }
+            currentTerm := if (inTerm > currentTerm) { inTerm } else { currentTerm }
+    }
+
+    /* Heartbeat / replicate last entry only (simplified AppendEntries) */
+    transition getLogMetadata(
+        peerId : Int,
+        term : Int,
+        leaderId : Int,
+        prevLogIndex : Int,
+        prevLogTerm : Int,
+        entryTerm : Int,
+        entryValue : String,
+        entriesLen : Int,
+        leaderCommit : Int,
+        peerUrlOut : String
+    ) {
+        guard:
+            & state = "Leader"
+            & peerId >= 0 & peerId < clusterSize & peerId != selfId
+            & term = currentTerm
+            & leaderId = selfId
+            & peerUrlOut = clusterUrls[peerId]
+            & prevLogIndex = length(log)
+            & prevLogTerm = lastLogTermVar
+            & entriesLen = 0
+            & entryTerm = 0
+            & entryValue = ""
+            & leaderCommit = commitIndex
+    }
+
+    transition handleAppendEntriesResp(
+        peerId : Int,
+        inTerm : Int,
+        success : Boolean,
+        matchIdx : Int
+    ) {
+        guard:
+            state = "Leader" & peerId >= 0 & peerId < clusterSize & inTerm = currentTerm
+        transit:
+            commitIndex := if (success & matchIdx > commitIndex) { matchIdx } else { commitIndex }
+    }
+
+    transition handleAppendEntries(
+        inTerm : Int,
+        leaderId : Int,
+        prevLogIndex : Int,
+        prevLogTerm : Int,
+        entriesLen : Int,
+        entryTerm : Int,
+        entryValue : String,
+        leaderCommit : Int,
+        outTerm : Int,
+        success : Boolean,
+        matchIdx : Int
+    ) {
+        guard:
+            leaderId >= 0 & leaderId < clusterSize
+            & (
+                | (inTerm < currentTerm & outTerm = currentTerm & ~success & matchIdx = 0)
+                | (
+                    & inTerm >= currentTerm
+                    & outTerm = inTerm
+                    & success
+                    & matchIdx = length(log)
+                    & entriesLen = 0
+                )
+            )
+        transit:
+            votedFor := if (inTerm > currentTerm) { -1 } else { votedFor }
+            state := if (inTerm >= currentTerm) { "Follower" } else { state }
+            leaderUrl := if (inTerm >= currentTerm) { clusterUrls[leaderId] } else { leaderUrl }
+            electionEpoch := if (inTerm >= currentTerm) { electionEpoch + 1 } else { electionEpoch }
+            currentTerm := if (inTerm > currentTerm) { inTerm } else { currentTerm }
+            commitIndex := if (inTerm >= currentTerm & leaderCommit > commitIndex) {
+                leaderCommit
+            } else {
+                commitIndex
+            }
+    }
+
+    transition applyEntryToStateMachine() {
+        guard: lastApplied < commitIndex & lastApplied < length(log)
+        transit:
+            stateMachine := stateMachine + [entryValueAt(log, lastApplied)]
+            lastApplied := lastApplied + 1
+    }
+}

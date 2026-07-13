@@ -1,0 +1,17 @@
+import julaylib.pclass.HttpServer
+import julaylib.pclass.HttpClient
+import julaylib.pclass.Timer
+import node.core.RaftCore
+import node.initializers.Initializers
+import node.http_handler.NodeHttpHandler
+import node.election.ElectionDriver
+
+/*
+ * Single Raft node composition.
+ * CLI: <configPath> <selfIndex>
+ */
+
+proc Http := (HttpServer || NodeHttpHandler) || HttpClient || Timer
+proc Raft := RaftCore || ElectionDriver || Http
+
+proc NodeLogic := Raft || Initializers

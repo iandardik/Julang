@@ -9,7 +9,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CONFIG="${1:-$SCRIPT_DIR/cluster.conf}"
+RAFT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+CONFIG="${1:-$RAFT_DIR/cluster.conf}"
 PIDFILE="$(dirname "$CONFIG")/.raft-pids"
 LOGDIR="$(dirname "$CONFIG")"
 
@@ -26,8 +27,8 @@ fi
 
 if [[ -n "${RAFT_NODE_JAR:-}" ]]; then
   JAR="$RAFT_NODE_JAR"
-elif [[ -f "$SCRIPT_DIR/../../RaftNode.jar" ]]; then
-  JAR="$SCRIPT_DIR/../../RaftNode.jar"
+elif [[ -f "$RAFT_DIR/../../RaftNode.jar" ]]; then
+  JAR="$RAFT_DIR/../../RaftNode.jar"
 elif [[ -f "$PWD/RaftNode.jar" ]]; then
   JAR="$PWD/RaftNode.jar"
 else

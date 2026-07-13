@@ -1,7 +1,18 @@
 import julaylib.fun.length
 import julaylib.fun.split
 import julaylib.fun.startsWith
-import types.Entry
+
+/*
+ * Shared Raft types and helpers (RPC encoding, config parsing, log access).
+ */
+
+o-class Entry {
+    term : Int
+    value : String
+}
+
+fun entryValueAt(log : List<Entry>, idx : Int) : String =
+    let (e : Entry := log[idx]) { e.value }
 
 fun isQuorum(n : Int, granted : Set<Int>) : Boolean =
     length(granted) * 2 > n
@@ -41,9 +52,6 @@ fun encodeAppendEntriesResp(term : Int, success : Boolean, matchIndex : Int) : S
 
 fun isBlankOrComment(line : String) : Boolean =
     line = "" | startsWith(line, "#")
-
-fun entryValueAt(log : List<Entry>, idx : Int) : String =
-    let (e : Entry := log[idx]) { e.value }
 
 fun parseBool(s : String) : Boolean =
     s = "true"

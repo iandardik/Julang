@@ -1,0 +1,175 @@
+import julaylib.fun.split
+import julaylib.fun.parseInt
+import node.lib.fieldValue
+import node.lib.encodeRequestVoteResp
+import node.lib.encodeAppendEntriesResp
+
+/*
+ * Inbound HTTP routing for Raft RPCs and client commands.
+ */
+
+p-class NodeHttpHandler {
+    var step : String
+    var httpReq : HttpServerRequest
+    var path : String
+    var reqBody : String
+    var respBody : String
+    var respCode : Int
+    var rvTerm : Int
+    var rvCand : Int
+    var rvLastIdx : Int
+    var rvLastTerm : Int
+    var aeTerm : Int
+    var aeLeaderId : Int
+    var aePrevIdx : Int
+    var aePrevTerm : Int
+    var aeEntriesLen : Int
+    var aeEntryTerm : Int
+    var aeEntryValue : String
+    var aeLeaderCommit : Int
+    var appendIdx : Int
+
+    constructor receiveRequest(req : HttpServerRequest) {
+        transit:
+            httpReq := req
+            path := req.path
+            reqBody := req.body
+            respBody := ""
+            respCode := 500
+            rvTerm := 0
+            rvCand := 0
+            rvLastIdx := 0
+            rvLastTerm := 0
+            aeTerm := 0
+            aeLeaderId := 0
+            aePrevIdx := 0
+            aePrevTerm := 0
+            aeEntriesLen := 0
+            aeEntryTerm := 0
+            aeEntryValue := ""
+            aeLeaderCommit := 0
+            appendIdx := 0
+            step := if (req.path = "raft/requestVote") {
+                "rv"
+            } else {
+                if (req.path = "raft/appendEntries") {
+                    "ae"
+                } else {
+                    if (req.path = "client/append") {
+                        "ca"
+                    } else {
+                        if (req.path = "client/get") { "cg" } else { "bad" }
+                    }
+                }
+            }
+    }
+
+    transition parseRV() {
+        guard: step = "rv"
+        transit:
+            rvTerm := parseInt(fieldValue(split(reqBody, "|")[0]))
+            rvCand := parseInt(fieldValue(split(reqBody, "|")[1]))
+            rvLastIdx := parseInt(fieldValue(split(reqBody, "|")[2]))
+            rvLastTerm := parseInt(fieldValue(split(reqBody, "|")[3]))
+            step := "rvHandle"
+    }
+
+    transition handleRequestVote(
+        inTerm : Int, candidateId : Int, lastLogIndex : Int, lastLogTerm : Int,
+        outTerm : Int, voteGranted : Boolean
+    ) {
+        guard:
+            & step = "rvHandle"
+            & inTerm = rvTerm & candidateId = rvCand
+            & lastLogIndex = rvLastIdx & lastLogTerm = rvLastTerm
+        transit:
+            respBody := encodeRequestVoteResp(outTerm, voteGranted)
+            respCode := 200
+            step := "resp"
+    }
+
+    transition parseAE() {
+        guard: step = "ae"
+        transit:
+            aeTerm := parseInt(fieldValue(split(reqBody, "|")[0]))
+            aeLeaderId := parseInt(fieldValue(split(reqBody, "|")[1]))
+            aePrevIdx := parseInt(fieldValue(split(reqBody, "|")[2]))
+            aePrevTerm := parseInt(fieldValue(split(reqBody, "|")[3]))
+            aeEntriesLen := parseInt(fieldValue(split(reqBody, "|")[4]))
+            aeEntryTerm := parseInt(fieldValue(split(reqBody, "|")[5]))
+            aeEntryValue := fieldValue(split(reqBody, "|")[6])
+            aeLeaderCommit := parseInt(fieldValue(split(reqBody, "|")[7]))
+            step := "aeHandle"
+    }
+
+    transition handleAppendEntries(
+        inTerm : Int, leaderId : Int, prevLogIndex : Int, prevLogTerm : Int,
+        entriesLen : Int, entryTerm : Int, entryValue : String, leaderCommit : Int,
+        outTerm : Int, success : Boolean, matchIdx : Int
+    ) {
+        guard:
+            & step = "aeHandle"
+            & inTerm = aeTerm & leaderId = aeLeaderId
+            & prevLogIndex = aePrevIdx & prevLogTerm = aePrevTerm
+            & entriesLen = aeEntriesLen & entryTerm = aeEntryTerm
+            & entryValue = aeEntryValue & leaderCommit = aeLeaderCommit
+        transit:
+            respBody := encodeAppendEntriesResp(outTerm, success, matchIdx)
+            respCode := 200
+            step := "resp"
+    }
+
+    transition clientAppend(value : String, ok : Boolean, idx : Int) {
+        guard: step = "ca" & value = reqBody
+        transit:
+            appendIdx := idx
+            step := if (ok) { "caOk" } else { "redir" }
+    }
+
+    transition finishAppendOk() {
+        guard: step = "caOk"
+        transit:
+            respBody := "OK " + appendIdx
+            respCode := 200
+            step := "resp"
+    }
+
+    transition clientGet(body : String, ok : Boolean) {
+        guard: step = "cg"
+        transit:
+            respBody := body
+            step := if (ok) { "cgOk" } else { "redir" }
+    }
+
+    transition finishGetOk() {
+        guard: step = "cgOk"
+        transit:
+            respCode := 200
+            step := "resp"
+    }
+
+    transition redirectBody(body : String, code : Int) {
+        guard: step = "redir"
+        transit:
+            respBody := body
+            respCode := code
+            step := "resp"
+    }
+
+    transition badPath() {
+        guard: step = "bad"
+        transit:
+            respBody := "NOT_FOUND"
+            respCode := 404
+            step := "resp"
+    }
+
+    transition sendResponse(req : HttpServerRequest, resp : HttpServerResponse) {
+        guard: step = "resp" & req = httpReq & resp = HttpServerResponse { body := respBody, code := respCode }
+        transit: step := "done"
+    }
+
+    p2p-consumer transition close() {
+        guard: false
+    }
+}
