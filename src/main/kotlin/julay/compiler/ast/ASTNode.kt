@@ -743,7 +743,7 @@ class BinaryOpExprNode(
                             "val __sz = ctx.mkSub(setCellSizeExpr(ctx, __l, $meta.sizeAccessor), setCellSizeExpr(ctx, __r, $meta.sizeAccessor)); " +
                             "setMkCellExpr(ctx, $meta.constructorDecl, __arr, __sz) }"
                     }
-                    else -> numericZ3 { l, r -> "ctx.mkMinus($l,$r)" }
+                    else -> numericZ3 { l, r -> "ctx.mkSub($l,$r)" }
                 }
             }
             "in" -> when (rhsType) {

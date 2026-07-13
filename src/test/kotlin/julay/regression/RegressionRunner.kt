@@ -67,6 +67,8 @@ object RegressionRunner {
                 "No program JARs produced for ${case.source}\n--- compiler output ---\n${compileResult.output}"
             }
 
+            stageWorkspaceFiles(projectRoot, workspace, case)
+
             case.programs.forEach { program ->
                 RegressionTimeouts.requireRemaining(case.id, deadlineMs)
                 background = runProgram(projectRoot, case, workspace, compileResult.jars, program, background, deadlineMs)
@@ -75,6 +77,20 @@ object RegressionRunner {
             background?.destroy()
             workspace.deleteRecursively()
         }
+    }
+
+    /** Copy CLI arg paths that exist under the project root into the isolated workspace. */
+    private fun stageWorkspaceFiles(projectRoot: File, workspace: File, case: CaseFile) {
+        case.programs
+            .flatMap { it.run?.args ?: emptyList() }
+            .distinct()
+            .forEach { arg ->
+                val src = File(projectRoot, arg)
+                if (!src.isFile) return@forEach
+                val dest = File(workspace, arg)
+                dest.parentFile.mkdirs()
+                Files.copy(src.toPath(), dest.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            }
     }
 
     private fun assertCompileFailure(case: CaseFile, compileResult: CompileResult) {

@@ -23,7 +23,8 @@ class JulHttpServer(
         val respArg = Variable("resp", httpServerResponseType)
         val startServerAct = SymbolicAction("startServer", listOf(portArg))
         val receiveRequestAct = SymbolicAction("receiveRequest", listOf(reqArg))
-        val sendResponseAct = SymbolicAction("sendResponse", listOf(respArg))
+        // req correlates the response with the exchange that received it (avoids cross-wiring concurrent handlers)
+        val sendResponseAct = SymbolicAction("sendResponse", listOf(reqArg, respArg))
         val closeAct = SymbolicAction("close", listOf(), SymbolicAction.SyncType.P2P)
         val startServerCtor: Pair<SymbolicAction, suspend (Program, ConcreteAction) -> JulHttpServer> = Pair(
             startServerAct,
@@ -90,7 +91,15 @@ class JulHttpServer(
                 )
             } else if (finishHttpReq) {
                 finishHttpReq = false
-                return setOf(TSAction(sendResponseAct, ctx.mkTrue()))
+                return setOf(
+                    TSAction(
+                        sendResponseAct,
+                        ctx.mkEq(
+                            reqArg.toZ3Expr(ctx),
+                            httpServerRequestType.toZ3Expr(Value(request, httpServerRequestType), ctx),
+                        ),
+                    ),
+                )
             } else {
                 return setOf()
             }

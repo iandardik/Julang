@@ -1,0 +1,74 @@
+import julaylib.fun.readFile
+import julaylib.fun.split
+import julaylib.fun.trim
+import julaylib.fun.portFromUrl
+import julaylib.fun.startsWith
+import julaylib.fun.length
+
+p-class StringFileDemo {
+    var phase : Int
+    var url : String
+    var port : Int
+    var line : String
+    var path : String
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            phase := 0
+            url := "http://127.0.0.1:5001"
+            port := 0
+            line := "  # comment  "
+            path := args[0]
+            n := 0
+    }
+
+    transition checkPort() {
+        guard:
+            phase = 0
+        transit:
+            port := portFromUrl(url)
+            phase := 1
+    }
+
+    transition checkTrim() {
+        guard:
+            phase = 1 & port = 5001
+        transit:
+            line := trim(line)
+            phase := 2
+    }
+
+    transition checkStartsWith() {
+        guard:
+            phase = 2 & startsWith(line, "#")
+        transit:
+            phase := 3
+    }
+
+    transition checkSplit() {
+        guard:
+            phase = 3
+        transit:
+            n := length(split("a,b,c", ","))
+            phase := 4
+    }
+
+    transition checkFile() {
+        guard:
+            phase = 4 & n = 3
+        transit:
+            line := trim(split(readFile(path), "\n")[0])
+            phase := 5
+    }
+
+    transition done() {
+        guard:
+            phase = 5 & line = "hello-config"
+        effect:
+            println(line + ":" + port)
+            exitProcess()
+    }
+}
+
+program StringFileFunsTest := StringFileDemo

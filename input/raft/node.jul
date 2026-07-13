@@ -1,0 +1,757 @@
+import julaylib.pclass.HttpServer
+import julaylib.pclass.HttpClient
+import julaylib.pclass.Timer
+import julaylib.fun.length
+import julaylib.fun.readFile
+import julaylib.fun.split
+import julaylib.fun.trim
+import julaylib.fun.portFromUrl
+import julaylib.fun.parseInt
+import types.Entry
+import helpers.fieldValue
+import helpers.encodeRequestVote
+import helpers.encodeRequestVoteResp
+import helpers.encodeAppendEntries
+import helpers.encodeAppendEntriesResp
+import helpers.isBlankOrComment
+import helpers.parseBool
+import helpers.entryValueAt
+
+/*
+ * Single Raft node (classic Raft control flow as guarded transitions).
+ * CLI: <configPath> <selfIndex>
+ */
+
+p-class RaftCore {
+    var ready : Boolean
+    var selfId : Int
+    var n : Int
+    var clusterUrls : List<String>
+    var selfUrl : String
+    var selfPort : Int
+    var currentTerm : Int
+    var state : String
+    var votedFor : Int
+    var log : List<Entry>
+    var logLen : Int
+    var lastLogTermVar : Int
+    var commitIndex : Int
+    var lastApplied : Int
+    var sm : List<String>
+    var votesGranted : Set<Int>
+    var voteCount : Int
+    var leaderUrl : String
+    var electionEpoch : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            ready := false
+            selfId := parseInt(args[1])
+            n := 0
+            clusterUrls := []
+            selfUrl := ""
+            selfPort := 0
+            currentTerm := 0
+            state := "Follower"
+            votedFor := -1
+            log := []
+            logLen := 0
+            lastLogTermVar := 0
+            commitIndex := 0
+            lastApplied := 0
+            sm := []
+            votesGranted := {}
+            voteCount := 0
+            leaderUrl := ""
+            electionEpoch := 0
+    }
+
+    p2p-service transition setCluster(urls : List<String>, id : Int) {
+        guard: ~ready & id = selfId & length(urls) > 0
+        transit:
+            clusterUrls := urls
+            n := length(urls)
+            selfUrl := urls[id]
+            selfPort := portFromUrl(urls[id])
+            ready := true
+    }
+
+    p2p-service transition getListenPort(port : Int) {
+        guard: ready & port = selfPort
+    }
+
+    p2p-service transition startElection(epoch : Int) {
+        guard:
+            ready & (state = "Follower" | state = "Candidate") & epoch = electionEpoch
+        transit:
+            state := "Candidate"
+            currentTerm := currentTerm + 1
+            votedFor := selfId
+            votesGranted := {selfId}
+            voteCount := 1
+            electionEpoch := electionEpoch + 1
+            leaderUrl := ""
+    }
+
+    p2p-service transition getClusterSize(size : Int) {
+        guard: ready & size = n
+    }
+
+    p2p-service transition getSelfId(id : Int) {
+        guard: ready & id = selfId
+    }
+
+    p2p-service transition isLeader(flag : Boolean) {
+        guard: (flag & state = "Leader") | (~flag & state != "Leader")
+    }
+
+    p2p-service transition hasQuorum(flag : Boolean) {
+        guard:
+            state = "Candidate"
+            & ((flag & voteCount * 2 > n) | (~flag & voteCount * 2 <= n))
+    }
+
+    p2p-service transition getElectionSnapshot(
+        epoch : Int,
+        term : Int,
+        candId : Int,
+        lastIdx : Int,
+        lastT : Int,
+        role : String
+    ) {
+        guard:
+            ready
+            & epoch = electionEpoch
+            & term = currentTerm
+            & candId = selfId
+            & lastIdx = logLen
+            & lastT = lastLogTermVar
+            & role = state
+    }
+
+    p2p-service transition peerUrl(peerId : Int, url : String) {
+        guard:
+            ready & peerId >= 0 & peerId < n & peerId != selfId & url = clusterUrls[peerId]
+    }
+
+    p2p-service transition recordVote(peerId : Int, term : Int, granted : Boolean) {
+        guard: state = "Candidate" & term = currentTerm & peerId >= 0 & peerId < n
+        transit:
+            votesGranted := if (granted) { votesGranted + {peerId} } else { votesGranted }
+            voteCount := if (granted) { voteCount + 1 } else { voteCount }
+    }
+
+    p2p-service transition becomeLeader() {
+        guard: state = "Candidate" & voteCount * 2 > n
+        transit:
+            state := "Leader"
+            leaderUrl := selfUrl
+            electionEpoch := electionEpoch + 1
+    }
+
+    p2p-service transition clientAppend(value : String, ok : Boolean, idx : Int) {
+        guard:
+            ready
+            & (
+                (state = "Leader" & ok & idx = logLen + 1)
+                | (state != "Leader" & ~ok & idx = 0)
+            )
+        transit:
+            log := if (state = "Leader") {
+                log + [Entry { term := currentTerm, value := value }]
+            } else {
+                log
+            }
+            logLen := if (state = "Leader") { logLen + 1 } else { logLen }
+            lastLogTermVar := if (state = "Leader") { currentTerm } else { lastLogTermVar }
+            commitIndex := if (state = "Leader") { logLen + 1 } else { commitIndex }
+    }
+
+    p2p-service transition clientGet(body : String, ok : Boolean) {
+        guard:
+            ready
+            & (
+                (state = "Leader" & ok & body = sm + "")
+                | (state != "Leader" & ~ok & body = "")
+            )
+    }
+
+    p2p-service transition redirectBody(body : String, code : Int) {
+        guard:
+            ready & state != "Leader"
+            & (
+                (leaderUrl != "" & code = 303 & body = "LEADER " + leaderUrl)
+                | (leaderUrl = "" & code = 503 & body = "NO_LEADER")
+            )
+    }
+
+    /* Simplified RequestVote: grant if term ok and log at least as long */
+    p2p-service transition handleRequestVote(
+        inTerm : Int,
+        candidateId : Int,
+        lastLogIndex : Int,
+        lastLogTerm : Int,
+        outTerm : Int,
+        voteGranted : Boolean
+    ) {
+        guard:
+            ready & candidateId >= 0 & candidateId < n
+            & (
+                (
+                    inTerm > currentTerm
+                    & outTerm = inTerm
+                    & (
+                        (voteGranted & lastLogIndex >= logLen)
+                        | (~voteGranted & lastLogIndex < logLen)
+                    )
+                )
+                | (
+                    inTerm = currentTerm
+                    & outTerm = currentTerm
+                    & (
+                        (voteGranted & (votedFor = -1 | votedFor = candidateId) & lastLogIndex >= logLen)
+                        | (~voteGranted & ~((votedFor = -1 | votedFor = candidateId) & lastLogIndex >= logLen))
+                    )
+                )
+                | (inTerm < currentTerm & outTerm = currentTerm & ~voteGranted)
+            )
+        transit:
+            votedFor := if (voteGranted) { candidateId } else { if (inTerm > currentTerm) { -1 } else { votedFor } }
+            state := if (inTerm > currentTerm) { "Follower" } else { state }
+            leaderUrl := if (inTerm > currentTerm) { "" } else { leaderUrl }
+            electionEpoch := if (inTerm > currentTerm) { electionEpoch + 1 } else { electionEpoch }
+            currentTerm := if (inTerm > currentTerm) { inTerm } else { currentTerm }
+    }
+
+    /* Heartbeat / replicate last entry only (simplified AppendEntries) */
+    p2p-service transition aeSendParams(
+        peerId : Int,
+        term : Int,
+        leaderId : Int,
+        prevLogIndex : Int,
+        prevLogTerm : Int,
+        entryTerm : Int,
+        entryValue : String,
+        entriesLen : Int,
+        leaderCommit : Int,
+        peerUrlOut : String
+    ) {
+        guard:
+            state = "Leader"
+            & peerId >= 0 & peerId < n & peerId != selfId
+            & term = currentTerm
+            & leaderId = selfId
+            & peerUrlOut = clusterUrls[peerId]
+            & prevLogIndex = logLen
+            & prevLogTerm = lastLogTermVar
+            & entriesLen = 0
+            & entryTerm = 0
+            & entryValue = ""
+            & leaderCommit = commitIndex
+    }
+
+    p2p-service transition handleAppendEntriesResp(
+        peerId : Int,
+        inTerm : Int,
+        success : Boolean,
+        matchIdx : Int
+    ) {
+        guard:
+            state = "Leader" & peerId >= 0 & peerId < n & inTerm = currentTerm
+        transit:
+            commitIndex := if (success & matchIdx > commitIndex) { matchIdx } else { commitIndex }
+    }
+
+    p2p-service transition handleAppendEntries(
+        inTerm : Int,
+        leaderId : Int,
+        prevLogIndex : Int,
+        prevLogTerm : Int,
+        entriesLen : Int,
+        entryTerm : Int,
+        entryValue : String,
+        leaderCommit : Int,
+        outTerm : Int,
+        success : Boolean,
+        matchIdx : Int
+    ) {
+        guard:
+            ready & leaderId >= 0 & leaderId < n
+            & (
+                (inTerm < currentTerm & outTerm = currentTerm & ~success & matchIdx = 0)
+                | (
+                    inTerm >= currentTerm
+                    & outTerm = inTerm
+                    & success
+                    & matchIdx = logLen
+                    & entriesLen = 0
+                )
+            )
+        transit:
+            votedFor := if (inTerm > currentTerm) { -1 } else { votedFor }
+            state := if (inTerm >= currentTerm) { "Follower" } else { state }
+            leaderUrl := if (inTerm >= currentTerm) { clusterUrls[leaderId] } else { leaderUrl }
+            electionEpoch := if (inTerm >= currentTerm) { electionEpoch + 1 } else { electionEpoch }
+            currentTerm := if (inTerm > currentTerm) { inTerm } else { currentTerm }
+            commitIndex := if (inTerm >= currentTerm & leaderCommit > commitIndex) {
+                leaderCommit
+            } else {
+                commitIndex
+            }
+    }
+
+    p2p-service transition applyOne() {
+        guard: lastApplied < commitIndex & lastApplied < logLen
+        transit:
+            sm := sm + [entryValueAt(log, lastApplied)]
+            lastApplied := lastApplied + 1
+    }
+}
+
+p-class ConfigLoader {
+    var path : String
+    var selfId : Int
+    var rawLines : List<String>
+    var idx : Int
+    var acc : List<String>
+    var step : String
+
+    constructor initially(args : List<String>) {
+        transit:
+            path := args[0]
+            selfId := parseInt(args[1])
+            rawLines := []
+            idx := 0
+            acc := []
+            step := "load"
+    }
+
+    transition readConfig() {
+        guard: step = "load"
+        transit:
+            rawLines := split(readFile(path), "\n")
+            idx := 0
+            acc := []
+            step := "scan"
+    }
+
+    transition skipOrTake() {
+        guard: step = "scan" & idx < length(rawLines)
+        transit:
+            acc := let (line : String := trim(rawLines[idx])) {
+                if (isBlankOrComment(line)) { acc } else { acc + [line] }
+            }
+            idx := idx + 1
+    }
+
+    p2p-consumer transition setCluster(urls : List<String>, id : Int) {
+        guard:
+            step = "scan" & idx = length(rawLines) & length(acc) > 0 & urls = acc & id = selfId
+        transit: step := "done"
+    }
+}
+
+p-class ServerStarter {
+    var started : Boolean
+    var myPort : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            started := false
+            myPort := 0
+    }
+
+    p2p-consumer transition getListenPort(port : Int) {
+        guard: ~started
+        transit: myPort := port
+    }
+
+    transition startServer(port : Int) {
+        guard: ~started & port = myPort & myPort > 0
+        transit: started := true
+    }
+}
+
+p-class NodeHttpHandler {
+    var step : String
+    var httpReq : HttpServerRequest
+    var path : String
+    var reqBody : String
+    var respBody : String
+    var respCode : Int
+    var rvTerm : Int
+    var rvCand : Int
+    var rvLastIdx : Int
+    var rvLastTerm : Int
+    var aeTerm : Int
+    var aeLeaderId : Int
+    var aePrevIdx : Int
+    var aePrevTerm : Int
+    var aeEntriesLen : Int
+    var aeEntryTerm : Int
+    var aeEntryValue : String
+    var aeLeaderCommit : Int
+    var appendIdx : Int
+
+    constructor receiveRequest(req : HttpServerRequest) {
+        transit:
+            httpReq := req
+            path := req.path
+            reqBody := req.body
+            respBody := ""
+            respCode := 500
+            rvTerm := 0
+            rvCand := 0
+            rvLastIdx := 0
+            rvLastTerm := 0
+            aeTerm := 0
+            aeLeaderId := 0
+            aePrevIdx := 0
+            aePrevTerm := 0
+            aeEntriesLen := 0
+            aeEntryTerm := 0
+            aeEntryValue := ""
+            aeLeaderCommit := 0
+            appendIdx := 0
+            step := if (req.path = "raft/requestVote") {
+                "rv"
+            } else {
+                if (req.path = "raft/appendEntries") {
+                    "ae"
+                } else {
+                    if (req.path = "client/append") {
+                        "ca"
+                    } else {
+                        if (req.path = "client/get") { "cg" } else { "bad" }
+                    }
+                }
+            }
+    }
+
+    transition parseRV() {
+        guard: step = "rv"
+        transit:
+            rvTerm := parseInt(fieldValue(split(reqBody, "|")[0]))
+            rvCand := parseInt(fieldValue(split(reqBody, "|")[1]))
+            rvLastIdx := parseInt(fieldValue(split(reqBody, "|")[2]))
+            rvLastTerm := parseInt(fieldValue(split(reqBody, "|")[3]))
+            step := "rvHandle"
+    }
+
+    p2p-consumer transition handleRequestVote(
+        inTerm : Int, candidateId : Int, lastLogIndex : Int, lastLogTerm : Int,
+        outTerm : Int, voteGranted : Boolean
+    ) {
+        guard:
+            step = "rvHandle"
+            & inTerm = rvTerm & candidateId = rvCand
+            & lastLogIndex = rvLastIdx & lastLogTerm = rvLastTerm
+        transit:
+            respBody := encodeRequestVoteResp(outTerm, voteGranted)
+            respCode := 200
+            step := "resp"
+    }
+
+    transition parseAE() {
+        guard: step = "ae"
+        transit:
+            aeTerm := parseInt(fieldValue(split(reqBody, "|")[0]))
+            aeLeaderId := parseInt(fieldValue(split(reqBody, "|")[1]))
+            aePrevIdx := parseInt(fieldValue(split(reqBody, "|")[2]))
+            aePrevTerm := parseInt(fieldValue(split(reqBody, "|")[3]))
+            aeEntriesLen := parseInt(fieldValue(split(reqBody, "|")[4]))
+            aeEntryTerm := parseInt(fieldValue(split(reqBody, "|")[5]))
+            aeEntryValue := fieldValue(split(reqBody, "|")[6])
+            aeLeaderCommit := parseInt(fieldValue(split(reqBody, "|")[7]))
+            step := "aeHandle"
+    }
+
+    p2p-consumer transition handleAppendEntries(
+        inTerm : Int, leaderId : Int, prevLogIndex : Int, prevLogTerm : Int,
+        entriesLen : Int, entryTerm : Int, entryValue : String, leaderCommit : Int,
+        outTerm : Int, success : Boolean, matchIdx : Int
+    ) {
+        guard:
+            step = "aeHandle"
+            & inTerm = aeTerm & leaderId = aeLeaderId
+            & prevLogIndex = aePrevIdx & prevLogTerm = aePrevTerm
+            & entriesLen = aeEntriesLen & entryTerm = aeEntryTerm
+            & entryValue = aeEntryValue & leaderCommit = aeLeaderCommit
+        transit:
+            respBody := encodeAppendEntriesResp(outTerm, success, matchIdx)
+            respCode := 200
+            step := "resp"
+    }
+
+    p2p-consumer transition clientAppend(value : String, ok : Boolean, idx : Int) {
+        guard: step = "ca" & value = reqBody
+        transit:
+            appendIdx := idx
+            step := if (ok) { "caOk" } else { "redir" }
+    }
+
+    transition finishAppendOk() {
+        guard: step = "caOk"
+        transit:
+            respBody := "OK " + appendIdx
+            respCode := 200
+            step := "resp"
+    }
+
+    p2p-consumer transition clientGet(body : String, ok : Boolean) {
+        guard: step = "cg"
+        transit:
+            respBody := body
+            step := if (ok) { "cgOk" } else { "redir" }
+    }
+
+    transition finishGetOk() {
+        guard: step = "cgOk"
+        transit:
+            respCode := 200
+            step := "resp"
+    }
+
+    p2p-consumer transition redirectBody(body : String, code : Int) {
+        guard: step = "redir"
+        transit:
+            respBody := body
+            respCode := code
+            step := "resp"
+    }
+
+    transition badPath() {
+        guard: step = "bad"
+        transit:
+            respBody := "NOT_FOUND"
+            respCode := 404
+            step := "resp"
+    }
+
+    transition sendResponse(req : HttpServerRequest, resp : HttpServerResponse) {
+        guard: step = "resp" & req = httpReq & resp = HttpServerResponse { body := respBody, code := respCode }
+        transit: step := "done"
+    }
+
+    p2p-consumer transition close() {
+        guard: false
+    }
+}
+
+p-class ElectionDriver {
+    var step : String
+    var myId : Int
+    var curPeer : Int
+    var peer : String
+    var reqBody : String
+    var respBody : String
+    var voteTerm : Int
+    var voteGrantedFlag : Boolean
+    var clusterN : Int
+    var respTerm : Int
+    var respSuccess : Boolean
+    var respMatch : Int
+    var electTimeout : Int
+    var armedEpoch : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            step := "needId"
+            myId := 0
+            curPeer := 0
+            peer := ""
+            reqBody := ""
+            respBody := ""
+            voteTerm := 0
+            voteGrantedFlag := false
+            clusterN := 0
+            respTerm := 0
+            respSuccess := false
+            respMatch := 0
+            electTimeout := 2
+            armedEpoch := 0
+    }
+
+    p2p-consumer transition getSelfId(id : Int) {
+        guard: step = "needId" | step = "hbSelf"
+        transit:
+            myId := id
+            electTimeout := 2 + id
+            step := if (step = "needId") { "arm" } else { "hbNeedN" }
+    }
+
+    p2p-consumer transition getElectionSnapshot(
+        epoch : Int, term : Int, candId : Int, lastIdx : Int, lastT : Int, role : String
+    ) {
+        guard: step = "arm" | step = "checkEpoch" | step = "snap"
+        transit:
+            armedEpoch := if (step = "arm") { epoch } else { armedEpoch }
+            myId := if (step = "snap") { candId } else { myId }
+            electTimeout := if (step = "snap") { 2 + candId } else { electTimeout }
+            curPeer := if (step = "snap") { 0 } else { curPeer }
+            reqBody := if (step = "snap") {
+                encodeRequestVote(term, candId, lastIdx, lastT)
+            } else {
+                reqBody
+            }
+            step := if (step = "arm") {
+                "waitTimer"
+            } else {
+                if (step = "checkEpoch") {
+                    if (epoch = armedEpoch) { "doElect" } else { "arm" }
+                } else {
+                    "needN"
+                }
+            }
+    }
+
+    transition timer(time : Int) {
+        guard: (step = "waitTimer" & time = electTimeout) | (step = "hbWait" & time = 1)
+        transit: step := "armed"
+    }
+
+    transition timeout() {
+        guard: step = "armed"
+        transit: step := "dispatch"
+    }
+
+    p2p-consumer transition isLeader(flag : Boolean) {
+        guard: step = "dispatch"
+        transit: step := if (flag) { "hbSelf" } else { "checkEpoch" }
+    }
+
+    p2p-consumer transition startElection(epoch : Int) {
+        guard: step = "doElect" & epoch = armedEpoch
+        transit: step := "snap"
+    }
+
+    p2p-consumer transition getClusterSize(size : Int) {
+        guard: step = "needN" | step = "hbNeedN"
+        transit:
+            clusterN := size
+            curPeer := 0
+            step := if (step = "hbNeedN") { "hbPeers" } else { "peers" }
+    }
+
+    transition skipSelf() {
+        guard: step = "peers" & curPeer = myId & curPeer < clusterN
+        transit: curPeer := curPeer + 1
+    }
+
+    transition peersDone() {
+        guard: step = "peers" & curPeer >= clusterN
+        transit: step := "checkQ"
+    }
+
+    p2p-consumer transition peerUrl(peerId : Int, url : String) {
+        guard: step = "peers" & peerId = curPeer & curPeer != myId & curPeer < clusterN
+        transit:
+            peer := url
+            step := "sendRV"
+    }
+
+    transition sendRequest(req : HttpClientRequest) {
+        guard:
+            (step = "sendRV" & req = HttpClientRequest {
+                url := peer + "/raft/requestVote", method := "POST", body := reqBody
+            })
+            | (step = "sendAE" & req = HttpClientRequest {
+                url := peer + "/raft/appendEntries", method := "POST", body := reqBody
+            })
+        transit:
+            step := if (step = "sendRV") { "recvRV" } else { "recvAE" }
+    }
+
+    transition receiveResponse(resp : HttpClientResponse) {
+        guard: step = "recvRV" | step = "recvAE"
+        transit:
+            respBody := resp.body
+            step := if (step = "recvRV") { "parseVote" } else { "parseAE" }
+    }
+
+    transition parseVote() {
+        guard: step = "parseVote"
+        transit:
+            voteTerm := parseInt(fieldValue(split(respBody, "|")[0]))
+            voteGrantedFlag := parseBool(fieldValue(split(respBody, "|")[1]))
+            step := "tally"
+    }
+
+    p2p-consumer transition recordVote(peerId : Int, term : Int, granted : Boolean) {
+        guard: step = "tally" & peerId = curPeer & term = voteTerm & granted = voteGrantedFlag
+        transit:
+            curPeer := curPeer + 1
+            step := "peers"
+    }
+
+    p2p-consumer transition hasQuorum(flag : Boolean) {
+        guard: step = "checkQ"
+        transit: step := if (flag) { "doLeader" } else { "arm" }
+    }
+
+    p2p-consumer transition becomeLeader() {
+        guard: step = "doLeader"
+        transit: step := "hbWait"
+    }
+
+    transition hbSkipSelf() {
+        guard: step = "hbPeers" & curPeer = myId & curPeer < clusterN
+        transit: curPeer := curPeer + 1
+    }
+
+    transition hbPeersDone() {
+        guard: step = "hbPeers" & curPeer >= clusterN
+        transit: step := "hbWait"
+    }
+
+    p2p-consumer transition aeSendParams(
+        peerId : Int, term : Int, leaderId : Int, prevLogIndex : Int, prevLogTerm : Int,
+        entryTerm : Int, entryValue : String, entriesLen : Int, leaderCommit : Int, peerUrlOut : String
+    ) {
+        guard: step = "hbPeers" & peerId = curPeer & curPeer != myId & curPeer < clusterN
+        transit:
+            peer := peerUrlOut
+            reqBody := encodeAppendEntries(
+                term, leaderId, prevLogIndex, prevLogTerm,
+                entryTerm, entryValue, entriesLen, leaderCommit
+            )
+            step := "sendAE"
+    }
+
+    transition parseAEResp() {
+        guard: step = "parseAE"
+        transit:
+            respTerm := parseInt(fieldValue(split(respBody, "|")[0]))
+            respSuccess := parseBool(fieldValue(split(respBody, "|")[1]))
+            respMatch := parseInt(fieldValue(split(respBody, "|")[2]))
+            step := "applyAE"
+    }
+
+    p2p-consumer transition handleAppendEntriesResp(
+        peerId : Int, inTerm : Int, success : Boolean, matchIdx : Int
+    ) {
+        guard:
+            step = "applyAE" & peerId = curPeer
+            & inTerm = respTerm & success = respSuccess & matchIdx = respMatch
+        transit:
+            curPeer := curPeer + 1
+            step := "hbPeers"
+    }
+}
+
+p-class ApplyDriver {
+    var step : String
+
+    constructor initially(args : List<String>) {
+        transit: step := "loop"
+    }
+
+    p2p-consumer transition applyOne() {
+        guard: step = "loop"
+        transit: step := "loop"
+    }
+}
+
+proc NodeLogic :=
+    RaftCore || ConfigLoader || ServerStarter || NodeHttpHandler
+    || ElectionDriver || ApplyDriver || HttpServer || HttpClient || Timer

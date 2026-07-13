@@ -5,7 +5,10 @@ import julay.program.MapType
 import julay.program.SetType
 import julay.program.StringType
 import julay.program.Type
+import julay.program.boolType
 import julay.program.intType
+import julay.program.listType
+import julay.program.stringType
 
 /**
  * Kotlin-backed expression function (julaylib.fun.*), analogous to effect builtins
@@ -56,9 +59,103 @@ object FunBuiltinRegistry {
         z3Codegen = { args -> "ctx.stringToInt(${args[0]} as Expr<SeqSort<CharSort>>)" },
     )
 
+    private val readFileBuiltin = FunBuiltin(
+        name = "readFile",
+        arity = 1,
+        returnType = stringType,
+        checkArgs = { argTypes ->
+            when {
+                argTypes.size != 1 -> "Expected function \"readFile\" to take 1 argument(s) but got ${argTypes.size}"
+                argTypes[0] !is StringType -> "Expected argument of \"readFile\" to have a String type but got ${argTypes[0]}"
+                else -> null
+            }
+        },
+        kotlinCodegen = { args -> "java.io.File(${args[0]}).readText()" },
+        z3Codegen = { _ ->
+            throw RuntimeException("Function \"readFile\" cannot be used in guards")
+        },
+    )
+
+    private val splitBuiltin = FunBuiltin(
+        name = "split",
+        arity = 2,
+        returnType = listType(stringType),
+        checkArgs = { argTypes ->
+            when {
+                argTypes.size != 2 -> "Expected function \"split\" to take 2 argument(s) but got ${argTypes.size}"
+                argTypes[0] !is StringType -> "Expected first argument of \"split\" to have a String type but got ${argTypes[0]}"
+                argTypes[1] !is StringType -> "Expected second argument of \"split\" to have a String type but got ${argTypes[1]}"
+                else -> null
+            }
+        },
+        kotlinCodegen = { args -> "${args[0]}.split(${args[1]})" },
+        z3Codegen = { _ ->
+            throw RuntimeException("Function \"split\" cannot be used in guards")
+        },
+    )
+
+    private val trimBuiltin = FunBuiltin(
+        name = "trim",
+        arity = 1,
+        returnType = stringType,
+        checkArgs = { argTypes ->
+            when {
+                argTypes.size != 1 -> "Expected function \"trim\" to take 1 argument(s) but got ${argTypes.size}"
+                argTypes[0] !is StringType -> "Expected argument of \"trim\" to have a String type but got ${argTypes[0]}"
+                else -> null
+            }
+        },
+        kotlinCodegen = { args -> "${args[0]}.trim()" },
+        z3Codegen = { _ ->
+            throw RuntimeException("Function \"trim\" cannot be used in guards")
+        },
+    )
+
+    private val portFromUrlBuiltin = FunBuiltin(
+        name = "portFromUrl",
+        arity = 1,
+        returnType = intType,
+        checkArgs = { argTypes ->
+            when {
+                argTypes.size != 1 -> "Expected function \"portFromUrl\" to take 1 argument(s) but got ${argTypes.size}"
+                argTypes[0] !is StringType -> "Expected argument of \"portFromUrl\" to have a String type but got ${argTypes[0]}"
+                else -> null
+            }
+        },
+        kotlinCodegen = { args ->
+            "run { val _u = ${args[0]}; val _h = _u.substringAfter(\"://\", _u); _h.substringAfterLast(':').toInt() }"
+        },
+        z3Codegen = { _ ->
+            throw RuntimeException("Function \"portFromUrl\" cannot be used in guards")
+        },
+    )
+
+    private val startsWithBuiltin = FunBuiltin(
+        name = "startsWith",
+        arity = 2,
+        returnType = boolType,
+        checkArgs = { argTypes ->
+            when {
+                argTypes.size != 2 -> "Expected function \"startsWith\" to take 2 argument(s) but got ${argTypes.size}"
+                argTypes[0] !is StringType -> "Expected first argument of \"startsWith\" to have a String type but got ${argTypes[0]}"
+                argTypes[1] !is StringType -> "Expected second argument of \"startsWith\" to have a String type but got ${argTypes[1]}"
+                else -> null
+            }
+        },
+        kotlinCodegen = { args -> "${args[0]}.startsWith(${args[1]})" },
+        z3Codegen = { args ->
+            "ctx.mkPrefixOf(${args[1]} as Expr<SeqSort<CharSort>>, ${args[0]} as Expr<SeqSort<CharSort>>)"
+        },
+    )
+
     private val builtins = mapOf(
         lengthBuiltin.name to lengthBuiltin,
         parseIntBuiltin.name to parseIntBuiltin,
+        readFileBuiltin.name to readFileBuiltin,
+        splitBuiltin.name to splitBuiltin,
+        trimBuiltin.name to trimBuiltin,
+        portFromUrlBuiltin.name to portFromUrlBuiltin,
+        startsWithBuiltin.name to startsWithBuiltin,
     )
 
     val all: Collection<FunBuiltin> get() = builtins.values

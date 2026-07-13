@@ -184,7 +184,8 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
 
 fun buildModuleSearchPath(entryPath: Path, extraLibraryPaths: List<Path>): List<Path> {
     val paths = mutableListOf<Path>()
-    entryPath.parent?.let { paths.add(it) }
+    // Resolve so a bare "main.jul" still contributes its directory (cwd) as a search root.
+    entryPath.toAbsolutePath().normalize().parent?.let { paths.add(it) }
     extraLibraryPaths.forEach { paths.add(it) }
     System.getenv("JULAY_PATH")?.split(':')?.filter { it.isNotEmpty() }?.forEach { paths.add(Path.of(it)) }
     return paths.distinct()

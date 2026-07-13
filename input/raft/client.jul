@@ -1,0 +1,85 @@
+import julaylib.pclass.HttpClient
+import julaylib.fun.length
+import julaylib.fun.split
+import julaylib.fun.startsWith
+
+/*
+ * Raft client — CLI:
+ *   <nodeUrl> append <value>
+ *   <nodeUrl> get
+ *
+ * Prints every response; on 303 LEADER <url>, retries once against the leader.
+ */
+
+p-class RaftClientLogic {
+    var step : String
+    var targetUrl : String
+    var command : String
+    var value : String
+    var path : String
+    var reqBody : String
+    var respBody : String
+    var respCode : Int
+    var retried : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            targetUrl := args[0]
+            command := args[1]
+            value := if (length(args) > 2) { args[2] } else { "" }
+            path := if (args[1] = "append") { "/client/append" } else { "/client/get" }
+            reqBody := if (args[1] = "append") { args[2] } else { "" }
+            respBody := ""
+            respCode := 0
+            retried := false
+            step := "send"
+    }
+
+    transition sendRequest(req : HttpClientRequest) {
+        guard:
+            step = "send"
+            & req = HttpClientRequest {
+                url := targetUrl + path,
+                method := "POST",
+                body := reqBody
+            }
+        transit: step := "recv"
+    }
+
+    transition receiveResponse(resp : HttpClientResponse) {
+        guard: step = "recv"
+        transit:
+            respBody := resp.body
+            respCode := resp.code
+            step := "print"
+    }
+
+    transition printResp() {
+        guard: step = "print"
+        transit: step := "afterPrint"
+        effect:
+            println("" + respCode + " " + respBody)
+    }
+
+    transition retryLeader() {
+        guard:
+            step = "afterPrint"
+            & ~retried
+            & respCode = 303
+            & startsWith(respBody, "LEADER ")
+        transit:
+            targetUrl := split(respBody, " ")[1]
+            retried := true
+            step := "send"
+    }
+
+    transition doneOk() {
+        guard:
+            step = "afterPrint"
+            & (respCode = 200 | retried | respCode = 503 | ~(startsWith(respBody, "LEADER ")))
+        effect:
+            exitProcess()
+    }
+}
+
+proc Client := RaftClientLogic || HttpClient

@@ -1,0 +1,4 @@
+o-class Entry {
+    term : Int
+    value : String
+}

@@ -72,7 +72,12 @@ class BoolType : Type {
     }
 
     override fun fromZ3Expr(expr: Expr<*>, model: Model): Any {
-        return expr.string.lowercase() == "true"
+        val evaluated = model.eval(expr, true)
+        return when {
+            evaluated.isTrue -> true
+            evaluated.isFalse -> false
+            else -> evaluated.toString().lowercase() == "true"
+        }
     }
 
     override fun isOfType(obj: Any): Boolean {

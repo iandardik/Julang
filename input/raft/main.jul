@@ -1,0 +1,5 @@
+import node.NodeLogic
+import client.Client
+
+program RaftNode := NodeLogic
+program RaftClient := Client

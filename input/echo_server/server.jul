@@ -21,11 +21,13 @@ p-class ServerStarter {
 
 p-class EchoHandler {
     var info : ReqInfo
+    var httpReq : HttpServerRequest
     var responded : Boolean
     var done : Boolean
 
     constructor receiveRequest(req : HttpServerRequest) {
         transit:
+            httpReq := req
             info := ReqInfo {
                 req := req.body,
                 resp := req.body + " is a good point!"
@@ -34,9 +36,11 @@ p-class EchoHandler {
             done := false
     }
 
-    transition sendResponse(resp : HttpServerResponse) {
+    transition sendResponse(req : HttpServerRequest, resp : HttpServerResponse) {
         guard:
-            ~responded & resp = HttpServerResponse {
+            ~responded
+            & req = httpReq
+            & resp = HttpServerResponse {
                 body := info.resp,
                 code := 200
             }

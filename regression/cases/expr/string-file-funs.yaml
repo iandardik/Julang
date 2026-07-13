@@ -1,0 +1,9 @@
+source: regression/input/expr/string-file-funs.jul
+programs:
+  - name: StringFileFunsTest
+    run:
+      timeoutMs: 60000
+      args:
+        - "regression/input/expr/string-file-funs-fixture.txt"
+      expectStdoutContains:
+        - "hello-config:5001"
