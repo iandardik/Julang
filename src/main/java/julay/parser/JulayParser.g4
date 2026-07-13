@@ -146,8 +146,7 @@ expr
     | oclass_literal
     | fun_call
     | NOT expr
-    | BANG expr
-    // Prefix & / | are no-ops (TLA+ style formatting); same precedence as ~ / !
+    // Prefix & / | are no-ops (TLA+ style formatting); same precedence as ~
     | AND expr
     | OR expr
     | expr TIMES expr
@@ -162,7 +161,6 @@ expr
     | expr IN expr
     | expr EQ expr
     | expr NEQ expr
-    | expr BANG_NEQ expr
     | expr AND expr
     | expr OR expr
     | expr IMPLIES expr

@@ -116,7 +116,7 @@ p-class ElectionDriver {
     }
 
     transition getPeerUrl(peerId : Int, url : String) {
-        guard: step = "peers" & peerId = curPeer & curPeer != myId & curPeer < clusterN
+        guard: step = "peers" & peerId = curPeer & curPeer ~= myId & curPeer < clusterN
         transit:
             peer := url
             step := "sendRV"
@@ -180,7 +180,7 @@ p-class ElectionDriver {
         peerId : Int, term : Int, leaderId : Int, prevLogIndex : Int, prevLogTerm : Int,
         entryTerm : Int, entryValue : String, entriesLen : Int, leaderCommit : Int, peerUrlOut : String
     ) {
-        guard: step = "hbPeers" & peerId = curPeer & curPeer != myId & curPeer < clusterN
+        guard: step = "hbPeers" & peerId = curPeer & curPeer ~= myId & curPeer < clusterN
         transit:
             peer := peerUrlOut
             reqBody := encodeAppendEntries(

@@ -73,7 +73,7 @@ p-class RaftCore {
     }
 
     transition isLeader(flag : Boolean) {
-        guard: (flag & state = "Leader") | (~flag & state != "Leader")
+        guard: (flag & state = "Leader") | (~flag & state ~= "Leader")
     }
 
     transition hasQuorum(flag : Boolean) {
@@ -101,7 +101,7 @@ p-class RaftCore {
 
     transition getPeerUrl(peerId : Int, url : String) {
         guard:
-            peerId >= 0 & peerId < clusterSize & peerId != selfId & url = clusterUrls[peerId]
+            peerId >= 0 & peerId < clusterSize & peerId ~= selfId & url = clusterUrls[peerId]
     }
 
     transition recordVote(peerId : Int, term : Int, granted : Boolean) {
@@ -123,7 +123,7 @@ p-class RaftCore {
         guard:
             let (newLogLen : Int := length(log) + 1) {
                 | (state = "Leader" & ok & idx = newLogLen)
-                | (state != "Leader" & ~ok & idx = 0)
+                | (state ~= "Leader" & ~ok & idx = 0)
             }
         transit:
             log := if (state = "Leader") {
@@ -142,14 +142,14 @@ p-class RaftCore {
     transition clientGet(body : String, ok : Boolean) {
         guard:
             | (state = "Leader" & ok & body = stateMachine + "")
-            | (state != "Leader" & ~ok & body = "")
+            | (state ~= "Leader" & ~ok & body = "")
     }
 
     transition redirectBody(body : String, code : Int) {
         guard:
-            state != "Leader"
+            state ~= "Leader"
             & (
-                | (leaderUrl != "" & code = 303 & body = "LEADER " + leaderUrl)
+                | (leaderUrl ~= "" & code = 303 & body = "LEADER " + leaderUrl)
                 | (leaderUrl = "" & code = 503 & body = "NO_LEADER")
             )
     }
@@ -207,7 +207,7 @@ p-class RaftCore {
     ) {
         guard:
             & state = "Leader"
-            & peerId >= 0 & peerId < clusterSize & peerId != selfId
+            & peerId >= 0 & peerId < clusterSize & peerId ~= selfId
             & term = currentTerm
             & leaderId = selfId
             & peerUrlOut = clusterUrls[peerId]

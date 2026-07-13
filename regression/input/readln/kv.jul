@@ -27,7 +27,7 @@ p-class FrontEnd {
 
     transition readDB(key : String, val : String) {
         guard:
-            (state = "C") & (key = keyReq) & (keyReq != "exit")
+            (state = "C") & (key = keyReq) & (keyReq ~= "exit")
         transit:
             state := "D"
             valReq := "val:\n\t" + val // just to test string concatenation and escape characters

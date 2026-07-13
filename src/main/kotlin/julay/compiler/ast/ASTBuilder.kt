@@ -373,7 +373,6 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         val unaryOpMapper = {
             when {
                 ctx.NOT() != null -> "~"
-                ctx.BANG() != null -> "~"
                 else -> "N/A"
             }
         }
@@ -381,7 +380,6 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             when {
                 ctx.EQ() != null -> "="
                 ctx.NEQ() != null -> "#"
-                ctx.BANG_NEQ() != null -> "#"
                 ctx.TIMES() != null -> "*"
                 ctx.DIV() != null -> "/"
                 ctx.MOD() != null -> "%"
