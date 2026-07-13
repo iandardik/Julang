@@ -39,6 +39,8 @@ class Program {
         // create a SyncChannel for each action
         // ConstructorTS offers each constructor action once and spawns every matching p-class,
         // so multiple constructor declarations of the same action count as 1 toward sync size.
+        // CSP sync size is the full peer set (alphabet offers + one constructor offer when present).
+        // Pairwise 1:1 rendezvous is the role of p2p actions, not CSP.
         val allActions = componentInfo
             .flatMap { it.alphabet union it.constructors.keys }
             .toSet()

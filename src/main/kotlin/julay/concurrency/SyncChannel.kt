@@ -10,8 +10,16 @@ import kotlinx.coroutines.sync.withLock
 import java.util.*
 
 /**
- * V: The type of the value sent over the channel
- * C: The type of each constraint
+ * The sole mechanism for inter-process communication in Julay.
+ *
+ * All coordination between transition systems / procs must go through [SyncChannel]
+ * (CSP or p2p rendezvous on program actions). Do not introduce shared caches, mutable
+ * statics, or other shortcuts that let processes observe or affect each other outside
+ * of sync. Pairwise 1:1 rendezvous is expressed with p2p actions (sync size 2); CSP
+ * sync size is the full set of alphabet/constructor peers for that action.
+ *
+ * @param V The type of the value sent over the channel
+ * @param C The type of each constraint
  */
 class SyncChannel<V : Any, C : Any>(
     private val syncSize : Int,

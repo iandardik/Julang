@@ -1,0 +1,13 @@
+---
+description: Julay inter-process communication must use SyncChannel only
+globs: src/main/kotlin/julay/**/*.kt
+alwaysApply: false
+---
+
+# SyncChannel-only IPC
+
+All inter-process communication in Julay must go exclusively through `SyncChannel` (CSP or p2p action rendezvous). Do not add shared caches, mutable statics, or other cross-process shortcuts.
+
+- Pairwise 1:1 sync → p2p actions (sync size 2)
+- CSP sync size → full alphabet/constructor peer set for that action
+- Do not reintroduce type-factory interning/caching in `ListType` / `MapType` / `SetType` as an optimization that blurs process isolation assumptions
