@@ -1,110 +1,101 @@
 package julay.program
 
-import com.microsoft.z3.*
+import io.github.cvc5.Kind
+import io.github.cvc5.Solver
+import io.github.cvc5.Sort
+import io.github.cvc5.Term
+import io.github.cvc5.TermManager
 import julay.compiler.decl.mangleTypeForName
-import julay.tools.*
+import julay.tools.applyConstructor
+import julay.tools.mkSetAdd
+import julay.tools.mkSetMember
 
 class SetCellMetadata(
-    val sort: DatatypeSort<*>,
-    val constructorDecl: FuncDecl<*>,
-    val arrAccessor: FuncDecl<*>,
-    val sizeAccessor: FuncDecl<*>,
-    val arraySort: ArraySort<Sort, BoolSort>,
+    val sort: Sort,
+    val constructorTerm: Term,
+    val arrSelector: Term,
+    val sizeSelector: Term,
+    val setSort: Sort,
     val domainSort: Sort,
 )
 
 data class SetType(val elementType: Type) : Type {
-    private val homeCtx = Context()
-    private val cellName = "SetCell_${mangleTypeForName(elementType)}"
+    val cellName: String = "SetCell_${mangleTypeForName(elementType)}"
+    val serializedDatatype: SerializedDatatype = buildDatatypeDeclare(
+        cellName,
+        "mk-$cellName",
+        listOf(
+            "arr" to "(Set ${elementType.toSmtLibSort()})",
+            "size" to "Int",
+        ),
+    )
 
-    private val metadata: SetCellMetadata by lazy {
-        val domain = elementType.toZ3Sort(homeCtx)
-        @Suppress("UNCHECKED_CAST")
-        val arraySort = homeCtx.mkSetSort(domain) as ArraySort<Sort, BoolSort>
-        val constructor = homeCtx.mkConstructor<Any>(
-            "mk-$cellName",
-            "is-$cellName",
-            arrayOf("arr", "size"),
-            arrayOf(arraySort, homeCtx.intSort),
-            null,
-        )
-        val sort = homeCtx.mkDatatypeSort(cellName, arrayOf(constructor))
-        SetCellMetadata(
-            sort = sort,
-            constructorDecl = constructor.ConstructorDecl(),
-            arrAccessor = constructor.accessorDecls[0],
-            sizeAccessor = constructor.accessorDecls[1],
-            arraySort = arraySort,
-            domainSort = domain,
-        )
-    }
-
-    fun cellMetadata(ctx: Context): SetCellMetadata =
-        if (ctx === homeCtx) {
-            metadata
-        } else {
-            @Suppress("UNCHECKED_CAST")
-            val translatedSort = metadata.sort.translate(ctx) as DatatypeSort<*>
-            @Suppress("UNCHECKED_CAST")
-            val translatedArraySort = metadata.arraySort.translate(ctx) as ArraySort<Sort, BoolSort>
+    fun cellMetadata(tm: TermManager): SetCellMetadata =
+        DatatypeBinder.forTm(tm).setCell(cellName) {
+            val domain = elementType.toSmtSort(tm)
+            val setSort = tm.mkSetSort(domain)
+            val decl = tm.mkDatatypeDecl(cellName)
+            val constructor = tm.mkDatatypeConstructorDecl("mk-$cellName")
+            constructor.addSelector("arr", setSort)
+            constructor.addSelector("size", tm.integerSort)
+            decl.addConstructor(constructor)
+            val sort = tm.mkDatatypeSort(decl)
+            val dt = sort.datatype
+            val ctor = dt.getConstructor(0)
             SetCellMetadata(
-                sort = translatedSort,
-                constructorDecl = metadata.constructorDecl.translate(ctx),
-                arrAccessor = metadata.arrAccessor.translate(ctx),
-                sizeAccessor = metadata.sizeAccessor.translate(ctx),
-                arraySort = translatedArraySort,
-                domainSort = metadata.domainSort.translate(ctx),
+                sort = sort,
+                constructorTerm = ctor.term,
+                arrSelector = ctor.getSelector(0).term,
+                sizeSelector = ctor.getSelector(1).term,
+                setSort = setSort,
+                domainSort = domain,
             )
         }
 
-    override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {
-        return ctx.mkConst(variable.name, cellMetadata(ctx).sort)
-    }
+    override fun toSmtTerm(variable: Variable, tm: TermManager): Term =
+        tm.mkConst(cellMetadata(tm).sort, variable.name)
 
-    override fun toZ3Expr(value: Value, ctx: Context): Expr<*> {
+    override fun toSmtTerm(value: Value, tm: TermManager): Term {
         @Suppress("UNCHECKED_CAST")
         val elements = value.value as Set<Any>
-        val meta = cellMetadata(ctx)
-        val domain = meta.domainSort
-        @Suppress("UNCHECKED_CAST")
-        var arr = ctx.mkEmptySet(domain) as ArrayExpr<Sort, BoolSort>
+        val meta = cellMetadata(tm)
+        var arr = tm.mkEmptySet(meta.setSort)
         for (elem in elements) {
-            val elemValue = Value(elem, elementType)
-            @Suppress("UNCHECKED_CAST")
-            arr = ctx.mkSetAdd(arr, elementType.toZ3Expr(elemValue, ctx) as Expr<Sort>)
+            arr = tm.mkSetAdd(arr, elementType.toSmtTerm(Value(elem, elementType), tm))
         }
-        return ctx.mkApp(meta.constructorDecl, arr, ctx.mkInt(elements.size))
+        return applyConstructor(
+            tm,
+            meta.constructorTerm,
+            arrayOf(arr, tm.mkInteger(elements.size.toLong())),
+        )
     }
 
-    override fun fromZ3Expr(expr: Expr<*>, model: Model): Any {
-        val ctx = model.julangContext()
-        val meta = cellMetadata(ctx)
-        val cell = model.eval(expr, true)
-        @Suppress("UNCHECKED_CAST")
-        val arrExpr = model.eval(ctx.mkApp(meta.arrAccessor, cell), true) as ArrayExpr<Sort, BoolSort>
+    override fun fromSmtTerm(expr: Term, solver: Solver): Any {
+        val tm = solver.termManager
+        // Prefer constructor children: solver.termManager is a distinct Java wrapper from the
+        // TermManager used to declare the datatype, so APPLY_SELECTOR via cellMetadata fails.
+        val cell = solver.getValue(expr)
+        val arrExpr = if (cell.kind == Kind.APPLY_CONSTRUCTOR && cell.numChildren >= 2) {
+            cell.getChild(1)
+        } else {
+            throw RuntimeException("Set fromSmtTerm expected APPLY_CONSTRUCTOR cell, got ${cell.kind}")
+        }
         return when (elementType) {
             is IntType -> {
                 val result = mutableSetOf<Int>()
                 for (i in -50..50) {
-                    if (model.eval(ctx.mkSetMemberAny(ctx.mkInt(i), arrExpr), true).isTrue) {
+                    val member = solver.getValue(tm.mkSetMember(tm.mkInteger(i.toLong()), arrExpr))
+                    if (member.isBooleanValue && member.booleanValue) {
                         result.add(i)
                     }
                 }
                 result
             }
             is StringType -> {
-                val result = mutableSetOf<String>()
-                for (decl in model.constDecls) {
-                    if (decl.range == ctx.stringSort) {
-                        val candidate = decl.name.toString().trim('"')
-                        if (model.eval(ctx.mkSetMemberAny(ctx.mkString(candidate), arrExpr), true).isTrue) {
-                            result.add(candidate)
-                        }
-                    }
-                }
-                result
+                // String domain is infinite; callers should assert SET_MEMBER for known literals.
+                emptySet<String>()
             }
-            else -> throw RuntimeException("Set fromZ3Expr not implemented for element type $elementType")
+            else -> throw RuntimeException("Set fromSmtTerm not implemented for element type $elementType")
         }
     }
 

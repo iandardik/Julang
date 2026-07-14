@@ -1,11 +1,19 @@
 package julay.program
 
-import com.microsoft.z3.Context
-import com.microsoft.z3.Expr
-import com.microsoft.z3.Model
-import com.microsoft.z3.Status
+import io.github.cvc5.Kind
+import io.github.cvc5.Solver
+import io.github.cvc5.Term
+import io.github.cvc5.TermManager
+import julay.tools.SmtConstraint
+import julay.tools.applyConstructor
+import julay.tools.applySelector
+import julay.tools.findDeclaredConst
+import julay.tools.isSat
+import julay.tools.newModelSolver
+import julay.tools.withSolveConstraints
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 data class Point(val x: Int, val y: Int)
@@ -23,8 +31,8 @@ class ObjClassTypeTest {
                 Variable("x", intType),
                 Variable("y", intType),
             ),
-            { value, ctx -> pointToZ3(ctx, value.value as Point) },
-            { expr, model -> pointFromZ3(expr, model) },
+            { value, tm -> pointToSmt(tm, value.value as Point) },
+            { expr, solver -> pointFromSmt(expr, solver) },
         )
         lineType = ObjClassType(
             "Line",
@@ -32,108 +40,94 @@ class ObjClassTypeTest {
                 Variable("start", pointType),
                 Variable("end", pointType),
             ),
-            { value, ctx -> lineToZ3(ctx, value.value as Line) },
-            { expr, model -> lineFromZ3(expr, model) },
+            { value, tm -> lineToSmt(tm, value.value as Line) },
+            { expr, solver -> lineFromSmt(expr, solver) },
         )
     }
 
-    private fun emptyModel(ctx: Context): Model {
-        val solver = ctx.mkSolver()
-        assertEquals(Status.SATISFIABLE, solver.check())
-        return solver.model
+    private fun emptySolver(tm: TermManager): Solver {
+        val solver = newModelSolver(tm)
+        assertTrue(solver.isSat())
+        return solver
     }
 
-    private fun pointMk(ctx: Context, x: Expr<*>, y: Expr<*>): Expr<*> =
-        pointType.constructorDecl(ctx).apply(x, y) as Expr<*>
+    private fun pointMk(tm: TermManager, x: Term, y: Term): Term =
+        applyConstructor(tm, pointType.constructorTerm(tm), arrayOf(x, y))
 
-    private fun pointX(ctx: Context, record: Expr<*>): Expr<*> =
-        pointType.accessor(ctx, 0).apply(record) as Expr<*>
+    private fun pointX(tm: TermManager, record: Term): Term =
+        applySelector(tm, pointType.selector(tm, 0), record)
 
-    private fun pointY(ctx: Context, record: Expr<*>): Expr<*> =
-        pointType.accessor(ctx, 1).apply(record) as Expr<*>
+    private fun pointY(tm: TermManager, record: Term): Term =
+        applySelector(tm, pointType.selector(tm, 1), record)
 
-    private fun pointToZ3(ctx: Context, value: Point): Expr<*> =
-        pointMk(ctx, ctx.mkInt(value.x), ctx.mkInt(value.y))
+    private fun pointToSmt(tm: TermManager, value: Point): Term =
+        pointMk(tm, tm.mkInteger(value.x.toLong()), tm.mkInteger(value.y.toLong()))
 
-    private fun pointFromZ3(expr: Expr<*>, model: Model): Point {
-        val fieldExprs = if (expr.isApp && expr.funcDecl.name == pointType.homeConstructorDecl().name) {
-            expr.args
-        } else {
-            arrayOf(
-                pointType.homeAccessor(0).apply(expr) as Expr<*>,
-                pointType.homeAccessor(1).apply(expr) as Expr<*>,
-            )
-        }
+    private fun pointFromSmt(expr: Term, solver: Solver): Point {
+        val valued = solver.getValue(expr)
+        require(valued.kind == Kind.APPLY_CONSTRUCTOR && valued.numChildren >= 3)
         return Point(
-            intType.fromZ3Expr(fieldExprs[0], model) as Int,
-            intType.fromZ3Expr(fieldExprs[1], model) as Int,
+            intType.fromSmtTerm(valued.getChild(1), solver) as Int,
+            intType.fromSmtTerm(valued.getChild(2), solver) as Int,
         )
     }
 
-    private fun lineMk(ctx: Context, start: Expr<*>, end: Expr<*>): Expr<*> =
-        lineType.constructorDecl(ctx).apply(start, end) as Expr<*>
+    private fun lineMk(tm: TermManager, start: Term, end: Term): Term =
+        applyConstructor(tm, lineType.constructorTerm(tm), arrayOf(start, end))
 
-    private fun lineToZ3(ctx: Context, value: Line): Expr<*> =
-        lineMk(ctx, pointToZ3(ctx, value.start), pointToZ3(ctx, value.end))
+    private fun lineToSmt(tm: TermManager, value: Line): Term =
+        lineMk(tm, pointToSmt(tm, value.start), pointToSmt(tm, value.end))
 
-    private fun lineFromZ3(expr: Expr<*>, model: Model): Line {
-        val fieldExprs = if (expr.isApp && expr.funcDecl.name == lineType.homeConstructorDecl().name) {
-            expr.args
-        } else {
-            arrayOf(
-                lineType.homeAccessor(0).apply(expr) as Expr<*>,
-                lineType.homeAccessor(1).apply(expr) as Expr<*>,
-            )
-        }
+    private fun lineFromSmt(expr: Term, solver: Solver): Line {
+        val valued = solver.getValue(expr)
+        require(valued.kind == Kind.APPLY_CONSTRUCTOR && valued.numChildren >= 3)
         return Line(
-            pointFromZ3(fieldExprs[0], model),
-            pointFromZ3(fieldExprs[1], model),
+            pointFromSmt(valued.getChild(1), solver),
+            pointFromSmt(valued.getChild(2), solver),
         )
     }
 
     @Test
-    fun roundTripPointThroughZ3() {
-        val ctx = Context()
+    fun roundTripPointThroughSmt() {
+        val tm = TermManager()
         val original = Point(3, 7)
-        val z3Value = pointToZ3(ctx, original)
-        val restored = pointType.fromZ3Expr(z3Value, emptyModel(ctx)) as Point
+        val smtValue = pointToSmt(tm, original)
+        val restored = pointType.fromSmtTerm(smtValue, emptySolver(tm)) as Point
         assertEquals(original, restored)
     }
 
     @Test
-    fun roundTripNestedLineThroughZ3() {
-        val ctx = Context()
+    fun roundTripNestedLineThroughSmt() {
+        val tm = TermManager()
         val original = Line(Point(1, 2), Point(3, 4))
-        val z3Value = lineToZ3(ctx, original)
-        val restored = lineType.fromZ3Expr(z3Value, emptyModel(ctx)) as Line
+        val smtValue = lineToSmt(tm, original)
+        val restored = lineType.fromSmtTerm(smtValue, emptySolver(tm)) as Line
         assertEquals(original, restored)
     }
 
     @Test
-    fun translateBetweenContexts() {
-        val ctx1 = Context()
-        val ctx2 = Context()
-
-        val p1 = ctx1.mkConst("p", pointType.sort(ctx1))
-        val p2 = ctx2.mkConst("p", pointType.sort(ctx2))
-        val solver = ctx2.mkSolver()
-        solver.add(ctx1.mkEq(p1, pointToZ3(ctx1, Point(9, 10))).translate(ctx2))
-        solver.add(ctx2.mkEq(p2, pointToZ3(ctx2, Point(9, 10))))
-        assertEquals(Status.SATISFIABLE, solver.check())
-        val model = solver.model
-        val value = pointType.fromZ3Expr(model.eval(p2, true), model) as Point
-        assertEquals(Point(9, 10), value)
+    fun smtLibRoundTripBetweenSolvers() {
+        val tm = TermManager()
+        val p = pointType.toSmtTerm(Variable("p", pointType), tm)
+        val constraint = SmtConstraint.from(
+            tm.mkTerm(Kind.EQUAL, p, pointToSmt(tm, Point(9, 10))),
+        )
+        val value = withSolveConstraints(listOf(constraint)) { solver, declared ->
+            val restoredTerm = findDeclaredConst(declared, "p")
+            pointType.fromSmtTerm(restoredTerm, solver) as Point
+        }
+        assertEquals(Point(9, 10), assertNotNull(value))
     }
 
     @Test
-    fun accessorHelpersReadFields() {
-        val ctx = Context()
-        val p = ctx.mkConst("p", pointType.sort(ctx))
-        val solver = ctx.mkSolver()
-        solver.add(ctx.mkEq(p, pointToZ3(ctx, Point(4, 5))))
-        solver.add(ctx.mkEq(pointX(ctx, p) as com.microsoft.z3.IntExpr, ctx.mkInt(4)))
-        solver.add(ctx.mkEq(pointY(ctx, p) as com.microsoft.z3.IntExpr, ctx.mkInt(5)))
-        assertEquals(Status.SATISFIABLE, solver.check())
+    fun selectorHelpersReadFields() {
+        val tm = TermManager()
+        val p = pointType.toSmtTerm(Variable("p", pointType), tm)
+        val solver = newModelSolver(tm)
+        solver.assertFormula(tm.mkTerm(Kind.EQUAL, p, pointToSmt(tm, Point(4, 5))))
+        solver.assertFormula(tm.mkTerm(Kind.EQUAL, pointX(tm, p), tm.mkInteger(4)))
+        solver.assertFormula(tm.mkTerm(Kind.EQUAL, pointY(tm, p), tm.mkInteger(5)))
+        assertTrue(solver.isSat())
     }
 
     @Test

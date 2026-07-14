@@ -1,6 +1,6 @@
 package julay.program
 
-import com.microsoft.z3.BoolExpr
+import io.github.cvc5.Term
 import julay.tools.assert
 
 /**
@@ -10,19 +10,24 @@ import julay.tools.assert
  * (each TransitionSystem class decides how the transit should happen).
  */
 data class TSAction(
-    val symAction : SymbolicAction,
-    val guard : BoolExpr,
-    val syncRole : SyncRole = SyncRole.CSP,
+    val symAction: SymbolicAction,
+    val guard: Term,
+    val syncRole: SyncRole = SyncRole.CSP,
 ) {
-    enum class SyncRole {CSP, P2PService, P2PConsumer}
+    enum class SyncRole { CSP, P2PService, P2PConsumer }
 
     init {
-        // sanity checks
-        assert(!(syncRole == SyncRole.CSP) || (symAction.syncType == SymbolicAction.SyncType.CSP),
-            "Expected (syncRole == SyncRole.CSP) => (symAction.syncType == SymbolicAction.SyncType.CSP)")
-        assert(!(syncRole == SyncRole.P2PService) || (symAction.syncType == SymbolicAction.SyncType.P2P),
-            "Expected (syncRole == SyncRole.P2PService) => (symAction.syncType == SymbolicAction.SyncType.P2P)")
-        assert(!(syncRole == SyncRole.P2PConsumer) || (symAction.syncType == SymbolicAction.SyncType.P2P),
-            "Expected (syncRole == SyncRole.P2PConsumer) => (symAction.syncType == SymbolicAction.SyncType.P2P)")
+        assert(
+            !(syncRole == SyncRole.CSP) || (symAction.syncType == SymbolicAction.SyncType.CSP),
+            "Expected (syncRole == SyncRole.CSP) => (symAction.syncType == SymbolicAction.SyncType.CSP)",
+        )
+        assert(
+            !(syncRole == SyncRole.P2PService) || (symAction.syncType == SymbolicAction.SyncType.P2P),
+            "Expected (syncRole == SyncRole.P2PService) => (symAction.syncType == SymbolicAction.SyncType.P2P)",
+        )
+        assert(
+            !(syncRole == SyncRole.P2PConsumer) || (symAction.syncType == SymbolicAction.SyncType.P2P),
+            "Expected (syncRole == SyncRole.P2PConsumer) => (symAction.syncType == SymbolicAction.SyncType.P2P)",
+        )
     }
 }

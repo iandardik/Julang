@@ -1,6 +1,7 @@
 package julay.program.library
 
-import com.microsoft.z3.Context
+import io.github.cvc5.Kind
+import io.github.cvc5.TermManager
 import julay.compiler.decl.ActionDecl
 import julay.compiler.LibraryLoc
 import julay.program.ConcreteAction
@@ -59,15 +60,16 @@ class JulHttpClient(
         response = HttpClientResponse(jdkResponse.body(), jdkResponse.statusCode())
     }
 
-    override suspend fun actions(ctx: Context): Set<TSAction> {
+    override suspend fun actions(tm: TermManager): Set<TSAction> {
         return if (recResp) {
             recResp = false
             setOf(
                 TSAction(
                     receiveResponseAct,
-                    ctx.mkEq(
-                        respArg.toZ3Expr(ctx),
-                        httpClientResponseType.toZ3Expr(Value(response, httpClientResponseType), ctx),
+                    tm.mkTerm(
+                        Kind.EQUAL,
+                        respArg.toSmtTerm(tm),
+                        httpClientResponseType.toSmtTerm(Value(response, httpClientResponseType), tm),
                     ),
                 ),
             )

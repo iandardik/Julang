@@ -1,9 +1,10 @@
 package julay.program.library
 
-import com.microsoft.z3.Context
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpHandler
 import com.sun.net.httpserver.HttpServer
+import io.github.cvc5.Kind
+import io.github.cvc5.TermManager
 import julay.compiler.decl.ActionDecl
 import julay.compiler.LibraryLoc
 import julay.program.*
@@ -52,9 +53,9 @@ class JulHttpServer(
         server.createContext("/", this)
         server.start()
     }
-    override suspend fun actions(ctx: Context): Set<TSAction> {
+    override suspend fun actions(tm: TermManager): Set<TSAction> {
         return setOf(
-            TSAction(closeAct, ctx.mkTrue(), TSAction.SyncRole.P2PService),
+            TSAction(closeAct, tm.mkTrue(), TSAction.SyncRole.P2PService),
         )
     }
     override suspend fun transit(act: ConcreteAction) {}
@@ -74,15 +75,16 @@ class JulHttpServer(
             val body = exchange.requestBody.bufferedReader().use { it.readText() }
             request = HttpServerRequest(path, body)
         }
-        override suspend fun actions(ctx: Context): Set<TSAction> {
+        override suspend fun actions(tm: TermManager): Set<TSAction> {
             if (initHttpReq) {
                 initHttpReq = false
                 return setOf(
                     TSAction(
                         receiveRequestAct,
-                        ctx.mkEq(
-                            reqArg.toZ3Expr(ctx),
-                            httpServerRequestType.toZ3Expr(Value(request, httpServerRequestType), ctx),
+                        tm.mkTerm(
+                            Kind.EQUAL,
+                            reqArg.toSmtTerm(tm),
+                            httpServerRequestType.toSmtTerm(Value(request, httpServerRequestType), tm),
                         ),
                     ),
                 )
@@ -91,9 +93,10 @@ class JulHttpServer(
                 return setOf(
                     TSAction(
                         sendResponseAct,
-                        ctx.mkEq(
-                            reqArg.toZ3Expr(ctx),
-                            httpServerRequestType.toZ3Expr(Value(request, httpServerRequestType), ctx),
+                        tm.mkTerm(
+                            Kind.EQUAL,
+                            reqArg.toSmtTerm(tm),
+                            httpServerRequestType.toSmtTerm(Value(request, httpServerRequestType), tm),
                         ),
                     ),
                 )

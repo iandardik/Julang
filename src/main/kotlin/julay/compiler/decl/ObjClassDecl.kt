@@ -274,8 +274,8 @@ internal class ObjClassResolver(
         val objClassType = ObjClassType(
             concreteName,
             fields,
-            { _, _ -> throw RuntimeException("valueToZ3 not available on compiler-resolved ObjClassType $concreteName") },
-            { _, _ -> throw RuntimeException("valueFromZ3 not available on compiler-resolved ObjClassType $concreteName") },
+            { _, _ -> throw RuntimeException("valueToSmt not available on compiler-resolved ObjClassType $concreteName") },
+            { _, _ -> throw RuntimeException("valueFromSmt not available on compiler-resolved ObjClassType $concreteName") },
         )
         resolved[concreteName] = objClassType
         instantiationLocs[concreteName] = loc

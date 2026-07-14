@@ -58,7 +58,7 @@ abstract class ExprNode(children : List<ASTNode>) : ASTNode(children) {
             throw RuntimeException("Type not inferred for expression at ${programLocation()}")
     }
     internal abstract fun inferType(symbolEnv : Map<String, Type>) : Type
-    abstract fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean = false) : String
+    abstract fun toSmtGuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean = false) : String
     abstract fun toTransitString(symbolTypes : Map<String,Type>, argSymbols : Set<String>) : String
 }
 
@@ -275,30 +275,30 @@ class FunCallExprNode(
         }
     }
 
-    override fun toZ3GuardString(
+    override fun toSmtGuardString(
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
         resolvedBuiltin?.let { builtin ->
-            val argStrs = args.map { it.toZ3GuardString(symbolTypes, argSymbols, forceString) }
+            val argStrs = args.map { it.toSmtGuardString(symbolTypes, argSymbols, forceString) }
             if (builtin.name == "length" && args.isNotEmpty()) {
                 return when (val argType = args[0].getType()) {
-                    is ListType -> "ctx.mkSeqLengthAny(${argStrs[0]})"
+                    is ListType -> "tm.mkSeqLength(${argStrs[0]})"
                     is SetType -> {
-                        val meta = "${argType.toCodegenTypeVal()}.cellMetadata(ctx)"
-                        "setCellSizeExpr(ctx, ${argStrs[0]}, $meta.sizeAccessor)"
+                        val meta = "${argType.toCodegenTypeVal()}.cellMetadata(tm)"
+                        "setCellSizeExpr(tm, ${argStrs[0]}, $meta.sizeSelector)"
                     }
                     is MapType -> {
-                        val meta = "${argType.toCodegenTypeVal()}.cellMetadata(ctx)"
-                        "mapCellSizeExpr(ctx, ${argStrs[0]}, $meta.sizeAccessor)"
+                        val meta = "${argType.toCodegenTypeVal()}.cellMetadata(tm)"
+                        "mapCellSizeExpr(tm, ${argStrs[0]}, $meta.sizeSelector)"
                     }
-                    else -> builtin.z3Codegen(argStrs)
+                    else -> builtin.smtCodegen(argStrs)
                 }
             }
-            return builtin.z3Codegen(argStrs)
+            return builtin.smtCodegen(argStrs)
         }
-        return inlinedBody().toZ3GuardString(symbolTypes, argSymbols, forceString)
+        return inlinedBody().toSmtGuardString(symbolTypes, argSymbols, forceString)
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
@@ -628,10 +628,10 @@ class UnaryOpExprNode(
     override fun programLocation() = loc
     internal fun op(): String = op
     internal fun operand(): ExprNode = operand
-    override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
+    override fun toSmtGuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         julay.tools.assert(!forceString, "Cannot force a unary boolean operator to a string")
         return when (op) {
-            "~" -> "ctx.mkNot(${operand.toZ3GuardString(symbolTypes, argSymbols)})"
+            "~" -> "tm.mkTerm(Kind.NOT, ${operand.toSmtGuardString(symbolTypes, argSymbols)})"
             else -> throw RuntimeException("Invalid unary op: $op")
         }
     }
@@ -660,76 +660,78 @@ class BinaryOpExprNode(
     internal fun op(): String = op
     internal fun lhsOperand(): ExprNode = lhsOperand
     internal fun rhsOperand(): ExprNode = rhsOperand
-    override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
+    override fun toSmtGuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         val lhsType = lhsOperand.getType()
         val rhsType = rhsOperand.getType()
         val isStringConcat = op == "+" && (lhsType is StringType || rhsType is StringType)
         julay.tools.assert(!forceString || isStringConcat, "Cannot force a binary boolean operator to a string")
 
         val forceStringOperands = forceString || isStringConcat
-        val lhsGuardStr = lhsOperand.toZ3GuardString(symbolTypes, argSymbols, forceStringOperands)
-        val rhsGuardStr = rhsOperand.toZ3GuardString(symbolTypes, argSymbols, forceStringOperands)
+        val lhsGuardStr = lhsOperand.toSmtGuardString(symbolTypes, argSymbols, forceStringOperands)
+        val rhsGuardStr = rhsOperand.toSmtGuardString(symbolTypes, argSymbols, forceStringOperands)
 
-        fun numericZ3(mkOp: (String, String) -> String): String {
+        fun numericSmt(mkOp: (String, String) -> String): String {
             val promoted = promoteNumeric(lhsType, rhsType)
                 ?: throw RuntimeException("Cannot apply \"$op\" to types $lhsType and $rhsType")
             return if (promoted is RealType) {
-                mkOp(asZ3Real(lhsGuardStr, lhsType), asZ3Real(rhsGuardStr, rhsType))
+                mkOp(asSmtReal(lhsGuardStr, lhsType), asSmtReal(rhsGuardStr, rhsType))
             } else {
                 mkOp(lhsGuardStr, rhsGuardStr)
             }
         }
 
         return when (op) {
-            "*" -> numericZ3 { l, r -> "ctx.mkMul($l,$r)" }
-            "/" -> numericZ3 { l, r -> "ctx.mkDiv($l,$r)" }
+            "*" -> numericSmt { l, r -> "tm.mkTerm(Kind.MULT, $l, $r)" }
+            "/" -> numericSmt { l, r -> "tm.mkTerm(Kind.DIVISION, $l, $r)" }
             "%" -> {
                 if (lhsType !is IntType || rhsType !is IntType) {
                     throw RuntimeException("Cannot apply \"%\" to types $lhsType and $rhsType")
                 }
-                "ctx.mkMod($lhsGuardStr,$rhsGuardStr)"
+                "tm.mkTerm(Kind.INTS_MODULUS, $lhsGuardStr, $rhsGuardStr)"
             }
-            "<" -> numericZ3 { l, r -> "ctx.mkLt($l,$r)" }
-            "<=" -> numericZ3 { l, r -> "ctx.mkLe($l,$r)" }
-            ">" -> numericZ3 { l, r -> "ctx.mkGt($l,$r)" }
-            ">=" -> numericZ3 { l, r -> "ctx.mkGe($l,$r)" }
+            "<" -> numericSmt { l, r -> "tm.mkTerm(Kind.LT, $l, $r)" }
+            "<=" -> numericSmt { l, r -> "tm.mkTerm(Kind.LEQ, $l, $r)" }
+            ">" -> numericSmt { l, r -> "tm.mkTerm(Kind.GT, $l, $r)" }
+            ">=" -> numericSmt { l, r -> "tm.mkTerm(Kind.GEQ, $l, $r)" }
             "=" -> {
                 val promoted = promoteNumeric(lhsType, rhsType)
                 if (promoted is RealType) {
-                    "ctx.mkEq(${asZ3Real(lhsGuardStr, lhsType)},${asZ3Real(rhsGuardStr, rhsType)})"
+                    "tm.mkTerm(Kind.EQUAL, ${asSmtReal(lhsGuardStr, lhsType)}, ${asSmtReal(rhsGuardStr, rhsType)})"
                 } else {
-                    "ctx.mkEq($lhsGuardStr,$rhsGuardStr)"
+                    "tm.mkTerm(Kind.EQUAL, $lhsGuardStr, $rhsGuardStr)"
                 }
             }
             "#" -> {
                 val promoted = promoteNumeric(lhsType, rhsType)
                 if (promoted is RealType) {
-                    "ctx.mkNot(ctx.mkEq(${asZ3Real(lhsGuardStr, lhsType)},${asZ3Real(rhsGuardStr, rhsType)}))"
+                    "tm.mkTerm(Kind.NOT, tm.mkTerm(Kind.EQUAL, ${asSmtReal(lhsGuardStr, lhsType)}, ${asSmtReal(rhsGuardStr, rhsType)}))"
                 } else {
-                    "ctx.mkNot(ctx.mkEq($lhsGuardStr,$rhsGuardStr))"
+                    "tm.mkTerm(Kind.NOT, tm.mkTerm(Kind.EQUAL, $lhsGuardStr, $rhsGuardStr))"
                 }
             }
-            "&" -> "ctx.mkAnd($lhsGuardStr,$rhsGuardStr)"
-            "|" -> "ctx.mkOr($lhsGuardStr,$rhsGuardStr)"
-            "=>" -> "ctx.mkImplies($lhsGuardStr,$rhsGuardStr)"
+            "&" -> "tm.mkTerm(Kind.AND, $lhsGuardStr, $rhsGuardStr)"
+            "|" -> "tm.mkTerm(Kind.OR, $lhsGuardStr, $rhsGuardStr)"
+            "=>" -> "tm.mkTerm(Kind.IMPLIES, $lhsGuardStr, $rhsGuardStr)"
             "+" -> {
                 when {
-                    lhsType is IntType && rhsType is IntType -> "ctx.mkAdd($lhsGuardStr,$rhsGuardStr)"
+                    lhsType is IntType && rhsType is IntType ->
+                        "tm.mkTerm(Kind.ADD, $lhsGuardStr, $rhsGuardStr)"
                     promoteNumeric(lhsType, rhsType) is RealType ->
-                        "ctx.mkAdd(${asZ3Real(lhsGuardStr, lhsType)},${asZ3Real(rhsGuardStr, rhsType)})"
+                        "tm.mkTerm(Kind.ADD, ${asSmtReal(lhsGuardStr, lhsType)}, ${asSmtReal(rhsGuardStr, rhsType)})"
                     lhsType is ListType && rhsType is ListType ->
-                        "ctx.mkSeqConcatAny($lhsGuardStr, $rhsGuardStr)"
+                        "tm.mkSeqConcat($lhsGuardStr, $rhsGuardStr)"
                     lhsType is SetType && rhsType is SetType -> {
                         val setVal = lhsType.toCodegenTypeVal()
-                        val meta = "$setVal.cellMetadata(ctx)"
+                        val meta = "$setVal.cellMetadata(tm)"
                         "run { val __l = $lhsGuardStr; val __r = $rhsGuardStr; " +
-                            "val __la = setCellArrExpr(ctx, __l, $meta.arrAccessor); " +
-                            "val __ra = setCellArrExpr(ctx, __r, $meta.arrAccessor); " +
-                            "val __arr = ctx.mkSetUnionAny(__la, __ra); " +
-                            "val __sz = ctx.mkAdd(setCellSizeExpr(ctx, __l, $meta.sizeAccessor), setCellSizeExpr(ctx, __r, $meta.sizeAccessor)); " +
-                            "setMkCellExpr(ctx, $meta.constructorDecl, __arr, __sz) }"
+                            "val __la = setCellArrExpr(tm, __l, $meta.arrSelector); " +
+                            "val __ra = setCellArrExpr(tm, __r, $meta.arrSelector); " +
+                            "val __arr = tm.mkSetUnion(__la, __ra); " +
+                            "val __sz = tm.mkTerm(Kind.ADD, setCellSizeExpr(tm, __l, $meta.sizeSelector), setCellSizeExpr(tm, __r, $meta.sizeSelector)); " +
+                            "setMkCellExpr(tm, $meta.constructorTerm, __arr, __sz) }"
                     }
-                    lhsType is StringType || rhsType is StringType -> "ctx.mkConcat($lhsGuardStr,$rhsGuardStr)"
+                    lhsType is StringType || rhsType is StringType ->
+                        "tm.mkTerm(Kind.STRING_CONCAT, $lhsGuardStr, $rhsGuardStr)"
                     else -> throw RuntimeException("Cannot add types: $lhsType and $rhsType")
                 }
             }
@@ -737,23 +739,24 @@ class BinaryOpExprNode(
                 when {
                     lhsType is SetType && rhsType is SetType -> {
                         val setVal = lhsType.toCodegenTypeVal()
-                        val meta = "$setVal.cellMetadata(ctx)"
+                        val meta = "$setVal.cellMetadata(tm)"
                         "run { val __l = $lhsGuardStr; val __r = $rhsGuardStr; " +
-                            "val __la = setCellArrExpr(ctx, __l, $meta.arrAccessor); " +
-                            "val __ra = setCellArrExpr(ctx, __r, $meta.arrAccessor); " +
-                            "val __arr = ctx.mkSetDifferenceAny(__la, __ra); " +
-                            "val __sz = ctx.mkSub(setCellSizeExpr(ctx, __l, $meta.sizeAccessor), setCellSizeExpr(ctx, __r, $meta.sizeAccessor)); " +
-                            "setMkCellExpr(ctx, $meta.constructorDecl, __arr, __sz) }"
+                            "val __la = setCellArrExpr(tm, __l, $meta.arrSelector); " +
+                            "val __ra = setCellArrExpr(tm, __r, $meta.arrSelector); " +
+                            "val __arr = tm.mkSetDifference(__la, __ra); " +
+                            "val __sz = tm.mkTerm(Kind.SUB, setCellSizeExpr(tm, __l, $meta.sizeSelector), setCellSizeExpr(tm, __r, $meta.sizeSelector)); " +
+                            "setMkCellExpr(tm, $meta.constructorTerm, __arr, __sz) }"
                     }
-                    else -> numericZ3 { l, r -> "ctx.mkSub($l,$r)" }
+                    else -> numericSmt { l, r -> "tm.mkTerm(Kind.SUB, $l, $r)" }
                 }
             }
             "in" -> when (rhsType) {
-                is ListType -> "ctx.mkListMemberAny($lhsGuardStr, $rhsGuardStr)"
-                is SetType -> "ctx.mkSetMemberAny($lhsGuardStr, setCellArrExpr(ctx, $rhsGuardStr, ${rhsType.toCodegenTypeVal()}.cellMetadata(ctx).arrAccessor))"
+                is ListType -> "tm.mkListMember($lhsGuardStr, $rhsGuardStr)"
+                is SetType ->
+                    "tm.mkSetMember($lhsGuardStr, setCellArrExpr(tm, $rhsGuardStr, ${rhsType.toCodegenTypeVal()}.cellMetadata(tm).arrSelector))"
                 is MapType -> {
                     val mapVal = rhsType.toCodegenTypeVal()
-                    "ctx.mkSetMemberAny($lhsGuardStr, mapCellKeysExpr(ctx, $rhsGuardStr, $mapVal.cellMetadata(ctx).keysAccessor))"
+                    "tm.mkSetMember($lhsGuardStr, mapCellKeysExpr(tm, $rhsGuardStr, $mapVal.cellMetadata(tm).keysSelector))"
                 }
                 else -> throw RuntimeException("Cannot apply \"in\" to type $rhsType")
             }
@@ -882,11 +885,11 @@ class IfElseExprNode(
     internal fun condExpr(): ExprNode = condExpr
     internal fun thenExpr(): ExprNode = thenExpr
     internal fun elseExpr(): ExprNode = elseExpr
-    override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
-        val condGuardStr = condExpr.toZ3GuardString(symbolTypes,argSymbols)
-        val thenGuardStr = thenExpr.toZ3GuardString(symbolTypes,argSymbols)
-        val elseGuardStr = elseExpr.toZ3GuardString(symbolTypes,argSymbols)
-        return "ctx.mkITE<BoolSort>($condGuardStr,$thenGuardStr,$elseGuardStr) as BoolExpr"
+    override fun toSmtGuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
+        val condGuardStr = condExpr.toSmtGuardString(symbolTypes,argSymbols)
+        val thenGuardStr = thenExpr.toSmtGuardString(symbolTypes,argSymbols)
+        val elseGuardStr = elseExpr.toSmtGuardString(symbolTypes,argSymbols)
+        return "tm.mkTerm(Kind.ITE, $condGuardStr, $thenGuardStr, $elseGuardStr)"
     }
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
         val condTransitStr = condExpr.toTransitString(symbolTypes,argSymbols)
@@ -946,13 +949,13 @@ class LetExprNode(
         letTypeResolution = type
     }
 
-    override fun toZ3GuardString(
+    override fun toSmtGuardString(
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
         return substituteExpr(bodyExpr, name, letInitExpr)
-            .toZ3GuardString(symbolTypes, argSymbols, forceString)
+            .toSmtGuardString(symbolTypes, argSymbols, forceString)
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
@@ -997,13 +1000,13 @@ class WhenExprNode(
     internal fun subjectExpr(): ExprNode? = subjectExpr
     internal fun arms(): List<WhenArm> = arms
 
-    override fun toZ3GuardString(
+    override fun toSmtGuardString(
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
         julay.tools.assert(!forceString, "Cannot force a when expression to a string")
-        return buildNestedZ3ITE(symbolTypes, argSymbols)
+        return buildNestedSmtITE(symbolTypes, argSymbols)
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
@@ -1020,20 +1023,20 @@ class WhenExprNode(
         }
     }
 
-    private fun buildNestedZ3ITE(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+    private fun buildNestedSmtITE(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
         val elseArm = arms.last() as WhenArm.Else
-        var result = elseArm.expr.toZ3GuardString(symbolTypes, argSymbols)
+        var result = elseArm.expr.toSmtGuardString(symbolTypes, argSymbols)
         for (arm in arms.dropLast(1).reversed()) {
             val (condStr, branchStr) = when (arm) {
-                is WhenArm.Subject -> subjectMatchZ3String(arm.pattern, symbolTypes, argSymbols) to
-                    arm.expr.toZ3GuardString(symbolTypes, argSymbols)
+                is WhenArm.Subject -> subjectMatchSmtString(arm.pattern, symbolTypes, argSymbols) to
+                    arm.expr.toSmtGuardString(symbolTypes, argSymbols)
                 is WhenArm.Guard -> {
-                    arm.cond.toZ3GuardString(symbolTypes, argSymbols) to
-                        arm.expr.toZ3GuardString(symbolTypes, argSymbols)
+                    arm.cond.toSmtGuardString(symbolTypes, argSymbols) to
+                        arm.expr.toSmtGuardString(symbolTypes, argSymbols)
                 }
                 is WhenArm.Else -> throw RuntimeException("Unexpected else arm before final position")
             }
-            result = "ctx.mkITE<BoolSort>($condStr,$branchStr,$result) as BoolExpr"
+            result = "tm.mkTerm(Kind.ITE, $condStr, $branchStr, $result)"
         }
         return result
     }
@@ -1056,21 +1059,21 @@ class WhenExprNode(
         return result
     }
 
-    private fun subjectMatchZ3String(
+    private fun subjectMatchSmtString(
         pattern: WhenPattern,
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
     ): String {
         val subject = subjectExpr ?: throw RuntimeException("Subject when at $loc has no subject expression")
-        val lhsStr = subject.toZ3GuardString(symbolTypes, argSymbols)
+        val lhsStr = subject.toSmtGuardString(symbolTypes, argSymbols)
         val rhsStr = when (pattern) {
             is WhenPattern.Primitive ->
                 pattern.literal.toLiteralExprNode(subject.programLocation())
-                    .toZ3GuardString(symbolTypes, argSymbols)
+                    .toSmtGuardString(symbolTypes, argSymbols)
             is WhenPattern.Struct ->
-                pattern.literal.toZ3GuardString(symbolTypes, argSymbols)
+                pattern.literal.toSmtGuardString(symbolTypes, argSymbols)
         }
-        return "ctx.mkEq($lhsStr,$rhsStr)"
+        return "tm.mkTerm(Kind.EQUAL, $lhsStr, $rhsStr)"
     }
 
     private fun subjectMatchTransitString(
@@ -1143,13 +1146,13 @@ class ObjClassLiteralExprNode(
         objClassLiteralResolution = ObjClassLiteralResolution.Resolved(type)
     }
 
-    override fun toZ3GuardString(
+    override fun toSmtGuardString(
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
-        val fieldExprs = fieldEntries.map { it.second.toZ3GuardString(symbolTypes, argSymbols) }
-        return structType.literalToZ3Codegen(fieldExprs)
+        val fieldExprs = fieldEntries.map { it.second.toSmtGuardString(symbolTypes, argSymbols) }
+        return structType.literalToSmtCodegen(fieldExprs)
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
@@ -1180,25 +1183,25 @@ class ListLiteralExprNode(
 
     internal fun resolvedListTypeOrNull(): ListType? = listType
 
-    override fun toZ3GuardString(
+    override fun toSmtGuardString(
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
         if (forceString) {
-            return "ctx.mkString(${toTransitString(symbolTypes, argSymbols)}.toString())"
+            return "tm.mkKotlinString(${toTransitString(symbolTypes, argSymbols)}.toString())"
         }
         val ty = listType ?: throw RuntimeException("List literal type not resolved at $loc")
         if (elements.isEmpty()) {
-            return "ctx.mkEmptySeq(${ty.toCodegenTypeVal()}.sort(ctx))"
+            return "tm.mkEmptySequence(${ty.toCodegenTypeVal()}.sort(tm))"
         }
         val units = elements.map { elem ->
-            "ctx.mkUnit(${elem.toZ3GuardString(symbolTypes, argSymbols)})"
+            "tm.mkTerm(Kind.SEQ_UNIT, ${elem.toSmtGuardString(symbolTypes, argSymbols)})"
         }
         return if (units.size == 1) {
             units[0]
         } else {
-            "ctx.mkConcat(${units.joinToString(", ")})"
+            "tm.mkSeqConcat(listOf(${units.joinToString(", ")}))"
         }
     }
 
@@ -1238,19 +1241,19 @@ class EmptyBracketLiteralExprNode(
     internal fun resolvedListTypeOrNull(): ListType? = listType
     internal fun resolvedMapTypeOrNull(): MapType? = mapType
 
-    override fun toZ3GuardString(
+    override fun toSmtGuardString(
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
         if (forceString) {
-            return "ctx.mkString(${toTransitString(symbolTypes, argSymbols)}.toString())"
+            return "tm.mkKotlinString(${toTransitString(symbolTypes, argSymbols)}.toString())"
         }
         mapType?.let { ty ->
-            return MapLiteralExprNode(emptyList(), loc, ty).toZ3GuardString(symbolTypes, argSymbols, forceString)
+            return MapLiteralExprNode(emptyList(), loc, ty).toSmtGuardString(symbolTypes, argSymbols, forceString)
         }
         listType?.let { ty ->
-            return ListLiteralExprNode(emptyList(), loc, ty).toZ3GuardString(symbolTypes, argSymbols, forceString)
+            return ListLiteralExprNode(emptyList(), loc, ty).toSmtGuardString(symbolTypes, argSymbols, forceString)
         }
         throw RuntimeException("Empty bracket literal type not resolved at $loc")
     }
@@ -1284,33 +1287,33 @@ class MapLiteralExprNode(
 
     internal fun resolvedMapTypeOrNull(): MapType? = mapType
 
-    override fun toZ3GuardString(
+    override fun toSmtGuardString(
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
         if (forceString) {
-            return "ctx.mkString(${toTransitString(symbolTypes, argSymbols)}.toString())"
+            return "tm.mkKotlinString(${toTransitString(symbolTypes, argSymbols)}.toString())"
         }
         val ty = mapType ?: throw RuntimeException("Map literal type not resolved at $loc")
         val mapVal = ty.toCodegenTypeVal()
-        val meta = "$mapVal.cellMetadata(ctx)"
-        val domain = "${mapVal}.cellMetadata(ctx).domainSort"
+        val meta = "$mapVal.cellMetadata(tm)"
+        val defaultVal = mapDefaultSmtCodegen(ty.valueType)
         if (entries.isEmpty()) {
-            return "mapMkCellExpr(ctx, $meta.constructorDecl, ctx.mkConstArray($domain, ctx.mkInt(0)), ctx.mkEmptySet($domain), ctx.mkInt(0))"
+            return "mapMkCellExpr(tm, $meta.constructorTerm, tm.mkConstArray($meta.arraySort, $defaultVal), tm.mkEmptySet($meta.keySetSort), tm.mkInteger(0))"
         }
-        var arr = "ctx.mkConstArray($domain, ctx.mkInt(0))"
-        var keys = "ctx.mkEmptySet($domain)"
-        var size = "ctx.mkInt(0)"
+        var arr = "tm.mkConstArray($meta.arraySort, $defaultVal)"
+        var keys = "tm.mkEmptySet($meta.keySetSort)"
+        var size = "tm.mkInteger(0)"
         for ((k, v) in entries) {
-            val keyStr = k.toZ3GuardString(symbolTypes, argSymbols)
-            val valStr = v.toZ3GuardString(symbolTypes, argSymbols)
-            val wasMember = "ctx.mkSetMemberAny($keyStr, $keys)"
-            arr = "mapStoreExpr(ctx, $arr, $keyStr, $valStr)"
-            keys = "mapSetAddExpr(ctx, $keys, $keyStr)"
-            size = "ctx.mkITE($wasMember, $size, ctx.mkAdd($size, ctx.mkInt(1)))"
+            val keyStr = k.toSmtGuardString(symbolTypes, argSymbols)
+            val valStr = v.toSmtGuardString(symbolTypes, argSymbols)
+            val wasMember = "tm.mkSetMember($keyStr, $keys)"
+            arr = "mapStoreExpr(tm, $arr, $keyStr, $valStr)"
+            keys = "mapSetAddExpr(tm, $keys, $keyStr)"
+            size = "tm.mkTerm(Kind.ITE, $wasMember, $size, tm.mkTerm(Kind.ADD, $size, tm.mkInteger(1)))"
         }
-        return "mapMkCellExpr(ctx, $meta.constructorDecl, $arr, $keys, $size)"
+        return "mapMkCellExpr(tm, $meta.constructorTerm, $arr, $keys, $size)"
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
@@ -1346,27 +1349,26 @@ class SetLiteralExprNode(
 
     internal fun resolvedSetTypeOrNull(): SetType? = setType
 
-    override fun toZ3GuardString(
+    override fun toSmtGuardString(
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
         if (forceString) {
-            return "ctx.mkString(${toTransitString(symbolTypes, argSymbols)}.toString())"
+            return "tm.mkKotlinString(${toTransitString(symbolTypes, argSymbols)}.toString())"
         }
         val ty = setType ?: throw RuntimeException("Set literal type not resolved at $loc")
         val setVal = ty.toCodegenTypeVal()
-        val meta = "$setVal.cellMetadata(ctx)"
-        val domain = "$setVal.cellMetadata(ctx).domainSort"
+        val meta = "$setVal.cellMetadata(tm)"
         if (elements.isEmpty()) {
-            return "setMkCellExpr(ctx, $meta.constructorDecl, ctx.mkEmptySet($domain), ctx.mkInt(0))"
+            return "setMkCellExpr(tm, $meta.constructorTerm, tm.mkEmptySet($meta.setSort), tm.mkInteger(0))"
         }
-        var arr = "ctx.mkEmptySet($domain)"
+        var arr = "tm.mkEmptySet($meta.setSort)"
         for (elem in elements) {
-            val elemStr = elem.toZ3GuardString(symbolTypes, argSymbols)
-            arr = "ctx.mkSetAddAny($arr, $elemStr)"
+            val elemStr = elem.toSmtGuardString(symbolTypes, argSymbols)
+            arr = "tm.mkSetAdd($arr, $elemStr)"
         }
-        return "setMkCellExpr(ctx, $meta.constructorDecl, $arr, ctx.mkInt(${elements.size}))"
+        return "setMkCellExpr(tm, $meta.constructorTerm, $arr, tm.mkInteger(${elements.size}))"
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
@@ -1391,22 +1393,23 @@ class IndexExprNode(
 ) : ExprNode(listOf(base, index)) {
     override fun programLocation() = loc
 
-    override fun toZ3GuardString(
+    override fun toSmtGuardString(
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
-        val baseStr = base.toZ3GuardString(symbolTypes, argSymbols)
-        val indexStr = index.toZ3GuardString(symbolTypes, argSymbols)
+        val baseStr = base.toSmtGuardString(symbolTypes, argSymbols)
+        val indexStr = index.toSmtGuardString(symbolTypes, argSymbols)
         return when (val baseType = base.getType()) {
-            is ListType -> "ctx.mkSeqNthAny($baseStr, $indexStr)"
+            is ListType -> "tm.mkSeqNth($baseStr, $indexStr)"
             is MapType -> {
                 val mapVal = baseType.toCodegenTypeVal()
-                val meta = "$mapVal.cellMetadata(ctx)"
-                "run { val __cell = $baseStr; val __keys = mapCellKeysExpr(ctx, __cell, $meta.keysAccessor); " +
-                    "val __arr = mapCellArrExpr(ctx, __cell, $meta.arrAccessor); " +
-                    "ctx.mkITE(ctx.mkSetMemberAny($indexStr, __keys), mapSelectExpr(ctx, __arr, $indexStr), " +
-                    "${baseType.valueType.toCodegenTypeVal()}.toZ3Expr(Value(0, ${baseType.valueType.toCodegenTypeVal()}), ctx)) }"
+                val meta = "$mapVal.cellMetadata(tm)"
+                val defaultVal = mapDefaultSmtCodegen(baseType.valueType)
+                "run { val __cell = $baseStr; val __keys = mapCellKeysExpr(tm, __cell, $meta.keysSelector); " +
+                    "val __arr = mapCellArrExpr(tm, __cell, $meta.arrSelector); " +
+                    "tm.mkTerm(Kind.ITE, tm.mkSetMember($indexStr, __keys), mapSelectExpr(tm, __arr, $indexStr), " +
+                    "$defaultVal) }"
             }
             else -> throw RuntimeException("Cannot index type $baseType at $loc")
         }
@@ -1440,24 +1443,24 @@ class SliceExprNode(
 ) : ExprNode(listOf(base, start, end)) {
     override fun programLocation() = loc
 
-    override fun toZ3GuardString(
+    override fun toSmtGuardString(
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
         if (forceString) {
-            return "ctx.mkString(${toTransitString(symbolTypes, argSymbols)}.toString())"
+            return "tm.mkKotlinString(${toTransitString(symbolTypes, argSymbols)}.toString())"
         }
         val baseType = base.getType()
         if (baseType !is ListType) {
             throw RuntimeException("Cannot slice non-list type $baseType at $loc")
         }
-        val baseStr = base.toZ3GuardString(symbolTypes, argSymbols)
-        val startStr = start.toZ3GuardString(symbolTypes, argSymbols)
-        val endStr = end.toZ3GuardString(symbolTypes, argSymbols)
-        val empty = "ctx.mkEmptySeq(${baseType.toCodegenTypeVal()}.sort(ctx))"
-        val extract = "ctx.mkSeqExtractAny($baseStr, $startStr, ctx.mkSub($endStr, $startStr))"
-        return "ctx.mkITE(ctx.mkGt($endStr, $startStr), $extract, $empty)"
+        val baseStr = base.toSmtGuardString(symbolTypes, argSymbols)
+        val startStr = start.toSmtGuardString(symbolTypes, argSymbols)
+        val endStr = end.toSmtGuardString(symbolTypes, argSymbols)
+        val empty = "tm.mkEmptySequence(${baseType.toCodegenTypeVal()}.sort(tm))"
+        val extract = "tm.mkTerm(Kind.SEQ_EXTRACT, $baseStr, $startStr, tm.mkTerm(Kind.SUB, $endStr, $startStr))"
+        return "tm.mkTerm(Kind.ITE, tm.mkTerm(Kind.GT, $endStr, $startStr), $extract, $empty)"
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
@@ -1492,15 +1495,15 @@ class LiteralValueExprNode(
         setInferredType(TypePassType.Inferred(type))
     }
     override fun programLocation() = loc
-    override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
+    override fun toSmtGuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         if (forceString) {
-            return "ctx.mkString(\"$value\")"
+            return "tm.mkString(\"$value\")"
         }
         return when (type) {
-            is BoolType -> "ctx.mkBool($value)"
-            is IntType -> "ctx.mkInt($value)"
-            is RealType -> "ctx.mkReal(\"$value\")"
-            is StringType -> "ctx.mkString(\"$value\")"
+            is BoolType -> "tm.mkBoolean($value)"
+            is IntType -> "tm.mkInteger($value)"
+            is RealType -> "tm.mkReal(\"$value\")"
+            is StringType -> "tm.mkString(\"$value\")"
             else -> throw RuntimeException("Invalid type: $type")
         }
     }
@@ -1566,7 +1569,7 @@ class FieldAccessExprNode(
         )
     }
 
-    override fun toZ3GuardString(
+    override fun toSmtGuardString(
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
         forceString: Boolean,
@@ -1576,24 +1579,24 @@ class FieldAccessExprNode(
             if (baseSymbol in argSymbols) {
                 throw RuntimeException("Cannot convert symbolic ${resolution.leafType} to string")
             }
-            return "ctx.mkString((${toTransitString(symbolTypes, argSymbols)}).toString())"
+            return "tm.mkKotlinString((${toTransitString(symbolTypes, argSymbols)}).toString())"
         }
         val baseType = symbolTypes.getValue(baseSymbol) as ObjClassType
-        val baseZ3 = recordZ3Expr(baseSymbol, baseType, argSymbols)
-        val fieldZ3 = ObjClassType.fieldAccessZ3Codegen(baseType, baseZ3, fieldPath)
-        return castFieldZ3(fieldZ3, resolution.leafType, forceString)
+        val baseSmt = recordSmtExpr(baseSymbol, baseType, argSymbols)
+        val fieldSmt = ObjClassType.fieldAccessSmtCodegen(baseType, baseSmt, fieldPath)
+        return castFieldSmt(fieldSmt, resolution.leafType, forceString)
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
         return ObjClassType.fieldAccessTransitString(baseSymbol, fieldPath, symbolTypes, argSymbols)
     }
 
-    private fun recordZ3Expr(baseSymbol: String, baseType: ObjClassType, argSymbols: Set<String>): String {
+    private fun recordSmtExpr(baseSymbol: String, baseType: ObjClassType, argSymbols: Set<String>): String {
         val typeVal = objClassTypeValName(baseType.name)
         return if (baseSymbol in argSymbols) {
-            ObjClassType.z3ConstString(baseSymbol, typeVal)
+            ObjClassType.smtConstString(baseSymbol, typeVal)
         } else {
-            ObjClassType.kotlinObjClassToZ3String(baseType.name, baseSymbol)
+            ObjClassType.kotlinObjClassToSmtString(baseType.name, baseSymbol)
         }
     }
 
@@ -1620,18 +1623,18 @@ class FieldAccessOnExprNode(
 
     override fun programLocation() = loc
 
-    override fun toZ3GuardString(
+    override fun toSmtGuardString(
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
         if (forceString && (leafType is ListType || leafType is ObjClassType)) {
-            return "ctx.mkString((${toTransitString(symbolTypes, argSymbols)}).toString())"
+            return "tm.mkKotlinString((${toTransitString(symbolTypes, argSymbols)}).toString())"
         }
         val baseType = baseExpr.getType() as ObjClassType
-        val baseZ3 = baseExpr.toZ3GuardString(symbolTypes, argSymbols)
-        val fieldZ3 = ObjClassType.fieldAccessZ3Codegen(baseType, baseZ3, fieldPath)
-        return castFieldZ3(fieldZ3, leafType, forceString)
+        val baseSmt = baseExpr.toSmtGuardString(symbolTypes, argSymbols)
+        val fieldSmt = ObjClassType.fieldAccessSmtCodegen(baseType, baseSmt, fieldPath)
+        return castFieldSmt(fieldSmt, leafType, forceString)
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
@@ -1666,34 +1669,38 @@ private fun promoteNumeric(lhs: Type, rhs: Type): Type? = when {
     else -> null
 }
 
-private fun asZ3Real(guardStr: String, type: Type): String =
-    if (type is IntType) "ctx.mkInt2Real($guardStr)" else guardStr
+private fun asSmtReal(guardStr: String, type: Type): String =
+    if (type is IntType) "tm.mkTerm(Kind.TO_REAL, $guardStr)" else guardStr
 
 private fun asKotlinDouble(exprStr: String, type: Type): String =
     if (type is IntType) "($exprStr).toDouble()" else exprStr
 
-private fun castFieldZ3(fieldZ3: String, leafType: Type, forceString: Boolean): String {
+private fun castFieldSmt(fieldSmt: String, leafType: Type, forceString: Boolean): String {
     if (forceString) {
         return when (leafType) {
             is BoolType -> throw RuntimeException("Cannot convert a Bool to a string")
-            is IntType -> "ctx.intToString($fieldZ3 as IntExpr)"
+            is IntType -> "tm.mkTerm(Kind.STRING_FROM_INT, $fieldSmt)"
             is RealType -> throw RuntimeException("Cannot convert a symbolic Real to a string")
-            is StringType -> "$fieldZ3 as Expr<SeqSort<CharSort>>"
+            is StringType -> fieldSmt
             is ObjClassType, is ListType ->
                 throw RuntimeException("Cannot convert symbolic $leafType field to string")
             else -> throw RuntimeException("Invalid field type: $leafType")
         }
     }
-    if (leafType is ObjClassType) {
-        return fieldZ3
-    }
-    return when (leafType) {
-        is BoolType -> "$fieldZ3 as BoolExpr"
-        is IntType -> "$fieldZ3 as IntExpr"
-        is RealType -> "$fieldZ3 as RealExpr"
-        is StringType -> "$fieldZ3 as Expr<SeqSort<CharSort>>"
-        is ListType -> fieldZ3
-        else -> throw RuntimeException("Invalid field type: $leafType")
+    return fieldSmt
+}
+
+private fun mapDefaultSmtCodegen(valueType: Type): String {
+    val typeVal = valueType.toCodegenTypeVal()
+    return when (valueType) {
+        is IntType -> "tm.mkInteger(0)"
+        is BoolType -> "tm.mkFalse()"
+        is RealType -> "tm.mkReal(\"0\")"
+        is StringType -> "tm.mkString(\"\")"
+        is ListType -> "$typeVal.toSmtTerm(Value(emptyList<Any>(), $typeVal), tm)"
+        is SetType -> "$typeVal.toSmtTerm(Value(emptySet<Any>(), $typeVal), tm)"
+        is MapType -> "$typeVal.toSmtTerm(Value(emptyMap<Any, Any>(), $typeVal), tm)"
+        else -> "$typeVal.toSmtTerm(Value(0, $typeVal), tm)"
     }
 }
 
@@ -1702,37 +1709,37 @@ class SymbolValueExprNode(
     private val loc : ProgramLoc
 ) : ExprNode(listOf()) {
     override fun programLocation() = loc
-    override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
+    override fun toSmtGuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         val type = symbolTypes[symbol]
         if (forceString) {
             return when (type) {
                 is BoolType -> throw RuntimeException("Cannot convert a Bool to a string")
                 is IntType -> {
                     if (symbol in argSymbols) {
-                        "ctx.intToString(ctx.mkIntConst(\"${symbol.escapeKotlinStringLiteral()}\"))"
+                        "tm.mkTerm(Kind.STRING_FROM_INT, tm.mkConst(tm.integerSort, \"${symbol.escapeKotlinStringLiteral()}\"))"
                     } else {
-                        "ctx.mkString(${symbol.toKotlinIdent()}.toString())"
+                        "tm.mkKotlinString(${symbol.toKotlinIdent()}.toString())"
                     }
                 }
                 is RealType -> {
                     if (symbol in argSymbols) {
                         throw RuntimeException("Cannot convert a symbolic Real to a string")
                     } else {
-                        "ctx.mkString(${symbol.toKotlinIdent()}.toString())"
+                        "tm.mkKotlinString(${symbol.toKotlinIdent()}.toString())"
                     }
                 }
                 is StringType -> {
                     if (symbol in argSymbols) {
-                        "ctx.mkStringConst(\"${symbol.escapeKotlinStringLiteral()}\")"
+                        "tm.mkStringConst(\"${symbol.escapeKotlinStringLiteral()}\")"
                     } else {
-                        "ctx.mkString(${symbol.toKotlinIdent()})"
+                        "tm.mkKotlinString(${symbol.toKotlinIdent()})"
                     }
                 }
                 is ObjClassType, is ListType, is SetType, is MapType -> {
                     if (symbol in argSymbols) {
                         throw RuntimeException("Cannot convert symbolic $type to string")
                     } else {
-                        "ctx.mkString(${symbol.toKotlinIdent()}.toString())"
+                        "tm.mkKotlinString(${symbol.toKotlinIdent()}.toString())"
                     }
                 }
                 else -> throw RuntimeException("Invalid type: $type")
@@ -1742,49 +1749,49 @@ class SymbolValueExprNode(
         if (type is ObjClassType) {
             val typeVal = objClassTypeValName(type.name)
             return if (symbol in argSymbols) {
-                ObjClassType.z3ConstString(symbol, typeVal)
+                ObjClassType.smtConstString(symbol, typeVal)
             } else {
-                ObjClassType.kotlinObjClassToZ3String(type.name, symbol)
+                ObjClassType.kotlinObjClassToSmtString(type.name, symbol)
             }
         }
         if (type is ListType) {
             val typeVal = type.toCodegenTypeVal()
             return if (symbol in argSymbols) {
-                "ctx.mkConst(\"${symbol.escapeKotlinStringLiteral()}\", $typeVal.sort(ctx))"
+                "tm.mkConst($typeVal.sort(tm), \"${symbol.escapeKotlinStringLiteral()}\")"
             } else {
-                "$typeVal.toZ3Expr(Value(${symbol.toKotlinIdent()}, $typeVal), ctx)"
+                "$typeVal.toSmtTerm(Value(${symbol.toKotlinIdent()}, $typeVal), tm)"
             }
         }
         if (type is SetType) {
             val typeVal = type.toCodegenTypeVal()
             return if (symbol in argSymbols) {
-                "ctx.mkConst(\"${symbol.escapeKotlinStringLiteral()}\", $typeVal.cellMetadata(ctx).sort)"
+                "tm.mkConst($typeVal.cellMetadata(tm).sort, \"${symbol.escapeKotlinStringLiteral()}\")"
             } else {
-                "$typeVal.toZ3Expr(Value(${symbol.toKotlinIdent()}, $typeVal), ctx)"
+                "$typeVal.toSmtTerm(Value(${symbol.toKotlinIdent()}, $typeVal), tm)"
             }
         }
         if (type is MapType) {
             val typeVal = type.toCodegenTypeVal()
             return if (symbol in argSymbols) {
-                "ctx.mkConst(\"${symbol.escapeKotlinStringLiteral()}\", $typeVal.cellMetadata(ctx).sort)"
+                "tm.mkConst($typeVal.cellMetadata(tm).sort, \"${symbol.escapeKotlinStringLiteral()}\")"
             } else {
-                "$typeVal.toZ3Expr(Value(${symbol.toKotlinIdent()}, $typeVal), ctx)"
+                "$typeVal.toSmtTerm(Value(${symbol.toKotlinIdent()}, $typeVal), tm)"
             }
         }
         if (symbol in argSymbols) {
             return when (type) {
-                is BoolType -> "ctx.mkBoolConst(\"${symbol.escapeKotlinStringLiteral()}\")"
-                is IntType -> "ctx.mkIntConst(\"${symbol.escapeKotlinStringLiteral()}\")"
-                is RealType -> "ctx.mkRealConst(\"${symbol.escapeKotlinStringLiteral()}\")"
-                is StringType -> "ctx.mkStringConst(\"${symbol.escapeKotlinStringLiteral()}\")"
+                is BoolType -> "tm.mkConst(tm.booleanSort, \"${symbol.escapeKotlinStringLiteral()}\")"
+                is IntType -> "tm.mkConst(tm.integerSort, \"${symbol.escapeKotlinStringLiteral()}\")"
+                is RealType -> "tm.mkConst(tm.realSort, \"${symbol.escapeKotlinStringLiteral()}\")"
+                is StringType -> "tm.mkStringConst(\"${symbol.escapeKotlinStringLiteral()}\")"
                 else -> throw RuntimeException("Invalid type: $type")
             }
         }
         return when (type) {
-            is BoolType -> "ctx.mkBool(${symbol.toKotlinIdent()})"
-            is IntType -> "ctx.mkInt(${symbol.toKotlinIdent()})"
-            is RealType -> "ctx.mkReal(${symbol.toKotlinIdent()}.toString())"
-            is StringType -> "ctx.mkString(${symbol.toKotlinIdent()})"
+            is BoolType -> "tm.mkBoolean(${symbol.toKotlinIdent()})"
+            is IntType -> "tm.mkInteger(${symbol.toKotlinIdent()}.toLong())"
+            is RealType -> "tm.mkReal(${symbol.toKotlinIdent()}.toString())"
+            is StringType -> "tm.mkKotlinString(${symbol.toKotlinIdent()})"
             else -> throw RuntimeException("Invalid type: $type")
         }
     }

@@ -1,6 +1,6 @@
 package julay.program
 
-import com.microsoft.z3.Context
+import io.github.cvc5.TermManager
 
 /**
  * Transition systems do not worry about channels or any kind of communication--they simply deal with their own internal
@@ -13,10 +13,10 @@ interface TransitionSystem {
      * permissible to simply return the alphabet() here, though implementations may wish to dynamically decide which
      * actions to return.
      *
-     * Guards must be built with [ctx], the single Context owned by the calling Proc (one Context per Proc for Z3 thread
-     * safety; see https://stackoverflow.com/questions/25542200/multi-threaded-z3).
+     * Guards must be built with [tm], the single TermManager owned by the calling Proc (one TermManager per Proc for
+     * CVC5 thread safety). Cross-process formula exchange uses SMT-LIB via SyncChannel, not shared TermManagers.
      */
-    suspend fun actions(ctx: Context): Set<TSAction>
+    suspend fun actions(tm: TermManager): Set<TSAction>
 
     /**
      * The transition system transits to a (potentially new) state based on the given concrete action.

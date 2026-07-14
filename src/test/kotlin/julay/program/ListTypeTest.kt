@@ -1,47 +1,46 @@
 package julay.program
 
-import com.microsoft.z3.Context
-import com.microsoft.z3.Status
+import io.github.cvc5.Kind
+import io.github.cvc5.TermManager
+import julay.tools.isSat
+import julay.tools.newModelSolver
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class ListTypeTest {
     @Test
-    fun nestedListFromZ3ExprViaModel() {
-        val ctx = Context()
+    fun nestedListFromSmtTermViaModel() {
+        val tm = TermManager()
         val nested = listType(listType(intType))
         val value = Value(listOf(listOf(1, 2), listOf(3)), nested)
-        val z3 = nested.toZ3Expr(value, ctx)
-        val solver = ctx.mkSolver()
-        val v = nested.toZ3Expr(Variable("xs", nested), ctx)
-        solver.add(ctx.mkEq(v, z3))
-        assertEquals(Status.SATISFIABLE, solver.check())
-        val model = solver.model
-        val restored = nested.fromZ3Expr(model.eval(v, true), model)
+        val solver = newModelSolver(tm)
+        val v = nested.toSmtTerm(Variable("xs", nested), tm)
+        solver.assertFormula(tm.mkTerm(Kind.EQUAL, v, nested.toSmtTerm(value, tm)))
+        assertTrue(solver.isSat())
+        val restored = nested.fromSmtTerm(v, solver)
         assertEquals(listOf(listOf(1, 2), listOf(3)), restored)
     }
 
     @Test
     fun emptyStringListRoundTrip() {
-        val ctx = Context()
+        val tm = TermManager()
         val lt = listType(stringType)
-        val z3 = lt.toZ3Expr(Value(emptyList<String>(), lt), ctx)
-        val solver = ctx.mkSolver()
-        val v = ctx.mkConst("lst", lt.sort(ctx))
-        solver.add(ctx.mkEq(v, z3))
-        assertEquals(Status.SATISFIABLE, solver.check())
-        assertEquals(emptyList<String>(), lt.fromZ3Expr(solver.model.eval(v, true), solver.model))
+        val solver = newModelSolver(tm)
+        val v = lt.toSmtTerm(Variable("lst", lt), tm)
+        solver.assertFormula(tm.mkTerm(Kind.EQUAL, v, lt.toSmtTerm(Value(emptyList<String>(), lt), tm)))
+        assertTrue(solver.isSat())
+        assertEquals(emptyList<String>(), lt.fromSmtTerm(v, solver))
     }
 
     @Test
     fun emptyIntListRoundTrip() {
-        val ctx = Context()
+        val tm = TermManager()
         val lt = listType(intType)
-        val z3 = lt.toZ3Expr(Value(emptyList<Int>(), lt), ctx)
-        val solver = ctx.mkSolver()
-        val v = ctx.mkConst("lst", lt.sort(ctx))
-        solver.add(ctx.mkEq(v, z3))
-        assertEquals(Status.SATISFIABLE, solver.check())
-        assertEquals(emptyList<Int>(), lt.fromZ3Expr(solver.model.eval(v, true), solver.model))
+        val solver = newModelSolver(tm)
+        val v = lt.toSmtTerm(Variable("lst", lt), tm)
+        solver.assertFormula(tm.mkTerm(Kind.EQUAL, v, lt.toSmtTerm(Value(emptyList<Int>(), lt), tm)))
+        assertTrue(solver.isSat())
+        assertEquals(emptyList<Int>(), lt.fromSmtTerm(v, solver))
     }
 }

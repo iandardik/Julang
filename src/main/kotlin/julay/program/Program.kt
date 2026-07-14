@@ -1,23 +1,22 @@
 package julay.program
 
-import com.microsoft.z3.BoolExpr
-import com.microsoft.z3.Context
-import com.microsoft.z3.Status
+import julay.tools.SmtConstraint
+import julay.tools.solveToConcreteAction
 import julay.concurrency.SyncChannel
-import java.util.*
+import java.util.Optional
 
 /**
  * A program represents one or more processes that interact together on a single computer.
  */
 class Program {
-    val actionTable : Map<SymbolicAction,ProgramAction>
-    private val constructorProc : Proc
+    val actionTable: Map<SymbolicAction, ProgramAction>
+    private val constructorProc: Proc
 
     /**
      * The constructor sets up a channel for each TSAction so that each process that engages in the action can
      * communicate (synchronize on args) over the channel.
      */
-    constructor(componentInfo : Set<TransitionSystemStaticInfo>, cliArgs : List<String> = emptyList()) {
+    constructor(componentInfo: Set<TransitionSystemStaticInfo>, cliArgs: List<String> = emptyList()) {
         // assumpmtions/requirements:
         // - all action signatures that have the same name should have the same param
         // - no transition should be for initially (only constructors)
@@ -61,22 +60,13 @@ class Program {
         val channelTable = actionCounts.keys.associateWith { act ->
             val syncSize = actionCounts[act]!!
             if (act == initially) {
-                SyncChannel<ConcreteAction,BoolExpr>(syncSize) { _ ->
+                SyncChannel<ConcreteAction, SmtConstraint>(syncSize) { _ ->
                     Optional.of(initiallyConcrete)
                 }
             } else {
-                val ctx = Context() // one Context per channel
-                val solver = ctx.mkSolver()
-                SyncChannel<ConcreteAction,BoolExpr>(syncSize) { constraints ->
-                    // c.translate(ctx) is key because each constraint will come from a different thread, and hence are
-                    // created by different Contexts.
-                    solver.reset()
-                    constraints.forEach { c -> solver.add(c.translate(ctx)) }
-                    if (solver.check() == Status.SATISFIABLE) {
-                        Optional.of(ConcreteAction(act, ctx, solver.model))
-                    } else {
-                        Optional.empty()
-                    }
+                // Fresh TermManager per sync; disposed inside solveToConcreteAction after model extract.
+                SyncChannel<ConcreteAction, SmtConstraint>(syncSize) { constraints ->
+                    Optional.ofNullable(solveToConcreteAction(constraints, act))
                 }
             }
         }
@@ -86,7 +76,7 @@ class Program {
         constructorProc = Proc(
             ConstructorTransitionSystem(initially, componentInfo, this),
             ConstructorTransitionSystem.staticInfo(),
-            actionTable
+            actionTable,
         )
     }
 

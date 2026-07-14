@@ -1,42 +1,71 @@
 package julay.program
 
-import com.microsoft.z3.Status
-import com.microsoft.z3.BoolExpr
-import com.microsoft.z3.Context
+import io.github.cvc5.Kind
+import io.github.cvc5.TermManager
 import julay.concurrency.Select
-import julay.concurrency.SyncChannel
-import java.util.*
+import julay.tools.SmtConstraint
+import julay.tools.isSat
+import julay.tools.newModelSolver
+import java.util.Optional
 
 class Proc(
-    private val transitionSystem : TransitionSystem,
-    private val tsInfo : TransitionSystemStaticInfo,
-    private val actionTable : Map<SymbolicAction,ProgramAction>
+    private val transitionSystem: TransitionSystem,
+    private val tsInfo: TransitionSystemStaticInfo,
+    private val actionTable: Map<SymbolicAction, ProgramAction>,
 ) {
     suspend fun run() {
-        Context().use { ctx ->
-            runUsingCtx(ctx)
+        // One TermManager per Proc (like the former per-Proc Z3 Context).
+        val tm = TermManager()
+        DatatypeBinder.withBinder(tm) {
+            runUsingTm(tm)
         }
     }
 
-    suspend fun runUsingCtx(ctx : Context) {
+    suspend fun runUsingTm(tm: TermManager) {
         while (true) {
             var nextAct = Optional.empty<ConcreteAction>()
-            val enabledActions = transitionSystem.actions(ctx).filter { act ->
-                val solver = ctx.mkSolver()
-                solver.add(act.guard)
-                // deadlock is not enabled, but we let it pass on purpose to create a deadlock
-                act.symAction.name == "deadlock" || solver.check() == Status.SATISFIABLE
+            val enabledActions = transitionSystem.actions(tm).filter { act ->
+                val solver = newModelSolver(tm)
+                try {
+                    solver.assertFormula(act.guard)
+                    // deadlock is not enabled, but we let it pass on purpose to create a deadlock
+                    act.symAction.name == "deadlock" || solver.isSat()
+                } finally {
+                    try {
+                        solver.deletePointer()
+                    } catch (_: Exception) {
+                    }
+                }
             }
             val cases = enabledActions.map { act ->
                 val programAction = actionTable[act.symAction]!!
                 // the first anticonstraint ensures that processes from the same p-class never sync
                 // the second ensures that service transitions act like servers, and all others act like clients
-                val anticonstraint = when (act.syncRole) {
-                    TSAction.SyncRole.CSP -> ctx.mkEq(ctx.mkIntConst("classID"), ctx.mkInt(tsInfo.classID()))
-                    TSAction.SyncRole.P2PService -> ctx.mkEq(ctx.mkBoolConst("serviceTransition"), ctx.mkTrue())
-                    TSAction.SyncRole.P2PConsumer -> ctx.mkEq(ctx.mkBoolConst("serviceTransition"), ctx.mkFalse())
+                val anticonstraintTerm = when (act.syncRole) {
+                    TSAction.SyncRole.CSP ->
+                        tm.mkTerm(
+                            Kind.EQUAL,
+                            tm.mkConst(tm.integerSort, "classID"),
+                            tm.mkInteger(tsInfo.classID().toLong()),
+                        )
+                    TSAction.SyncRole.P2PService ->
+                        tm.mkTerm(
+                            Kind.EQUAL,
+                            tm.mkConst(tm.booleanSort, "serviceTransition"),
+                            tm.mkTrue(),
+                        )
+                    TSAction.SyncRole.P2PConsumer ->
+                        tm.mkTerm(
+                            Kind.EQUAL,
+                            tm.mkConst(tm.booleanSort, "serviceTransition"),
+                            tm.mkFalse(),
+                        )
                 }
-                Select.SyncCase(programAction.channel, act.guard, anticonstraint) { concAct : ConcreteAction ->
+                Select.SyncCase(
+                    programAction.channel,
+                    SmtConstraint.from(act.guard),
+                    SmtConstraint.from(anticonstraintTerm),
+                ) { concAct: ConcreteAction ->
                     nextAct = Optional.of(concAct)
                 }
             }

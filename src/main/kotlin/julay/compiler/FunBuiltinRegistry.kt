@@ -20,7 +20,7 @@ data class FunBuiltin(
     val returnType: Type,
     val checkArgs: (List<Type>) -> String?,
     val kotlinCodegen: (List<String>) -> String,
-    val z3Codegen: (List<String>) -> String,
+    val smtCodegen: (List<String>) -> String,
 )
 
 object FunBuiltinRegistry {
@@ -37,10 +37,9 @@ object FunBuiltinRegistry {
             }
         },
         kotlinCodegen = { args -> "${args[0]}.size" },
-        z3Codegen = { args ->
-            val argType = args[0] // placeholder - resolved at call site via type on FunCallExprNode
-            // Actual Z3 codegen is overridden in FunCallExprNode using argument type
-            "ctx.mkSeqLengthAny(${args[0]})"
+        smtCodegen = { args ->
+            // Actual SMT codegen is overridden in FunCallExprNode using argument type
+            "tm.mkSeqLength(${args[0]})"
         },
     )
 
@@ -56,7 +55,7 @@ object FunBuiltinRegistry {
             }
         },
         kotlinCodegen = { args -> "${args[0]}.toInt()" },
-        z3Codegen = { args -> "ctx.stringToInt(${args[0]} as Expr<SeqSort<CharSort>>)" },
+        smtCodegen = { args -> "tm.mkTerm(Kind.STRING_TO_INT, ${args[0]})" },
     )
 
     private val readFileBuiltin = FunBuiltin(
@@ -71,7 +70,7 @@ object FunBuiltinRegistry {
             }
         },
         kotlinCodegen = { args -> "java.io.File(${args[0]}).readText()" },
-        z3Codegen = { _ ->
+        smtCodegen = { _ ->
             throw RuntimeException("Function \"readFile\" cannot be used in guards")
         },
     )
@@ -89,7 +88,7 @@ object FunBuiltinRegistry {
             }
         },
         kotlinCodegen = { args -> "${args[0]}.split(${args[1]})" },
-        z3Codegen = { _ ->
+        smtCodegen = { _ ->
             throw RuntimeException("Function \"split\" cannot be used in guards")
         },
     )
@@ -106,7 +105,7 @@ object FunBuiltinRegistry {
             }
         },
         kotlinCodegen = { args -> "${args[0]}.trim()" },
-        z3Codegen = { _ ->
+        smtCodegen = { _ ->
             throw RuntimeException("Function \"trim\" cannot be used in guards")
         },
     )
@@ -125,7 +124,7 @@ object FunBuiltinRegistry {
         kotlinCodegen = { args ->
             "run { val _u = ${args[0]}; val _h = _u.substringAfter(\"://\", _u); _h.substringAfterLast(':').toInt() }"
         },
-        z3Codegen = { _ ->
+        smtCodegen = { _ ->
             throw RuntimeException("Function \"portFromUrl\" cannot be used in guards")
         },
     )
@@ -143,8 +142,8 @@ object FunBuiltinRegistry {
             }
         },
         kotlinCodegen = { args -> "${args[0]}.startsWith(${args[1]})" },
-        z3Codegen = { args ->
-            "ctx.mkPrefixOf(${args[1]} as Expr<SeqSort<CharSort>>, ${args[0]} as Expr<SeqSort<CharSort>>)"
+        smtCodegen = { args ->
+            "tm.mkTerm(Kind.STRING_PREFIX, ${args[1]}, ${args[0]})"
         },
     )
 

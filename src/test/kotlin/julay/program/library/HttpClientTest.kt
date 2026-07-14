@@ -1,13 +1,16 @@
 package julay.program.library
 
-import com.microsoft.z3.Context
-import com.microsoft.z3.Status
 import com.sun.net.httpserver.HttpServer
+import io.github.cvc5.Kind
+import io.github.cvc5.TermManager
 import julay.program.ConcreteAction
 import julay.program.Value
+import julay.tools.isSat
+import julay.tools.newModelSolver
 import kotlinx.coroutines.runBlocking
 import java.net.InetSocketAddress
 import kotlin.test.Test
+import kotlin.test.assertTrue
 
 class HttpClientTest {
     @Test
@@ -25,17 +28,21 @@ class HttpClientTest {
             val client = JulHttpClient(
                 HttpClientRequest("http://127.0.0.1:$port/", "POST", "ping"),
             )
-            val ctx = Context()
-            val solver = ctx.mkSolver()
+            val tm = TermManager()
+            val solver = newModelSolver(tm)
             val response = HttpClientResponse("echo:ping", 200)
-            solver.add(
-                ctx.mkEq(
-                    JulHttpClient.respArg.toZ3Expr(ctx),
-                    httpClientResponseType.toZ3Expr(Value(response, httpClientResponseType), ctx),
+            solver.assertFormula(
+                tm.mkTerm(
+                    Kind.EQUAL,
+                    JulHttpClient.respArg.toSmtTerm(tm),
+                    httpClientResponseType.toSmtTerm(Value(response, httpClientResponseType), tm),
                 ),
             )
-            assert(solver.check() == Status.SATISFIABLE)
-            val act = ConcreteAction(JulHttpClient.receiveResponseAct, ctx, solver.model)
+            assertTrue(solver.isSat())
+            val act = ConcreteAction(
+                JulHttpClient.receiveResponseAct,
+                mapOf(JulHttpClient.respArg to Value(response, httpClientResponseType)),
+            )
             client.transit(act)
         } finally {
             server.stop(0)

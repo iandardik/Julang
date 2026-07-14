@@ -1,53 +1,45 @@
 package julay.program
 
-import com.microsoft.z3.*
+import io.github.cvc5.Kind
+import io.github.cvc5.Solver
+import io.github.cvc5.Sort
+import io.github.cvc5.Term
+import io.github.cvc5.TermManager
+import julay.tools.mkSeqLength
+import julay.tools.mkSeqNth
 
 /**
- * Built-in parametric list type, backed by Z3 [SeqSort] and Kotlin [List] at runtime.
+ * Built-in parametric list type, backed by CVC5 sequences and Kotlin [List] at runtime.
  */
 data class ListType(val elementType: Type) : Type {
-    private val homeCtx = Context()
-    private val homeSort: SeqSort<*> by lazy {
-        @Suppress("UNCHECKED_CAST")
-        homeCtx.mkSeqSort(elementType.toZ3Sort(homeCtx) as Sort) as SeqSort<*>
-    }
-
-    fun sort(ctx: Context): SeqSort<*> {
-        @Suppress("UNCHECKED_CAST")
-        return if (ctx === homeCtx) {
-            homeSort
-        } else {
-            homeSort.translate(ctx) as SeqSort<*>
+    fun sort(tm: TermManager): Sort =
+        DatatypeBinder.forTm(tm).seqSort("Seq_${elementType}") {
+            tm.mkSequenceSort(elementType.toSmtSort(tm))
         }
-    }
 
-    override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {
-        return ctx.mkConst(variable.name, sort(ctx))
-    }
+    override fun toSmtTerm(variable: Variable, tm: TermManager): Term =
+        tm.mkConst(sort(tm), variable.name)
 
-    override fun toZ3Expr(value: Value, ctx: Context): Expr<*> {
+    override fun toSmtTerm(value: Value, tm: TermManager): Term {
         @Suppress("UNCHECKED_CAST")
         val elements = value.value as List<Any>
         if (elements.isEmpty()) {
-            return ctx.mkEmptySeq(sort(ctx))
+            // mkEmptySequence takes the *element* sort, not the sequence sort.
+            return tm.mkEmptySequence(elementType.toSmtSort(tm))
         }
         val units = elements.map { elem ->
-            val elemValue = Value(elem, elementType)
-            @Suppress("UNCHECKED_CAST")
-            ctx.mkUnit(elementType.toZ3Expr(elemValue, ctx) as Expr<Sort>)
+            tm.mkTerm(Kind.SEQ_UNIT, elementType.toSmtTerm(Value(elem, elementType), tm))
         }
-        @Suppress("UNCHECKED_CAST")
-        return ctx.mkConcat(*units.toTypedArray()) as Expr<*>
+        return units.reduce { a, b -> tm.mkTerm(Kind.SEQ_CONCAT, a, b) }
     }
 
-    override fun fromZ3Expr(expr: Expr<*>, model: Model): Any {
-        val ctx = model.julangContext()
-        @Suppress("UNCHECKED_CAST")
-        val seq = model.eval(expr, true) as Expr<SeqSort<Sort>>
-        val len = intType.fromZ3Expr(model.eval(ctx.mkLength(seq), true), model) as Int
+    override fun fromSmtTerm(expr: Term, solver: Solver): Any {
+        val tm = solver.termManager
+        val seq = solver.getValue(expr)
+        val len = intType.fromSmtTerm(tm.mkSeqLength(seq), solver) as Int
         return (0 until len).map { i ->
-            val elemExpr = model.eval(ctx.mkNth(seq, ctx.mkInt(i)), true)
-            elementType.fromZ3Expr(elemExpr, model)
+            val elemExpr = solver.getValue(tm.mkSeqNth(seq, tm.mkInteger(i.toLong())))
+            elementType.fromSmtTerm(elemExpr, solver)
         }
     }
 
@@ -61,15 +53,15 @@ data class ListType(val elementType: Type) : Type {
 
 fun listType(element: Type): ListType = ListType(element)
 
-fun Type.toZ3Sort(ctx: Context): Sort = when (this) {
-    is BoolType -> ctx.boolSort
-    is IntType -> ctx.intSort
-    is RealType -> ctx.realSort
-    is StringType -> ctx.stringSort
-    is ObjClassType -> sort(ctx)
-    is ListType -> sort(ctx)
-    is SetType -> cellMetadata(ctx).sort
-    is MapType -> cellMetadata(ctx).sort
-    is TypeVar -> throw RuntimeException("TypeVar \"$name\" must not reach Z3 sort construction")
-    else -> throw RuntimeException("Cannot build Z3 sort for type $this")
+fun Type.toSmtSort(tm: TermManager): Sort = when (this) {
+    is BoolType -> tm.booleanSort
+    is IntType -> tm.integerSort
+    is RealType -> tm.realSort
+    is StringType -> tm.stringSort
+    is ObjClassType -> sort(tm)
+    is ListType -> sort(tm)
+    is SetType -> cellMetadata(tm).sort
+    is MapType -> cellMetadata(tm).sort
+    is TypeVar -> throw RuntimeException("TypeVar \"$name\" must not reach SMT sort construction")
+    else -> throw RuntimeException("Cannot build SMT sort for type $this")
 }

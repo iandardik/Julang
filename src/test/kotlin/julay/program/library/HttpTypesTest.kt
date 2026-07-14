@@ -1,58 +1,59 @@
 package julay.program.library
 
-import com.microsoft.z3.Context
-import com.microsoft.z3.Status
+import io.github.cvc5.TermManager
+import julay.tools.isSat
+import julay.tools.newModelSolver
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class HttpTypesTest {
-    private fun emptyModel(ctx: Context) = run {
-        val solver = ctx.mkSolver()
-        assertEquals(Status.SATISFIABLE, solver.check())
-        solver.model
+    private fun emptySolver(tm: TermManager) = run {
+        val solver = newModelSolver(tm)
+        assertTrue(solver.isSat())
+        solver
     }
 
     @Test
     fun roundTripHttpServerRequest() {
-        val ctx = Context()
+        val tm = TermManager()
         val original = HttpServerRequest("x/y/z", "hello")
-        val restored = httpServerRequestType.fromZ3Expr(
-            httpServerRequestToZ3(ctx, original),
-            emptyModel(ctx),
+        val restored = httpServerRequestType.fromSmtTerm(
+            httpServerRequestToSmt(tm, original),
+            emptySolver(tm),
         ) as HttpServerRequest
         assertEquals(original, restored)
     }
 
     @Test
     fun roundTripHttpServerResponse() {
-        val ctx = Context()
+        val tm = TermManager()
         val original = HttpServerResponse("ok", 200)
-        val restored = httpServerResponseType.fromZ3Expr(
-            httpServerResponseToZ3(ctx, original),
-            emptyModel(ctx),
+        val restored = httpServerResponseType.fromSmtTerm(
+            httpServerResponseToSmt(tm, original),
+            emptySolver(tm),
         ) as HttpServerResponse
         assertEquals(original, restored)
     }
 
     @Test
     fun roundTripHttpClientRequest() {
-        val ctx = Context()
+        val tm = TermManager()
         val original = HttpClientRequest("http://localhost:8000", "POST", "body")
-        val restored = httpClientRequestType.fromZ3Expr(
-            httpClientRequestToZ3(ctx, original),
-            emptyModel(ctx),
+        val restored = httpClientRequestType.fromSmtTerm(
+            httpClientRequestToSmt(tm, original),
+            emptySolver(tm),
         ) as HttpClientRequest
         assertEquals(original, restored)
     }
 
     @Test
     fun roundTripHttpClientResponse() {
-        val ctx = Context()
+        val tm = TermManager()
         val original = HttpClientResponse("resp", 201)
-        val restored = httpClientResponseType.fromZ3Expr(
-            httpClientResponseToZ3(ctx, original),
-            emptyModel(ctx),
+        val restored = httpClientResponseType.fromSmtTerm(
+            httpClientResponseToSmt(tm, original),
+            emptySolver(tm),
         ) as HttpClientResponse
         assertEquals(original, restored)
     }

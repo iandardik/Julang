@@ -43,18 +43,23 @@ fun codegenPass(
         "\n$runProgram".prependIndent() +
         "\n}"
 
-    val imports = "import com.microsoft.z3.*\n" +
+    // Avoid `import io.github.cvc5.*` — cvc5.Pair clashes with kotlin.Pair in generated mapOf(Pair(...)).
+    val imports = "import io.github.cvc5.Kind\n" +
+        "import io.github.cvc5.Solver\n" +
+        "import io.github.cvc5.Term\n" +
+        "import io.github.cvc5.TermManager\n" +
         "import julay.program.*\n" +
         "import julay.program.library.*\n" +
         "import julay.tools.mkStringConst\n" +
-        "import julay.tools.mkSeqLengthAny\n" +
-        "import julay.tools.mkSeqNthAny\n" +
-        "import julay.tools.mkSeqConcatAny\n" +
-        "import julay.tools.mkListMemberAny\n" +
-        "import julay.tools.mkSetMemberAny\n" +
-        "import julay.tools.mkSetUnionAny\n" +
-        "import julay.tools.mkSetDifferenceAny\n" +
-        "import julay.tools.mkSetAddAny\n" +
+        "import julay.tools.mkKotlinString\n" +
+        "import julay.tools.mkSeqLength\n" +
+        "import julay.tools.mkSeqNth\n" +
+        "import julay.tools.mkSeqConcat\n" +
+        "import julay.tools.mkListMember\n" +
+        "import julay.tools.mkSetMember\n" +
+        "import julay.tools.mkSetUnion\n" +
+        "import julay.tools.mkSetDifference\n" +
+        "import julay.tools.mkSetAdd\n" +
         "import julay.tools.setCellArrExpr\n" +
         "import julay.tools.setCellSizeExpr\n" +
         "import julay.tools.setMkCellExpr\n" +
@@ -64,7 +69,9 @@ fun codegenPass(
         "import julay.tools.mapSelectExpr\n" +
         "import julay.tools.mapStoreExpr\n" +
         "import julay.tools.mapSetAddExpr\n" +
-        "import julay.tools.mapMkCellExpr\n"
+        "import julay.tools.mapMkCellExpr\n" +
+        "import julay.tools.applyConstructor\n" +
+        "import julay.tools.applySelector\n"
     val dataClassCode = objClassDecls.joinToString("\n\n") { it.kotlinDataClassString() }
     val dataClassSection = if (dataClassCode.isEmpty()) "" else "$dataClassCode\n\n"
     val conversionHelpers = objClassDecls.joinToString("\n\n") { it.kotlinConversionHelpersString() }
@@ -106,14 +113,14 @@ private fun ObjClassDecl.kotlinTypeValWithConvertersString(): String {
         "Variable(\"${it.name}\", ${it.type.toCodegenTypeVal()})"
     }
     val typeVal = objClassTypeValName(name)
-    val toZ3Fun = objClassToZ3FunName(name)
-    val fromZ3Fun = objClassFromZ3FunName(name)
+    val toSmtFun = objClassToSmtFunName(name)
+    val fromSmtFun = objClassFromSmtFunName(name)
     return """
         |val $typeVal = ObjClassType(
         |    "$name",
         |    listOf($fieldsStr),
-        |    { value, ctx -> $toZ3Fun(ctx, value.value as $name) },
-        |    { expr, model -> $fromZ3Fun(expr, model) },
+        |    { value, tm -> $toSmtFun(tm, value.value as $name) },
+        |    { expr, solver -> $fromSmtFun(expr, solver) },
         |)
     """.trimMargin()
 }
@@ -121,82 +128,64 @@ private fun ObjClassDecl.kotlinTypeValWithConvertersString(): String {
 private fun ObjClassDecl.kotlinConversionHelpersString(): String {
     val typeVal = objClassTypeValName(name)
     val mkFun = objClassMkFunName(name)
-    val toZ3Fun = objClassToZ3FunName(name)
-    val fromZ3Fun = objClassFromZ3FunName(name)
+    val toSmtFun = objClassToSmtFunName(name)
+    val fromSmtFun = objClassFromSmtFunName(name)
     val mkParams = fields.joinToString(", ") { field ->
-        "${field.name}: Expr<*>"
+        "${field.name}: Term"
     }
     val mkArgs = fields.joinToString(", ") { it.name }
     val accessorFuns = fields.mapIndexed { index, field ->
         val accFun = objClassAccessorFunName(name, field.name)
-        val returnType = field.type.toZ3ExprTypeString()
         """
-            |fun $accFun(ctx: Context, record: Expr<*>): $returnType =
-            |    $typeVal.accessor(ctx, $index).apply(record) as $returnType
+            |fun $accFun(tm: TermManager, record: Term): Term =
+            |    applySelector(tm, $typeVal.selector(tm, $index), record)
         """.trimMargin()
     }.joinToString("\n\n")
-    val toZ3Args = fields.joinToString(", ") { field ->
-        fieldToZ3ExprString("value.${field.name}", field.type)
+    val toSmtArgs = fields.joinToString(", ") { field ->
+        fieldToSmtExprString("value.${field.name}", field.type)
     }
-    val fromZ3FieldExprs = fields.mapIndexed { index, _ ->
-        "$typeVal.homeAccessor($index).apply(expr) as Expr<*>"
-    }.joinToString(",\n")
-    val fromZ3Args = fields.mapIndexed { index, field ->
-        fieldFromZ3ExprString("fieldExprs[$index]", field.type)
+    val fromSmtArgs = fields.mapIndexed { index, field ->
+        // APPLY_CONSTRUCTOR children: [ctor, field0, field1, ...] — avoid re-declaring
+        // datatypes on the solver TM via selectors after SMT-LIB parse.
+        fieldFromSmtExprString("valued.getChild(${index + 1})", field.type)
     }.joinToString(",\n")
     return """
-        |fun $mkFun(ctx: Context, $mkParams): Expr<*> =
-        |    $typeVal.constructorDecl(ctx).apply($mkArgs) as Expr<*>
+        |fun $mkFun(tm: TermManager, $mkParams): Term =
+        |    applyConstructor(tm, $typeVal.constructorTerm(tm), arrayOf($mkArgs))
         |
         |$accessorFuns
         |
-        |fun $toZ3Fun(ctx: Context, value: $name): Expr<*> =
-        |    $mkFun(ctx, $toZ3Args)
+        |fun $toSmtFun(tm: TermManager, value: $name): Term =
+        |    $mkFun(tm, $toSmtArgs)
         |
-        |fun $fromZ3Fun(expr: Expr<*>, model: Model): $name {
-        |    val fieldExprs = if (expr.isApp && expr.funcDecl.name == $typeVal.homeConstructorDecl().name) {
-        |        expr.args
-        |    } else {
-        |        arrayOf(
-        |${fromZ3FieldExprs.prependIndent("            ")}
-        |        )
-        |    }
+        |fun $fromSmtFun(expr: Term, solver: Solver): $name {
+        |    val valued = solver.getValue(expr)
         |    return $name(
-        |${fromZ3Args.prependIndent("        ")}
+        |${fromSmtArgs.prependIndent("        ")}
         |    )
         |}
     """.trimMargin()
 }
 
-private fun fieldToZ3ExprString(valueExpr: String, type: Type): String = when (type) {
-    is BoolType -> "ctx.mkBool($valueExpr)"
-    is IntType -> "ctx.mkInt($valueExpr)"
-    is RealType -> "ctx.mkReal($valueExpr.toString())"
-    is StringType -> "ctx.mkString($valueExpr)"
-    is ObjClassType -> "${objClassToZ3FunName(type.name)}(ctx, $valueExpr)"
-    is ListType -> "${type.toCodegenTypeVal()}.toZ3Expr(Value($valueExpr, ${type.toCodegenTypeVal()}), ctx)"
-    else -> throw RuntimeException("Invalid field type for Z3 conversion: $type")
+private fun fieldToSmtExprString(valueExpr: String, type: Type): String = when (type) {
+    is BoolType -> "tm.mkBoolean($valueExpr)"
+    is IntType -> "tm.mkInteger($valueExpr.toLong())"
+    is RealType -> "tm.mkReal($valueExpr.toString())"
+    is StringType -> "tm.mkKotlinString($valueExpr)"
+    is ObjClassType -> "${objClassToSmtFunName(type.name)}(tm, $valueExpr)"
+    is ListType -> "${type.toCodegenTypeVal()}.toSmtTerm(Value($valueExpr, ${type.toCodegenTypeVal()}), tm)"
+    else -> throw RuntimeException("Invalid field type for SMT conversion: $type")
 }
 
-private fun fieldFromZ3ExprString(exprStr: String, type: Type): String = when (type) {
-    is BoolType -> "boolType.fromZ3Expr($exprStr, model) as Boolean"
-    is IntType -> "intType.fromZ3Expr($exprStr, model) as Int"
-    is RealType -> "realType.fromZ3Expr($exprStr, model) as Double"
-    is StringType -> "stringType.fromZ3Expr($exprStr, model) as String"
-    is ObjClassType -> "${objClassFromZ3FunName(type.name)}($exprStr, model)"
+private fun fieldFromSmtExprString(exprStr: String, type: Type): String = when (type) {
+    is BoolType -> "boolType.fromSmtTerm($exprStr, solver) as Boolean"
+    is IntType -> "intType.fromSmtTerm($exprStr, solver) as Int"
+    is RealType -> "realType.fromSmtTerm($exprStr, solver) as Double"
+    is StringType -> "stringType.fromSmtTerm($exprStr, solver) as String"
+    is ObjClassType -> "${objClassFromSmtFunName(type.name)}($exprStr, solver)"
     is ListType ->
-        "@Suppress(\"UNCHECKED_CAST\") (${type.toCodegenTypeVal()}.fromZ3Expr($exprStr, model) as ${type.toKotlinTypeString()})"
-    else -> throw RuntimeException("Invalid field type for Z3 conversion: $type")
-}
-
-private fun Type.toZ3ExprTypeString(): String = when (this) {
-    is BoolType -> "BoolExpr"
-    is IntType -> "IntExpr"
-    is RealType -> "RealExpr"
-    is StringType -> "Expr<SeqSort<CharSort>>"
-    is ObjClassType -> "Expr<*>"
-    is ListType -> "Expr<*>"
-    else -> throw RuntimeException("Invalid field type for Z3 expr: $this")
+        "@Suppress(\"UNCHECKED_CAST\") (${type.toCodegenTypeVal()}.fromSmtTerm($exprStr, solver) as ${type.toKotlinTypeString()})"
+    else -> throw RuntimeException("Invalid field type for SMT conversion: $type")
 }
 
 private fun ProcClassDecl.usesEffects(): Boolean =
@@ -245,7 +234,7 @@ private fun ProcClassDecl.kotlinClassString(objClassDecls: List<ObjClassDecl>): 
         "private var ${it.name.toKotlinIdent()}: ${it.type.toKotlinTypeString()}"
     }
     val registerTypes = ""
-    val actionsStr = "override suspend fun actions(ctx: Context): Set<TSAction> = setOf(\n" +
+    val actionsStr = "override suspend fun actions(tm: TermManager): Set<TSAction> = setOf(\n" +
         transitions.joinToString(",\n") { it.kotlinActionString(stateVarTypes).prependIndent() } +
         "\n)"
     val transitStr = "override suspend fun transit(act: ConcreteAction) {" +
@@ -317,12 +306,13 @@ private fun ActionDecl.kotlinActionString(stateVarTypes: Map<String, Type>): Str
         SymbolicAction.SyncType.P2P -> "SymbolicAction.SyncType.P2P"
     }
     val actionSigStr = "SymbolicAction(\"${action.name}\", listOf($actionArgsStr), $syncTypeStr)"
-    val guardStr = if (guards.size == 1) {
-        val guard = guards[0]
-        guard.toZ3GuardString(symbolTypes, argSymbols)
-    } else {
-        val body = guards.joinToString(", ") { it.toZ3GuardString(symbolTypes, argSymbols) }
-        "ctx.mkAnd($body)"
+    val guardStr = when {
+        guards.isEmpty() -> "tm.mkTrue()"
+        guards.size == 1 -> guards[0].toSmtGuardString(symbolTypes, argSymbols)
+        else -> {
+            val body = guards.joinToString(", ") { it.toSmtGuardString(symbolTypes, argSymbols) }
+            "tm.mkTerm(Kind.AND, $body)"
+        }
     }
     val syncRoleStr = when (modifier) {
         TSAction.SyncRole.CSP -> "TSAction.SyncRole.CSP"

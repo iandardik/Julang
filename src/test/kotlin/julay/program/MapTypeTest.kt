@@ -1,63 +1,71 @@
 package julay.program
 
-import com.microsoft.z3.Context
-import com.microsoft.z3.Status
+import io.github.cvc5.Kind
+import io.github.cvc5.TermManager
+import julay.tools.applySelector
+import julay.tools.isSat
 import julay.tools.mapSelectExpr
-import julay.tools.mkSetMemberAny
+import julay.tools.mkSetMember
+import julay.tools.newModelSolver
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class MapTypeTest {
     @Test
     fun stringIntMapMembershipInModel() {
-        val ctx = Context()
+        val tm = TermManager()
         val mt = mapType(stringType, intType)
-        val z3 = mt.toZ3Expr(Value(mapOf("a" to 1, "b" to 2), mt), ctx)
-        val solver = ctx.mkSolver()
-        val v = mt.toZ3Expr(Variable("mp", mt), ctx)
-        solver.add(ctx.mkEq(v, z3))
-        assertEquals(Status.SATISFIABLE, solver.check())
-        val model = solver.model
-        val cell = model.eval(v, true)
-        val meta = mt.cellMetadata(ctx)
-        val arr = model.eval(ctx.mkApp(meta.arrAccessor, cell), true)
-        val keys = model.eval(ctx.mkApp(meta.keysAccessor, cell), true)
-        kotlin.test.assertTrue(
-            model.eval(ctx.mkSetMemberAny(ctx.mkString("a"), keys), true).isTrue,
+        val solver = newModelSolver(tm)
+        val v = mt.toSmtTerm(Variable("mp", mt), tm)
+        solver.assertFormula(
+            tm.mkTerm(Kind.EQUAL, v, mt.toSmtTerm(Value(mapOf("a" to 1, "b" to 2), mt), tm)),
         )
+        assertTrue(solver.isSat())
+        val meta = mt.cellMetadata(tm)
+        val cell = solver.getValue(v)
+        val arr = solver.getValue(applySelector(tm, meta.arrSelector, cell))
+        val keys = solver.getValue(applySelector(tm, meta.keysSelector, cell))
+        assertTrue(solver.getValue(tm.mkSetMember(tm.mkString("a"), keys)).booleanValue)
+        assertTrue(solver.getValue(tm.mkSetMember(tm.mkString("b"), keys)).booleanValue)
         assertEquals(
             1,
-            intType.fromZ3Expr(
-                model.eval(mapSelectExpr(ctx, arr, ctx.mkString("a")), true),
-                model,
+            intType.fromSmtTerm(
+                solver.getValue(mapSelectExpr(tm, arr, tm.mkString("a"))),
+                solver,
+            ),
+        )
+        assertEquals(
+            2,
+            intType.fromSmtTerm(
+                solver.getValue(mapSelectExpr(tm, arr, tm.mkString("b"))),
+                solver,
             ),
         )
     }
 
     @Test
     fun emptyStringIntMapRoundTrip() {
-        val ctx = Context()
+        val tm = TermManager()
         val mt = mapType(stringType, intType)
-        val z3 = mt.toZ3Expr(Value(emptyMap<String, Int>(), mt), ctx)
-        val solver = ctx.mkSolver()
-        val v = mt.toZ3Expr(Variable("mp", mt), ctx)
-        solver.add(ctx.mkEq(v, z3))
-        assertEquals(Status.SATISFIABLE, solver.check())
-        assertEquals(emptyMap<String, Int>(), mt.fromZ3Expr(solver.model.eval(v, true), solver.model))
+        val solver = newModelSolver(tm)
+        val v = mt.toSmtTerm(Variable("mp", mt), tm)
+        solver.assertFormula(tm.mkTerm(Kind.EQUAL, v, mt.toSmtTerm(Value(emptyMap<String, Int>(), mt), tm)))
+        assertTrue(solver.isSat())
+        assertEquals(emptyMap<String, Int>(), mt.fromSmtTerm(v, solver))
     }
 
     @Test
     fun intIntMapRoundTrip() {
-        val ctx = Context()
+        val tm = TermManager()
         val mt = mapType(intType, intType)
         val value = Value(mapOf(1 to 10, 2 to 20), mt)
-        val z3 = mt.toZ3Expr(value, ctx)
-        val solver = ctx.mkSolver()
-        val v = mt.toZ3Expr(Variable("mp", mt), ctx)
-        solver.add(ctx.mkEq(v, z3))
-        assertEquals(Status.SATISFIABLE, solver.check())
+        val solver = newModelSolver(tm)
+        val v = mt.toSmtTerm(Variable("mp", mt), tm)
+        solver.assertFormula(tm.mkTerm(Kind.EQUAL, v, mt.toSmtTerm(value, tm)))
+        assertTrue(solver.isSat())
         @Suppress("UNCHECKED_CAST")
-        val restored = mt.fromZ3Expr(solver.model.eval(v, true), solver.model) as Map<Int, Int>
+        val restored = mt.fromSmtTerm(v, solver) as Map<Int, Int>
         assertEquals(mapOf(1 to 10, 2 to 20), restored)
     }
 }

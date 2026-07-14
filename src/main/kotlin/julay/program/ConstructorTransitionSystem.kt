@@ -1,6 +1,6 @@
 package julay.program
 
-import com.microsoft.z3.Context
+import io.github.cvc5.TermManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -26,18 +26,18 @@ class ConstructorTransitionSystem(
     private var initially = true
     private var nonInitiallyConstructorActions: Set<TSAction>? = null
 
-    override suspend fun actions(ctx: Context): Set<TSAction> {
+    override suspend fun actions(tm: TermManager): Set<TSAction> {
         return if (initially) {
             initially = false
-            setOf(TSAction(initiallyAction, ctx.mkTrue(), TSAction.SyncRole.CSP))
+            setOf(TSAction(initiallyAction, tm.mkTrue(), TSAction.SyncRole.CSP))
         } else {
             nonInitiallyConstructorActions ?: constructorsInfo
                 .asSequence()
                 .flatMap { info -> info.constructors.keys }
                 .filter { act -> act != initiallyAction }
-                .map { act -> TSAction(act, ctx.mkTrue()) }
+                .map { act -> TSAction(act, tm.mkTrue()) }
                 .toSet()
-                .plus(TSAction(deadlockAct, ctx.mkFalse()))
+                .plus(TSAction(deadlockAct, tm.mkFalse()))
                 .also { nonInitiallyConstructorActions = it }
         }
     }

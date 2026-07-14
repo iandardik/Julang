@@ -1,56 +1,53 @@
 package julay.program
 
-import com.microsoft.z3.Context
-import com.microsoft.z3.Status
-import julay.tools.mkSetMemberAny
+import io.github.cvc5.Kind
+import io.github.cvc5.TermManager
+import julay.tools.applySelector
+import julay.tools.isSat
+import julay.tools.mkSetMember
+import julay.tools.newModelSolver
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class SetTypeTest {
     @Test
     fun intSetRoundTrip() {
-        val ctx = Context()
+        val tm = TermManager()
         val st = setType(intType)
         val value = Value(setOf(1, 2, 3), st)
-        val z3 = st.toZ3Expr(value, ctx)
-        val solver = ctx.mkSolver()
-        val v = st.toZ3Expr(Variable("s", st), ctx)
-        solver.add(ctx.mkEq(v, z3))
-        assertEquals(Status.SATISFIABLE, solver.check())
-        val restored = st.fromZ3Expr(solver.model.eval(v, true), solver.model) as Set<*>
+        val solver = newModelSolver(tm)
+        val v = st.toSmtTerm(Variable("s", st), tm)
+        solver.assertFormula(tm.mkTerm(Kind.EQUAL, v, st.toSmtTerm(value, tm)))
+        assertTrue(solver.isSat())
+        val restored = st.fromSmtTerm(v, solver) as Set<*>
         assertEquals(setOf(1, 2, 3), restored)
     }
 
     @Test
     fun emptyIntSetRoundTrip() {
-        val ctx = Context()
+        val tm = TermManager()
         val st = setType(intType)
-        val z3 = st.toZ3Expr(Value(emptySet<Int>(), st), ctx)
-        val solver = ctx.mkSolver()
-        val v = st.toZ3Expr(Variable("s", st), ctx)
-        solver.add(ctx.mkEq(v, z3))
-        assertEquals(Status.SATISFIABLE, solver.check())
-        assertEquals(emptySet<Int>(), st.fromZ3Expr(solver.model.eval(v, true), solver.model))
+        val solver = newModelSolver(tm)
+        val v = st.toSmtTerm(Variable("s", st), tm)
+        solver.assertFormula(tm.mkTerm(Kind.EQUAL, v, st.toSmtTerm(Value(emptySet<Int>(), st), tm)))
+        assertTrue(solver.isSat())
+        assertEquals(emptySet<Int>(), st.fromSmtTerm(v, solver))
     }
 
     @Test
     fun stringSetMembershipInModel() {
-        val ctx = Context()
+        val tm = TermManager()
         val st = setType(stringType)
-        val z3 = st.toZ3Expr(Value(setOf("a", "b"), st), ctx)
-        val solver = ctx.mkSolver()
-        val v = st.toZ3Expr(Variable("s", st), ctx)
-        solver.add(ctx.mkEq(v, z3))
-        assertEquals(Status.SATISFIABLE, solver.check())
-        val model = solver.model
-        val cell = model.eval(v, true)
-        val meta = st.cellMetadata(ctx)
-        val arr = model.eval(ctx.mkApp(meta.arrAccessor, cell), true)
-        kotlin.test.assertTrue(
-            model.eval(ctx.mkSetMemberAny(ctx.mkString("a"), arr), true).isTrue,
-        )
-        kotlin.test.assertTrue(
-            model.eval(ctx.mkSetMemberAny(ctx.mkString("b"), arr), true).isTrue,
-        )
+        val solver = newModelSolver(tm)
+        val v = st.toSmtTerm(Variable("s", st), tm)
+        solver.assertFormula(tm.mkTerm(Kind.EQUAL, v, st.toSmtTerm(Value(setOf("a", "b"), st), tm)))
+        assertTrue(solver.isSat())
+        val meta = st.cellMetadata(tm)
+        val cell = solver.getValue(v)
+        val arr = solver.getValue(applySelector(tm, meta.arrSelector, cell))
+        assertTrue(solver.getValue(tm.mkSetMember(tm.mkString("a"), arr)).booleanValue)
+        assertTrue(solver.getValue(tm.mkSetMember(tm.mkString("b"), arr)).booleanValue)
+        assertTrue(!solver.getValue(tm.mkSetMember(tm.mkString("c"), arr)).booleanValue)
     }
 }

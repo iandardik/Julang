@@ -1,8 +1,9 @@
 package julay.concurrency
 
-import com.microsoft.z3.BoolExpr
-import com.microsoft.z3.Context
-import com.microsoft.z3.Status
+import io.github.cvc5.Kind
+import io.github.cvc5.TermManager
+import julay.tools.SmtConstraint
+import julay.tools.constraintsAreSat
 import kotlinx.coroutines.*
 import kotlin.test.*
 import java.util.*
@@ -20,12 +21,10 @@ class SyncChannelFormulaTest {
                 val incVal = AtomicInteger(0)
                 val chan = createChan(incVal)
                 val t1 = launch {
-                    val ctx = Context()
-                    chan.sync(ctx.mkLt(ctx.mkIntConst("x"), ctx.mkInt(0)))
+                    chan.sync(mkLtX(0))
                 }
                 val t2 = launch {
-                    val ctx = Context()
-                    chan.sync(ctx.mkGt(ctx.mkIntConst("x"), ctx.mkInt(0)))
+                    chan.sync(mkGtX(0))
                 }
                 withTimeoutOrNull(aliveCheckTimeout) {
                     t1.join()
@@ -46,12 +45,10 @@ class SyncChannelFormulaTest {
                 val incVal = AtomicInteger(0)
                 val chan = createChan(incVal)
                 val t1 = launch {
-                    val ctx = Context()
-                    chan.sync(ctx.mkLt(ctx.mkIntConst("x"), ctx.mkInt(0)))
+                    chan.sync(mkLtX(0))
                 }
                 val t2 = launch {
-                    val ctx = Context()
-                    chan.sync(ctx.mkGt(ctx.mkIntConst("x"), ctx.mkInt(0)))
+                    chan.sync(mkGtX(0))
                 }
                 withTimeoutOrNull(aliveCheckTimeout) {
                     t1.join()
@@ -62,12 +59,10 @@ class SyncChannelFormulaTest {
                 assertTrue(t2.isActive)
 
                 val t3 = launch {
-                    val ctx = Context()
-                    chan.sync(ctx.mkLt(ctx.mkIntConst("x"), ctx.mkInt(0)))
+                    chan.sync(mkLtX(0))
                 }
                 val t4 = launch {
-                    val ctx = Context()
-                    chan.sync(ctx.mkGt(ctx.mkIntConst("x"), ctx.mkInt(0)))
+                    chan.sync(mkGtX(0))
                 }
                 delay(notAliveCheckTimeout)
                 // the threads should have synced
@@ -86,12 +81,10 @@ class SyncChannelFormulaTest {
                 val incVal = AtomicInteger(0)
                 val chan = createChan(incVal)
                 val t1 = launch {
-                    val ctx = Context()
-                    chan.sync(ctx.mkLt(ctx.mkIntConst("x"), ctx.mkInt(0)))
+                    chan.sync(mkLtX(0))
                 }
                 val t2 = launch {
-                    val ctx = Context()
-                    chan.sync(ctx.mkGt(ctx.mkIntConst("x"), ctx.mkInt(0)))
+                    chan.sync(mkGtX(0))
                 }
                 withTimeoutOrNull(aliveCheckTimeout) {
                     t1.join()
@@ -101,8 +94,7 @@ class SyncChannelFormulaTest {
                 assertTrue(t2.isActive)
 
                 val t3 = launch {
-                    val ctx = Context()
-                    chan.sync(ctx.mkLt(ctx.mkIntConst("x"), ctx.mkInt(0)))
+                    chan.sync(mkLtX(0))
                 }
                 delay(notAliveCheckTimeout)
                 assertFalse(t1.isActive)
@@ -110,8 +102,7 @@ class SyncChannelFormulaTest {
                 assertFalse(t3.isActive)
 
                 val t4 = launch {
-                    val ctx = Context()
-                    chan.sync(ctx.mkGt(ctx.mkIntConst("x"), ctx.mkInt(0)))
+                    chan.sync(mkGtX(0))
                 }
                 delay(notAliveCheckTimeout)
                 assertFalse(t2.isActive)
@@ -127,22 +118,18 @@ class SyncChannelFormulaTest {
                 val incVal = AtomicInteger(0)
                 val chan = createChan(incVal)
                 val t1 = launch {
-                    val ctx = Context()
-                    chan.sync(ctx.mkLt(ctx.mkIntConst("x"), ctx.mkInt(0)))
+                    chan.sync(mkLtX(0))
                 }
                 val t2 = launch {
-                    val ctx = Context()
-                    chan.sync(ctx.mkGt(ctx.mkIntConst("x"), ctx.mkInt(0)))
+                    chan.sync(mkGtX(0))
                 }
                 delay(aliveCheckTimeout)
 
                 val t3 = launch {
-                    val ctx = Context()
-                    chan.sync(ctx.mkLt(ctx.mkIntConst("x"), ctx.mkInt(0)))
+                    chan.sync(mkLtX(0))
                 }
                 val t4 = launch {
-                    val ctx = Context()
-                    chan.sync(ctx.mkGt(ctx.mkIntConst("x"), ctx.mkInt(0)))
+                    chan.sync(mkGtX(0))
                 }
                 delay(aliveCheckTimeout)
 
@@ -158,18 +145,26 @@ class SyncChannelFormulaTest {
         }
     }
 
-    private fun createChan(incVal : AtomicInteger) : SyncChannel<Int, BoolExpr> {
-        val chanCtx = Context()
-        val chan = SyncChannel<Int, BoolExpr>(2) { constraints ->
+    private fun mkLtX(n: Long): SmtConstraint {
+        val tm = TermManager()
+        val x = tm.mkConst(tm.integerSort, "x")
+        return SmtConstraint.from(tm.mkTerm(Kind.LT, x, tm.mkInteger(n)))
+    }
+
+    private fun mkGtX(n: Long): SmtConstraint {
+        val tm = TermManager()
+        val x = tm.mkConst(tm.integerSort, "x")
+        return SmtConstraint.from(tm.mkTerm(Kind.GT, x, tm.mkInteger(n)))
+    }
+
+    private fun createChan(incVal: AtomicInteger): SyncChannel<Int, SmtConstraint> {
+        return SyncChannel(2) { constraints ->
             val i = incVal.getAndIncrement()
-            val solver = chanCtx.mkSolver()
-            constraints.forEach { c -> solver.add(c.translate(chanCtx)) }
-            if (solver.check() == Status.SATISFIABLE) {
+            if (constraintsAreSat(constraints)) {
                 Optional.of(i)
             } else {
                 Optional.empty()
             }
         }
-        return chan
     }
 }

@@ -1,53 +1,67 @@
 package julay.program
 
-import com.microsoft.z3.*
+import io.github.cvc5.Solver
+import io.github.cvc5.Sort
+import io.github.cvc5.Term
+import io.github.cvc5.TermManager
+import julay.tools.applySelector
 
-// Z3 mkDatatypeSort artifacts for one o-class in a given Context.
-// sort: the record's Z3 sort; constructorDecl: mk-Name(...);
-// accessors: field getters in declaration order (e.g. x, y for Point).
+// CVC5 datatype artifacts for one o-class in a given TermManager.
 class JulangDatatypeMetadata(
-    val sort: DatatypeSort<*>,
-    val constructorDecl: FuncDecl<*>,
-    val accessors: Array<FuncDecl<*>>,
+    val sort: Sort,
+    val constructorTerm: Term,
+    val selectors: Array<Term>,
 )
 
 class ObjClassType(
     val name: String,
     val fields: List<Variable>,
-    private val valueToZ3: (Value, Context) -> Expr<*>,
-    private val valueFromZ3: (Expr<*>, Model) -> Any,
+    private val valueToSmt: (Value, TermManager) -> Term,
+    private val valueFromSmt: (Term, Solver) -> Any,
 ) : Type {
-    private val objClassCtx = Context()
-    // Lazy so polymorphic o-class instantiations (fields still typed as TypeVar) can be
-    // constructed during type checking without calling z3SortForField on TypeVars.
-    // Concrete monomorphized types force this on first Z3 use; TypeVar schemas never should.
-    private val metadata : JulangDatatypeMetadata by lazy {
-        val fieldNames = fields.map { it.name }.toTypedArray()
-        val fieldSorts = fields.map { field -> z3SortForField(field.type, objClassCtx) }.toTypedArray()
-        val constructor = objClassCtx.mkConstructor<Any>(
-            "mk-$name",
-            "is-$name",
-            fieldNames,
-            fieldSorts,
-            null,
-        )
-        val sort: DatatypeSort<*> = objClassCtx.mkDatatypeSort(name, arrayOf(constructor))
-        JulangDatatypeMetadata(
-            sort = sort,
-            constructorDecl = constructor.ConstructorDecl(),
-            accessors = constructor.accessorDecls,
-        )
-    }
+    /**
+     * SMT-LIB datatype for this o-class. Null when fields still contain [TypeVar]
+     * (polymorphic templates during type checking).
+     */
+    val serializedDatatype: SerializedDatatype? =
+        if (fields.any { fieldContainsTypeVar(it.type) }) {
+            null
+        } else {
+            buildDatatypeDeclare(
+                name,
+                "mk-$name",
+                fields.map { it.name to it.type.toSmtLibSort() },
+            )
+        }
 
-    override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {
-        return ctx.mkConst(variable.name, metadata.sort.translate(ctx))
-    }
+    // Polymorphic o-class instantiations (fields still typed as TypeVar) can be
+    // constructed during type checking without declaring sorts; concrete types force this.
+    private fun metadataFor(tm: TermManager): JulangDatatypeMetadata =
+        DatatypeBinder.forTm(tm).objClass(name) {
+            val decl = tm.mkDatatypeDecl(name)
+            val constructor = tm.mkDatatypeConstructorDecl("mk-$name")
+            for (field in fields) {
+                constructor.addSelector(field.name, field.type.toSmtSort(tm))
+            }
+            decl.addConstructor(constructor)
+            val sort = tm.mkDatatypeSort(decl)
+            val dt = sort.datatype
+            val ctor = dt.getConstructor(0)
+            JulangDatatypeMetadata(
+                sort = sort,
+                constructorTerm = ctor.term,
+                selectors = Array(fields.size) { i -> ctor.getSelector(i).term },
+            )
+        }
 
-    override fun toZ3Expr(value: Value, ctx: Context): Expr<*> =
-        valueToZ3(value, ctx)
+    override fun toSmtTerm(variable: Variable, tm: TermManager): Term =
+        tm.mkConst(metadataFor(tm).sort, variable.name)
 
-    override fun fromZ3Expr(expr: Expr<*>, model: Model): Any =
-        valueFromZ3(expr, model)
+    override fun toSmtTerm(value: Value, tm: TermManager): Term =
+        valueToSmt(value, tm)
+
+    override fun fromSmtTerm(expr: Term, solver: Solver): Any =
+        valueFromSmt(expr, solver)
 
     override fun isOfType(obj: Any): Boolean = obj.javaClass.simpleName == name
 
@@ -57,23 +71,15 @@ class ObjClassType(
 
     override fun hashCode(): Int = name.hashCode()
 
-    fun sort(ctx: Context): DatatypeSort<*> = metadataFor(ctx).sort
+    fun sort(tm: TermManager): Sort = metadataFor(tm).sort
 
-    /** Constructor FuncDecl translated into [ctx] (callers apply field exprs). */
-    fun constructorDecl(ctx: Context): FuncDecl<*> = metadataFor(ctx).constructorDecl
+    fun constructorTerm(tm: TermManager): Term = metadataFor(tm).constructorTerm
 
-    /** Field accessor FuncDecl translated into [ctx] (callers apply the record expr). */
-    fun accessor(ctx: Context, fieldIndex: Int): FuncDecl<*> = metadataFor(ctx).accessors[fieldIndex]
+    fun selector(tm: TermManager, fieldIndex: Int): Term = metadataFor(tm).selectors[fieldIndex]
 
-    /** Home-context constructor decl (for fromZ3 deconstruction without a target Context). */
-    fun homeConstructorDecl(): FuncDecl<*> = metadata.constructorDecl
-
-    /** Home-context accessor decl (for fromZ3 deconstruction without a target Context). */
-    fun homeAccessor(fieldIndex: Int): FuncDecl<*> = metadata.accessors[fieldIndex]
-
-    fun literalToZ3Codegen(fieldExprStrs: List<String>): String {
+    fun literalToSmtCodegen(fieldExprStrs: List<String>): String {
         val args = fieldExprStrs.joinToString(", ")
-        return "${objClassMkFunName(name)}(ctx, $args)"
+        return "${objClassMkFunName(name)}(tm, $args)"
     }
 
     fun literalToTransit(fieldExprStrs: List<String>): String {
@@ -83,31 +89,17 @@ class ObjClassType(
         return "$name($args)"
     }
 
-    private fun metadataFor(ctx: Context): JulangDatatypeMetadata {
-        if (ctx === objClassCtx) {
-            return metadata
-        }
-        @Suppress("UNCHECKED_CAST")
-        return JulangDatatypeMetadata(
-            sort = metadata.sort.translate(ctx) as DatatypeSort<*>,
-            constructorDecl = metadata.constructorDecl.translate(ctx),
-            accessors = metadata.accessors.map { it.translate(ctx) }.toTypedArray(),
-        )
-    }
-
-    private fun z3SortForField(type: Type, ctx: Context): Sort = type.toZ3Sort(ctx)
-
     companion object {
-        fun z3ConstString(symbol: String, typeValName: String): String {
+        fun smtConstString(symbol: String, typeValName: String): String {
             val escaped = symbol.escapeKotlinStringLiteral()
-            return "ctx.mkConst(\"$escaped\", $typeValName.sort(ctx))"
+            return "tm.mkConst($typeValName.sort(tm), \"$escaped\")"
         }
 
-        fun kotlinObjClassToZ3String(className: String, varName: String): String {
-            return "${objClassToZ3FunName(className)}(ctx, $varName)"
+        fun kotlinObjClassToSmtString(className: String, varName: String): String {
+            return "${objClassToSmtFunName(className)}(tm, $varName)"
         }
 
-        fun fieldAccessZ3Codegen(rootType: ObjClassType, recordExpr: String, fieldPath: List<String>): String {
+        fun fieldAccessSmtCodegen(rootType: ObjClassType, recordExpr: String, fieldPath: List<String>): String {
             if (fieldPath.isEmpty()) {
                 return recordExpr
             }
@@ -120,7 +112,7 @@ class ObjClassType(
                     throw RuntimeException("Unknown field \"$segment\" on o-class ${objType.name}")
                 }
                 val field = objType.fields[fieldIndex]
-                expr = "${objClassAccessorFunName(objType.name, field.name)}(ctx, $expr)"
+                expr = "${objClassAccessorFunName(objType.name, field.name)}(tm, $expr)"
                 currentType = field.type
             }
             return expr
@@ -146,11 +138,11 @@ class ObjClassType(
 fun objClassTypeValName(className: String): String =
     className.replaceFirstChar { it.lowercase() } + "Type"
 
-fun objClassToZ3FunName(className: String): String =
-    className.replaceFirstChar { it.lowercase() } + "ToZ3"
+fun objClassToSmtFunName(className: String): String =
+    className.replaceFirstChar { it.lowercase() } + "ToSmt"
 
-fun objClassFromZ3FunName(className: String): String =
-    className.replaceFirstChar { it.lowercase() } + "FromZ3"
+fun objClassFromSmtFunName(className: String): String =
+    className.replaceFirstChar { it.lowercase() } + "FromSmt"
 
 fun objClassMkFunName(className: String): String =
     className.replaceFirstChar { it.lowercase() } + "Mk"
@@ -218,3 +210,12 @@ private fun copyExprString(
 }
 
 fun transitRootVar(transitKey: String): String = transitKey.substringBefore('.')
+
+private fun fieldContainsTypeVar(type: Type): Boolean = when (type) {
+    is TypeVar -> true
+    is ListType -> fieldContainsTypeVar(type.elementType)
+    is SetType -> fieldContainsTypeVar(type.elementType)
+    is MapType -> fieldContainsTypeVar(type.keyType) || fieldContainsTypeVar(type.valueType)
+    is ObjClassType -> type.fields.any { fieldContainsTypeVar(it.type) }
+    else -> false
+}

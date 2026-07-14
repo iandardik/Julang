@@ -1,9 +1,9 @@
 package julay.program
 
-import com.microsoft.z3.BoolExpr
 import julay.concurrency.SyncChannel
+import julay.tools.SmtConstraint
 
 data class ProgramAction(
-    val action : SymbolicAction,
-    var channel : SyncChannel<ConcreteAction, BoolExpr>,
-) {}
+    val action: SymbolicAction,
+    var channel: SyncChannel<ConcreteAction, SmtConstraint>,
+)
