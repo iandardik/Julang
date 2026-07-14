@@ -68,10 +68,11 @@ class Program {
                 }
             } else {
                 val ctx = Context() // one Context per channel
+                val solver = ctx.mkSolver()
                 SyncChannel<ConcreteAction,BoolExpr>(syncSize) { constraints ->
-                    val solver = ctx.mkSolver()
                     // c.translate(ctx) is key because each constraint will come from a different thread, and hence are
                     // created by different Contexts.
+                    solver.reset()
                     constraints.forEach { c -> solver.add(c.translate(ctx)) }
                     if (solver.check() == Status.SATISFIABLE) {
                         Optional.of(ConcreteAction(act, ctx, solver.model))

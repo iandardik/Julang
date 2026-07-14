@@ -1486,6 +1486,11 @@ class LiteralValueExprNode(
     private val type : Type,
     private val loc : ProgramLoc
 ) : ExprNode(listOf()) {
+    init {
+        // Literals know their type at construction; keep it available for transit codegen
+        // even when typeForTransit falls back (e.g. after let-subst recreates unbound nodes).
+        setInferredType(TypePassType.Inferred(type))
+    }
     override fun programLocation() = loc
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         if (forceString) {
@@ -1643,10 +1648,12 @@ private fun typeForTransit(expr: ExprNode, symbolTypes: Map<String, Type>): Type
     try {
         return expr.getType()
     } catch (_: RuntimeException) {
-        // Substituted let bindings may lack inferred types; fall back to the symbol env.
+        // Substituted let bindings may lack inferred types; fall back to the symbol env
+        // (symbols) or the literal's inherent type (Int/String/Bool/... literals).
     }
     return when (expr) {
         is SymbolValueExprNode -> symbolTypes[expr.symbol]
+        is LiteralValueExprNode -> expr.inferType(emptyMap())
         else -> null
     }
 }
