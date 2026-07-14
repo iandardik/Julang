@@ -1,9 +1,8 @@
 package julay.program
 
+import com.microsoft.z3.Context
 import com.microsoft.z3.Status
-import com.microsoft.z3.BoolExpr
 import julay.concurrency.Select
-import julay.concurrency.SyncChannel
 import java.util.*
 
 class Proc(
@@ -11,9 +10,15 @@ class Proc(
     private val tsInfo : TransitionSystemStaticInfo,
     private val actionTable : Map<SymbolicAction,ProgramAction>
 ) {
-    private val ctx = transitionSystem.getContext()
-
     suspend fun run() {
+        // One Context per transition-system process; free native Z3 state when the proc exits
+        // (generated p-classes, HttpClient, HttpResource, etc.).
+        transitionSystem.getContext().use { ctx ->
+            runUsingCtx(ctx)
+        }
+    }
+
+    private suspend fun runUsingCtx(ctx : Context) {
         while (true) {
             var nextAct = Optional.empty<ConcreteAction>()
             val enabledActions = transitionSystem.actions().filter { act ->
