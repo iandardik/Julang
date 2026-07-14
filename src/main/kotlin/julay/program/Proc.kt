@@ -2,6 +2,7 @@ package julay.program
 
 import com.microsoft.z3.Status
 import com.microsoft.z3.BoolExpr
+import com.microsoft.z3.Context
 import julay.concurrency.Select
 import julay.concurrency.SyncChannel
 import java.util.*
@@ -11,9 +12,13 @@ class Proc(
     private val tsInfo : TransitionSystemStaticInfo,
     private val actionTable : Map<SymbolicAction,ProgramAction>
 ) {
-    private val ctx = transitionSystem.getContext()
-
     suspend fun run() {
+        transitionSystem.getContext().use { ctx ->
+            runUsingCtx(ctx)
+        }
+    }
+
+    suspend fun runUsingCtx(ctx : Context) {
         while (true) {
             var nextAct = Optional.empty<ConcreteAction>()
             val enabledActions = transitionSystem.actions().filter { act ->

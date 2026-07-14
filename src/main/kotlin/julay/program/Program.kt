@@ -62,12 +62,12 @@ class Program {
 
         val channelTable = actionCounts.keys.associateWith { act ->
             val syncSize = actionCounts[act]!!
-            val ctx = Context() // one Context per channel
             if (act == initially) {
                 SyncChannel<ConcreteAction,BoolExpr>(syncSize) { _ ->
                     Optional.of(initiallyConcrete)
                 }
             } else {
+                val ctx = Context() // one Context per channel
                 SyncChannel<ConcreteAction,BoolExpr>(syncSize) { constraints ->
                     val solver = ctx.mkSolver()
                     // c.translate(ctx) is key because each constraint will come from a different thread, and hence are
