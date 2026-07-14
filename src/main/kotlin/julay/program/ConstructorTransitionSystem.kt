@@ -6,10 +6,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 class ConstructorTransitionSystem(
-    private val initiallyAction: TSAction,
+    private val initiallyAction: SymbolicAction,
     private val constructorsInfo: Set<TransitionSystemStaticInfo>,
     private val program: Program,
-    private val ctx: Context,
 ) : TransitionSystem {
     companion object : StaticInfo {
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one
@@ -24,22 +23,22 @@ class ConstructorTransitionSystem(
     // dispatch type.
     private val scope = CoroutineScope(Dispatchers.IO)
 
-    private val z3True = ctx.mkTrue()
-    private val nonInitiallyConstructorActions = constructorsInfo
-        .asSequence()
-        .flatMap { info -> info.constructors.keys }
-        .filter { act -> act != initiallyAction.symAction }
-        .map { act -> TSAction(act, z3True) }
-        .toSet()
-        .plus(TSAction(deadlockAct, ctx.mkFalse()))
     private var initially = true
+    private var nonInitiallyConstructorActions: Set<TSAction>? = null
 
-    override suspend fun actions(): Set<TSAction> {
+    override suspend fun actions(ctx: Context): Set<TSAction> {
         return if (initially) {
             initially = false
-            setOf(initiallyAction)
+            setOf(TSAction(initiallyAction, ctx.mkTrue(), TSAction.SyncRole.CSP))
         } else {
-            nonInitiallyConstructorActions
+            nonInitiallyConstructorActions ?: constructorsInfo
+                .asSequence()
+                .flatMap { info -> info.constructors.keys }
+                .filter { act -> act != initiallyAction }
+                .map { act -> TSAction(act, ctx.mkTrue()) }
+                .toSet()
+                .plus(TSAction(deadlockAct, ctx.mkFalse()))
+                .also { nonInitiallyConstructorActions = it }
         }
     }
 
@@ -55,6 +54,4 @@ class ConstructorTransitionSystem(
                 }
             }
     }
-
-    override fun getContext() = ctx
 }

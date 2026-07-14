@@ -44,7 +44,6 @@ class JulHttpClient(
         )
     }
 
-    private val ctx = Context()
     private var recResp = true
     private var response: HttpClientResponse
 
@@ -60,7 +59,7 @@ class JulHttpClient(
         response = HttpClientResponse(jdkResponse.body(), jdkResponse.statusCode())
     }
 
-    override suspend fun actions(): Set<TSAction> {
+    override suspend fun actions(ctx: Context): Set<TSAction> {
         return if (recResp) {
             recResp = false
             setOf(
@@ -79,5 +78,4 @@ class JulHttpClient(
     override suspend fun transit(act: ConcreteAction) {
         // Response is already materialized in init; sync only delivers it to peers.
     }
-    override fun getContext() = ctx
 }

@@ -26,10 +26,8 @@ class Program {
         // - a TS who claims to be a servicer of an action must have that action in its alphabet
         // TODO add a sanity check for each of the above requirements
 
-        val constructorCtx = Context()
         val argsVar = Variable("args", listType(stringType))
         val initially = SymbolicAction("initially", listOf(argsVar), SymbolicAction.SyncType.CSP)
-        val initiallyAction = TSAction(initially, constructorCtx.mkTrue(), TSAction.SyncRole.CSP)
         val initiallyConcrete = ConcreteAction(
             initially,
             mapOf(argsVar to Value(cliArgs, listType(stringType))),
@@ -86,7 +84,7 @@ class Program {
         actionTable = channelTable.keys
             .associateWith { ProgramAction(it, channelTable[it]!!) }
         constructorProc = Proc(
-            ConstructorTransitionSystem(initiallyAction, componentInfo, this, constructorCtx),
+            ConstructorTransitionSystem(initially, componentInfo, this),
             ConstructorTransitionSystem.staticInfo(),
             actionTable
         )

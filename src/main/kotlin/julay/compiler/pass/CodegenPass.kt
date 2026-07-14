@@ -245,7 +245,7 @@ private fun ProcClassDecl.kotlinClassString(objClassDecls: List<ObjClassDecl>): 
         "private var ${it.name.toKotlinIdent()}: ${it.type.toKotlinTypeString()}"
     }
     val registerTypes = ""
-    val actionsStr = "override suspend fun actions(): Set<TSAction> = setOf(\n" +
+    val actionsStr = "override suspend fun actions(ctx: Context): Set<TSAction> = setOf(\n" +
         transitions.joinToString(",\n") { it.kotlinActionString(stateVarTypes).prependIndent() } +
         "\n)"
     val transitStr = "override suspend fun transit(act: ConcreteAction) {" +
@@ -259,11 +259,9 @@ private fun ProcClassDecl.kotlinClassString(objClassDecls: List<ObjClassDecl>): 
     return "class $name(" +
         "\n$stateVarsStr".prependIndent() +
         "\n) : TransitionSystem {" +
-        "\nprivate val ctx = Context()".prependIndent() +
         registerTypes +
         "\n$actionsStr".prependIndent() +
         "\n$transitStr".prependIndent() +
-        "\noverride fun getContext() = ctx".prependIndent() +
         "\n}"
 }
 

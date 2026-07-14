@@ -12,17 +12,14 @@ interface TransitionSystem {
      * that each one is satisfiable, so it is permissible to return actions that are not satisfiable. This is why it is
      * permissible to simply return the alphabet() here, though implementations may wish to dynamically decide which
      * actions to return.
+     *
+     * Guards must be built with [ctx], the single Context owned by the calling Proc (one Context per Proc for Z3 thread
+     * safety; see https://stackoverflow.com/questions/25542200/multi-threaded-z3).
      */
-    suspend fun actions() : Set<TSAction>
+    suspend fun actions(ctx: Context): Set<TSAction>
 
     /**
      * The transition system transits to a (potentially new) state based on the given concrete action.
      */
-    suspend fun transit(act : ConcreteAction)
-
-    /**
-     * Exactly one Context should be used, and should be available here for public use. Using just one Context is
-     * important for thread safety, see: https://stackoverflow.com/questions/25542200/multi-threaded-z3
-     */
-    fun getContext() : Context
+    suspend fun transit(act: ConcreteAction)
 }

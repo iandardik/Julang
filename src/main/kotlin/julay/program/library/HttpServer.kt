@@ -46,20 +46,18 @@ class JulHttpServer(
         )
     }
 
-    private val ctx = Context()
     private val scope = CoroutineScope(Dispatchers.IO)
     init {
         val server = HttpServer.create(InetSocketAddress(port), 0)
         server.createContext("/", this)
         server.start()
     }
-    override suspend fun actions(): Set<TSAction> {
+    override suspend fun actions(ctx: Context): Set<TSAction> {
         return setOf(
             TSAction(closeAct, ctx.mkTrue(), TSAction.SyncRole.P2PService),
         )
     }
     override suspend fun transit(act: ConcreteAction) {}
-    override fun getContext() = ctx
     override fun handle(exchange: HttpExchange?) {
         val resource = HttpResource(exchange!!)
         scope.launch { Proc(resource, staticInfo(), actionTable).run() }
@@ -68,7 +66,6 @@ class JulHttpServer(
     class HttpResource(
         private val exchange: HttpExchange,
     ) : TransitionSystem {
-        private val ctx = Context()
         private val request: HttpServerRequest
         private var initHttpReq = true
         private var finishHttpReq = true
@@ -77,7 +74,7 @@ class JulHttpServer(
             val body = exchange.requestBody.bufferedReader().use { it.readText() }
             request = HttpServerRequest(path, body)
         }
-        override suspend fun actions(): Set<TSAction> {
+        override suspend fun actions(ctx: Context): Set<TSAction> {
             if (initHttpReq) {
                 initHttpReq = false
                 return setOf(
@@ -113,6 +110,5 @@ class JulHttpServer(
                 }
             }
         }
-        override fun getContext() = ctx
     }
 }

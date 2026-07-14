@@ -13,7 +13,7 @@ class Proc(
     private val actionTable : Map<SymbolicAction,ProgramAction>
 ) {
     suspend fun run() {
-        transitionSystem.getContext().use { ctx ->
+        Context().use { ctx ->
             runUsingCtx(ctx)
         }
     }
@@ -21,7 +21,7 @@ class Proc(
     suspend fun runUsingCtx(ctx : Context) {
         while (true) {
             var nextAct = Optional.empty<ConcreteAction>()
-            val enabledActions = transitionSystem.actions().filter { act ->
+            val enabledActions = transitionSystem.actions(ctx).filter { act ->
                 val solver = ctx.mkSolver()
                 solver.add(act.guard)
                 // deadlock is not enabled, but we let it pass on purpose to create a deadlock
