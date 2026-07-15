@@ -65,22 +65,23 @@ class Program {
                     Optional.of(initiallyConcrete)
                 }
             } else {
-                // Long-lived Context/Solver per channel: peer constraints must remain valid ASTs
-                // across waiting participants and pairwiseSatisfiable translate calls.
-                val ctx = Context()
-                val solver = ctx.mkSolver()
+                // Fresh Context per compute so translated ASTs/models are force-cleared on close.
+                // Source constraints stay valid in still-open Proc Contexts for the duration of Select.
                 SyncChannel<ConcreteAction,BoolExpr>(syncSize) { constraints ->
-                    // c.translate(ctx) is key because each constraint will come from a different thread, and hence are
-                    // created by different Contexts.
-                    solver.reset()
-                    constraints.forEach { c -> solver.add(c.translate(ctx) as BoolExpr) }
-                    if (solver.check() != Status.SATISFIABLE) {
-                        Optional.empty()
-                    } else if (act.args.isEmpty()) {
-                        // Avoid allocating a Model when no args need extraction.
-                        Optional.of(ConcreteAction(act, emptyMap()))
-                    } else {
-                        Optional.of(ConcreteAction(act, ctx, solver.model))
+                    Context().use { ctx ->
+                        val solver = ctx.mkSolver()
+                        // c.translate(ctx) is key because each constraint will come from a different thread, and hence are
+                        // created by different Contexts.
+                        constraints.forEach { c -> solver.add(c.translate(ctx) as BoolExpr) }
+                        if (solver.check() != Status.SATISFIABLE) {
+                            Optional.empty()
+                        } else if (act.args.isEmpty()) {
+                            // Avoid allocating a Model when no args need extraction.
+                            Optional.of(ConcreteAction(act, emptyMap()))
+                        } else {
+                            // Extract ConcreteAction (Kotlin Values only) before Context closes.
+                            Optional.of(ConcreteAction(act, ctx, solver.model))
+                        }
                     }
                 }
             }

@@ -6,6 +6,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.channels.ClosedSendChannelException
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import java.lang.RuntimeException
@@ -72,7 +73,9 @@ class Select(private vararg val cases : Case) {
             // channels have been closed. In this case, no case would fire; however--for now--we will not consider that
             // a bug.
             //assert(winnerDone, "Select $this expected a winner")
-            jobs.forEach { it.cancel() }
+            // Cancel losers, then join so SyncChannel participant cleanup finishes before
+            // callers (e.g. Proc) close Z3 Contexts that own those constraints.
+            jobs.forEach { it.cancelAndJoin() }
             caseDoneChan.close()
         }
     }

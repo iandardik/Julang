@@ -24,6 +24,9 @@ class MapCellMetadata(
  */
 data class MapType(val keyType: Type, val valueType: Type) : Type {
     private val cellName = "MapCell_${mangleTypeForName(keyType)}_${mangleTypeForName(valueType)}"
+    // TODO: this shared per-Context cache breaks the rule that interprocess communication
+    // must go only through SyncChannel (procs can observe/reuse metadata across contexts).
+    // Fix later; kept for now so fixed-name mkDatatypeSort is not redefined within a Context.
     private val metaByCtx: MutableMap<Context, MapCellMetadata> =
         Collections.synchronizedMap(WeakHashMap())
 

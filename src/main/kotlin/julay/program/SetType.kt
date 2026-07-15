@@ -22,6 +22,9 @@ class SetCellMetadata(
  */
 data class SetType(val elementType: Type) : Type {
     private val cellName = "SetCell_${mangleTypeForName(elementType)}"
+    // TODO: this shared per-Context cache breaks the rule that interprocess communication
+    // must go only through SyncChannel (procs can observe/reuse metadata across contexts).
+    // Fix later; kept for now so fixed-name mkDatatypeSort is not redefined within a Context.
     private val metaByCtx: MutableMap<Context, SetCellMetadata> =
         Collections.synchronizedMap(WeakHashMap())
 

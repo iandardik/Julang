@@ -69,19 +69,18 @@ class SyncChannel<V : Any, C : Any>(
             // we didn't find a big enough compatible group to sync so we wait for someone else to lead the sync
             try {
                 val syncVal = me.syncValueChan.receive()
+                // Leader already removeParticipants(group) before send; do not clean up on success.
                 return SyncChannelResult.sat(syncVal)
             }
-            catch (_ : CancellationException) { }
+            catch (_ : CancellationException) {
+                // Select cancel of loser cases: convert to abort so SyncCase can finish cleanly.
+                // (Rethrowing would skip abort return and confuse Select's cancelAndJoin path.)
+            }
             catch (_ : ClosedReceiveChannelException) { }
-            finally {
-                me.syncValueChan.close()
-                mutex.withLock {
-                    if (!closed) {
-                        participants.forEach { p ->
-                            p.compatiblePeers.remove(me)
-                        }
-                        participants.remove(me)
-                    }
+            me.syncValueChan.close()
+            mutex.withLock {
+                if (!closed) {
+                    removeParticipants(setOf(me))
                 }
             }
             return SyncChannelResult.abort()
@@ -104,8 +103,12 @@ class SyncChannel<V : Any, C : Any>(
         me.compatiblePeers.addAll(compatiblePeers)
         compatiblePeers.forEach { it.compatiblePeers.add(me) }
         participants.add(me)
+        // Only form groups from participants still waiting on this channel (compatiblePeers can
+        // briefly disagree during cleanup; never sync against peers already removed).
         val compatibleGroups = participants
-            .map { p -> me.compatiblePeers.intersect(p.compatiblePeers) }
+            .map { p ->
+                me.compatiblePeers.intersect(p.compatiblePeers).intersect(participants)
+            }
             .filter { g -> g.size >= syncSize }
             .flatMap { g -> subsetsOfSize(g, syncSize) }
             .toSet()
@@ -121,14 +124,14 @@ class SyncChannel<V : Any, C : Any>(
                     .toSet()
                 val syncValue = compute.invoke(constraints)
                 assert(syncValue.isPresent, "Expected a sync value to be present")
-                participants.removeAll(group)
+                removeParticipants(group)
                 return Pair(true, Optional.of(Pair(syncValue.get(), group)))
             }
             else {
                 // at least one participant is stale (has a select that has already been won). remove the stale
                 // participants and try the next compatible group
                 val staleParticipants = participants.filter { p -> p.selectIsWon }.toSet()
-                participants.removeAll(staleParticipants)
+                removeParticipants(staleParticipants)
                 if (me in staleParticipants) {
                     // if me is a stale participant then abort
                     return Pair(false, Optional.empty())
@@ -138,6 +141,22 @@ class SyncChannel<V : Any, C : Any>(
 
         // if we reach this point then there are no compatible groups yet, so we wait for someone else to lead the sync
         return Pair(true, Optional.empty())
+    }
+
+    /**
+     * Drop [toRemove] from [participants] and from every remaining peer's [Participant.compatiblePeers].
+     * Plain removeAll leaves stale peers in compatiblePeers; those can still be picked into a sync
+     * group and translated after their owning Proc Context has closed.
+     */
+    private fun removeParticipants(toRemove: Set<Participant<V,C>>) {
+        if (toRemove.isEmpty()) return
+        for (p in participants) {
+            p.compatiblePeers.removeAll(toRemove)
+        }
+        for (r in toRemove) {
+            r.compatiblePeers.clear()
+        }
+        participants.removeAll(toRemove)
     }
 
     private fun compatible(p1 : Participant<V,C>, p2 : Participant<V,C>) : Boolean {
@@ -185,7 +204,7 @@ class SyncChannel<V : Any, C : Any>(
             if (!closed) {
                 closed = true
                 participants.forEach { it.syncValueChan.close() }
-                participants.removeAll(participants)
+                removeParticipants(participants.toSet())
             }
         }
     }

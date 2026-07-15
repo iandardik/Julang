@@ -24,21 +24,25 @@ class ConstructorTransitionSystem(
     private val scope = CoroutineScope(Dispatchers.IO)
 
     private var initially = true
-    private var nonInitiallyConstructorActions: Set<TSAction>? = null
+    // Cache symbolic actions only — BoolExpr guards must be rebuilt each step because
+    // Proc uses a fresh Z3 Context per step (caching TSAction caused Context mismatch).
+    private var nonInitiallyConstructorSymActs: Set<SymbolicAction>? = null
 
     override suspend fun actions(ctx: Context): Set<TSAction> {
         return if (initially) {
             initially = false
             setOf(TSAction(initiallyAction, ctx.mkTrue(), TSAction.SyncRole.CSP))
         } else {
-            nonInitiallyConstructorActions ?: constructorsInfo
+            val symActs = nonInitiallyConstructorSymActs ?: constructorsInfo
                 .asSequence()
                 .flatMap { info -> info.constructors.keys }
                 .filter { act -> act != initiallyAction }
+                .toSet()
+                .also { nonInitiallyConstructorSymActs = it }
+            symActs
                 .map { act -> TSAction(act, ctx.mkTrue()) }
                 .toSet()
                 .plus(TSAction(deadlockAct, ctx.mkFalse()))
-                .also { nonInitiallyConstructorActions = it }
         }
     }
 
