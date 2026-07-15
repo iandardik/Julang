@@ -1,0 +1,158 @@
+import julaylib.fun.split
+import julaylib.fun.parseInt
+import node.lib.fieldValue
+import node.lib.encodeAppendEntries
+import node.lib.encodeAppendEntriesResp
+import node.lib.parseBool
+
+/*
+ * AppendEntries RPCs (incoming and outgoing).
+ */
+
+p-class IncomingAppendEntriesRPC {
+    const httpReq : HttpServerRequest
+    const reqBody : String
+    var step : String
+    var aeTerm : Int
+    var aeLeaderId : Int
+    var aePrevIdx : Int
+    var aePrevTerm : Int
+    var aeEntriesLen : Int
+    var aeEntryTerm : Int
+    var aeEntryValue : String
+    var aeLeaderCommit : Int
+    var respBody : String
+    var respCode : Int
+
+    constructor startIncomingAppendEntries(req : HttpServerRequest) {
+        transit:
+            httpReq := req
+            reqBody := req.body
+            aeTerm := 0
+            aeLeaderId := 0
+            aePrevIdx := 0
+            aePrevTerm := 0
+            aeEntriesLen := 0
+            aeEntryTerm := 0
+            aeEntryValue := ""
+            aeLeaderCommit := 0
+            respBody := ""
+            respCode := 500
+            step := "parse"
+    }
+
+    transition parseAE() {
+        guard: step = "parse"
+        transit:
+            aeTerm := parseInt(fieldValue(split(reqBody, "|")[0]))
+            aeLeaderId := parseInt(fieldValue(split(reqBody, "|")[1]))
+            aePrevIdx := parseInt(fieldValue(split(reqBody, "|")[2]))
+            aePrevTerm := parseInt(fieldValue(split(reqBody, "|")[3]))
+            aeEntriesLen := parseInt(fieldValue(split(reqBody, "|")[4]))
+            aeEntryTerm := parseInt(fieldValue(split(reqBody, "|")[5]))
+            aeEntryValue := fieldValue(split(reqBody, "|")[6])
+            aeLeaderCommit := parseInt(fieldValue(split(reqBody, "|")[7]))
+            step := "handle"
+    }
+
+    transition handleAppendEntries(
+        inTerm : Int, leaderId : Int, prevLogIndex : Int, prevLogTerm : Int,
+        entriesLen : Int, entryTerm : Int, entryValue : String, leaderCommit : Int,
+        outTerm : Int, success : Boolean, matchIdx : Int
+    ) {
+        guard:
+            & step = "handle"
+            & inTerm = aeTerm & leaderId = aeLeaderId
+            & prevLogIndex = aePrevIdx & prevLogTerm = aePrevTerm
+            & entriesLen = aeEntriesLen & entryTerm = aeEntryTerm
+            & entryValue = aeEntryValue & leaderCommit = aeLeaderCommit
+        transit:
+            respBody := encodeAppendEntriesResp(outTerm, success, matchIdx)
+            respCode := 200
+            step := "finish"
+    }
+
+    transition finishIncomingAppendEntries(body : String, code : Int) {
+        guard: step = "finish" & body = respBody & code = respCode
+        transit: step := "done"
+    }
+}
+
+p-class OutgoingAppendEntriesRPC {
+    const cPeerId : Int
+    const cPeerUrl : String
+    const cTerm : Int
+    const cLeaderId : Int
+    const cPrevLogIndex : Int
+    const cPrevLogTerm : Int
+    const cEntryTerm : Int
+    const cEntryValue : String
+    const cEntriesLen : Int
+    const cLeaderCommit : Int
+    const cReqBody : String
+    var step : String
+    var respBody : String
+    var respTerm : Int
+    var respSuccess : Boolean
+    var respMatch : Int
+
+    constructor startOutgoingAppendEntries(
+        peerId : Int, peerUrl : String,
+        term : Int, leaderId : Int, prevLogIndex : Int, prevLogTerm : Int,
+        entryTerm : Int, entryValue : String, entriesLen : Int, leaderCommit : Int
+    ) {
+        transit:
+            cPeerId := peerId
+            cPeerUrl := peerUrl
+            cTerm := term
+            cLeaderId := leaderId
+            cPrevLogIndex := prevLogIndex
+            cPrevLogTerm := prevLogTerm
+            cEntryTerm := entryTerm
+            cEntryValue := entryValue
+            cEntriesLen := entriesLen
+            cLeaderCommit := leaderCommit
+            cReqBody := encodeAppendEntries(
+                term, leaderId, prevLogIndex, prevLogTerm,
+                entryTerm, entryValue, entriesLen, leaderCommit
+            )
+            respBody := ""
+            respTerm := 0
+            respSuccess := false
+            respMatch := 0
+            step := "beginHttp"
+    }
+
+    transition beginHttpAE(peerUrl : String, reqBody : String) {
+        guard: step = "beginHttp" & peerUrl = cPeerUrl & reqBody = cReqBody
+        transit: step := "awaitHttp"
+    }
+
+    transition endHttpAE(respOut : String) {
+        guard: step = "awaitHttp"
+        transit:
+            respBody := respOut
+            step := "parse"
+    }
+
+    transition parseAEResp() {
+        guard: step = "parse"
+        transit:
+            respTerm := parseInt(fieldValue(split(respBody, "|")[0]))
+            respSuccess := parseBool(fieldValue(split(respBody, "|")[1]))
+            respMatch := parseInt(fieldValue(split(respBody, "|")[2]))
+            step := "apply"
+    }
+
+    transition handleAppendEntriesResp(
+        peerId : Int, inTerm : Int, success : Boolean, matchIdx : Int
+    ) {
+        guard:
+            & step = "apply"
+            & peerId = cPeerId
+            & inTerm = respTerm
+            & success = respSuccess
+            & matchIdx = respMatch
+        transit: step := "done"
+    }
+}

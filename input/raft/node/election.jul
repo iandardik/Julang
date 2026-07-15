@@ -1,13 +1,8 @@
 import julaylib.fun.length
-import julaylib.fun.split
-import julaylib.fun.parseInt
-import node.lib.fieldValue
-import node.lib.encodeRequestVote
-import node.lib.encodeAppendEntries
-import node.lib.parseBool
 
 /*
  * Election timeout, RequestVote to peers, leadership, and heartbeats.
+ * HTTP/wire encoding lives in the rpc_* modules; this driver only orchestrates.
  */
 
 p-class ElectionDriver {
@@ -15,38 +10,43 @@ p-class ElectionDriver {
     var myId : Int
     var curPeer : Int
     var peer : String
-    var reqBody : String
-    var respBody : String
-    var voteTerm : Int
-    var voteGrantedFlag : Boolean
+    var snapTerm : Int
+    var snapCand : Int
+    var snapLastIdx : Int
+    var snapLastTerm : Int
+    var aeTerm : Int
+    var aeLeaderId : Int
+    var aePrevIdx : Int
+    var aePrevTerm : Int
+    var aeEntryTerm : Int
+    var aeEntryValue : String
+    var aeEntriesLen : Int
+    var aeLeaderCommit : Int
     var clusterN : Int
-    var respTerm : Int
-    var respSuccess : Boolean
-    var respMatch : Int
     var electTimeout : Int
     var armedEpoch : Int
 
     constructor startRaft(urls : List<String>, id : Int) {
         transit:
-            step := "startClient"
+            step := "arm"
             myId := id
             curPeer := 0
             peer := ""
-            reqBody := ""
-            respBody := ""
-            voteTerm := 0
-            voteGrantedFlag := false
+            snapTerm := 0
+            snapCand := 0
+            snapLastIdx := 0
+            snapLastTerm := 0
+            aeTerm := 0
+            aeLeaderId := 0
+            aePrevIdx := 0
+            aePrevTerm := 0
+            aeEntryTerm := 0
+            aeEntryValue := ""
+            aeEntriesLen := 0
+            aeLeaderCommit := 0
             clusterN := length(urls)
-            respTerm := 0
-            respSuccess := false
-            respMatch := 0
             electTimeout := 2 + id
             armedEpoch := 0
-    }
-
-    transition startClient() {
-        guard: step = "startClient"
-        transit: step := "arm"
     }
 
     transition getSelfId(id : Int) {
@@ -66,11 +66,10 @@ p-class ElectionDriver {
             myId := if (step = "snap") { candId } else { myId }
             electTimeout := if (step = "snap") { 2 + candId } else { electTimeout }
             curPeer := if (step = "snap") { 0 } else { curPeer }
-            reqBody := if (step = "snap") {
-                encodeRequestVote(term, candId, lastIdx, lastT)
-            } else {
-                reqBody
-            }
+            snapTerm := if (step = "snap") { term } else { snapTerm }
+            snapCand := if (step = "snap") { candId } else { snapCand }
+            snapLastIdx := if (step = "snap") { lastIdx } else { snapLastIdx }
+            snapLastTerm := if (step = "snap") { lastT } else { snapLastTerm }
             step := if (step = "arm") {
                 "waitTimer"
             } else {
@@ -127,35 +126,23 @@ p-class ElectionDriver {
             step := "sendRV"
     }
 
-    transition sendRequest(req : HttpClientRequest) {
+    transition startOutgoingRequestVote(
+        peerId : Int, peerUrl : String,
+        term : Int, candId : Int, lastIdx : Int, lastTerm : Int
+    ) {
         guard:
-            | (step = "sendRV" & req = HttpClientRequest {
-                url := peer + "/raft/requestVote", method := "POST", body := reqBody
-            })
-            | (step = "sendAE" & req = HttpClientRequest {
-                url := peer + "/raft/appendEntries", method := "POST", body := reqBody
-            })
-        transit:
-            step := if (step = "sendRV") { "recvRV" } else { "recvAE" }
-    }
-
-    transition receiveResponse(resp : HttpClientResponse) {
-        guard: step = "recvRV" | step = "recvAE"
-        transit:
-            respBody := resp.body
-            step := if (step = "recvRV") { "parseVote" } else { "parseAE" }
-    }
-
-    transition parseVote() {
-        guard: step = "parseVote"
-        transit:
-            voteTerm := parseInt(fieldValue(split(respBody, "|")[0]))
-            voteGrantedFlag := parseBool(fieldValue(split(respBody, "|")[1]))
-            step := "tally"
+            & step = "sendRV"
+            & peerId = curPeer
+            & peerUrl = peer
+            & term = snapTerm
+            & candId = snapCand
+            & lastIdx = snapLastIdx
+            & lastTerm = snapLastTerm
+        transit: step := "awaitRV"
     }
 
     transition recordVote(peerId : Int, term : Int, granted : Boolean) {
-        guard: step = "tally" & peerId = curPeer & term = voteTerm & granted = voteGrantedFlag
+        guard: step = "awaitRV" & peerId = curPeer
         transit:
             curPeer := curPeer + 1
             step := "peers"
@@ -188,28 +175,41 @@ p-class ElectionDriver {
         guard: step = "hbPeers" & peerId = curPeer & curPeer ~= myId & curPeer < clusterN
         transit:
             peer := peerUrlOut
-            reqBody := encodeAppendEntries(
-                term, leaderId, prevLogIndex, prevLogTerm,
-                entryTerm, entryValue, entriesLen, leaderCommit
-            )
+            aeTerm := term
+            aeLeaderId := leaderId
+            aePrevIdx := prevLogIndex
+            aePrevTerm := prevLogTerm
+            aeEntryTerm := entryTerm
+            aeEntryValue := entryValue
+            aeEntriesLen := entriesLen
+            aeLeaderCommit := leaderCommit
             step := "sendAE"
     }
 
-    transition parseAEResp() {
-        guard: step = "parseAE"
-        transit:
-            respTerm := parseInt(fieldValue(split(respBody, "|")[0]))
-            respSuccess := parseBool(fieldValue(split(respBody, "|")[1]))
-            respMatch := parseInt(fieldValue(split(respBody, "|")[2]))
-            step := "applyAE"
+    transition startOutgoingAppendEntries(
+        peerId : Int, peerUrl : String,
+        term : Int, leaderId : Int, prevLogIndex : Int, prevLogTerm : Int,
+        entryTerm : Int, entryValue : String, entriesLen : Int, leaderCommit : Int
+    ) {
+        guard:
+            & step = "sendAE"
+            & peerId = curPeer
+            & peerUrl = peer
+            & term = aeTerm
+            & leaderId = aeLeaderId
+            & prevLogIndex = aePrevIdx
+            & prevLogTerm = aePrevTerm
+            & entryTerm = aeEntryTerm
+            & entryValue = aeEntryValue
+            & entriesLen = aeEntriesLen
+            & leaderCommit = aeLeaderCommit
+        transit: step := "awaitAE"
     }
 
     transition handleAppendEntriesResp(
         peerId : Int, inTerm : Int, success : Boolean, matchIdx : Int
     ) {
-        guard:
-            & step = "applyAE" & peerId = curPeer
-            & inTerm = respTerm & success = respSuccess & matchIdx = respMatch
+        guard: step = "awaitAE" & peerId = curPeer
         transit:
             curPeer := curPeer + 1
             step := "hbPeers"

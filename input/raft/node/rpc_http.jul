@@ -1,0 +1,172 @@
+/*
+ * HTTP endpoints for Raft node RPCs: inbound listener (RpcServer) and
+ * outbound client bridge (RpcClient). Typed RPC pclasses live in
+ * rpc_vote / rpc_append_entries / rpc_client.
+ *
+ * Incoming RPCs are not globally mutexed: each request gets its own
+ * RpcServer, so concurrent inbound handlers may overlap. Outgoing RPCs
+ * are serialized through RpcClient (at most one outbound send/recv in
+ * flight). An inbound and an outbound RPC may run at the same time.
+ * Where serialization shows up, it just happens to be the case — it is
+ * not required for correctness.
+ */
+
+p-class RpcServer {
+    const httpReq : HttpServerRequest
+    const path : String
+    const reqBody : String
+    var step : String
+    var respBody : String
+    var respCode : Int
+
+    constructor receiveRequest(req : HttpServerRequest) {
+        transit:
+            httpReq := req
+            path := req.path
+            reqBody := req.body
+            respBody := ""
+            respCode := 500
+            step := if (req.path = "raft/requestVote") {
+                "startRV"
+            } else {
+                if (req.path = "raft/appendEntries") {
+                    "startAE"
+                } else {
+                    if (req.path = "client/append") {
+                        "startCA"
+                    } else {
+                        if (req.path = "client/get") { "startCG" } else { "bad" }
+                    }
+                }
+            }
+    }
+
+    transition startIncomingRequestVote(req : HttpServerRequest) {
+        guard: step = "startRV" & req = httpReq
+        transit: step := "awaitRV"
+    }
+
+    transition startIncomingAppendEntries(req : HttpServerRequest) {
+        guard: step = "startAE" & req = httpReq
+        transit: step := "awaitAE"
+    }
+
+    transition startIncomingClientAppend(req : HttpServerRequest) {
+        guard: step = "startCA" & req = httpReq
+        transit: step := "awaitCA"
+    }
+
+    transition startIncomingClientGet(req : HttpServerRequest) {
+        guard: step = "startCG" & req = httpReq
+        transit: step := "awaitCG"
+    }
+
+    transition finishIncomingRequestVote(body : String, code : Int) {
+        guard: step = "awaitRV"
+        transit:
+            respBody := body
+            respCode := code
+            step := "resp"
+    }
+
+    transition finishIncomingAppendEntries(body : String, code : Int) {
+        guard: step = "awaitAE"
+        transit:
+            respBody := body
+            respCode := code
+            step := "resp"
+    }
+
+    transition finishIncomingClientAppend(body : String, code : Int) {
+        guard: step = "awaitCA"
+        transit:
+            respBody := body
+            respCode := code
+            step := "resp"
+    }
+
+    transition finishIncomingClientGet(body : String, code : Int) {
+        guard: step = "awaitCG"
+        transit:
+            respBody := body
+            respCode := code
+            step := "resp"
+    }
+
+    transition badPath() {
+        guard: step = "bad"
+        transit:
+            respBody := "NOT_FOUND"
+            respCode := 404
+            step := "resp"
+    }
+
+    transition sendResponse(req : HttpServerRequest, resp : HttpServerResponse) {
+        guard: step = "resp" & req = httpReq & resp = HttpServerResponse { body := respBody, code := respCode }
+        transit: step := "done"
+    }
+
+    p2p-consumer transition close() {
+        guard: false
+    }
+}
+
+p-class RpcClient {
+    var step : String
+    var url : String
+    var body : String
+    var respBody : String
+
+    constructor startClient() {
+        transit:
+            step := "idle"
+            url := ""
+            body := ""
+            respBody := ""
+    }
+
+    transition beginHttpRV(peerUrl : String, reqBody : String) {
+        guard: step = "idle"
+        transit:
+            url := peerUrl
+            body := reqBody
+            step := "sendRV"
+    }
+
+    transition beginHttpAE(peerUrl : String, reqBody : String) {
+        guard: step = "idle"
+        transit:
+            url := peerUrl
+            body := reqBody
+            step := "sendAE"
+    }
+
+    transition sendRequest(req : HttpClientRequest) {
+        guard:
+            | (step = "sendRV" & req = HttpClientRequest {
+                url := url + "/raft/requestVote", method := "POST", body := body
+            })
+            | (step = "sendAE" & req = HttpClientRequest {
+                url := url + "/raft/appendEntries", method := "POST", body := body
+            })
+        transit:
+            step := if (step = "sendRV") { "recvRV" } else { "recvAE" }
+    }
+
+    transition receiveResponse(resp : HttpClientResponse) {
+        guard: step = "recvRV" | step = "recvAE"
+        transit:
+            respBody := resp.body
+            step := if (step = "recvRV") { "endRV" } else { "endAE" }
+    }
+
+    transition endHttpRV(respOut : String) {
+        guard: step = "endRV" & respOut = respBody
+        transit: step := "idle"
+    }
+
+    transition endHttpAE(respOut : String) {
+        guard: step = "endAE" & respOut = respBody
+        transit: step := "idle"
+    }
+}

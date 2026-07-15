@@ -1,0 +1,86 @@
+/*
+ * Client command RPCs (append / get).
+ *
+ * One pclass for both commands so redirectBody stays CSP size 2 with RaftCore
+ * (two separate pclasses sharing redirectBody would require a 3-way sync and deadlock).
+ * Constructors keep the startIncomingClientAppend / startIncomingClientGet names.
+ */
+
+p-class IncomingClientRPC {
+    const httpReq : HttpServerRequest
+    const reqBody : String
+    const kind : String
+    var step : String
+    var appendIdx : Int
+    var respBody : String
+    var respCode : Int
+
+    constructor startIncomingClientAppend(req : HttpServerRequest) {
+        transit:
+            httpReq := req
+            reqBody := req.body
+            kind := "append"
+            appendIdx := 0
+            respBody := ""
+            respCode := 500
+            step := "ca"
+    }
+
+    constructor startIncomingClientGet(req : HttpServerRequest) {
+        transit:
+            httpReq := req
+            reqBody := req.body
+            kind := "get"
+            appendIdx := 0
+            respBody := ""
+            respCode := 500
+            step := "cg"
+    }
+
+    transition clientAppend(value : String, ok : Boolean, idx : Int) {
+        guard: step = "ca" & value = reqBody
+        transit:
+            appendIdx := idx
+            step := if (ok) { "caOk" } else { "redir" }
+    }
+
+    transition finishAppendOk() {
+        guard: step = "caOk"
+        transit:
+            respBody := "OK " + appendIdx
+            respCode := 200
+            step := "finishCA"
+    }
+
+    transition clientGet(body : String, ok : Boolean) {
+        guard: step = "cg"
+        transit:
+            respBody := body
+            step := if (ok) { "cgOk" } else { "redir" }
+    }
+
+    transition finishGetOk() {
+        guard: step = "cgOk"
+        transit:
+            respCode := 200
+            step := "finishCG"
+    }
+
+    transition redirectBody(body : String, code : Int) {
+        guard: step = "redir"
+        transit:
+            respBody := body
+            respCode := code
+            step := if (kind = "append") { "finishCA" } else { "finishCG" }
+    }
+
+    transition finishIncomingClientAppend(body : String, code : Int) {
+        guard: step = "finishCA" & body = respBody & code = respCode
+        transit: step := "done"
+    }
+
+    transition finishIncomingClientGet(body : String, code : Int) {
+        guard: step = "finishCG" & body = respBody & code = respCode
+        transit: step := "done"
+    }
+}

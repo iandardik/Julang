@@ -6,7 +6,7 @@ import julaylib.fun.parseInt
 import node.lib.isBlankOrComment
 
 /*
- * Static cluster config loading and HTTP listen-port startup.
+ * Static cluster config loading, HTTP listen-port startup, and outbound HttpClient startup.
  */
 
 p-class RaftInitializer {
@@ -74,4 +74,17 @@ p-class ServerInitializer {
     }
 }
 
-proc Initializers := RaftInitializer || ServerInitializer
+p-class ClientInitializer {
+    var started : Boolean
+
+    constructor initially(args : List<String>) {
+        transit: started := false
+    }
+
+    transition startClient() {
+        guard: ~started
+        transit: started := true
+    }
+}
+
+proc Initializers := RaftInitializer || ServerInitializer || ClientInitializer

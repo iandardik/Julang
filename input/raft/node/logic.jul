@@ -3,7 +3,13 @@ import julaylib.pclass.HttpClient
 import julaylib.pclass.Timer
 import node.core.RaftCore
 import node.initializers.Initializers
-import node.http_handler.NodeHttpHandler
+import node.rpc_http.RpcServer
+import node.rpc_http.RpcClient
+import node.rpc_vote.IncomingRequestVoteRPC
+import node.rpc_vote.OutgoingRequestVoteRPC
+import node.rpc_append_entries.IncomingAppendEntriesRPC
+import node.rpc_append_entries.OutgoingAppendEntriesRPC
+import node.rpc_client.IncomingClientRPC
 import node.election.ElectionDriver
 
 /*
@@ -11,7 +17,12 @@ import node.election.ElectionDriver
  * CLI: <configPath> <selfIndex>
  */
 
-proc Http := (HttpServer || NodeHttpHandler) || HttpClient || Timer
-proc Raft := RaftCore || ElectionDriver || Http
+proc IncomingRPCs := HttpServer || RpcServer
+    || IncomingRequestVoteRPC || IncomingAppendEntriesRPC || IncomingClientRPC
+
+proc OutgoingRPCs := HttpClient || RpcClient
+    || OutgoingRequestVoteRPC || OutgoingAppendEntriesRPC
+
+proc Raft := RaftCore || ElectionDriver || IncomingRPCs || OutgoingRPCs || Timer
 
 proc NodeLogic := Raft || Initializers

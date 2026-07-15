@@ -1,0 +1,125 @@
+import julaylib.fun.split
+import julaylib.fun.parseInt
+import node.lib.fieldValue
+import node.lib.encodeRequestVote
+import node.lib.encodeRequestVoteResp
+import node.lib.parseBool
+
+/*
+ * RequestVote RPCs (incoming and outgoing).
+ */
+
+p-class IncomingRequestVoteRPC {
+    const httpReq : HttpServerRequest
+    const reqBody : String
+    var step : String
+    var rvTerm : Int
+    var rvCand : Int
+    var rvLastIdx : Int
+    var rvLastTerm : Int
+    var respBody : String
+    var respCode : Int
+
+    constructor startIncomingRequestVote(req : HttpServerRequest) {
+        transit:
+            httpReq := req
+            reqBody := req.body
+            rvTerm := 0
+            rvCand := 0
+            rvLastIdx := 0
+            rvLastTerm := 0
+            respBody := ""
+            respCode := 500
+            step := "parse"
+    }
+
+    transition parseRV() {
+        guard: step = "parse"
+        transit:
+            rvTerm := parseInt(fieldValue(split(reqBody, "|")[0]))
+            rvCand := parseInt(fieldValue(split(reqBody, "|")[1]))
+            rvLastIdx := parseInt(fieldValue(split(reqBody, "|")[2]))
+            rvLastTerm := parseInt(fieldValue(split(reqBody, "|")[3]))
+            step := "handle"
+    }
+
+    transition handleRequestVote(
+        inTerm : Int, candidateId : Int, lastLogIndex : Int, lastLogTerm : Int,
+        outTerm : Int, voteGranted : Boolean
+    ) {
+        guard:
+            & step = "handle"
+            & inTerm = rvTerm & candidateId = rvCand
+            & lastLogIndex = rvLastIdx & lastLogTerm = rvLastTerm
+        transit:
+            respBody := encodeRequestVoteResp(outTerm, voteGranted)
+            respCode := 200
+            step := "finish"
+    }
+
+    transition finishIncomingRequestVote(body : String, code : Int) {
+        guard: step = "finish" & body = respBody & code = respCode
+        transit: step := "done"
+    }
+}
+
+p-class OutgoingRequestVoteRPC {
+    const cPeerId : Int
+    const cPeerUrl : String
+    const cTerm : Int
+    const cCandId : Int
+    const cLastIdx : Int
+    const cLastTerm : Int
+    const cReqBody : String
+    var step : String
+    var respBody : String
+    var voteTerm : Int
+    var voteGrantedFlag : Boolean
+
+    constructor startOutgoingRequestVote(
+        peerId : Int, peerUrl : String,
+        term : Int, candId : Int, lastIdx : Int, lastTerm : Int
+    ) {
+        transit:
+            cPeerId := peerId
+            cPeerUrl := peerUrl
+            cTerm := term
+            cCandId := candId
+            cLastIdx := lastIdx
+            cLastTerm := lastTerm
+            cReqBody := encodeRequestVote(term, candId, lastIdx, lastTerm)
+            respBody := ""
+            voteTerm := 0
+            voteGrantedFlag := false
+            step := "beginHttp"
+    }
+
+    transition beginHttpRV(peerUrl : String, reqBody : String) {
+        guard: step = "beginHttp" & peerUrl = cPeerUrl & reqBody = cReqBody
+        transit: step := "awaitHttp"
+    }
+
+    transition endHttpRV(respOut : String) {
+        guard: step = "awaitHttp"
+        transit:
+            respBody := respOut
+            step := "parse"
+    }
+
+    transition parseVote() {
+        guard: step = "parse"
+        transit:
+            voteTerm := parseInt(fieldValue(split(respBody, "|")[0]))
+            voteGrantedFlag := parseBool(fieldValue(split(respBody, "|")[1]))
+            step := "tally"
+    }
+
+    transition recordVote(peerId : Int, term : Int, granted : Boolean) {
+        guard:
+            & step = "tally"
+            & peerId = cPeerId
+            & term = voteTerm
+            & granted = voteGrantedFlag
+        transit: step := "done"
+    }
+}
