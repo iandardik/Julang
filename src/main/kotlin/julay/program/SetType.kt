@@ -3,8 +3,6 @@ package julay.program
 import com.microsoft.z3.*
 import julay.compiler.decl.mangleTypeForName
 import julay.tools.*
-import java.util.Collections
-import java.util.WeakHashMap
 
 class SetCellMetadata(
     val sort: DatatypeSort<*>,
@@ -17,16 +15,15 @@ class SetCellMetadata(
 
 /**
  * Built-in parametric set type. Cell datatype metadata is built directly in the caller's
- * [Context] (no per-instance home Context); results are cached per Context so the datatype
- * is not redefined on every use.
+ * [Context] (no per-instance home Context); results are cached per live Context so the
+ * datatype is not redefined on every use, without retaining closed Contexts.
  */
 data class SetType(val elementType: Type) : Type {
     private val cellName = "SetCell_${mangleTypeForName(elementType)}"
     // TODO: this shared per-Context cache breaks the rule that interprocess communication
     // must go only through SyncChannel (procs can observe/reuse metadata across contexts).
     // Fix later; kept for now so fixed-name mkDatatypeSort is not redefined within a Context.
-    private val metaByCtx: MutableMap<Context, SetCellMetadata> =
-        Collections.synchronizedMap(WeakHashMap())
+    private val metaByCtx = ContextLocalCache<SetCellMetadata>()
 
     fun cellMetadata(ctx: Context): SetCellMetadata =
         metaByCtx.getOrPut(ctx) { buildMetadata(ctx) }

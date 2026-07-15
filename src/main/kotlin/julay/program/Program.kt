@@ -65,25 +65,36 @@ class Program {
                     Optional.of(initiallyConcrete)
                 }
             } else {
-                // Fresh Context per compute so translated ASTs/models are force-cleared on close.
-                // Source constraints stay valid in still-open Proc Contexts for the duration of Select.
-                SyncChannel<ConcreteAction,BoolExpr>(syncSize) { constraints ->
+                // Ephemeral Z3 Contexts: channels live for the program lifetime, but each SAT /
+                // model extraction uses a scratch Context that is closed immediately after.
+                // (ConcreteAction copies assignments into plain Java Values.)
+                // c.translate(ctx) is required because each constraint comes from a different
+                // proc thread / Context.
+                fun constraintsSatisfiable(constraints: Set<BoolExpr>): Boolean =
                     Context().use { ctx ->
                         val solver = ctx.mkSolver()
-                        // c.translate(ctx) is key because each constraint will come from a different thread, and hence are
-                        // created by different Contexts.
                         constraints.forEach { c -> solver.add(c.translate(ctx) as BoolExpr) }
-                        if (solver.check() != Status.SATISFIABLE) {
-                            Optional.empty()
-                        } else if (act.args.isEmpty()) {
-                            // Avoid allocating a Model when no args need extraction.
-                            Optional.of(ConcreteAction(act, emptyMap()))
-                        } else {
-                            // Extract ConcreteAction (Kotlin Values only) before Context closes.
-                            Optional.of(ConcreteAction(act, ctx, solver.model))
-                        }
+                        solver.check() == Status.SATISFIABLE
                     }
-                }
+                SyncChannel(
+                    syncSize,
+                    satisfiable = ::constraintsSatisfiable,
+                    compute = { constraints ->
+                        Context().use { ctx ->
+                            val solver = ctx.mkSolver()
+                            constraints.forEach { c -> solver.add(c.translate(ctx) as BoolExpr) }
+                            if (solver.check() != Status.SATISFIABLE) {
+                                Optional.empty()
+                            } else if (act.args.isEmpty()) {
+                                // Avoid allocating a Model when no args need extraction.
+                                Optional.of(ConcreteAction(act, emptyMap()))
+                            } else {
+                                // Extract ConcreteAction (Kotlin Values only) before Context closes.
+                                Optional.of(ConcreteAction(act, ctx, solver.model))
+                            }
+                        }
+                    },
+                )
             }
         }
 

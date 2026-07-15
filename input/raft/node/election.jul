@@ -28,7 +28,7 @@ p-class ElectionDriver {
 
     constructor startRaft(urls : List<String>, id : Int) {
         transit:
-            step := "arm"
+            step := "startClient"
             myId := id
             curPeer := 0
             peer := ""
@@ -42,6 +42,11 @@ p-class ElectionDriver {
             respMatch := 0
             electTimeout := 2 + id
             armedEpoch := 0
+    }
+
+    transition startClient() {
+        guard: step = "startClient"
+        transit: step := "arm"
     }
 
     transition getSelfId(id : Int) {

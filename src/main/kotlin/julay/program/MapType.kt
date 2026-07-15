@@ -3,8 +3,6 @@ package julay.program
 import com.microsoft.z3.*
 import julay.compiler.decl.mangleTypeForName
 import julay.tools.*
-import java.util.Collections
-import java.util.WeakHashMap
 
 class MapCellMetadata(
     val sort: DatatypeSort<*>,
@@ -19,16 +17,15 @@ class MapCellMetadata(
 
 /**
  * Built-in parametric map type. Cell datatype metadata is built directly in the caller's
- * [Context] (no per-instance home Context); results are cached per Context so the datatype
- * is not redefined on every use.
+ * [Context] (no per-instance home Context); results are cached per live Context so the
+ * datatype is not redefined on every use, without retaining closed Contexts.
  */
 data class MapType(val keyType: Type, val valueType: Type) : Type {
     private val cellName = "MapCell_${mangleTypeForName(keyType)}_${mangleTypeForName(valueType)}"
     // TODO: this shared per-Context cache breaks the rule that interprocess communication
     // must go only through SyncChannel (procs can observe/reuse metadata across contexts).
     // Fix later; kept for now so fixed-name mkDatatypeSort is not redefined within a Context.
-    private val metaByCtx: MutableMap<Context, MapCellMetadata> =
-        Collections.synchronizedMap(WeakHashMap())
+    private val metaByCtx = ContextLocalCache<MapCellMetadata>()
 
     fun cellMetadata(ctx: Context): MapCellMetadata =
         metaByCtx.getOrPut(ctx) { buildMetadata(ctx) }

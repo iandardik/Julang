@@ -17,65 +17,82 @@ import java.net.http.HttpRequest
 import java.net.http.HttpRequest.BodyPublishers
 import java.net.http.HttpResponse.BodyHandlers
 
-class JulHttpClient(
-    private val request: HttpClientRequest,
-) : TransitionSystem {
+/**
+ * Long-lived outbound HTTP client. [startClient] constructs one process that owns a single JDK
+ * [HttpClient]; [sendRequest] / [receiveResponse] may be repeated on that process.
+ */
+class JulHttpClient : TransitionSystem {
     companion object : JulLibrary {
         override val julName = "HttpClient"
         val reqArg = Variable("req", httpClientRequestType)
         val respArg = Variable("resp", httpClientResponseType)
+        val startClientAct = SymbolicAction("startClient", listOf())
         val sendRequestAct = SymbolicAction("sendRequest", listOf(reqArg))
-        val sendRequestCtor: Pair<SymbolicAction, suspend (Program, ConcreteAction) -> JulHttpClient> = Pair(
-            sendRequestAct,
-        ) { _, act ->
-            val req = act.lookup(reqArg).value as HttpClientRequest
-            JulHttpClient(req)
-        }
         val receiveResponseAct = SymbolicAction("receiveResponse", listOf(respArg))
+        val startClientCtor: Pair<SymbolicAction, suspend (Program, ConcreteAction) -> JulHttpClient> = Pair(
+            startClientAct,
+        ) { _, _ ->
+            JulHttpClient()
+        }
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one
         override fun staticInfo() = TransitionSystemStaticInfo(
             "JulHttpClient$",
-            setOf(receiveResponseAct),
-            mapOf(sendRequestCtor),
+            setOf(sendRequestAct, receiveResponseAct),
+            mapOf(startClientCtor),
         )
         override val actionDecls = listOf(
+            ActionDecl(startClientAct, listOf(), emptyList(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
             ActionDecl(sendRequestAct, listOf(), emptyList(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
             ActionDecl(receiveResponseAct, listOf(), emptyList(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
         )
     }
 
-    private var recResp = true
-    private var response: HttpClientResponse
+    private enum class Phase { Idle, HaveResponse }
 
-    init {
-        val client = HttpClient.newBuilder().build()
+    private val jdkClient = HttpClient.newBuilder().build()
+    private var phase = Phase.Idle
+    private var response: HttpClientResponse? = null
+
+    override suspend fun actions(ctx: Context): Set<TSAction> {
+        return when (phase) {
+            Phase.Idle -> setOf(TSAction(sendRequestAct, ctx.mkTrue()))
+            Phase.HaveResponse -> {
+                val resp = response!!
+                setOf(
+                    TSAction(
+                        receiveResponseAct,
+                        ctx.mkEq(
+                            respArg.toZ3Expr(ctx),
+                            httpClientResponseType.toZ3Expr(Value(resp, httpClientResponseType), ctx),
+                        ),
+                    ),
+                )
+            }
+        }
+    }
+
+    override suspend fun transit(act: ConcreteAction) {
+        when (act.symAction) {
+            sendRequestAct -> {
+                val request = act.lookup(reqArg).value as HttpClientRequest
+                response = send(request)
+                phase = Phase.HaveResponse
+            }
+            receiveResponseAct -> {
+                response = null
+                phase = Phase.Idle
+            }
+        }
+    }
+
+    private fun send(request: HttpClientRequest): HttpClientResponse {
         val builder = HttpRequest.newBuilder().uri(URI.create(request.url))
         val method = request.method.uppercase()
         val jdkRequest = when (method) {
             "GET", "HEAD" -> builder.method(method, BodyPublishers.noBody()).build()
             else -> builder.method(method, BodyPublishers.ofString(request.body)).build()
         }
-        val jdkResponse = client.send(jdkRequest, BodyHandlers.ofString())
-        response = HttpClientResponse(jdkResponse.body(), jdkResponse.statusCode())
-    }
-
-    override suspend fun actions(ctx: Context): Set<TSAction> {
-        return if (recResp) {
-            recResp = false
-            setOf(
-                TSAction(
-                    receiveResponseAct,
-                    ctx.mkEq(
-                        respArg.toZ3Expr(ctx),
-                        httpClientResponseType.toZ3Expr(Value(response, httpClientResponseType), ctx),
-                    ),
-                ),
-            )
-        } else {
-            setOf()
-        }
-    }
-    override suspend fun transit(act: ConcreteAction) {
-        // Response is already materialized in init; sync only delivers it to peers.
+        val jdkResponse = jdkClient.send(jdkRequest, BodyHandlers.ofString())
+        return HttpClientResponse(jdkResponse.body(), jdkResponse.statusCode())
     }
 }

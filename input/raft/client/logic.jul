@@ -32,7 +32,12 @@ p-class RaftClientLogic {
             respBody := ""
             respCode := 0
             retried := false
-            step := "send"
+            step := "startClient"
+    }
+
+    transition startClient() {
+        guard: step = "startClient"
+        transit: step := "send"
     }
 
     transition sendRequest(req : HttpClientRequest) {

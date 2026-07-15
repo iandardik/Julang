@@ -23,7 +23,15 @@ import java.util.*
  */
 class SyncChannel<V : Any, C : Any>(
     private val syncSize : Int,
-    private val compute : (Set<C>)->Optional<V>
+    /**
+     * Optional SAT-only check used for pairwise compatibility. When omitted, compatibility
+     * falls back to [compute] (and discards any produced value). Prefer a dedicated check so
+     * callers need not materialize [V] just to test satisfiability.
+     *
+     * Placed before [compute] so trailing-lambda call sites bind to [compute].
+     */
+    private val satisfiable : ((Set<C>)->Boolean)? = null,
+    private val compute : (Set<C>)->Optional<V>,
 ) {
     private val mutex = Mutex()
     private var participants = mutableSetOf<Participant<V,C>>()
@@ -182,7 +190,10 @@ class SyncChannel<V : Any, C : Any>(
                 !pairwiseSatisfiable(p1.anticonstraint.get(), p2.anticonstraint.get())
         return satConstraints && unsatAnticonstraints
     }
-    private fun pairwiseSatisfiable(c1 : C, c2 : C) = compute.invoke(setOf(c1, c2)).isPresent
+    private fun pairwiseSatisfiable(c1 : C, c2 : C): Boolean {
+        val constraints = setOf(c1, c2)
+        return satisfiable?.invoke(constraints) ?: compute.invoke(constraints).isPresent
+    }
 
     private suspend fun selectsCommit(group : Set<Participant<V,C>>) : Boolean {
         // request a commit from all parties--only commit if all are able to 2PL on all selects

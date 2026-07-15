@@ -44,6 +44,7 @@ fun codegenPass(
         "\n}"
 
     val imports = "import com.microsoft.z3.*\n" +
+        "import com.microsoft.z3.julangContext\n" +
         "import julay.program.*\n" +
         "import julay.program.library.*\n" +
         "import julay.tools.mkStringConst\n" +
@@ -212,7 +213,7 @@ private fun ObjClassDecl.kotlinConversionHelpersString(): String {
         fieldToZ3ExprString("value.${field.name}", field.type)
     }
     val fromZ3FieldExprs = fields.mapIndexed { index, _ ->
-        "$typeVal.homeAccessor($index).apply(expr) as Expr<*>"
+        "$typeVal.accessor(modelCtx, $index).apply(expr) as Expr<*>"
     }.joinToString(",\n")
     val fromZ3Args = fields.mapIndexed { index, field ->
         fieldFromZ3ExprString("fieldExprs[$index]", field.type)
@@ -230,6 +231,7 @@ private fun ObjClassDecl.kotlinConversionHelpersString(): String {
         |    val fieldExprs = if (expr.isApp && expr.funcDecl.name == $typeVal.homeConstructorDecl().name) {
         |        expr.args
         |    } else {
+        |        val modelCtx = model.julangContext()
         |        arrayOf(
         |${fromZ3FieldExprs.prependIndent("            ")}
         |        )

@@ -5,6 +5,7 @@ import com.microsoft.z3.Expr
 import com.microsoft.z3.IntExpr
 import com.microsoft.z3.Model
 import com.microsoft.z3.SeqExpr
+import com.microsoft.z3.julangContext
 import julay.program.ObjClassType
 import julay.program.Variable
 import julay.program.intType
@@ -31,14 +32,7 @@ fun httpServerRequestToZ3(ctx: Context, value: HttpServerRequest): Expr<*> =
     httpServerRequestMk(ctx, ctx.mkString(value.path), ctx.mkString(value.body))
 
 fun httpServerRequestFromZ3(expr: Expr<*>, model: Model): HttpServerRequest {
-    val fieldExprs = if (expr.isApp && expr.funcDecl.name == httpServerRequestType.homeConstructorDecl().name) {
-        expr.args
-    } else {
-        arrayOf(
-            httpServerRequestType.homeAccessor(0).apply(expr) as Expr<*>,
-            httpServerRequestType.homeAccessor(1).apply(expr) as Expr<*>,
-        )
-    }
+    val fieldExprs = objClassFieldExprs(httpServerRequestType, expr, model)
     return HttpServerRequest(
         stringType.fromZ3Expr(fieldExprs[0], model) as String,
         stringType.fromZ3Expr(fieldExprs[1], model) as String,
@@ -68,14 +62,7 @@ fun httpServerResponseToZ3(ctx: Context, value: HttpServerResponse): Expr<*> =
     httpServerResponseMk(ctx, ctx.mkString(value.body), ctx.mkInt(value.code))
 
 fun httpServerResponseFromZ3(expr: Expr<*>, model: Model): HttpServerResponse {
-    val fieldExprs = if (expr.isApp && expr.funcDecl.name == httpServerResponseType.homeConstructorDecl().name) {
-        expr.args
-    } else {
-        arrayOf(
-            httpServerResponseType.homeAccessor(0).apply(expr) as Expr<*>,
-            httpServerResponseType.homeAccessor(1).apply(expr) as Expr<*>,
-        )
-    }
+    val fieldExprs = objClassFieldExprs(httpServerResponseType, expr, model)
     return HttpServerResponse(
         stringType.fromZ3Expr(fieldExprs[0], model) as String,
         intType.fromZ3Expr(fieldExprs[1], model) as Int,
@@ -113,15 +100,7 @@ fun httpClientRequestToZ3(ctx: Context, value: HttpClientRequest): Expr<*> =
     )
 
 fun httpClientRequestFromZ3(expr: Expr<*>, model: Model): HttpClientRequest {
-    val fieldExprs = if (expr.isApp && expr.funcDecl.name == httpClientRequestType.homeConstructorDecl().name) {
-        expr.args
-    } else {
-        arrayOf(
-            httpClientRequestType.homeAccessor(0).apply(expr) as Expr<*>,
-            httpClientRequestType.homeAccessor(1).apply(expr) as Expr<*>,
-            httpClientRequestType.homeAccessor(2).apply(expr) as Expr<*>,
-        )
-    }
+    val fieldExprs = objClassFieldExprs(httpClientRequestType, expr, model)
     return HttpClientRequest(
         stringType.fromZ3Expr(fieldExprs[0], model) as String,
         stringType.fromZ3Expr(fieldExprs[1], model) as String,
@@ -153,18 +132,25 @@ fun httpClientResponseToZ3(ctx: Context, value: HttpClientResponse): Expr<*> =
     httpClientResponseMk(ctx, ctx.mkString(value.body), ctx.mkInt(value.code))
 
 fun httpClientResponseFromZ3(expr: Expr<*>, model: Model): HttpClientResponse {
-    val fieldExprs = if (expr.isApp && expr.funcDecl.name == httpClientResponseType.homeConstructorDecl().name) {
-        expr.args
-    } else {
-        arrayOf(
-            httpClientResponseType.homeAccessor(0).apply(expr) as Expr<*>,
-            httpClientResponseType.homeAccessor(1).apply(expr) as Expr<*>,
-        )
-    }
+    val fieldExprs = objClassFieldExprs(httpClientResponseType, expr, model)
     return HttpClientResponse(
         stringType.fromZ3Expr(fieldExprs[0], model) as String,
         intType.fromZ3Expr(fieldExprs[1], model) as Int,
     )
+}
+
+/**
+ * Deconstruct an o-class value using the model's Context (never [ObjClassType.homeAccessor],
+ * which would allocate ASTs on the immortal home Context).
+ */
+private fun objClassFieldExprs(type: ObjClassType, expr: Expr<*>, model: Model): Array<Expr<*>> {
+    if (expr.isApp && expr.funcDecl.name == type.homeConstructorDecl().name) {
+        return expr.args
+    }
+    val ctx = model.julangContext()
+    return Array(type.fields.size) { i ->
+        type.accessor(ctx, i).apply(expr) as Expr<*>
+    }
 }
 
 val httpClientResponseType = ObjClassType(
