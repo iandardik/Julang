@@ -318,6 +318,22 @@ class SelectTest {
         catch (_ : RuntimeException) {}
     }
 
+    /**
+     * Loser case blocks on a size-2 channel with no peer until Select cancels it.
+     * After run() returns (post cancelAndJoin), the loser must not remain a participant.
+     */
+    @Test
+    fun cancelledLoserCaseRemovedFromChannel() = runBlocking {
+        val chanLoser = SyncChannel<Int, Int>(2) { Optional.of(1) }
+        val chanWinner = SyncChannel<Int, Int>(1) { Optional.of(1) }
+        Select(
+            Select.SyncCase(chanLoser) {},
+            Select.SyncCase(chanWinner) {},
+        ).run()
+        assertEquals(0, chanLoser.participantCountForTests())
+        assertEquals(0, chanWinner.participantCountForTests())
+    }
+
     private val chmResultUpdate : (Int, Int?)->Int? = {
             _, curVal ->
         if (curVal == null) {

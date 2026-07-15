@@ -50,40 +50,49 @@ class SyncChannel<V : Any, C : Any>(
         select : Optional<Select> = Optional.empty()
     ) : SyncChannelResult<V> {
         val me = Participant<V,C>(constraint, anticonstraint, select)
-        val (validResult, syncInfo) = withContext(NonCancellable) {
-            // findCompatibleGroup() also performs important clean up of the participants list which should not be
-            // canceled part way through. we also call this function with the mutex because it interacts with the
-            // participants list, which is a shared data structure.
-            mutex.withLock { findCompatibleGroup(me) }
-        }
-        if (!validResult) {
-            return SyncChannelResult.abort()
-        }
-        if (syncInfo.isPresent) {
-            // we found a big enough compatible group to sync so send everyone in the group that value
-            val (syncValue, syncGroup) = syncInfo.get()
-            syncGroup.minus(me).forEach { p -> p.syncValueChan.send(syncValue) } // TODO parallelize this?
-            return SyncChannelResult.sat(syncValue)
-        }
-        else {
-            // we didn't find a big enough compatible group to sync so we wait for someone else to lead the sync
+        try {
+            // Find groups + deliver sync values under NonCancellable so Select cancelAndJoin cannot
+            // leave us registered with peers after Proc is about to Context.close, and cannot
+            // strand waiters mid-send.
+            val earlyResult = withContext(NonCancellable) {
+                val (validResult, syncInfo) = mutex.withLock { findCompatibleGroup(me) }
+                if (!validResult) {
+                    Optional.of(SyncChannelResult.abort<V>())
+                } else if (syncInfo.isPresent) {
+                    val (syncValue, syncGroup) = syncInfo.get()
+                    syncGroup.minus(me).forEach { p -> p.syncValueChan.send(syncValue) }
+                    Optional.of(SyncChannelResult.sat(syncValue))
+                } else {
+                    Optional.empty()
+                }
+            }
+            if (earlyResult.isPresent) {
+                return earlyResult.get()
+            }
+            // Waiting for someone else to lead the sync
             try {
                 val syncVal = me.syncValueChan.receive()
                 // Leader already removeParticipants(group) before send; do not clean up on success.
                 return SyncChannelResult.sat(syncVal)
-            }
-            catch (_ : CancellationException) {
+            } catch (_ : CancellationException) {
                 // Select cancel of loser cases: convert to abort so SyncCase can finish cleanly.
-                // (Rethrowing would skip abort return and confuse Select's cancelAndJoin path.)
-            }
-            catch (_ : ClosedReceiveChannelException) { }
-            me.syncValueChan.close()
-            mutex.withLock {
-                if (!closed) {
-                    removeParticipants(setOf(me))
-                }
-            }
+            } catch (_ : ClosedReceiveChannelException) { }
+            removeSelfAfterAbort(me)
             return SyncChannelResult.abort()
+        } catch (_ : CancellationException) {
+            // Cancelled after being added as a waiter (e.g. between NonCancellable find and receive).
+            // Scrub so peers do not translate constraints from a Context Proc is about to close.
+            removeSelfAfterAbort(me)
+            return SyncChannelResult.abort()
+        }
+    }
+
+    private suspend fun removeSelfAfterAbort(me: Participant<V, C>) {
+        me.syncValueChan.close()
+        mutex.withLock {
+            if (!closed) {
+                removeParticipants(setOf(me))
+            }
         }
     }
 
@@ -214,6 +223,10 @@ class SyncChannel<V : Any, C : Any>(
             return closed
         }
     }
+
+    /** Test-only: number of participants currently waiting on this channel. */
+    internal suspend fun participantCountForTests(): Int =
+        mutex.withLock { participants.size }
 
     private class Participant<V : Any, C : Any>(
         val constraint : Optional<C>,
