@@ -65,17 +65,22 @@ class Program {
                     Optional.of(initiallyConcrete)
                 }
             } else {
-                val ctx = Context() // one Context per channel
+                // Long-lived Context/Solver per channel: peer constraints must remain valid ASTs
+                // across waiting participants and pairwiseSatisfiable translate calls.
+                val ctx = Context()
                 val solver = ctx.mkSolver()
                 SyncChannel<ConcreteAction,BoolExpr>(syncSize) { constraints ->
                     // c.translate(ctx) is key because each constraint will come from a different thread, and hence are
                     // created by different Contexts.
                     solver.reset()
-                    constraints.forEach { c -> solver.add(c.translate(ctx)) }
-                    if (solver.check() == Status.SATISFIABLE) {
-                        Optional.of(ConcreteAction(act, ctx, solver.model))
-                    } else {
+                    constraints.forEach { c -> solver.add(c.translate(ctx) as BoolExpr) }
+                    if (solver.check() != Status.SATISFIABLE) {
                         Optional.empty()
+                    } else if (act.args.isEmpty()) {
+                        // Avoid allocating a Model when no args need extraction.
+                        Optional.of(ConcreteAction(act, emptyMap()))
+                    } else {
+                        Optional.of(ConcreteAction(act, ctx, solver.model))
                     }
                 }
             }

@@ -1,10 +1,8 @@
 package julay.program
 
 import com.microsoft.z3.Status
-import com.microsoft.z3.BoolExpr
 import com.microsoft.z3.Context
 import julay.concurrency.Select
-import julay.concurrency.SyncChannel
 import java.util.*
 
 class Proc(
@@ -13,16 +11,20 @@ class Proc(
     private val actionTable : Map<SymbolicAction,ProgramAction>
 ) {
     suspend fun run() {
+        // Long-lived Context: SyncChannel may still hold guards/anticonstraints from this
+        // Context while peer procs are waiting, so it must stay open for the process lifetime.
         Context().use { ctx ->
             runUsingCtx(ctx)
         }
     }
 
-    suspend fun runUsingCtx(ctx : Context) {
+    private suspend fun runUsingCtx(ctx: Context) {
+        // Reuse one Solver for the process lifetime (avoids mkSolver-per-check native growth).
+        val solver = ctx.mkSolver()
         while (true) {
             var nextAct = Optional.empty<ConcreteAction>()
             val enabledActions = transitionSystem.actions(ctx).filter { act ->
-                val solver = ctx.mkSolver()
+                solver.reset()
                 solver.add(act.guard)
                 // deadlock is not enabled, but we let it pass on purpose to create a deadlock
                 act.symAction.name == "deadlock" || solver.check() == Status.SATISFIABLE
@@ -42,7 +44,7 @@ class Proc(
             }
             Select(*cases.toTypedArray()).run()
 
-            // check for deadlocks
+            // check for "static" deadlocks
             if (nextAct.isEmpty) {
                 return
             }
