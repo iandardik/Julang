@@ -146,6 +146,15 @@ class ObjClassType(
 fun objClassTypeValName(className: String): String =
     className.replaceFirstChar { it.lowercase() } + "Type"
 
+fun listTypeValName(elementType: Type): String =
+    "listType_${julay.compiler.decl.mangleTypeForName(elementType)}"
+
+fun setTypeValName(elementType: Type): String =
+    "setType_${julay.compiler.decl.mangleTypeForName(elementType)}"
+
+fun mapTypeValName(keyType: Type, valueType: Type): String =
+    "mapType_${julay.compiler.decl.mangleTypeForName(keyType)}_${julay.compiler.decl.mangleTypeForName(valueType)}"
+
 fun objClassToZ3FunName(className: String): String =
     className.replaceFirstChar { it.lowercase() } + "ToZ3"
 
@@ -182,9 +191,9 @@ fun Type.toCodegenTypeVal(): String = when (this) {
     is RealType -> "realType"
     is StringType -> "stringType"
     is ObjClassType -> objClassTypeValName(name)
-    is ListType -> "listType(${elementType.toCodegenTypeVal()})"
-    is SetType -> "setType(${elementType.toCodegenTypeVal()})"
-    is MapType -> "mapType(${keyType.toCodegenTypeVal()}, ${valueType.toCodegenTypeVal()})"
+    is ListType -> listTypeValName(elementType)
+    is SetType -> setTypeValName(elementType)
+    is MapType -> mapTypeValName(keyType, valueType)
     is TypeVar -> throw RuntimeException("TypeVar \"$name\" must not reach Kotlin codegen")
     else -> throw RuntimeException("Invalid type: $this")
 }

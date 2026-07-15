@@ -3,6 +3,8 @@ package julay.program
 import com.microsoft.z3.*
 import julay.compiler.decl.mangleTypeForName
 import julay.tools.*
+import java.util.Collections
+import java.util.WeakHashMap
 
 class SetCellMetadata(
     val sort: DatatypeSort<*>,
@@ -13,23 +15,32 @@ class SetCellMetadata(
     val domainSort: Sort,
 )
 
+/**
+ * Built-in parametric set type. Cell datatype metadata is built directly in the caller's
+ * [Context] (no per-instance home Context); results are cached per Context so the datatype
+ * is not redefined on every use.
+ */
 data class SetType(val elementType: Type) : Type {
-    private val homeCtx = Context()
     private val cellName = "SetCell_${mangleTypeForName(elementType)}"
+    private val metaByCtx: MutableMap<Context, SetCellMetadata> =
+        Collections.synchronizedMap(WeakHashMap())
 
-    private val metadata: SetCellMetadata by lazy {
-        val domain = elementType.toZ3Sort(homeCtx)
+    fun cellMetadata(ctx: Context): SetCellMetadata =
+        metaByCtx.getOrPut(ctx) { buildMetadata(ctx) }
+
+    private fun buildMetadata(ctx: Context): SetCellMetadata {
+        val domain = elementType.toZ3Sort(ctx)
         @Suppress("UNCHECKED_CAST")
-        val arraySort = homeCtx.mkSetSort(domain) as ArraySort<Sort, BoolSort>
-        val constructor = homeCtx.mkConstructor<Any>(
+        val arraySort = ctx.mkSetSort(domain) as ArraySort<Sort, BoolSort>
+        val constructor = ctx.mkConstructor<Any>(
             "mk-$cellName",
             "is-$cellName",
             arrayOf("arr", "size"),
-            arrayOf(arraySort, homeCtx.intSort),
+            arrayOf(arraySort, ctx.intSort),
             null,
         )
-        val sort = homeCtx.mkDatatypeSort(cellName, arrayOf(constructor))
-        SetCellMetadata(
+        val sort = ctx.mkDatatypeSort(cellName, arrayOf(constructor))
+        return SetCellMetadata(
             sort = sort,
             constructorDecl = constructor.ConstructorDecl(),
             arrAccessor = constructor.accessorDecls[0],
@@ -38,24 +49,6 @@ data class SetType(val elementType: Type) : Type {
             domainSort = domain,
         )
     }
-
-    fun cellMetadata(ctx: Context): SetCellMetadata =
-        if (ctx === homeCtx) {
-            metadata
-        } else {
-            @Suppress("UNCHECKED_CAST")
-            val translatedSort = metadata.sort.translate(ctx) as DatatypeSort<*>
-            @Suppress("UNCHECKED_CAST")
-            val translatedArraySort = metadata.arraySort.translate(ctx) as ArraySort<Sort, BoolSort>
-            SetCellMetadata(
-                sort = translatedSort,
-                constructorDecl = metadata.constructorDecl.translate(ctx),
-                arrAccessor = metadata.arrAccessor.translate(ctx),
-                sizeAccessor = metadata.sizeAccessor.translate(ctx),
-                arraySort = translatedArraySort,
-                domainSort = metadata.domainSort.translate(ctx),
-            )
-        }
 
     override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {
         return ctx.mkConst(variable.name, cellMetadata(ctx).sort)

@@ -78,6 +78,7 @@ fun codegenPass(
             append("\n\n")
         }
     }
+    val parametricTypeSection = parametricTypeValsSection(procClasses, objClassDecls)
     val mainClassName = program.name.replaceFirstChar { it.uppercase() }
     val effectImports = if (procClasses.any { it.usesEffects() }) {
         EffectBuiltinRegistry.kotlinCodegenImports().joinToString("\n") { "import $it" } + "\n"
@@ -87,11 +88,83 @@ fun codegenPass(
     val sourceText = "$imports$effectImports\n" +
         dataClassSection +
         objClassSection +
+        parametricTypeSection +
         procClasses.joinToString("\n\n") { it.kotlinClassString(objClassDecls) } +
         "\n\n" +
         mainFunction
 
     return CodegenResult(sourceText, mainClassName)
+}
+
+/**
+ * File-level vals for monomorphized List/Set/Map types used by this compilation unit,
+ * so generated actions/transit reuse one instance instead of calling listType()/setType()/mapType()
+ * on every evaluation.
+ */
+private fun parametricTypeValsSection(
+    procClasses: List<ProcClassDecl>,
+    objClassDecls: List<ObjClassDecl>,
+): String {
+    val roots = mutableListOf<Type>()
+    procClasses.forEach { pc ->
+        pc.stateVars.forEach { roots.add(it.type) }
+        (pc.constructors + pc.transitions).forEach { action ->
+            action.action.args.forEach { roots.add(it.type) }
+        }
+    }
+    objClassDecls.forEach { decl ->
+        decl.fields.forEach { roots.add(it.type) }
+    }
+    // Program initially always uses List<String> in generated static info constructors.
+    roots.add(listType(stringType))
+
+    val collected = linkedSetOf<Type>()
+    roots.forEach { collectParametricTypes(it, collected) }
+    if (collected.isEmpty()) return ""
+
+    val ordered = collected.sortedWith(
+        compareBy<Type> { it.parametricNestingDepth() }
+            .thenBy { it.toCodegenTypeVal() },
+    )
+    val decls = ordered.joinToString("\n") { ty ->
+        val name = ty.toCodegenTypeVal()
+        val rhs = when (ty) {
+            is ListType -> "listType(${ty.elementType.toCodegenTypeVal()})"
+            is SetType -> "setType(${ty.elementType.toCodegenTypeVal()})"
+            is MapType -> "mapType(${ty.keyType.toCodegenTypeVal()}, ${ty.valueType.toCodegenTypeVal()})"
+            else -> throw RuntimeException("Not a parametric type for codegen val: $ty")
+        }
+        "val $name = $rhs"
+    }
+    return "$decls\n\n"
+}
+
+private fun collectParametricTypes(type: Type, out: MutableSet<Type>) {
+    when (type) {
+        is ListType -> {
+            collectParametricTypes(type.elementType, out)
+            out.add(type)
+        }
+        is SetType -> {
+            collectParametricTypes(type.elementType, out)
+            out.add(type)
+        }
+        is MapType -> {
+            collectParametricTypes(type.keyType, out)
+            collectParametricTypes(type.valueType, out)
+            out.add(type)
+        }
+        is ObjClassType -> type.fields.forEach { collectParametricTypes(it.type, out) }
+        else -> {}
+    }
+}
+
+private fun Type.parametricNestingDepth(): Int = when (this) {
+    is ListType -> 1 + elementType.parametricNestingDepth()
+    is SetType -> 1 + elementType.parametricNestingDepth()
+    is MapType -> 1 + maxOf(keyType.parametricNestingDepth(), valueType.parametricNestingDepth())
+    is ObjClassType -> fields.maxOfOrNull { it.type.parametricNestingDepth() } ?: 0
+    else -> 0
 }
 
 private fun ObjClassDecl.kotlinDataClassString(): String {

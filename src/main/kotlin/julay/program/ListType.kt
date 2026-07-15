@@ -4,21 +4,14 @@ import com.microsoft.z3.*
 
 /**
  * Built-in parametric list type, backed by Z3 [SeqSort] and Kotlin [List] at runtime.
+ *
+ * Sorts are built directly in the caller's [Context] (no per-instance home Context).
+ * Codegen emits file-level vals for monomorphized list types so hot paths reuse one instance.
  */
 data class ListType(val elementType: Type) : Type {
-    private val homeCtx = Context()
-    private val homeSort: SeqSort<*> by lazy {
-        @Suppress("UNCHECKED_CAST")
-        homeCtx.mkSeqSort(elementType.toZ3Sort(homeCtx) as Sort) as SeqSort<*>
-    }
-
     fun sort(ctx: Context): SeqSort<*> {
         @Suppress("UNCHECKED_CAST")
-        return if (ctx === homeCtx) {
-            homeSort
-        } else {
-            homeSort.translate(ctx) as SeqSort<*>
-        }
+        return ctx.mkSeqSort(elementType.toZ3Sort(ctx) as Sort) as SeqSort<*>
     }
 
     override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {

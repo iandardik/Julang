@@ -3,6 +3,8 @@ package julay.program
 import com.microsoft.z3.*
 import julay.compiler.decl.mangleTypeForName
 import julay.tools.*
+import java.util.Collections
+import java.util.WeakHashMap
 
 class MapCellMetadata(
     val sort: DatatypeSort<*>,
@@ -15,26 +17,35 @@ class MapCellMetadata(
     val domainSort: Sort,
 )
 
+/**
+ * Built-in parametric map type. Cell datatype metadata is built directly in the caller's
+ * [Context] (no per-instance home Context); results are cached per Context so the datatype
+ * is not redefined on every use.
+ */
 data class MapType(val keyType: Type, val valueType: Type) : Type {
-    private val homeCtx = Context()
     private val cellName = "MapCell_${mangleTypeForName(keyType)}_${mangleTypeForName(valueType)}"
+    private val metaByCtx: MutableMap<Context, MapCellMetadata> =
+        Collections.synchronizedMap(WeakHashMap())
 
-    private val metadata: MapCellMetadata by lazy {
-        val keySort = keyType.toZ3Sort(homeCtx)
-        val valueSort = valueType.toZ3Sort(homeCtx)
+    fun cellMetadata(ctx: Context): MapCellMetadata =
+        metaByCtx.getOrPut(ctx) { buildMetadata(ctx) }
+
+    private fun buildMetadata(ctx: Context): MapCellMetadata {
+        val keySort = keyType.toZ3Sort(ctx)
+        val valueSort = valueType.toZ3Sort(ctx)
         @Suppress("UNCHECKED_CAST")
-        val arraySort = homeCtx.mkArraySort(keySort, valueSort) as ArraySort<*, *>
+        val arraySort = ctx.mkArraySort(keySort, valueSort) as ArraySort<*, *>
         @Suppress("UNCHECKED_CAST")
-        val keyArraySort = homeCtx.mkSetSort(keySort) as ArraySort<Sort, BoolSort>
-        val constructor = homeCtx.mkConstructor<Any>(
+        val keyArraySort = ctx.mkSetSort(keySort) as ArraySort<Sort, BoolSort>
+        val constructor = ctx.mkConstructor<Any>(
             "mk-$cellName",
             "is-$cellName",
             arrayOf("arr", "keys", "size"),
-            arrayOf(arraySort, keyArraySort, homeCtx.intSort),
+            arrayOf(arraySort, keyArraySort, ctx.intSort),
             null,
         )
-        val sort = homeCtx.mkDatatypeSort(cellName, arrayOf(constructor))
-        MapCellMetadata(
+        val sort = ctx.mkDatatypeSort(cellName, arrayOf(constructor))
+        return MapCellMetadata(
             sort = sort,
             constructorDecl = constructor.ConstructorDecl(),
             arrAccessor = constructor.accessorDecls[0],
@@ -45,28 +56,6 @@ data class MapType(val keyType: Type, val valueType: Type) : Type {
             domainSort = keySort,
         )
     }
-
-    fun cellMetadata(ctx: Context): MapCellMetadata =
-        if (ctx === homeCtx) {
-            metadata
-        } else {
-            @Suppress("UNCHECKED_CAST")
-            val translated = metadata.sort.translate(ctx) as DatatypeSort<*>
-            @Suppress("UNCHECKED_CAST")
-            val translatedArraySort = metadata.arraySort.translate(ctx) as ArraySort<*, *>
-            @Suppress("UNCHECKED_CAST")
-            val translatedKeyArraySort = metadata.keyArraySort.translate(ctx) as ArraySort<Sort, BoolSort>
-            MapCellMetadata(
-                sort = translated,
-                constructorDecl = metadata.constructorDecl.translate(ctx),
-                arrAccessor = metadata.arrAccessor.translate(ctx),
-                keysAccessor = metadata.keysAccessor.translate(ctx),
-                sizeAccessor = metadata.sizeAccessor.translate(ctx),
-                arraySort = translatedArraySort,
-                keyArraySort = translatedKeyArraySort,
-                domainSort = metadata.domainSort.translate(ctx),
-            )
-        }
 
     override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {
         return ctx.mkConst(variable.name, cellMetadata(ctx).sort)
