@@ -47,10 +47,6 @@ p-class RaftCore {
             electionEpoch := 0
     }
 
-    transition getListenPort(port : Int) {
-        guard: port = selfPort
-    }
-
     transition startElection(epoch : Int) {
         guard:
             (state = "Follower" | state = "Candidate") & epoch = electionEpoch
@@ -62,46 +58,6 @@ p-class RaftCore {
             voteCount := 1
             electionEpoch := electionEpoch + 1
             leaderUrl := ""
-    }
-
-    transition getClusterSize(size : Int) {
-        guard: size = clusterSize
-    }
-
-    transition getSelfId(id : Int) {
-        guard: id = selfId
-    }
-
-    transition isLeader(flag : Boolean) {
-        guard: (flag & state = "Leader") | (~flag & state ~= "Leader")
-    }
-
-    transition hasQuorum(flag : Boolean) {
-        guard:
-            state = "Candidate"
-            & ((flag & voteCount * 2 > clusterSize) | (~flag & voteCount * 2 <= clusterSize))
-    }
-
-    transition getElectionSnapshot(
-        epoch : Int,
-        term : Int,
-        candId : Int,
-        lastIdx : Int,
-        lastT : Int,
-        role : String
-    ) {
-        guard:
-            epoch = electionEpoch
-            & term = currentTerm
-            & candId = selfId
-            & lastIdx = length(log)
-            & lastT = lastLogTermVar
-            & role = state
-    }
-
-    transition getPeerUrl(peerId : Int, url : String) {
-        guard:
-            peerId >= 0 & peerId < clusterSize & peerId ~= selfId & url = clusterUrls[peerId]
     }
 
     transition recordVote(peerId : Int, term : Int, granted : Boolean) {
@@ -137,21 +93,6 @@ p-class RaftCore {
             } else {
                 commitIndex
             }
-    }
-
-    transition clientGet(body : String, ok : Boolean) {
-        guard:
-            | (state = "Leader" & ok & body = stateMachine + "")
-            | (state ~= "Leader" & ~ok & body = "")
-    }
-
-    transition redirectBody(body : String, code : Int) {
-        guard:
-            state ~= "Leader"
-            & (
-                | (leaderUrl ~= "" & code = 303 & body = "LEADER " + leaderUrl)
-                | (leaderUrl = "" & code = 503 & body = "NO_LEADER")
-            )
     }
 
     /* Simplified RequestVote: grant if term ok and log at least as long */
@@ -190,33 +131,6 @@ p-class RaftCore {
             leaderUrl := if (inTerm > currentTerm) { "" } else { leaderUrl }
             electionEpoch := if (inTerm > currentTerm) { electionEpoch + 1 } else { electionEpoch }
             currentTerm := if (inTerm > currentTerm) { inTerm } else { currentTerm }
-    }
-
-    /* Heartbeat / replicate last entry only (simplified AppendEntries) */
-    transition getLogMetadata(
-        peerId : Int,
-        term : Int,
-        leaderId : Int,
-        prevLogIndex : Int,
-        prevLogTerm : Int,
-        entryTerm : Int,
-        entryValue : String,
-        entriesLen : Int,
-        leaderCommit : Int,
-        peerUrlOut : String
-    ) {
-        guard:
-            & state = "Leader"
-            & peerId >= 0 & peerId < clusterSize & peerId ~= selfId
-            & term = currentTerm
-            & leaderId = selfId
-            & peerUrlOut = clusterUrls[peerId]
-            & prevLogIndex = length(log)
-            & prevLogTerm = lastLogTermVar
-            & entriesLen = 0
-            & entryTerm = 0
-            & entryValue = ""
-            & leaderCommit = commitIndex
     }
 
     transition handleAppendEntriesResp(
@@ -274,5 +188,95 @@ p-class RaftCore {
         transit:
             stateMachine := stateMachine + [entryValueAt(log, lastApplied)]
             lastApplied := lastApplied + 1
+    }
+
+
+    /*
+     * Getters of RaftCore for accessing info from it.
+     */
+
+    p2p-service transition getListenPort(port : Int) {
+        guard: port = selfPort
+    }
+
+    p2p-service transition getClusterSize(size : Int) {
+        guard: size = clusterSize
+    }
+
+    p2p-service transition getSelfId(id : Int) {
+        guard: id = selfId
+    }
+
+    p2p-service transition isLeader(flag : Boolean) {
+        guard: (flag & state = "Leader") | (~flag & state ~= "Leader")
+    }
+
+    p2p-service transition hasQuorum(flag : Boolean) {
+        guard:
+            state = "Candidate"
+            & ((flag & voteCount * 2 > clusterSize) | (~flag & voteCount * 2 <= clusterSize))
+    }
+
+    p2p-service transition getElectionSnapshot(
+        epoch : Int,
+        term : Int,
+        candId : Int,
+        lastIdx : Int,
+        lastT : Int,
+        role : String
+    ) {
+        guard:
+            epoch = electionEpoch
+            & term = currentTerm
+            & candId = selfId
+            & lastIdx = length(log)
+            & lastT = lastLogTermVar
+            & role = state
+    }
+
+    p2p-service transition getPeerUrl(peerId : Int, url : String) {
+        guard:
+            peerId >= 0 & peerId < clusterSize & peerId ~= selfId & url = clusterUrls[peerId]
+    }
+
+    p2p-service transition getSerializedStateMachine(serializedSM : String, isLeader : Boolean) {
+        guard:
+            | (state = "Leader" & isLeader & serializedSM = stateMachine + "")
+            | (state ~= "Leader" & ~isLeader & serializedSM = "")
+    }
+
+    p2p-service transition getRedirectBody(body : String, code : Int) {
+        guard:
+            state ~= "Leader"
+            & (
+                | (leaderUrl ~= "" & code = 303 & body = "LEADER " + leaderUrl)
+                | (leaderUrl = "" & code = 503 & body = "NO_LEADER")
+            )
+    }
+
+    p2p-service transition getLogMetadata(
+        peerId : Int,
+        term : Int,
+        leaderId : Int,
+        prevLogIndex : Int,
+        prevLogTerm : Int,
+        entryTerm : Int,
+        entryValue : String,
+        entriesLen : Int,
+        leaderCommit : Int,
+        peerUrlOut : String
+    ) {
+        guard:
+            & state = "Leader"
+            & peerId >= 0 & peerId < clusterSize & peerId ~= selfId
+            & term = currentTerm
+            & leaderId = selfId
+            & peerUrlOut = clusterUrls[peerId]
+            & prevLogIndex = length(log)
+            & prevLogTerm = lastLogTermVar
+            & entriesLen = 0
+            & entryTerm = 0
+            & entryValue = ""
+            & leaderCommit = commitIndex
     }
 }

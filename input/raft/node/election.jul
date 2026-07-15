@@ -49,7 +49,7 @@ p-class ElectionDriver {
             armedEpoch := 0
     }
 
-    transition getSelfId(id : Int) {
+    p2p-consumer transition getSelfId(id : Int) {
         guard: step = "hbSelf"
         transit:
             myId := id
@@ -57,7 +57,7 @@ p-class ElectionDriver {
             step := "hbNeedN"
     }
 
-    transition getElectionSnapshot(
+    p2p-consumer transition getElectionSnapshot(
         epoch : Int, term : Int, candId : Int, lastIdx : Int, lastT : Int, role : String
     ) {
         guard: step = "arm" | step = "checkEpoch" | step = "snap"
@@ -91,7 +91,7 @@ p-class ElectionDriver {
         transit: step := "dispatch"
     }
 
-    transition isLeader(flag : Boolean) {
+    p2p-consumer transition isLeader(flag : Boolean) {
         guard: step = "dispatch"
         transit: step := if (flag) { "hbSelf" } else { "checkEpoch" }
     }
@@ -101,7 +101,7 @@ p-class ElectionDriver {
         transit: step := "snap"
     }
 
-    transition getClusterSize(size : Int) {
+    p2p-consumer transition getClusterSize(size : Int) {
         guard: step = "needN" | step = "hbNeedN"
         transit:
             clusterN := size
@@ -119,7 +119,7 @@ p-class ElectionDriver {
         transit: step := "checkQ"
     }
 
-    transition getPeerUrl(peerId : Int, url : String) {
+    p2p-consumer transition getPeerUrl(peerId : Int, url : String) {
         guard: step = "peers" & peerId = curPeer & curPeer ~= myId & curPeer < clusterN
         transit:
             peer := url
@@ -148,7 +148,7 @@ p-class ElectionDriver {
             step := "peers"
     }
 
-    transition hasQuorum(flag : Boolean) {
+    p2p-consumer transition hasQuorum(flag : Boolean) {
         guard: step = "checkQ"
         transit: step := if (flag) { "doLeader" } else { "arm" }
     }
@@ -168,7 +168,7 @@ p-class ElectionDriver {
         transit: step := "hbWait"
     }
 
-    transition getLogMetadata(
+    p2p-consumer transition getLogMetadata(
         peerId : Int, term : Int, leaderId : Int, prevLogIndex : Int, prevLogTerm : Int,
         entryTerm : Int, entryValue : String, entriesLen : Int, leaderCommit : Int, peerUrlOut : String
     ) {
