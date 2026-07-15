@@ -6,6 +6,8 @@ import com.microsoft.z3.Status
 import kotlinx.coroutines.*
 import kotlin.test.*
 import java.util.*
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -238,6 +240,95 @@ class SyncChannelFormulaTest {
             assertTrue(firstWave.none { it.isCancelled })
             assertTrue(jobD.isCompleted)
             assertFalse(jobD.isCancelled)
+        }
+    }
+
+    /**
+     * cancelAndJoin of a waiter must scrub it even when another peer holds the channel mutex
+     * inside compute (pairwiseSatisfiable). Without NonCancellable [removeSelfAfterAbort],
+     * cleanup can be skipped while waiting for the lock; after Context.close a later peer
+     * then translates a dead AST (Z3 "Context closed" / invalid ast).
+     *
+     * Gates only — no sleep-based synchronization.
+     */
+    @Test
+    fun cancelWhileMutexHeldScrubsParticipant() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val computeEntered = CompletableDeferred<Unit>()
+            // Latch (not Deferred.await): compute is a blocking callback, not a suspend function.
+            val computeRelease = CountDownLatch(1)
+            val parkedPairwise = AtomicBoolean(false)
+
+            val chan = SyncChannel<Int, BoolExpr>(2) { constraints ->
+                if (constraints.size == 2 && parkedPairwise.compareAndSet(false, true)) {
+                    computeEntered.complete(Unit)
+                    computeRelease.await()
+                    // Incompatible so H waits rather than leading a sync that removes W itself.
+                    return@SyncChannel Optional.empty()
+                }
+                if (constraints.isEmpty()) {
+                    return@SyncChannel Optional.of(1)
+                }
+                Context().use { ctx ->
+                    val solver = ctx.mkSolver()
+                    constraints.forEach { c ->
+                        solver.add(c.translate(ctx) as BoolExpr)
+                    }
+                    if (solver.check() != Status.SATISFIABLE) {
+                        Optional.empty()
+                    } else {
+                        Optional.of(1)
+                    }
+                }
+            }
+
+            val ctxW = Context()
+            val wJob = launch {
+                chan.sync(ctxW.mkTrue())
+            }
+            awaitParticipantCount(chan, 1)
+
+            val ctxH = Context()
+            val hJob = launch {
+                try {
+                    chan.sync(ctxH.mkTrue())
+                } finally {
+                    ctxH.close()
+                }
+            }
+
+            withTimeout(gateTimeout) { computeEntered.await() }
+
+            val joinW = async { wJob.cancelAndJoin() }
+            // NonCancellable scrub waits on the mutex H still holds inside compute.
+            // Do not call participantCountForTests here — it takes the same mutex and would deadlock
+            // with compute parked under withLock.
+            assertFalse(joinW.isCompleted)
+
+            computeRelease.countDown()
+            withTimeout(gateTimeout) { joinW.await() }
+
+            // W scrubbed; H remains as the lone waiter.
+            // Without NonCancellable cleanup, W would still be registered (count == 2).
+            assertEquals(1, chan.participantCountForTests())
+            ctxW.close()
+
+            val dJob = launch {
+                val ctxD = Context()
+                try {
+                    val result = chan.sync(ctxD.mkTrue())
+                    assertTrue(result.isPresent)
+                } finally {
+                    ctxD.close()
+                }
+            }
+            withTimeout(gateTimeout) {
+                hJob.join()
+                dJob.join()
+            }
+            assertEquals(0, chan.participantCountForTests())
+            assertFalse(hJob.isCancelled)
+            assertFalse(dJob.isCancelled)
         }
     }
 

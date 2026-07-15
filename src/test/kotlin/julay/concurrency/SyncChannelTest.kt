@@ -6,6 +6,7 @@ import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 
 class SyncChannelTest {
 
@@ -142,16 +143,23 @@ class SyncChannelTest {
                 val t1 = launch { chan.sync() }
                 val t2 = launch { chan.sync() }
                 val t3 = launch { chan.sync() }
-                delay(4.milliseconds)
-                // two threads will have synced, so exactly one must be alive
-                assertTrue(t1.isActive || t2.isActive || t3.isActive)
-                assertTrue((!t1.isActive && !t2.isActive) || (!t1.isActive && !t3.isActive) || (!t2.isActive && !t3.isActive))
+                val jobs = listOf(t1, t2, t3)
+
+                // Wait until one size-2 sync has completed: exactly one waiter remains.
+                withTimeout(5.seconds) {
+                    while (true) {
+                        val active = jobs.count { it.isActive }
+                        val waiting = chan.participantCountForTests()
+                        if (active == 1 && waiting == 1) break
+                        yield()
+                    }
+                }
 
                 chan.close()
-                delay(4.milliseconds)
-                assertFalse(t1.isActive)
-                assertFalse(t2.isActive)
-                assertFalse(t3.isActive)
+                withTimeout(5.seconds) {
+                    jobs.forEach { it.join() }
+                }
+                assertTrue(jobs.none { it.isActive })
             }
         }
     }

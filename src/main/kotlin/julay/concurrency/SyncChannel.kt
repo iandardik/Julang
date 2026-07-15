@@ -88,10 +88,15 @@ class SyncChannel<V : Any, C : Any>(
     }
 
     private suspend fun removeSelfAfterAbort(me: Participant<V, C>) {
-        me.syncValueChan.close()
-        mutex.withLock {
-            if (!closed) {
-                removeParticipants(setOf(me))
+        // Must not be interruptible: Select cancelAndJoin can otherwise throw while we wait
+        // for the channel mutex, skip removeParticipants, then Proc Context.close() — leaving
+        // a dead AST in participants for later pairwiseSatisfiable/translate.
+        withContext(NonCancellable) {
+            me.syncValueChan.close()
+            mutex.withLock {
+                if (!closed) {
+                    removeParticipants(setOf(me))
+                }
             }
         }
     }
