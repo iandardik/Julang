@@ -15,8 +15,21 @@ import kotlin.time.Duration.Companion.seconds
 
 class SyncChannelFormulaTest {
     private val aliveCheckTimeout = 100.milliseconds
-    private val notAliveCheckTimeout = 100.milliseconds
     private val gateTimeout = 5.seconds
+
+    private fun translateCompute(): (Set<BoolExpr>) -> Optional<Int> = { constraints ->
+        Context().use { ctx ->
+            val solver = ctx.mkSolver()
+            constraints.forEach { c ->
+                solver.add(c.translate(ctx) as BoolExpr)
+            }
+            if (solver.check() != Status.SATISFIABLE) {
+                Optional.empty()
+            } else {
+                Optional.of(1)
+            }
+        }
+    }
 
     @Test
     fun testUNSATHangs() = runBlocking {
@@ -38,8 +51,8 @@ class SyncChannelFormulaTest {
                 }
                 assertTrue(t1.isActive)
                 assertTrue(t2.isActive)
-                t1.cancel()
-                t2.cancel()
+                t1.cancelAndJoin()
+                t2.cancelAndJoin()
             }
         }
     }
@@ -62,9 +75,9 @@ class SyncChannelFormulaTest {
                     t1.join()
                     t2.join()
                 }
-                // two UNSAT threads should still be active
                 assertTrue(t1.isActive)
                 assertTrue(t2.isActive)
+                awaitParticipantCount(chan, 2)
 
                 val t3 = launch {
                     val ctx = Context()
@@ -74,8 +87,9 @@ class SyncChannelFormulaTest {
                     val ctx = Context()
                     chan.sync(ctx.mkGt(ctx.mkIntConst("x"), ctx.mkInt(0)))
                 }
-                delay(notAliveCheckTimeout)
-                // the threads should have synced
+                withTimeout(gateTimeout) {
+                    t1.join(); t2.join(); t3.join(); t4.join()
+                }
                 assertFalse(t1.isActive)
                 assertFalse(t2.isActive)
                 assertFalse(t3.isActive)
@@ -104,12 +118,16 @@ class SyncChannelFormulaTest {
                 }
                 assertTrue(t1.isActive)
                 assertTrue(t2.isActive)
+                awaitParticipantCount(chan, 2)
 
                 val t3 = launch {
                     val ctx = Context()
                     chan.sync(ctx.mkLt(ctx.mkIntConst("x"), ctx.mkInt(0)))
                 }
-                delay(notAliveCheckTimeout)
+                withTimeout(gateTimeout) {
+                    t1.join()
+                    t3.join()
+                }
                 assertFalse(t1.isActive)
                 assertTrue(t2.isActive)
                 assertFalse(t3.isActive)
@@ -118,7 +136,10 @@ class SyncChannelFormulaTest {
                     val ctx = Context()
                     chan.sync(ctx.mkGt(ctx.mkIntConst("x"), ctx.mkInt(0)))
                 }
-                delay(notAliveCheckTimeout)
+                withTimeout(gateTimeout) {
+                    t2.join()
+                    t4.join()
+                }
                 assertFalse(t2.isActive)
                 assertFalse(t4.isActive)
             }
@@ -139,7 +160,7 @@ class SyncChannelFormulaTest {
                     val ctx = Context()
                     chan.sync(ctx.mkGt(ctx.mkIntConst("x"), ctx.mkInt(0)))
                 }
-                delay(aliveCheckTimeout)
+                awaitParticipantCount(chan, 2)
 
                 val t3 = launch {
                     val ctx = Context()
@@ -149,17 +170,100 @@ class SyncChannelFormulaTest {
                     val ctx = Context()
                     chan.sync(ctx.mkGt(ctx.mkIntConst("x"), ctx.mkInt(0)))
                 }
-                delay(aliveCheckTimeout)
-
+                withTimeout(gateTimeout) {
+                    listOf(t1, t2, t3, t4).forEach { it.join() }
+                }
                 // the actual number of times <compute> will be invoked is nondeterministic, but it should be relatively low,
                 // e.g., under 15 times.
                 assertTrue(incVal.get() <= 15)
-
-                t1.cancel()
-                t2.cancel()
-                t3.cancel()
-                t4.cancel()
             }
+        }
+    }
+
+    @Test
+    fun sameAnticonstraintNeverSyncs() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val chan = SyncChannel(2, translateCompute())
+            fun classAnti(ctx: Context) =
+                ctx.mkEq(ctx.mkIntConst("classID"), ctx.mkInt(1))
+
+            val ctxA = Context()
+            val ctxB = Context()
+            val gotSat = AtomicBoolean(false)
+            val a = launch {
+                try {
+                    val r = chan.sync(
+                        Optional.of(ctxA.mkTrue()),
+                        Optional.of(classAnti(ctxA)),
+                        Optional.empty(),
+                    )
+                    if (r.isPresent) gotSat.set(true)
+                } finally {
+                    ctxA.close()
+                }
+            }
+            awaitParticipantCount(chan, 1)
+            val b = launch {
+                try {
+                    val r = chan.sync(
+                        Optional.of(ctxB.mkTrue()),
+                        Optional.of(classAnti(ctxB)),
+                        Optional.empty(),
+                    )
+                    if (r.isPresent) gotSat.set(true)
+                } finally {
+                    ctxB.close()
+                }
+            }
+            awaitParticipantCount(chan, 2)
+            assertTrue(a.isActive)
+            assertTrue(b.isActive)
+            withTimeoutOrNull(aliveCheckTimeout) {
+                a.join(); b.join()
+            }
+            assertTrue(a.isActive)
+            assertTrue(b.isActive)
+            assertFalse(gotSat.get())
+            a.cancelAndJoin()
+            b.cancelAndJoin()
+            assertEquals(0, chan.participantCountForTests())
+        }
+    }
+
+    @Test
+    fun emptyAnticonstraintCanSyncWithAntiPeer() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val chan = SyncChannel(2, translateCompute())
+            val ctxA = Context()
+            val anti = ctxA.mkEq(ctxA.mkIntConst("classID"), ctxA.mkInt(1))
+            val a = launch {
+                try {
+                    val r = chan.sync(
+                        Optional.of(ctxA.mkTrue()),
+                        Optional.of(anti),
+                        Optional.empty(),
+                    )
+                    assertTrue(r.isPresent)
+                } finally {
+                    ctxA.close()
+                }
+            }
+            awaitParticipantCount(chan, 1)
+            val b = launch {
+                val ctxB = Context()
+                try {
+                    val r = chan.sync(ctxB.mkTrue())
+                    assertTrue(r.isPresent)
+                } finally {
+                    ctxB.close()
+                }
+            }
+            withTimeout(gateTimeout) {
+                a.join(); b.join()
+            }
+            assertEquals(0, chan.participantCountForTests())
+            assertFalse(a.isCancelled)
+            assertFalse(b.isCancelled)
         }
     }
 
@@ -175,19 +279,7 @@ class SyncChannelFormulaTest {
     @Test
     fun staleCompatiblePeersNotTranslatedAfterSync() = runBlocking {
         withContext(Dispatchers.Default) {
-            val chan = SyncChannel<Int, BoolExpr>(2) { constraints ->
-                Context().use { ctx ->
-                    val solver = ctx.mkSolver()
-                    constraints.forEach { c ->
-                        solver.add(c.translate(ctx) as BoolExpr)
-                    }
-                    if (solver.check() != Status.SATISFIABLE) {
-                        Optional.empty()
-                    } else {
-                        Optional.of(1)
-                    }
-                }
-            }
+            val chan = SyncChannel(2, translateCompute())
 
             fun classAnti(ctx: Context): BoolExpr =
                 ctx.mkEq(ctx.mkIntConst("classID"), ctx.mkInt(1))
@@ -329,18 +421,6 @@ class SyncChannelFormulaTest {
             assertEquals(0, chan.participantCountForTests())
             assertFalse(hJob.isCancelled)
             assertFalse(dJob.isCancelled)
-        }
-    }
-
-    private suspend fun awaitParticipantCount(
-        chan: SyncChannel<*, *>,
-        expected: Int,
-        timeout: Duration = gateTimeout,
-    ) {
-        withTimeout(timeout) {
-            while (chan.participantCountForTests() != expected) {
-                yield()
-            }
         }
     }
 

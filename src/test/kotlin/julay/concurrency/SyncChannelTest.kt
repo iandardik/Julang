@@ -145,21 +145,55 @@ class SyncChannelTest {
                 val t3 = launch { chan.sync() }
                 val jobs = listOf(t1, t2, t3)
 
-                // Wait until one size-2 sync has completed: exactly one waiter remains.
-                withTimeout(5.seconds) {
-                    while (true) {
-                        val active = jobs.count { it.isActive }
-                        val waiting = chan.participantCountForTests()
-                        if (active == 1 && waiting == 1) break
-                        yield()
-                    }
-                }
+                awaitExactlyOneActive(jobs, chan)
 
                 chan.close()
                 withTimeout(5.seconds) {
                     jobs.forEach { it.join() }
                 }
                 assertTrue(jobs.none { it.isActive })
+            }
+        }
+    }
+
+    @Test
+    fun syncAfterCloseAborts() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val chan = SyncChannel<Int, Int>(2) { Optional.of(0) }
+            val waiter = launch { chan.sync() }
+            awaitParticipantCount(chan, 1)
+
+            chan.close()
+            withTimeout(5.seconds) { waiter.join() }
+            assertTrue(chan.isClosed())
+            assertEquals(0, chan.participantCountForTests())
+
+            val late = chan.sync()
+            assertTrue(late.isEmpty)
+            assertEquals(0, chan.participantCountForTests())
+
+            chan.close() // idempotent
+            assertTrue(chan.isClosed())
+        }
+    }
+
+    @Test
+    fun successfulSyncLeavesChannelEmpty() = runBlocking {
+        withContext(Dispatchers.Default) {
+            for (syncSize in listOf(2, 3)) {
+                val chan = SyncChannel<Int, Int>(syncSize) { Optional.of(42) }
+                val results = mutableListOf<Int>()
+                val jobs = (1..syncSize).map {
+                    launch {
+                        val r = chan.sync()
+                        assertTrue(r.isPresent)
+                        synchronized(results) { results.add(r.result.get()) }
+                    }
+                }
+                withTimeout(5.seconds) { jobs.forEach { it.join() } }
+                assertEquals(0, chan.participantCountForTests())
+                assertEquals(syncSize, results.size)
+                assertTrue(results.all { it == 42 })
             }
         }
     }
@@ -185,18 +219,15 @@ class SyncChannelTest {
                 val t1 = launch { chan.sync() }
                 val t2 = launch { chan.sync() }
                 val t3 = launch { chan.sync() }
-                delay(4.milliseconds)
-                // two threads will have synced, so exactly one must be alive
-                assertTrue(t1.isActive || t2.isActive || t3.isActive)
-                assertTrue((!t1.isActive && !t2.isActive) || (!t1.isActive && !t3.isActive) || (!t2.isActive && !t3.isActive))
+                val jobs = listOf(t1, t2, t3)
 
-                t1.cancel()
-                t2.cancel()
-                t3.cancel()
-                delay(4.milliseconds)
-                assertFalse(t1.isActive)
-                assertFalse(t2.isActive)
-                assertFalse(t3.isActive)
+                awaitExactlyOneActive(jobs, chan)
+
+                withTimeout(5.seconds) {
+                    jobs.forEach { it.cancelAndJoin() }
+                }
+                assertTrue(jobs.none { it.isActive })
+                assertEquals(0, chan.participantCountForTests())
             }
         }
     }
