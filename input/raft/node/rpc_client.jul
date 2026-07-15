@@ -1,3 +1,4 @@
+/* This RPC handles incoming client requests (append / get), not peer Raft RPCs. */
 /*
  * Client command RPCs (append / get).
  *
