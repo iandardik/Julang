@@ -239,6 +239,7 @@ class FunCallExprNode(
     private val loc: ProgramLoc,
     resolved: FunNode? = null,
     private var instantiatedReturnType: Type? = null,
+    private val typeArgs: List<TypeExpr> = emptyList(),
 ) : ExprNode(args) {
     private var resolvedFun: FunNode? = resolved
     private var resolvedBuiltin: FunBuiltin? = null
@@ -247,6 +248,7 @@ class FunCallExprNode(
     override fun programLocation() = loc
     fun callName(): String = name
     fun callArgs(): List<ExprNode> = args
+    fun callTypeArgs(): List<TypeExpr> = typeArgs
     internal fun resolvedFunOrNull(): FunNode? = resolvedFun
     internal fun resolvedBuiltinOrNull(): FunBuiltin? = resolvedBuiltin
     internal fun resolveFun(funNode: FunNode) {
@@ -296,6 +298,9 @@ class FunCallExprNode(
                     else -> builtin.z3Codegen(argStrs)
                 }
             }
+            if (builtin.name == "createEmptyChannel") {
+                return "ctx.mkInt(${Channel.EMPTY_ID})"
+            }
             return builtin.z3Codegen(argStrs)
         }
         return inlinedBody().toZ3GuardString(symbolTypes, argSymbols, forceString)
@@ -304,6 +309,11 @@ class FunCallExprNode(
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
         resolvedBuiltin?.let { builtin ->
             val argStrs = args.map { it.toTransitString(symbolTypes, argSymbols) }
+            if (builtin.name == "createEmptyChannel") {
+                val actName = (typeArgs.singleOrNull() as? TypeExpr.Simple)?.name
+                    ?: throw RuntimeException("createEmptyChannel missing action type argument at $loc")
+                return "Channel.empty(\"${actName.escapeKotlinStringLiteral()}\")"
+            }
             return builtin.kotlinCodegen(argStrs)
         }
         return inlinedBody().toTransitString(symbolTypes, argSymbols)
@@ -318,8 +328,9 @@ class FunCallExprNode(
     }
 
     override fun toString(): String {
+        val typeStr = if (typeArgs.isEmpty()) "" else "<${typeArgs.joinToString(", ")}>"
         val argsStr = args.joinToString(", ")
-        return "$name($argsStr)"
+        return "$name$typeStr($argsStr)"
     }
 }
 
@@ -359,6 +370,7 @@ class VarNode(
             is IntType -> "Int"
             is RealType -> "Real"
             is StringType -> "String"
+            is ChannelType -> "Channel<${type.actionName}>"
             else -> throw RuntimeException("Cannot create flattened VarNode for type $type")
         }
     }
@@ -409,7 +421,8 @@ class TransitionNode(
     private val name : String,
     private val args : ArgsNode,
     private val body : List<ActionBodyNode>,
-    private val loc : ProgramLoc
+    private val loc : ProgramLoc,
+    private val dynamicChannelVar: String? = null,
 ) : ProcClassDeclNode(listOf(args) + body) {
     override fun programLocation() = loc
     override fun transitVars() = body.flatMap { it.transitVars() }
@@ -423,6 +436,7 @@ class TransitionNode(
                 loc,
                 body.flatMap { it.effects() },
                 body.flatMap { it.errors() },
+                dynamicChannelVar = dynamicChannelVar,
             )
         )
     }
@@ -430,16 +444,18 @@ class TransitionNode(
     internal fun body(): List<ActionBodyNode> = body
     internal fun transitionArgs(): ArgsNode = args
     internal fun actionArgs(): List<Variable> = args.actionArgs()
+    internal fun dynamicChannelVar(): String? = dynamicChannelVar
     internal fun withBody(newBody: List<ActionBodyNode>): TransitionNode =
-        TransitionNode(modifier, name, args, newBody, programLocation())
+        TransitionNode(modifier, name, args, newBody, programLocation(), dynamicChannelVar)
     override fun toString(): String {
         val modifierStr = when (modifier) {
             TSAction.SyncRole.Default, TSAction.SyncRole.Consumer -> ""
             TSAction.SyncRole.Service -> "service "
             TSAction.SyncRole.Internal -> "internal "
         }
+        val chanStr = dynamicChannelVar?.let { "<$it>" } ?: ""
         val bodyStr = body.joinToString("\n") { "$it".prependIndent() }
-        return "${modifierStr}transition $name($args) {\n$bodyStr\n}"
+        return "${modifierStr}transition $name$chanStr($args) {\n$bodyStr\n}"
     }
 }
 
@@ -531,14 +547,17 @@ sealed class EffectStmtNode(children : List<ASTNode>) : ASTNode(children) {
 class EffectCallNode(
     private val name : String,
     private val args : List<ExprNode>,
-    private val loc : ProgramLoc
+    private val loc : ProgramLoc,
+    private val typeArgs: List<TypeExpr> = emptyList(),
 ) : EffectStmtNode(args) {
     override fun programLocation() = loc
     override fun callName() = name
     override fun callArgs() = args
+    fun callTypeArgs(): List<TypeExpr> = typeArgs
     override fun toString(): String {
+        val typeStr = if (typeArgs.isEmpty()) "" else "<${typeArgs.joinToString(", ")}>"
         val argStr = args.joinToString(", ") { "$it" }
-        return if (args.isEmpty()) "$name()" else "$name($argStr)"
+        return if (args.isEmpty()) "$name$typeStr()" else "$name$typeStr($argStr)"
     }
 }
 
@@ -547,11 +566,13 @@ class EffectAssignNode(
     val fieldPath : List<String> = emptyList(),
     private val callName : String,
     private val callArgs : List<ExprNode>,
-    private val loc : ProgramLoc
+    private val loc : ProgramLoc,
+    private val typeArgs: List<TypeExpr> = emptyList(),
 ) : EffectStmtNode(callArgs) {
     override fun programLocation() = loc
     override fun callName() = callName
     override fun callArgs() = callArgs
+    fun callTypeArgs(): List<TypeExpr> = typeArgs
 
     internal fun assignKey(): String =
         if (fieldPath.isEmpty()) varName else "$varName.${fieldPath.joinToString(".")}"
@@ -559,8 +580,9 @@ class EffectAssignNode(
     override fun effectAssignVars() = listOf(Pair(assignKey(), programLocation()))
 
     override fun toString(): String {
+        val typeStr = if (typeArgs.isEmpty()) "" else "<${typeArgs.joinToString(", ")}>"
         val argStr = callArgs.joinToString(", ") { "$it" }
-        val callStr = if (callArgs.isEmpty()) "$callName()" else "$callName($argStr)"
+        val callStr = if (callArgs.isEmpty()) "$callName$typeStr()" else "$callName$typeStr($argStr)"
         return "${assignKey()} := $callStr"
     }
 }
@@ -1762,6 +1784,14 @@ class SymbolValueExprNode(
             val typeVal = type.toCodegenTypeVal()
             return if (symbol in argSymbols) {
                 "ctx.mkConst(\"${symbol.escapeKotlinStringLiteral()}\", $typeVal.cellMetadata(ctx).sort)"
+            } else {
+                "$typeVal.toZ3Expr(Value(${symbol.toKotlinIdent()}, $typeVal), ctx)"
+            }
+        }
+        if (type is ChannelType) {
+            val typeVal = type.toCodegenTypeVal()
+            return if (symbol in argSymbols) {
+                "ctx.mkIntConst(\"${symbol.escapeKotlinStringLiteral()}\")"
             } else {
                 "$typeVal.toZ3Expr(Value(${symbol.toKotlinIdent()}, $typeVal), ctx)"
             }

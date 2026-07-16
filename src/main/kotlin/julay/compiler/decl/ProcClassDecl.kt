@@ -21,4 +21,12 @@ data class ActionDecl(
     val loc: ProgramLoc,
     val effects : List<EffectStmtNode> = emptyList(),
     val errors : List<ErrorArmNode> = emptyList(),
-)
+    /**
+     * When non-null, this action requires a dynamic [Channel] bind.
+     * For Julay transitions this is the state-variable name in `transition name<var>(...)`.
+     * Libraries may pass `""` to mark the action dynamic-channel-only without a bind name.
+     */
+    val dynamicChannelVar: String? = null,
+) {
+    val requiresDynamicChannel: Boolean get() = dynamicChannelVar != null
+}

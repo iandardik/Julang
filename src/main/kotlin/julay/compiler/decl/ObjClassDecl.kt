@@ -49,6 +49,7 @@ fun mangleTypeForName(type: Type): String = when (type) {
     is IntType -> "Int"
     is RealType -> "Real"
     is StringType -> "String"
+    is ChannelType -> "Channel_${type.actionName}"
     is ObjClassType -> type.name
     is ListType -> "List_${mangleTypeForName(type.elementType)}"
     is SetType -> "Set_${mangleTypeForName(type.elementType)}"
@@ -99,6 +100,7 @@ internal class ObjClassResolver(
             "Int" -> return FieldTypeResolveResult.Success(intType)
             "Real" -> return FieldTypeResolveResult.Success(realType)
             "String" -> return FieldTypeResolveResult.Success(stringType)
+            "Channel" -> return FieldTypeResolveResult.Failed("Type \"Channel\" expects 1 type argument")
             "List" -> return FieldTypeResolveResult.Failed("Type \"List\" expects 1 type argument")
             "Set" -> return FieldTypeResolveResult.Failed("Type \"Set\" expects 1 type argument")
             "Map" -> return FieldTypeResolveResult.Failed("Type \"Map\" expects 2 type arguments")
@@ -129,6 +131,18 @@ internal class ObjClassResolver(
         typeParamEnv: Map<String, Type>,
     ): FieldTypeResolveResult {
         val ctor = expr.ctor
+        if (ctor == "Channel") {
+            if (expr.args.size != 1) {
+                return FieldTypeResolveResult.Failed("Type \"Channel\" expects 1 type argument")
+            }
+            val actArg = expr.args[0]
+            if (actArg !is TypeExpr.Simple) {
+                return FieldTypeResolveResult.Failed(
+                    "Expected Channel type argument to be an action name",
+                )
+            }
+            return FieldTypeResolveResult.Success(channelType(actArg.name))
+        }
         if (ctor == "List") {
             if (expr.args.size != 1) {
                 return FieldTypeResolveResult.Failed("Type \"List\" expects 1 type argument")
@@ -233,6 +247,7 @@ internal class ObjClassResolver(
         is IntType -> TypeExpr.Simple("Int")
         is RealType -> TypeExpr.Simple("Real")
         is StringType -> TypeExpr.Simple("String")
+        is ChannelType -> TypeExpr.Parametric("Channel", listOf(TypeExpr.Simple(type.actionName)))
         is TypeVar -> TypeExpr.Simple(type.name)
         is ObjClassType -> TypeExpr.Simple(type.name)
         is ListType -> TypeExpr.Parametric("List", listOf(typeToTypeExpr(type.elementType)))
@@ -314,6 +329,7 @@ class ObjClassRegistry private constructor(
                     "Boolean" -> TypeResolveResult.Found(boolType)
                     "Int" -> TypeResolveResult.Found(intType)
                     "String" -> TypeResolveResult.Found(stringType)
+                    "Channel" -> TypeResolveResult.Error("Type \"Channel\" expects 1 type argument")
                     else -> typeParamEnv[expr.name]?.let { TypeResolveResult.Found(it) }
                         ?: ObjClassBuiltinRegistry.lookup(expr.name)?.let { TypeResolveResult.Found(it) }
                         ?: resolvedTypes[expr.name]?.let { TypeResolveResult.Found(it) }
@@ -321,6 +337,18 @@ class ObjClassRegistry private constructor(
                 }
                 is TypeExpr.Parametric -> {
                     when (expr.ctor) {
+                        "Channel" -> {
+                            if (expr.args.size != 1) {
+                                return TypeResolveResult.Error("Type \"Channel\" expects 1 type argument")
+                            }
+                            val actArg = expr.args[0]
+                            if (actArg !is TypeExpr.Simple) {
+                                return TypeResolveResult.Error(
+                                    "Expected Channel type argument to be an action name",
+                                )
+                            }
+                            return TypeResolveResult.Found(channelType(actArg.name))
+                        }
                         "List" -> {
                             if (expr.args.size != 1) {
                                 return TypeResolveResult.Error("Type \"List\" expects 1 type argument")

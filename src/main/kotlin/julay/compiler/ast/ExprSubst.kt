@@ -99,6 +99,7 @@ fun substituteExpr(expr: ExprNode, name: String, replacement: ExprNode): ExprNod
             expr.callArgs().map { substituteExpr(it, name, replacement) },
             expr.programLocation(),
             expr.resolvedFunOrNull(),
+            typeArgs = expr.callTypeArgs(),
         ).also { copy ->
             expr.resolvedBuiltinOrNull()?.let { copy.resolveBuiltin(it) }
             expr.specializedBodyOrNull()?.let { body ->

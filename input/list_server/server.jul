@@ -15,14 +15,16 @@ p-class ServerStarter {
 
 p-class IncReqHandler {
     const httpReq : HttpServerRequest
+    const httpChan : Channel<sendResponse>
     const reqBody : String
     var step : String
     var list : List<String>
 
-    constructor receiveRequest(req : HttpServerRequest) {
+    constructor receiveRequest(req : HttpServerRequest, httpChan : Channel<sendResponse>) {
         transit:
             step := "A"
             httpReq := req
+            httpChan := httpChan
             reqBody := req.body
             list := []
     }
@@ -35,10 +37,9 @@ p-class IncReqHandler {
             list := lst + [reqBody]
     }
 
-    transition sendResponse(req : HttpServerRequest, resp : HttpServerResponse) {
+    transition sendResponse<httpChan>(resp : HttpServerResponse) {
         guard:
             & step = "B"
-            & req = httpReq
             & resp = HttpServerResponse {
                 body := list + "",
                 code := 200

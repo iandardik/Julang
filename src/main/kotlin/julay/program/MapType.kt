@@ -141,6 +141,7 @@ data class MapType(val keyType: Type, val valueType: Type) : Type {
         is BoolType -> ctx.mkFalse()
         is RealType -> ctx.mkReal(0)
         is StringType -> ctx.mkString("")
+        is ChannelType -> ctx.mkInt(Channel.EMPTY_ID.toInt())
         is ListType -> valueType.toZ3Expr(Value(emptyList<Any>(), valueType), ctx)
         is SetType -> valueType.toZ3Expr(Value(emptySet<Any>(), valueType), ctx)
         is MapType -> valueType.toZ3Expr(Value(emptyMap<Any, Any>(), valueType), ctx)
@@ -159,6 +160,7 @@ data class MapType(val keyType: Type, val valueType: Type) : Type {
         is BoolType -> false
         is RealType -> 0.0
         is StringType -> ""
+        is ChannelType -> Channel.empty(type.actionName)
         is ListType -> emptyList<Any>()
         is SetType -> emptySet<Any>()
         is MapType -> emptyMap<Any, Any>()

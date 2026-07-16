@@ -3,7 +3,9 @@ package julay.program.library
 import com.microsoft.z3.Context
 import com.microsoft.z3.Status
 import com.sun.net.httpserver.HttpServer
+import julay.program.ChannelType
 import julay.program.ConcreteAction
+import julay.program.Program
 import julay.program.Value
 import kotlinx.coroutines.runBlocking
 import java.net.InetSocketAddress
@@ -23,12 +25,16 @@ class HttpClientTest {
         server.start()
         try {
             val port = server.address.port
-            val client = JulHttpClient()
+            val program = Program(setOf(JulHttpClient.staticInfo()))
+            val client = JulHttpClient(program)
             for (payload in listOf("ping", "pong")) {
                 val req = HttpClientRequest("http://127.0.0.1:$port/", "POST", payload)
                 val ctxSend = Context()
                 try {
+                    val acts = client.actions(ctxSend)
+                    assertEquals(1, acts.size)
                     val solver = ctxSend.mkSolver()
+                    solver.add(acts.first().guard)
                     solver.add(
                         ctxSend.mkEq(
                             JulHttpClient.reqArg.toZ3Expr(ctxSend),
@@ -36,7 +42,10 @@ class HttpClientTest {
                         ),
                     )
                     assert(solver.check() == Status.SATISFIABLE)
-                    client.transit(ConcreteAction(JulHttpClient.sendRequestAct, ctxSend, solver.model))
+                    val sendAct = ChannelType.withProgramLookup(program) {
+                        ConcreteAction(JulHttpClient.sendRequestAct, ctxSend, solver.model)
+                    }
+                    client.transit(sendAct)
                 } finally {
                     ctxSend.close()
                 }
@@ -55,11 +64,15 @@ class HttpClientTest {
                         ),
                     )
                     assert(solver.check() == Status.SATISFIABLE)
-                    client.transit(ConcreteAction(JulHttpClient.receiveResponseAct, ctxRecv, solver.model))
+                    val recvAct = ChannelType.withProgramLookup(program) {
+                        ConcreteAction(JulHttpClient.receiveResponseAct, ctxRecv, solver.model)
+                    }
+                    client.transit(recvAct)
                 } finally {
                     ctxRecv.close()
                 }
             }
+            assertEquals(0, program.openDynamicChannelCount(JulHttpClient.receiveResponseAct))
         } finally {
             server.stop(0)
         }

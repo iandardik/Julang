@@ -36,7 +36,11 @@ class Proc(
             solver.check() == Status.SATISFIABLE
         }
         val cases = enabledActions.map { act ->
-            val programAction = actionTable[act.symAction]!!
+            val syncChannel = if (act.channel != null) {
+                act.channel.requireOpenSyncChannel()
+            } else {
+                actionTable[act.symAction]!!.channel
+            }
             // Default/Internal: processes from the same p-class never sync.
             // Service/Consumer: service vs client rendezvous (serviceTransition).
             val anticonstraint = when (act.syncRole) {
@@ -47,7 +51,7 @@ class Proc(
                 TSAction.SyncRole.Consumer ->
                     ctx.mkEq(ctx.mkBoolConst("serviceTransition"), ctx.mkFalse())
             }
-            Select.SyncCase(programAction.channel, act.guard, anticonstraint) { concAct: ConcreteAction ->
+            Select.SyncCase(syncChannel, act.guard, anticonstraint) { concAct: ConcreteAction ->
                 nextAct = Optional.of(concAct)
             }
         }

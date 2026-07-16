@@ -75,13 +75,15 @@ p-class ServerStarter {
 
 p-class IncReqHandler {
     var httpReq : HttpServerRequest
+    var httpChan : Channel<sendResponse>
     var localCounter : Int
     var step : String
     var exit : Boolean
 
-    constructor receiveRequest(req : HttpServerRequest) {
+    constructor receiveRequest(req : HttpServerRequest, httpChan : Channel<sendResponse>) {
         transit:
             httpReq := req
+            httpChan := httpChan
             localCounter := -1 // TODO the reverse order causes a compiler bug
             step := "A"
             exit := (req.body = "exit")
@@ -99,10 +101,9 @@ p-class IncReqHandler {
             step := "C"
     }
 
-    transition sendResponse(req : HttpServerRequest, resp : HttpServerResponse) {
+    transition sendResponse<httpChan>(resp : HttpServerResponse) {
         guard:
             & step = "C"
-            & req = httpReq
             & resp = HttpServerResponse {
                 body := localCounter + "",
                 code := 200

@@ -2,6 +2,7 @@ import julaylib.pclass.HttpClient
 import julaylib.pclass.Println
 import julaylib.fun.length
 import julaylib.fun.parseInt
+import julaylib.fun.createEmptyChannel
 
 p-class ClientDispatcher {
     const targetNumReqs : Int
@@ -45,12 +46,14 @@ p-class ClientLogic {
     const reqNum : Int
     var state : String
     var respText : String
+    var httpChan : Channel<receiveResponse>
 
     constructor startReq(num : Int) {
         transit:
             reqNum := num
             state := "createHttp"
             respText := ""
+            httpChan := createEmptyChannel<receiveResponse>()
     }
 
     transition createHttpClient() {
@@ -58,7 +61,7 @@ p-class ClientLogic {
         transit: state := "A"
     }
 
-    transition sendRequest(req : HttpClientRequest) {
+    transition sendRequest(req : HttpClientRequest, httpChan : Channel<receiveResponse>) {
         guard:
             state = "A" & req = HttpClientRequest {
                 url := "http://localhost:8000",
@@ -66,10 +69,11 @@ p-class ClientLogic {
                 body := "ReqNum: " + reqNum
             }
         transit:
+            httpChan := httpChan
             state := "B"
     }
 
-    transition receiveResponse(resp : HttpClientResponse) {
+    transition receiveResponse<httpChan>(resp : HttpClientResponse) {
         guard:
             state = "B"
         transit:

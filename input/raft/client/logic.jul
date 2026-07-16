@@ -2,6 +2,7 @@ import julaylib.pclass.HttpClient
 import julaylib.fun.length
 import julaylib.fun.split
 import julaylib.fun.startsWith
+import julaylib.fun.createEmptyChannel
 
 /*
  * Raft client — CLI:
@@ -21,6 +22,7 @@ p-class RaftClientLogic {
     var respBody : String
     var respCode : Int
     var retried : Boolean
+    var httpChan : Channel<receiveResponse>
 
     constructor initially(args : List<String>) {
         transit:
@@ -32,6 +34,7 @@ p-class RaftClientLogic {
             respBody := ""
             respCode := 0
             retried := false
+            httpChan := createEmptyChannel<receiveResponse>()
             step := "createHttpClient"
     }
 
@@ -40,7 +43,7 @@ p-class RaftClientLogic {
         transit: step := "send"
     }
 
-    transition sendRequest(req : HttpClientRequest) {
+    transition sendRequest(req : HttpClientRequest, httpChan : Channel<receiveResponse>) {
         guard:
             & step = "send"
             & req = HttpClientRequest {
@@ -48,10 +51,12 @@ p-class RaftClientLogic {
                 method := "POST",
                 body := reqBody
             }
-        transit: step := "recv"
+        transit:
+            httpChan := httpChan
+            step := "recv"
     }
 
-    transition receiveResponse(resp : HttpClientResponse) {
+    transition receiveResponse<httpChan>(resp : HttpClientResponse) {
         guard: step = "recv"
         transit:
             respBody := resp.body

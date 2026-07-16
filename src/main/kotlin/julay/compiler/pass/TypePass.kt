@@ -134,8 +134,35 @@ private fun TransitionNode.typePassTransition(
     funBuiltinEnv: Map<String, FunBuiltin>,
 ): List<CompileError> {
     val argErrors = transitionArgs().typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    val actName = transitionName()
+    val channelErrors = dynamicChannelVar()?.let { chanVar ->
+        when (val ty = symbolEnv[chanVar]) {
+            null -> listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Unknown channel variable \"$chanVar\" in dynamic-channel bind",
+                ),
+            )
+            !is ChannelType -> listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected dynamic-channel bind \"$chanVar\" to have type Channel<$actName> but got $ty",
+                ),
+            )
+            else -> if (ty.actionName != actName) {
+                listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "Expected dynamic-channel bind \"$chanVar\" to have type Channel<$actName> but got $ty",
+                    ),
+                )
+            } else {
+                emptyList()
+            }
+        }
+    } ?: emptyList()
     val actionEnv = symbolEnv + transitionArgs().argsTypeMap() + transitionArgs().actionArgs().associate { it.name to it.type }
-    return argErrors + body().flatMap { it.typePass(actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    return argErrors + channelErrors + body().flatMap { it.typePass(actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
 }
 
 private fun ArgNode.typePassArgNode(symbolEnv: Map<String, Type>, registry: ObjClassRegistry, funEnv: Map<String, FunNode>, typeParamEnv: Map<String, Type>,
@@ -258,9 +285,54 @@ private fun EffectCallNode.typePassEffectCall(
     if (childrenErrors.isNotEmpty()) {
         return childrenErrors
     }
+    if (callName() == "closeChannel") {
+        val typeArgs = callTypeArgs()
+        if (typeArgs.size != 1) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected effect \"closeChannel\" to take 1 type argument but got ${typeArgs.size}",
+                ),
+            )
+        }
+        val actArg = typeArgs[0]
+        if (actArg !is TypeExpr.Simple) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected closeChannel type argument to be an action name",
+                ),
+            )
+        }
+        if (callArgs().size != 1) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected effect \"closeChannel\" to take 1 argument(s) but got ${callArgs().size}",
+                ),
+            )
+        }
+        val expected = channelType(actArg.name)
+        val actual = callArgs()[0].getType()
+        return assertOrCompileError(
+            actual == expected,
+            OneLocCompileError(
+                callArgs()[0].programLocation(),
+                "Expected argument to \"closeChannel\" to have type $expected but got $actual",
+            ),
+        )
+    }
     val builtin = EffectBuiltinRegistry.lookup(callName())
     if (builtin == null) {
         return listOf(OneLocCompileError(programLocation(), "Unknown effect builtin \"${callName()}\""))
+    }
+    if (callTypeArgs().isNotEmpty()) {
+        return listOf(
+            OneLocCompileError(
+                programLocation(),
+                "Expected effect \"${callName()}\" not to take type arguments",
+            ),
+        )
     }
     if (builtin.paramTypes.size != callArgs().size) {
         return listOf(
@@ -292,7 +364,7 @@ private fun EffectAssignNode.typePassEffectAssign(
     if (childrenErrors.isNotEmpty()) {
         return childrenErrors
     }
-    val callErrors = EffectCallNode(callName(), callArgs(), programLocation()).typePassEffectCall(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    val callErrors = EffectCallNode(callName(), callArgs(), programLocation(), callTypeArgs()).typePassEffectCall(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     if (callErrors.isNotEmpty()) {
         return callErrors
     }
@@ -825,6 +897,37 @@ private fun FunCallExprNode.typePassFunCall(
         val argTypes = callArgs().map { it.getType() }
         builtin.checkArgs(argTypes)?.let { msg ->
             return listOf(OneLocCompileError(programLocation(), msg))
+        }
+        if (builtin.name == "createEmptyChannel") {
+            val typeArgs = callTypeArgs()
+            if (typeArgs.size != 1) {
+                return listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "Expected function \"createEmptyChannel\" to take 1 type argument but got ${typeArgs.size}",
+                    ),
+                )
+            }
+            val actArg = typeArgs[0]
+            if (actArg !is TypeExpr.Simple) {
+                return listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "Expected createEmptyChannel type argument to be an action name",
+                    ),
+                )
+            }
+            resolveInstantiatedReturnType(channelType(actArg.name))
+            inferExprType(symbolEnv)
+            return emptyList()
+        }
+        if (callTypeArgs().isNotEmpty()) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected function \"${callName()}\" not to take type arguments",
+                ),
+            )
         }
         resolveInstantiatedReturnType(builtin.returnType)
         inferExprType(symbolEnv)

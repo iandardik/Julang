@@ -1,0 +1,6 @@
+tags:
+  - compile-only
+source: regression/input/syntax-errors/dynamic-channel-bare-channel.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - 'Type "Channel" expects 1 type argument'

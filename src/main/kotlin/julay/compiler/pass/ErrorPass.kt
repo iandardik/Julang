@@ -80,6 +80,44 @@ private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse:
             it.decl.modifier == TSAction.SyncRole.Default || it.decl.modifier == TSAction.SyncRole.Consumer
         }
 
+        val dynamicFlags = namedOffers.map { it.decl.requiresDynamicChannel }
+        val isDynamic = dynamicFlags.any { it }
+        val dynamicMixErrors = if (isDynamic && dynamicFlags.any { !it }) {
+            val withDyn = namedOffers.first { it.decl.requiresDynamicChannel }
+            val withoutDyn = namedOffers.first { !it.decl.requiresDynamicChannel }
+            listOf(
+                TwoLocsCompileError(
+                    withDyn.decl.loc,
+                    withoutDyn.decl.loc,
+                    "Expected action \"$name\" not to mix dynamic-channel and static-channel offers",
+                ),
+            )
+        } else {
+            emptyList()
+        }
+        val dynamicTagErrors = if (isDynamic) {
+            buildList {
+                if (services.isNotEmpty()) {
+                    add(
+                        OneLocCompileError(
+                            services[0].decl.loc,
+                            "Expected dynamic-channel action \"$name\" not to use the service tag",
+                        ),
+                    )
+                }
+                if (internals.isNotEmpty()) {
+                    add(
+                        OneLocCompileError(
+                            internals[0].decl.loc,
+                            "Expected dynamic-channel action \"$name\" not to use the internal tag",
+                        ),
+                    )
+                }
+            }
+        } else {
+            emptyList()
+        }
+
         val tagMixErrors = buildList {
             if (internals.isNotEmpty() && (services.isNotEmpty() || defaults.isNotEmpty())) {
                 add(
@@ -139,9 +177,28 @@ private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse:
                     ),
                 )
             }
+            if (constructors.isNotEmpty() && isDynamic) {
+                add(
+                    OneLocCompileError(
+                        constructors[0].decl.loc,
+                        "Expected dynamic-channel action \"$name\" not to have a constructor",
+                    ),
+                )
+            }
         }
 
         val peerErrors = when {
+            isDynamic -> {
+                val t = transitions.map { it.pclassKey }.toSet().size
+                assertOrCompileError(
+                    t == 2 && constructors.isEmpty(),
+                    OneLocCompileError(
+                        refAction.loc,
+                        "Expected dynamic-channel action \"$name\" to have exactly two transitioning p-classes, " +
+                            "but found $t transitioning p-class(es) and ${if (constructors.isNotEmpty()) 1 else 0} constructor offer(s)",
+                    ),
+                )
+            }
             internals.isNotEmpty() -> {
                 val t = transitions.map { it.pclassKey }.toSet().size
                 assertOrCompileError(
@@ -168,7 +225,7 @@ private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse:
             }
         }
 
-        argMismatches + tagMixErrors + constructorErrors + peerErrors
+        argMismatches + dynamicMixErrors + dynamicTagErrors + tagMixErrors + constructorErrors + peerErrors
     }
 }
 

@@ -6,6 +6,8 @@ import julay.program.SetType
 import julay.program.StringType
 import julay.program.Type
 import julay.program.boolType
+import julay.program.Channel
+import julay.program.channelType
 import julay.program.intType
 import julay.program.listType
 import julay.program.stringType
@@ -148,6 +150,24 @@ object FunBuiltinRegistry {
         },
     )
 
+    private val createEmptyChannelBuiltin = FunBuiltin(
+        name = "createEmptyChannel",
+        arity = 0,
+        // Placeholder; TypePass sets ChannelType from createEmptyChannel<ActName>() type arg.
+        returnType = channelType("_"),
+        checkArgs = { argTypes ->
+            when {
+                argTypes.isNotEmpty() ->
+                    "Expected function \"createEmptyChannel\" to take 0 argument(s) but got ${argTypes.size}"
+                else -> null
+            }
+        },
+        kotlinCodegen = { _ ->
+            throw RuntimeException("createEmptyChannel codegen requires a type argument")
+        },
+        z3Codegen = { _ -> "ctx.mkInt(${Channel.EMPTY_ID})" },
+    )
+
     private val builtins = mapOf(
         lengthBuiltin.name to lengthBuiltin,
         parseIntBuiltin.name to parseIntBuiltin,
@@ -156,6 +176,7 @@ object FunBuiltinRegistry {
         trimBuiltin.name to trimBuiltin,
         portFromUrlBuiltin.name to portFromUrlBuiltin,
         startsWithBuiltin.name to startsWithBuiltin,
+        createEmptyChannelBuiltin.name to createEmptyChannelBuiltin,
     )
 
     val all: Collection<FunBuiltin> get() = builtins.values

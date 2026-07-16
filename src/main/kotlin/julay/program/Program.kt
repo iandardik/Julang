@@ -27,6 +27,10 @@ class Program {
     private val constructorsByAction:
         Map<SymbolicAction, List<Pair<TransitionSystemStaticInfo, suspend (Program, ConcreteAction) -> TransitionSystem>>>
     private val constructorActions: Set<SymbolicAction>
+    private val dynamicChannelActions: Set<SymbolicAction>
+    /** Immutable once built — not a concurrent map. */
+    private val channelTables: Map<SymbolicAction, DynamicChannelTable>
+    private val channelTablesByName: Map<String, DynamicChannelTable>
     private val initiallyAction: SymbolicAction
     private val initiallyConcrete: ConcreteAction
 
@@ -42,6 +46,7 @@ class Program {
         // - service actions: at most one servicer; consumers are untagged defaults
         // - a service with no consumers is a legal intentional deadlock (warned at compile time)
         // - constructor peers are a compile-time sync abstraction; runtime spawns locally via spawn()
+        // - dynamic-channel actions have no static SyncChannel (rendezvous via Channel instances)
 
         this.componentInfo = componentInfo
 
@@ -59,8 +64,14 @@ class Program {
             .groupBy({ it.first }, { it.second })
         constructorActions = constructorsByAction.keys
 
-        // Channels for live alphabets only (constructors are not offered on a channel).
+        dynamicChannelActions = componentInfo.flatMap { it.dynamicChannelActions }.toSet()
+        channelTables = dynamicChannelActions.associateWith { DynamicChannelTable() }
+        channelTablesByName = channelTables.mapKeys { it.key.name }
+
+        // Channels for live alphabets only (constructors and dynamic-channel actions omitted).
         val allActions = componentInfo.flatMap { it.alphabet }.toSet()
+            .filter { it !in dynamicChannelActions }
+            .toSet()
         val actionCounts = allActions.associateWith { setAct ->
             when {
                 setAct.isInternal -> 1
@@ -70,43 +81,41 @@ class Program {
         }
 
         val channelTable = actionCounts.keys.associateWith { act ->
-            val syncSize = actionCounts[act]!!
-            // Ephemeral Z3 Contexts: channels live for the program lifetime, but each SAT /
-            // model extraction uses a scratch Context that is closed immediately after.
-            // (ConcreteAction copies assignments into plain Java Values.)
-            // c.translate(ctx) is required because each constraint comes from a different
-            // proc thread / Context.
-            fun constraintsSatisfiable(constraints: Set<BoolExpr>): Boolean =
-                Context().use { ctx ->
-                    val solver = ctx.mkSolver()
-                    constraints.forEach { c -> solver.add(c.translate(ctx) as BoolExpr) }
-                    solver.check() == Status.SATISFIABLE
-                }
-            SyncChannel(
-                syncSize,
-                satisfiable = ::constraintsSatisfiable,
-                compute = { constraints ->
-                    Context().use { ctx ->
-                        val solver = ctx.mkSolver()
-                        constraints.forEach { c -> solver.add(c.translate(ctx) as BoolExpr) }
-                        if (solver.check() != Status.SATISFIABLE) {
-                            Optional.empty()
-                        } else if (act.args.isEmpty()) {
-                            // Avoid allocating a Model when no args need extraction.
-                            Optional.of(ConcreteAction(act, emptyMap()))
-                        } else {
-                            // Extract ConcreteAction (Kotlin Values only) before Context closes.
-                            Optional.of(ConcreteAction(act, ctx, solver.model))
-                        }
-                    }
-                },
-            )
+            makeStaticSyncChannel(act, actionCounts[act]!!)
         }
 
         actionTable = channelTable.keys.associateWith { ProgramAction(it, channelTable[it]!!) }
     }
 
     fun isConstructorAction(act: SymbolicAction): Boolean = act in constructorActions
+
+    fun lookupDynamicChannel(actionName: String, id: Long): Channel {
+        val table = channelTablesByName[actionName]
+            ?: throw IllegalStateException("No dynamic channel table for action \"$actionName\"")
+        return table.lookup(id)
+    }
+
+    /**
+     * Allocates a live dynamic [Channel] for [act] (sync size 2). Creator must [closeChannel] after use.
+     * [act] selects the per-action [DynamicChannelTable] and stamps [Channel.ownerAction]; the
+     * underlying SyncChannel compute reads ownerAction from the Channel (not closed over [act]).
+     */
+    fun createDynamicChannel(act: SymbolicAction): Channel {
+        val table = channelTables[act]
+            ?: throw IllegalArgumentException("Action ${act.name} is not a dynamic-channel action")
+        lateinit var channel: Channel
+        val sync = makeDynamicSyncChannel { channel.ownerAction!! }
+        channel = Channel.create(sync, act, table)
+        return channel
+    }
+
+    /** Open channels registered for [act] (for in-process leak tests). */
+    fun openDynamicChannelCount(act: SymbolicAction): Int =
+        channelTables[act]?.size() ?: 0
+
+    /** Sum of open channels across all dynamic actions (test-only probe via HttpServer debug). */
+    fun totalOpenDynamicChannelCount(): Int =
+        channelTables.values.sumOf { it.size() }
 
     fun spawnProc(ts: TransitionSystem, tsInfo: TransitionSystemStaticInfo) {
         godScope.launch {
@@ -131,4 +140,64 @@ class Program {
         // Intentional process end uses exitProcess from a child (e.g. ExitSystem).
         awaitCancellation()
     }
+
+    private fun constraintsSatisfiable(constraints: Set<BoolExpr>): Boolean =
+        Context().use { ctx ->
+            val solver = ctx.mkSolver()
+            constraints.forEach { c -> solver.add(c.translate(ctx) as BoolExpr) }
+            solver.check() == Status.SATISFIABLE
+        }
+
+    private fun extractConcreteAction(
+        act: SymbolicAction,
+        constraints: Set<BoolExpr>,
+    ): Optional<ConcreteAction> =
+        Context().use { ctx ->
+            val solver = ctx.mkSolver()
+            constraints.forEach { c -> solver.add(c.translate(ctx) as BoolExpr) }
+            if (solver.check() != Status.SATISFIABLE) {
+                Optional.empty()
+            } else if (act.args.isEmpty()) {
+                Optional.of(ConcreteAction(act, emptyMap()))
+            } else {
+                Optional.of(ConcreteAction(act, ctx, solver.model))
+            }
+        }
+
+    private fun makeStaticSyncChannel(
+        act: SymbolicAction,
+        syncSize: Int,
+    ): SyncChannel<ConcreteAction, BoolExpr> {
+        // Ephemeral Z3 Contexts: channels live for the program lifetime, but each SAT /
+        // model extraction uses a scratch Context that is closed immediately after.
+        // (ConcreteAction copies assignments into plain Java Values.)
+        // c.translate(ctx) is required because each constraint comes from a different
+        // proc thread / Context.
+        return SyncChannel(
+            syncSize,
+            satisfiable = ::constraintsSatisfiable,
+            compute = { constraints ->
+                ChannelType.withProgramLookup(this@Program) {
+                    extractConcreteAction(act, constraints)
+                }
+            },
+        )
+    }
+
+    /**
+     * Dynamic SyncChannel: [ownerAction] is read from the Channel at sync time (not closed over
+     * a captured SymbolicAction at factory time).
+     */
+    private fun makeDynamicSyncChannel(
+        ownerAction: () -> SymbolicAction,
+    ): SyncChannel<ConcreteAction, BoolExpr> =
+        SyncChannel(
+            syncSize = 2,
+            satisfiable = ::constraintsSatisfiable,
+            compute = { constraints ->
+                ChannelType.withProgramLookup(this@Program) {
+                    extractConcreteAction(ownerAction(), constraints)
+                }
+            },
+        )
 }

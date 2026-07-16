@@ -13,6 +13,10 @@ data class TSAction(
     val symAction : SymbolicAction,
     val guard : BoolExpr,
     val syncRole : SyncRole = SyncRole.Default,
+    /**
+     * When non-null, sync on this dynamic [Channel] instead of the static [Program.actionTable] channel.
+     */
+    val channel : Channel? = null,
 ) {
     /**
      * [Default] / [Internal] come from source tags (untagged / `internal`).

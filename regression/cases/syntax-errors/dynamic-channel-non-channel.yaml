@@ -1,0 +1,6 @@
+tags:
+  - compile-only
+source: regression/input/syntax-errors/dynamic-channel-non-channel.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - 'Expected dynamic-channel bind "n" to have type Channel<sendResponse>'

@@ -103,13 +103,14 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
 
     override fun visitFun_call(ctx: JulayParser.Fun_callContext?): ASTNode {
         val name = ctx!!.ID().text
+        val typeArgs = ctx.typeArgs()?.typeExpr()?.map { parseTypeExpr(it) } ?: emptyList()
         val args = ctx.expr().map { visit(it) }.map {
             if (it !is ExprNode) {
                 throw RuntimeException("Expected function call arguments to be expressions")
             }
             it
         }
-        return FunCallExprNode(name, args, sourceLocation(ctx))
+        return FunCallExprNode(name, args, sourceLocation(ctx), typeArgs = typeArgs)
     }
 
     override fun visitOclass(ctx: JulayParser.OclassContext?): ASTNode {
@@ -204,6 +205,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             else -> TSAction.SyncRole.Default
         }
         val name = ctx.ID().text
+        val dynamicChannelVar = ctx.channel_bind()?.ID()?.text
         val args = visit(ctx.args()).let { argsNode ->
             if (argsNode !is ArgsNode) {
                 throw RuntimeException("Expected ArgsNode but got $argsNode")
@@ -218,7 +220,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 }
                 it
             }
-        return TransitionNode(modifier, name, args, body, sourceLocation(ctx))
+        return TransitionNode(modifier, name, args, body, sourceLocation(ctx), dynamicChannelVar)
     }
 
     override fun visitArgs(ctx: JulayParser.ArgsContext?): ASTNode {
@@ -320,6 +322,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                         call.callName(),
                         call.callArgs(),
                         sourceLocation(ctx),
+                        call.callTypeArgs(),
                     )
                     is SymbolValueExprNode -> EffectAssignNode(
                         lhs.symbol,
@@ -327,6 +330,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                         call.callName(),
                         call.callArgs(),
                         sourceLocation(ctx),
+                        call.callTypeArgs(),
                     )
                     else -> throw RuntimeException("Expected field access on left-hand side of effect assignment")
                 }
@@ -338,13 +342,14 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
 
     override fun visitEffect_call(ctx: JulayParser.Effect_callContext?): ASTNode {
         val name = ctx!!.ID().text
+        val typeArgs = ctx.typeArgs()?.typeExpr()?.map { parseTypeExpr(it) } ?: emptyList()
         val args = ctx.expr().map { visit(it) }.map {
             if (it !is ExprNode) {
                 throw RuntimeException("Expected effect call arguments to be expressions")
             }
             it
         }
-        return EffectCallNode(name, args, sourceLocation(ctx))
+        return EffectCallNode(name, args, sourceLocation(ctx), typeArgs)
     }
 
     override fun visitVar_transit(ctx: JulayParser.Var_transitContext?): ASTNode {

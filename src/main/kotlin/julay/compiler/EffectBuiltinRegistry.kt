@@ -41,11 +41,20 @@ object EffectBuiltinRegistry {
         kotlinCodegen = { args -> "delay(${args[0]}.seconds)" },
     )
 
+    private val closeChannelBuiltin = EffectBuiltin(
+        name = "closeChannel",
+        // Parametric: closeChannel<ActName>(chan : Channel<ActName>); validated in TypePass.
+        paramTypes = listOf(stringType),
+        returnType = null,
+        kotlinCodegen = { args -> "closeChannel(${args[0]})" },
+    )
+
     private val builtins = mapOf(
         printlnBuiltin.name to printlnBuiltin,
         exitProcessBuiltin.name to exitProcessBuiltin,
         readlnBuiltin.name to readlnBuiltin,
         delaySecondsBuiltin.name to delaySecondsBuiltin,
+        closeChannelBuiltin.name to closeChannelBuiltin,
     )
 
     fun lookup(name: String): EffectBuiltin? = builtins[name]
@@ -54,6 +63,7 @@ object EffectBuiltinRegistry {
         "kotlin.system.exitProcess",
         "kotlin.time.Duration.Companion.seconds",
         "kotlinx.coroutines.delay",
+        "julay.program.closeChannel",
     )
 
     fun effectStmtKotlinString(
@@ -75,6 +85,14 @@ object EffectBuiltinRegistry {
     }
 
     private fun callKotlinString(name: String, argStrings: List<String>): String {
+        if (name == "closeChannel") {
+            if (argStrings.size != 1) {
+                throw RuntimeException(
+                    "Expected effect \"closeChannel\" to take 1 argument(s) but got ${argStrings.size}",
+                )
+            }
+            return "closeChannel(${argStrings[0]})"
+        }
         val builtin = lookup(name)
             ?: throw RuntimeException("Unknown effect builtin \"$name\"")
         if (builtin.paramTypes.size != argStrings.size) {

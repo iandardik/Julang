@@ -357,6 +357,11 @@ private fun ProcClassDecl.kotlinStaticInfoString(servicedActionNames: Set<String
     val transitionInfo = transitions.joinToString(",\n") {
         it.kotlinStaticInfoString(servicedActionNames).prependIndent()
     }
+    val dynamicActs = transitions
+        .filter { it.requiresDynamicChannel }
+        .joinToString(",\n") {
+            it.kotlinStaticInfoString(servicedActionNames).prependIndent()
+        }
     val constructorPairs = constructors
         .joinToString(",\n") { ctor ->
             val actSigStr = ctor.kotlinStaticInfoString(servicedActionNames)
@@ -392,6 +397,9 @@ private fun ProcClassDecl.kotlinStaticInfoString(servicedActionNames: Set<String
             "\n)," +
             "\nmapOf<SymbolicAction, suspend (Program, ConcreteAction) -> TransitionSystem>(" +
             "\n$constructorPairs" +
+            "\n)," +
+            "\ndynamicChannelActions = setOf(" +
+            "\n$dynamicActs" +
             "\n)").prependIndent() +
         "\n)"
 }
@@ -425,10 +433,13 @@ private fun ActionDecl.kotlinActionString(
         TSAction.SyncRole.Service -> "TSAction.SyncRole.Service"
         TSAction.SyncRole.Consumer -> "TSAction.SyncRole.Consumer"
     }
+    val channelStr = dynamicChannelVar?.let { chanVar ->
+        ",\nchannel = ${chanVar.toKotlinIdent()}"
+    } ?: ""
     return "TSAction(" +
         "\n$actionSigStr,".prependIndent() +
         "\n$guardStr,".prependIndent() +
-        "\n$syncRoleStr".prependIndent() +
+        "\n$syncRoleStr$channelStr".prependIndent() +
         "\n)"
 }
 

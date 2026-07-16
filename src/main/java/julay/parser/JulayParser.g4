@@ -83,7 +83,11 @@ constructor
     ;
 
 transition
-    : (INTERNAL | SERVICE)? TRANSITION ID args LCURLY action_body* RCURLY
+    : (INTERNAL | SERVICE)? TRANSITION ID channel_bind? args LCURLY action_body* RCURLY
+    ;
+
+channel_bind
+    : LT ID GT
     ;
 
 args
@@ -138,7 +142,7 @@ effect_stmt
     ;
 
 effect_call
-    : ID LPAREN (expr (COMMA expr)*)? RPAREN
+    : ID typeArgs? LPAREN (expr (COMMA expr)*)? RPAREN
     ;
 
 // order approximately according to the Java rules: https://introcs.cs.princeton.edu/java/11precedence/
@@ -231,7 +235,7 @@ index_or_slice
     ;
 
 fun_call
-    : ID LPAREN (expr (COMMA expr)*)? RPAREN
+    : ID typeArgs? LPAREN (expr (COMMA expr)*)? RPAREN
     ;
 
 oclass_literal

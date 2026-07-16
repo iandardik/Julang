@@ -1,0 +1,23 @@
+import julaylib.pclass.Println
+
+p-class Bad {
+    var httpChan : Channel
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            done := false
+    }
+
+    transition sendResponse<httpChan>(resp : String) {
+        guard: ~done & resp = "x"
+        transit: done := true
+    }
+
+    transition println(msg : String) {
+        guard: done & msg = "x"
+    }
+}
+
+proc P := Bad || Println
+program Main := P

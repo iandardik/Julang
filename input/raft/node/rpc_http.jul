@@ -1,3 +1,5 @@
+import julaylib.fun.createEmptyChannel
+
 /*
  * HTTP endpoints for Raft node RPCs: inbound listener (RpcServer) and
  * outbound client bridge (RpcClient). Typed RPC pclasses live in
@@ -13,15 +15,17 @@
 
 p-class RpcServer {
     const httpReq : HttpServerRequest
+    const httpChan : Channel<sendResponse>
     const path : String
     const reqBody : String
     var step : String
     var respBody : String
     var respCode : Int
 
-    constructor receiveRequest(req : HttpServerRequest) {
+    constructor receiveRequest(req : HttpServerRequest, httpChan : Channel<sendResponse>) {
         transit:
             httpReq := req
+            httpChan := httpChan
             path := req.path
             reqBody := req.body
             respBody := ""
@@ -101,8 +105,8 @@ p-class RpcServer {
             step := "resp"
     }
 
-    transition sendResponse(req : HttpServerRequest, resp : HttpServerResponse) {
-        guard: step = "resp" & req = httpReq & resp = HttpServerResponse { body := respBody, code := respCode }
+    transition sendResponse<httpChan>(resp : HttpServerResponse) {
+        guard: step = "resp" & resp = HttpServerResponse { body := respBody, code := respCode }
         transit: step := "done"
     }
 
@@ -116,6 +120,7 @@ p-class RpcClient {
     var url : String
     var body : String
     var respBody : String
+    var httpChan : Channel<receiveResponse>
 
     constructor startClient() {
         transit:
@@ -123,6 +128,7 @@ p-class RpcClient {
             url := ""
             body := ""
             respBody := ""
+            httpChan := createEmptyChannel<receiveResponse>()
     }
 
     transition beginHttpRV(peerUrl : String, reqBody : String) {
@@ -141,7 +147,7 @@ p-class RpcClient {
             step := "sendAE"
     }
 
-    transition sendRequest(req : HttpClientRequest) {
+    transition sendRequest(req : HttpClientRequest, httpChan : Channel<receiveResponse>) {
         guard:
             | (step = "sendRV" & req = HttpClientRequest {
                 url := url + "/raft/requestVote", method := "POST", body := body
@@ -150,10 +156,11 @@ p-class RpcClient {
                 url := url + "/raft/appendEntries", method := "POST", body := body
             })
         transit:
+            httpChan := httpChan
             step := if (step = "sendRV") { "recvRV" } else { "recvAE" }
     }
 
-    transition receiveResponse(resp : HttpClientResponse) {
+    transition receiveResponse<httpChan>(resp : HttpClientResponse) {
         guard: step = "recvRV" | step = "recvAE"
         transit:
             respBody := resp.body
