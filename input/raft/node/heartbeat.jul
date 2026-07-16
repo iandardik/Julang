@@ -1,0 +1,167 @@
+import node.lib.AppendEntriesData
+import node.lib.Node
+
+/*
+ * Leader heartbeat / AppendEntries orchestration.
+ * HeartbeatTarget owns the peer cursor and resolves peers; HeartbeatDriver sends AEs.
+ */
+
+p-class HeartbeatDriver {
+    const me : Node
+    const clusterSize : Int
+    var step : String
+    var target : Node
+    var ae : AppendEntriesData
+
+    constructor startHeartbeatDriver(me : Node, n : Int) {
+        transit:
+            me := me
+            clusterSize := n
+            step := "initTarget"
+            target := Node { id := 0, url := "" }
+            ae := AppendEntriesData {
+                term := 0,
+                leaderId := 0,
+                prevLogIndex := 0,
+                prevLogTerm := 0,
+                entryTerm := 0,
+                entryValue := "",
+                entriesLen := 0,
+                leaderCommit := 0
+            }
+    }
+
+    transition startHeartbeatTarget(me : Node, n : Int) {
+        guard: step = "initTarget" & me = me & n = clusterSize
+        transit: step := "sleep"
+    }
+
+    internal transition sleep() {
+        guard: step = "sleep"
+        transit: step := "checkIsLeader"
+        effect: delaySeconds(1)
+    }
+
+    transition getIsLeader(isLeader : Boolean) {
+        guard: step = "checkIsLeader"
+        transit: step := if (isLeader) { "beginRound" } else { "stopTarget" }
+    }
+
+    transition beginHeartbeatRound() {
+        guard: step = "beginRound"
+        transit: step := "pickTarget"
+    }
+
+    transition heartbeatTargetDone() {
+        guard: step = "pickTarget"
+        transit: step := "sleep"
+    }
+
+    transition pickHeartbeatTarget(node : Node) {
+        guard: step = "pickTarget"
+        transit:
+            target := node
+            step := "needMeta"
+    }
+
+    transition getLogMetadata(data : AppendEntriesData) {
+        guard: step = "needMeta"
+        transit:
+            ae := data
+            step := "sendAE"
+    }
+
+    transition startOutgoingAppendEntries(peer : Node, data : AppendEntriesData) {
+        guard: step = "sendAE" & peer = target & data = ae
+        transit: step := "awaitAE"
+    }
+
+    /* Pairwise with OutgoingAppendEntriesRPC after Core has applied the AE response. */
+    transition finishAppendEntriesResp(peerId : Int) {
+        guard: step = "awaitAE" & peerId = target.id
+        transit: step := "pickTarget"
+    }
+
+    transition stopHeartbeatTarget() {
+        guard: step = "stopTarget"
+        transit: step := "handback"
+    }
+
+    /* Spawn a fresh ElectionDriver after losing leadership, then end this instance. */
+    transition resumeElectionDriver(id : Int, n : Int) {
+        guard: step = "handback" & id = me.id & n = clusterSize
+        transit: step := "done"
+    }
+}
+
+/*
+ * Tracks which cluster member should receive the next heartbeat in the current round.
+ * Resolves peers via ClusterInfo.lookupNodeById; spawned with HeartbeatDriver and stopped on demotion.
+ *
+ * Starts idle so it cannot lookupNodeById before HeartbeatDriver begins a round (avoids deadlock
+ * while the driver is in sleep). While ready, target.id is the next peer (never self).
+ */
+p-class HeartbeatTarget {
+    const me : Node
+    const clusterSize : Int
+    var target : Node
+    var peersLeft : Int
+    var step : String
+
+    constructor startHeartbeatTarget(me : Node, n : Int) {
+        transit:
+            me := me
+            clusterSize := n
+            target := Node { id := 0, url := "" }
+            peersLeft := 0
+            step := "idle"
+    }
+
+    transition beginHeartbeatRound() {
+        guard: step = "idle"
+        transit:
+            target := Node { id := (me.id + 1) % clusterSize, url := "" }
+            peersLeft := clusterSize - 1
+            step := if (clusterSize <= 1) { "doneRound" } else { "ready" }
+    }
+
+    transition lookupNodeById(id : Int, node : Node) {
+        guard: step = "ready" & id = target.id
+        transit:
+            target := node
+            step := "havePeer"
+    }
+
+    transition pickHeartbeatTarget(node : Node) {
+        guard: step = "havePeer" & node = target
+        transit: step := "advance"
+    }
+
+    /* Next peer after target.id, skipping self; wrap with %. */
+    internal transition advanceTarget() {
+        guard: step = "advance"
+        transit:
+            target := Node {
+                id := if (((target.id + 1) % clusterSize) = me.id) {
+                    (target.id + 2) % clusterSize
+                } else {
+                    (target.id + 1) % clusterSize
+                },
+                url := ""
+            }
+            peersLeft := peersLeft - 1
+            step := if (peersLeft - 1 = 0) { "doneRound" } else { "ready" }
+    }
+
+    transition heartbeatTargetDone() {
+        guard: step = "doneRound"
+        transit: step := "idle"
+    }
+
+    transition stopHeartbeatTarget() {
+        guard:
+            step = "idle" | step = "ready" | step = "havePeer"
+            | step = "advance" | step = "doneRound"
+        transit: step := "done"
+    }
+}

@@ -1,27 +1,21 @@
 import julaylib.fun.length
+import node.lib.Node
 
 /*
- * Election timeout, RequestVote to peers, leadership, and heartbeats.
- * HTTP/wire encoding lives in the rpc_* modules; this driver only orchestrates.
+ * Election timeout, RequestVote to peers, and leadership handoff.
+ * On becomeLeader, spawns HeartbeatDriver and ends; Heartbeat respawns this via resumeElectionDriver.
  */
 
 p-class ElectionDriver {
     var step : String
     var myId : Int
     var curPeer : Int
-    var peer : String
+    var target : Node
+    var selfNode : Node
     var snapTerm : Int
     var snapCand : Int
     var snapLastIdx : Int
     var snapLastTerm : Int
-    var aeTerm : Int
-    var aeLeaderId : Int
-    var aePrevIdx : Int
-    var aePrevTerm : Int
-    var aeEntryTerm : Int
-    var aeEntryValue : String
-    var aeEntriesLen : Int
-    var aeLeaderCommit : Int
     var clusterN : Int
     var electTimeout : Int
     var armedEpoch : Int
@@ -31,30 +25,32 @@ p-class ElectionDriver {
             step := "arm"
             myId := id
             curPeer := 0
-            peer := ""
+            target := Node { id := 0, url := "" }
+            selfNode := Node { id := id, url := "" }
             snapTerm := 0
             snapCand := 0
             snapLastIdx := 0
             snapLastTerm := 0
-            aeTerm := 0
-            aeLeaderId := 0
-            aePrevIdx := 0
-            aePrevTerm := 0
-            aeEntryTerm := 0
-            aeEntryValue := ""
-            aeEntriesLen := 0
-            aeLeaderCommit := 0
             clusterN := length(urls)
             electTimeout := 2 + id
             armedEpoch := 0
     }
 
-    transition getSelfId(id : Int) {
-        guard: step = "hbSelf"
+    /* Demotion restart from HeartbeatDriver (Initializer is already done). */
+    constructor resumeElectionDriver(id : Int, n : Int) {
         transit:
+            step := "arm"
             myId := id
+            curPeer := 0
+            target := Node { id := 0, url := "" }
+            selfNode := Node { id := id, url := "" }
+            snapTerm := 0
+            snapCand := 0
+            snapLastIdx := 0
+            snapLastTerm := 0
+            clusterN := n
             electTimeout := 2 + id
-            step := "hbNeedN"
+            armedEpoch := 0
     }
 
     transition getElectionSnapshot(
@@ -81,19 +77,10 @@ p-class ElectionDriver {
             }
     }
 
-    transition timer(time : Int) {
-        guard: (step = "waitTimer" & time = electTimeout) | (step = "hbWait" & time = 1)
-        transit: step := "armed"
-    }
-
-    transition timeout() {
-        guard: step = "armed"
-        transit: step := "dispatch"
-    }
-
-    transition isLeader(flag : Boolean) {
-        guard: step = "dispatch"
-        transit: step := if (flag) { "hbSelf" } else { "checkEpoch" }
+    internal transition waitElect() {
+        guard: step = "waitTimer"
+        transit: step := "checkEpoch"
+        effect: delaySeconds(electTimeout)
     }
 
     transition startElection(epoch : Int) {
@@ -102,11 +89,11 @@ p-class ElectionDriver {
     }
 
     transition getClusterSize(size : Int) {
-        guard: step = "needN" | step = "hbNeedN"
+        guard: step = "needN"
         transit:
             clusterN := size
             curPeer := 0
-            step := if (step = "hbNeedN") { "hbPeers" } else { "peers" }
+            step := "peers"
     }
 
     internal transition skipSelf() {
@@ -119,21 +106,20 @@ p-class ElectionDriver {
         transit: step := "checkQ"
     }
 
-    transition getPeerUrl(peerId : Int, url : String) {
-        guard: step = "peers" & peerId = curPeer & curPeer ~= myId & curPeer < clusterN
+    transition lookupNodeById(id : Int, node : Node) {
+        guard: step = "peers" & id = curPeer
         transit:
-            peer := url
+            target := node
             step := "sendRV"
     }
 
     transition startOutgoingRequestVote(
-        peerId : Int, peerUrl : String,
+        peer : Node,
         term : Int, candId : Int, lastIdx : Int, lastTerm : Int
     ) {
         guard:
             & step = "sendRV"
-            & peerId = curPeer
-            & peerUrl = peer
+            & peer = target
             & term = snapTerm
             & candId = snapCand
             & lastIdx = snapLastIdx
@@ -156,62 +142,19 @@ p-class ElectionDriver {
 
     transition becomeLeader() {
         guard: step = "doLeader"
-        transit: step := "hbWait"
+        transit: step := "needSelf"
     }
 
-    internal transition hbSkipSelf() {
-        guard: step = "hbPeers" & curPeer = myId & curPeer < clusterN
-        transit: curPeer := curPeer + 1
-    }
-
-    internal transition hbPeersDone() {
-        guard: step = "hbPeers" & curPeer >= clusterN
-        transit: step := "hbWait"
-    }
-
-    transition getLogMetadata(
-        peerId : Int, term : Int, leaderId : Int, prevLogIndex : Int, prevLogTerm : Int,
-        entryTerm : Int, entryValue : String, entriesLen : Int, leaderCommit : Int, peerUrlOut : String
-    ) {
-        guard: step = "hbPeers" & peerId = curPeer & curPeer ~= myId & curPeer < clusterN
+    transition getSelf(node : Node) {
+        guard: step = "needSelf" & node.id = myId
         transit:
-            peer := peerUrlOut
-            aeTerm := term
-            aeLeaderId := leaderId
-            aePrevIdx := prevLogIndex
-            aePrevTerm := prevLogTerm
-            aeEntryTerm := entryTerm
-            aeEntryValue := entryValue
-            aeEntriesLen := entriesLen
-            aeLeaderCommit := leaderCommit
-            step := "sendAE"
+            selfNode := node
+            step := "startHb"
     }
 
-    transition startOutgoingAppendEntries(
-        peerId : Int, peerUrl : String,
-        term : Int, leaderId : Int, prevLogIndex : Int, prevLogTerm : Int,
-        entryTerm : Int, entryValue : String, entriesLen : Int, leaderCommit : Int
-    ) {
-        guard:
-            & step = "sendAE"
-            & peerId = curPeer
-            & peerUrl = peer
-            & term = aeTerm
-            & leaderId = aeLeaderId
-            & prevLogIndex = aePrevIdx
-            & prevLogTerm = aePrevTerm
-            & entryTerm = aeEntryTerm
-            & entryValue = aeEntryValue
-            & entriesLen = aeEntriesLen
-            & leaderCommit = aeLeaderCommit
-        transit: step := "awaitAE"
-    }
-
-    /* Pairwise with OutgoingAppendEntriesRPC after Core has applied the AE response. */
-    transition finishAppendEntriesResp(peerId : Int) {
-        guard: step = "awaitAE" & peerId = curPeer
-        transit:
-            curPeer := curPeer + 1
-            step := "hbPeers"
+    /* Spawn HeartbeatDriver, then end this election instance. */
+    transition startHeartbeatDriver(me : Node, n : Int) {
+        guard: step = "startHb" & me = selfNode & n = clusterN
+        transit: step := "done"
     }
 }

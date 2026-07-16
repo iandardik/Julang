@@ -1,6 +1,8 @@
 import julaylib.fun.split
 import julaylib.fun.parseInt
 import node.lib.fieldValue
+import node.lib.AppendEntriesData
+import node.lib.Node
 import node.lib.encodeAppendEntries
 import node.lib.encodeAppendEntriesResp
 import node.lib.parseBool
@@ -79,16 +81,8 @@ p-class IncomingAppendEntriesRPC {
 }
 
 p-class OutgoingAppendEntriesRPC {
-    const cPeerId : Int
-    const cPeerUrl : String
-    const cTerm : Int
-    const cLeaderId : Int
-    const cPrevLogIndex : Int
-    const cPrevLogTerm : Int
-    const cEntryTerm : Int
-    const cEntryValue : String
-    const cEntriesLen : Int
-    const cLeaderCommit : Int
+    const cPeer : Node
+    const cData : AppendEntriesData
     const cReqBody : String
     var step : String
     var respBody : String
@@ -96,26 +90,11 @@ p-class OutgoingAppendEntriesRPC {
     var respSuccess : Boolean
     var respMatch : Int
 
-    constructor startOutgoingAppendEntries(
-        peerId : Int, peerUrl : String,
-        term : Int, leaderId : Int, prevLogIndex : Int, prevLogTerm : Int,
-        entryTerm : Int, entryValue : String, entriesLen : Int, leaderCommit : Int
-    ) {
+    constructor startOutgoingAppendEntries(peer : Node, data : AppendEntriesData) {
         transit:
-            cPeerId := peerId
-            cPeerUrl := peerUrl
-            cTerm := term
-            cLeaderId := leaderId
-            cPrevLogIndex := prevLogIndex
-            cPrevLogTerm := prevLogTerm
-            cEntryTerm := entryTerm
-            cEntryValue := entryValue
-            cEntriesLen := entriesLen
-            cLeaderCommit := leaderCommit
-            cReqBody := encodeAppendEntries(
-                term, leaderId, prevLogIndex, prevLogTerm,
-                entryTerm, entryValue, entriesLen, leaderCommit
-            )
+            cPeer := peer
+            cData := data
+            cReqBody := encodeAppendEntries(data)
             respBody := ""
             respTerm := 0
             respSuccess := false
@@ -124,7 +103,7 @@ p-class OutgoingAppendEntriesRPC {
     }
 
     transition beginHttpAE(peerUrl : String, reqBody : String) {
-        guard: step = "beginHttp" & peerUrl = cPeerUrl & reqBody = cReqBody
+        guard: step = "beginHttp" & peerUrl = cPeer.url & reqBody = cReqBody
         transit: step := "awaitHttp"
     }
 
@@ -149,15 +128,16 @@ p-class OutgoingAppendEntriesRPC {
     ) {
         guard:
             & step = "apply"
-            & peerId = cPeerId
+            & peerId = cPeer.id
             & inTerm = respTerm
             & success = respSuccess
             & matchIdx = respMatch
         transit: step := "finishElection"
     }
 
+    /* Pairwise with HeartbeatDriver after Core has applied the AE response. */
     transition finishAppendEntriesResp(peerId : Int) {
-        guard: step = "finishElection" & peerId = cPeerId
+        guard: step = "finishElection" & peerId = cPeer.id
         transit: step := "done"
     }
 }

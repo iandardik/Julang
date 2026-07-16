@@ -1,0 +1,48 @@
+import julaylib.fun.length
+import julaylib.fun.portFromUrl
+import node.lib.Node
+
+/*
+ * Static cluster membership: peer URLs and this node's id/port.
+ * Constructed once by RaftInitializer from the config file.
+ */
+
+p-class ClusterInfo {
+    const selfNode : Node
+    const clusterSize : Int
+    const urls : List<String>
+    const selfPort : Int
+
+    constructor startClusterInfo(peerUrls : List<String>, id : Int) {
+        transit:
+            selfNode := Node { id := id, url := peerUrls[id] }
+            clusterSize := length(peerUrls)
+            urls := peerUrls
+            selfPort := portFromUrl(peerUrls[id])
+    }
+
+    service transition getListenPort(port : Int) {
+        guard: port = selfPort
+    }
+
+    service transition getClusterSize(size : Int) {
+        guard: size = clusterSize
+    }
+
+    service transition lookupNodeById(id : Int, node : Node) {
+        guard:
+            id >= 0 & id < clusterSize & id ~= selfNode.id
+            & node = Node { id := id, url := urls[id] }
+    }
+
+    service transition getSelf(node : Node) {
+        guard: node = selfNode
+    }
+
+    /* Nondeterministic: any peer other than self may be chosen. */
+    service transition chooseOtherPeer(peerId : Int, node : Node) {
+        guard:
+            peerId >= 0 & peerId < clusterSize & peerId ~= selfNode.id
+            & node = Node { id := peerId, url := urls[peerId] }
+    }
+}

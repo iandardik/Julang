@@ -1,10 +1,10 @@
+import node.lib.Node
+
 /* This RPC handles incoming client requests (append / get), not peer Raft RPCs. */
 /*
  * Client command RPCs (append / get).
  *
- * One pclass for both commands so getRedirectBody stays a single default pairwise
- * sync with RaftCore (splitting append/get into two pclasses would need two
- * consumers on a service, or separate action names).
+ * One pclass for both commands so redirect stays coordinated with RaftCore + ClusterInfo.
  * Constructors keep the startIncomingClientAppend / startIncomingClientGet names.
  */
 
@@ -16,6 +16,7 @@ p-class IncomingClientRPC {
     var appendIdx : Int
     var respBody : String
     var respCode : Int
+    var redirLeaderId : Int
 
     constructor startIncomingClientAppend(req : HttpServerRequest) {
         transit:
@@ -25,6 +26,7 @@ p-class IncomingClientRPC {
             appendIdx := 0
             respBody := ""
             respCode := 500
+            redirLeaderId := -1
             step := "ca"
     }
 
@@ -36,6 +38,7 @@ p-class IncomingClientRPC {
             appendIdx := 0
             respBody := ""
             respCode := 500
+            redirLeaderId := -1
             step := "cg"
     }
 
@@ -68,11 +71,26 @@ p-class IncomingClientRPC {
             step := "finishCG"
     }
 
-    transition getRedirectBody(body : String, code : Int) {
+    transition getRedirectLeader(leaderIdOut : Int, hasLeader : Boolean) {
         guard: step = "redir"
         transit:
-            respBody := body
-            respCode := code
+            redirLeaderId := leaderIdOut
+            step := if (hasLeader) { "redirUrl" } else { "redirNone" }
+    }
+
+    transition lookupNodeById(id : Int, node : Node) {
+        guard: step = "redirUrl" & id = redirLeaderId
+        transit:
+            respBody := "LEADER " + node.url
+            respCode := 303
+            step := if (kind = "append") { "finishCA" } else { "finishCG" }
+    }
+
+    internal transition redirectNoLeader() {
+        guard: step = "redirNone"
+        transit:
+            respBody := "NO_LEADER"
+            respCode := 503
             step := if (kind = "append") { "finishCA" } else { "finishCG" }
     }
 

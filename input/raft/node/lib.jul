@@ -11,6 +11,22 @@ o-class Entry {
     value : String
 }
 
+o-class Node {
+    id : Int
+    url : String
+}
+
+o-class AppendEntriesData {
+    term : Int
+    leaderId : Int
+    prevLogIndex : Int
+    prevLogTerm : Int
+    entryTerm : Int
+    entryValue : String
+    entriesLen : Int
+    leaderCommit : Int
+}
+
 fun entryValueAt(log : List<Entry>, idx : Int) : String =
     let (e : Entry := log[idx]) { e.value }
 
@@ -26,24 +42,15 @@ fun encodeRequestVote(term : Int, candidateId : Int, lastLogIndex : Int, lastLog
 fun encodeRequestVoteResp(term : Int, voteGranted : Boolean) : String =
     "term=" + term + "|voteGranted=" + if (voteGranted) { "true" } else { "false" }
 
-fun encodeAppendEntries(
-    term : Int,
-    leaderId : Int,
-    prevLogIndex : Int,
-    prevLogTerm : Int,
-    entryTerm : Int,
-    entryValue : String,
-    entriesLen : Int,
-    leaderCommit : Int
-) : String =
-    "term=" + term
-        + "|leaderId=" + leaderId
-        + "|prevLogIndex=" + prevLogIndex
-        + "|prevLogTerm=" + prevLogTerm
-        + "|entriesLen=" + entriesLen
-        + "|entryTerm=" + entryTerm
-        + "|entryValue=" + entryValue
-        + "|leaderCommit=" + leaderCommit
+fun encodeAppendEntries(data : AppendEntriesData) : String =
+    "term=" + data.term
+        + "|leaderId=" + data.leaderId
+        + "|prevLogIndex=" + data.prevLogIndex
+        + "|prevLogTerm=" + data.prevLogTerm
+        + "|entriesLen=" + data.entriesLen
+        + "|entryTerm=" + data.entryTerm
+        + "|entryValue=" + data.entryValue
+        + "|leaderCommit=" + data.leaderCommit
 
 fun encodeAppendEntriesResp(term : Int, success : Boolean, matchIndex : Int) : String =
     "term=" + term

@@ -1,7 +1,7 @@
 import julaylib.pclass.HttpServer
 import julaylib.pclass.HttpClient
-import julaylib.pclass.Timer
 import node.core.RaftCore
+import node.cluster_info.ClusterInfo
 import node.initializers.Initializers
 import node.rpc_http.RpcServer
 import node.rpc_http.RpcClient
@@ -11,6 +11,8 @@ import node.rpc_append_entries.IncomingAppendEntriesRPC
 import node.rpc_append_entries.OutgoingAppendEntriesRPC
 import node.rpc_client.IncomingClientRPC
 import node.election.ElectionDriver
+import node.heartbeat.HeartbeatDriver
+import node.heartbeat.HeartbeatTarget
 
 /*
  * Single Raft node composition.
@@ -23,6 +25,7 @@ proc IncomingRPCs := HttpServer || RpcServer
 proc OutgoingRPCs := HttpClient || RpcClient
     || OutgoingRequestVoteRPC || OutgoingAppendEntriesRPC
 
-proc Raft := RaftCore || ElectionDriver || IncomingRPCs || OutgoingRPCs || Timer
+proc Raft := RaftCore || ClusterInfo || ElectionDriver
+    || HeartbeatDriver || HeartbeatTarget || IncomingRPCs || OutgoingRPCs
 
 proc NodeLogic := Raft || Initializers

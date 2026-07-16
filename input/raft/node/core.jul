@@ -1,18 +1,16 @@
 import julaylib.fun.length
-import julaylib.fun.portFromUrl
 import node.lib.Entry
+import node.lib.AppendEntriesData
 import node.lib.entryValueAt
 
 /*
  * Local Raft state and Ongaro-style transitions for one node.
+ * Peer URLs live in ClusterInfo; this core tracks leaderId for redirects.
  */
 
 p-class RaftCore {
     const selfId : Int
     const clusterSize : Int
-    const clusterUrls : List<String>
-    const selfUrl : String
-    const selfPort : Int
     var currentTerm : Int
     var state : String
     var votedFor : Int
@@ -23,16 +21,13 @@ p-class RaftCore {
     var stateMachine : List<String>
     var votesGranted : Set<Int>
     var voteCount : Int
-    var leaderUrl : String
+    var knownLeaderId : Int
     var electionEpoch : Int
 
-    constructor startRaftCore(urls : List<String>, id : Int) {
+    constructor startRaftCore(id : Int, n : Int) {
         transit:
             selfId := id
-            clusterSize := length(urls)
-            clusterUrls := urls
-            selfUrl := urls[id]
-            selfPort := portFromUrl(urls[id])
+            clusterSize := n
             currentTerm := 0
             state := "Follower"
             votedFor := -1
@@ -43,7 +38,7 @@ p-class RaftCore {
             stateMachine := []
             votesGranted := {}
             voteCount := 0
-            leaderUrl := ""
+            knownLeaderId := -1
             electionEpoch := 0
     }
 
@@ -57,7 +52,7 @@ p-class RaftCore {
             votesGranted := {selfId}
             voteCount := 1
             electionEpoch := electionEpoch + 1
-            leaderUrl := ""
+            knownLeaderId := -1
     }
 
     /* Pairwise with OutgoingRequestVoteRPC (Election advances via finishRecordVote). */
@@ -72,7 +67,7 @@ p-class RaftCore {
         guard: state = "Candidate" & voteCount * 2 > clusterSize
         transit:
             state := "Leader"
-            leaderUrl := selfUrl
+            knownLeaderId := selfId
             electionEpoch := electionEpoch + 1
     }
 
@@ -129,12 +124,12 @@ p-class RaftCore {
         transit:
             votedFor := if (voteGranted) { candidateId } else { if (inTerm > currentTerm) { -1 } else { votedFor } }
             state := if (inTerm > currentTerm) { "Follower" } else { state }
-            leaderUrl := if (inTerm > currentTerm) { "" } else { leaderUrl }
+            knownLeaderId := if (inTerm > currentTerm) { -1 } else { knownLeaderId }
             electionEpoch := if (inTerm > currentTerm) { electionEpoch + 1 } else { electionEpoch }
             currentTerm := if (inTerm > currentTerm) { inTerm } else { currentTerm }
     }
 
-    /* Pairwise with OutgoingAppendEntriesRPC (Election advances via finishAppendEntriesResp). */
+    /* Pairwise with OutgoingAppendEntriesRPC (Heartbeat advances via finishAppendEntriesResp). */
     transition handleAppendEntriesResp(
         peerId : Int,
         inTerm : Int,
@@ -175,7 +170,7 @@ p-class RaftCore {
         transit:
             votedFor := if (inTerm > currentTerm) { -1 } else { votedFor }
             state := if (inTerm >= currentTerm) { "Follower" } else { state }
-            leaderUrl := if (inTerm >= currentTerm) { clusterUrls[leaderId] } else { leaderUrl }
+            knownLeaderId := if (inTerm >= currentTerm) { leaderId } else { knownLeaderId }
             electionEpoch := if (inTerm >= currentTerm) { electionEpoch + 1 } else { electionEpoch }
             currentTerm := if (inTerm > currentTerm) { inTerm } else { currentTerm }
             commitIndex := if (inTerm >= currentTerm & leaderCommit > commitIndex) {
@@ -194,23 +189,12 @@ p-class RaftCore {
 
 
     /*
-     * Getters of RaftCore for accessing info from it.
+     * The services that RaftCore provides for accessing its info.
+     * Essentially, the transitions below are getters.
      */
 
-    service transition getListenPort(port : Int) {
-        guard: port = selfPort
-    }
-
-    service transition getClusterSize(size : Int) {
-        guard: size = clusterSize
-    }
-
-    service transition getSelfId(id : Int) {
-        guard: id = selfId
-    }
-
-    service transition isLeader(flag : Boolean) {
-        guard: (flag & state = "Leader") | (~flag & state ~= "Leader")
+    service transition getIsLeader(isLeader : Boolean) {
+        guard: (isLeader & state = "Leader") | (~isLeader & state ~= "Leader")
     }
 
     service transition hasQuorum(flag : Boolean) {
@@ -236,49 +220,34 @@ p-class RaftCore {
             & role = state
     }
 
-    service transition getPeerUrl(peerId : Int, url : String) {
-        guard:
-            peerId >= 0 & peerId < clusterSize & peerId ~= selfId & url = clusterUrls[peerId]
-    }
-
     service transition getSerializedStateMachine(serializedSM : String, isLeader : Boolean) {
         guard:
             | (state = "Leader" & isLeader & serializedSM = stateMachine + "")
             | (state ~= "Leader" & ~isLeader & serializedSM = "")
     }
 
-    service transition getRedirectBody(body : String, code : Int) {
+    /* Follower redirect: known leader id, or hasLeader false when unknown. */
+    service transition getRedirectLeader(leaderIdOut : Int, hasLeader : Boolean) {
         guard:
             state ~= "Leader"
             & (
-                | (leaderUrl ~= "" & code = 303 & body = "LEADER " + leaderUrl)
-                | (leaderUrl = "" & code = 503 & body = "NO_LEADER")
+                | (hasLeader & leaderIdOut = knownLeaderId & knownLeaderId >= 0)
+                | (~hasLeader & leaderIdOut = -1 & knownLeaderId < 0)
             )
     }
 
-    service transition getLogMetadata(
-        peerId : Int,
-        term : Int,
-        leaderId : Int,
-        prevLogIndex : Int,
-        prevLogTerm : Int,
-        entryTerm : Int,
-        entryValue : String,
-        entriesLen : Int,
-        leaderCommit : Int,
-        peerUrlOut : String
-    ) {
+    service transition getLogMetadata(data : AppendEntriesData) {
         guard:
             & state = "Leader"
-            & peerId >= 0 & peerId < clusterSize & peerId ~= selfId
-            & term = currentTerm
-            & leaderId = selfId
-            & peerUrlOut = clusterUrls[peerId]
-            & prevLogIndex = length(log)
-            & prevLogTerm = lastLogTermVar
-            & entriesLen = 0
-            & entryTerm = 0
-            & entryValue = ""
-            & leaderCommit = commitIndex
+            & data = AppendEntriesData {
+                term := currentTerm,
+                leaderId := selfId,
+                prevLogIndex := length(log),
+                prevLogTerm := lastLogTermVar,
+                entryTerm := 0,
+                entryValue := "",
+                entriesLen := 0,
+                leaderCommit := commitIndex
+            }
     }
 }

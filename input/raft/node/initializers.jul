@@ -45,10 +45,16 @@ p-class RaftInitializer {
             idx := idx + 1
     }
 
-    transition startRaftCore(urls : List<String>, id : Int) {
+    transition startClusterInfo(peerUrls : List<String>, id : Int) {
         guard:
             step = "scan" & idx = length(rawLines) & length(acc) > 0
-            & urls = acc & id = selfId
+            & peerUrls = acc & id = selfId
+        transit: step := "startCore"
+    }
+
+    transition startRaftCore(id : Int, n : Int) {
+        guard:
+            step = "startCore" & id = selfId & n = length(acc)
         transit: step := "startElection"
     }
 

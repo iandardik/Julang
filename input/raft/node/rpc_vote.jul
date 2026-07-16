@@ -1,6 +1,7 @@
 import julaylib.fun.split
 import julaylib.fun.parseInt
 import node.lib.fieldValue
+import node.lib.Node
 import node.lib.encodeRequestVote
 import node.lib.encodeRequestVoteResp
 import node.lib.parseBool
@@ -64,8 +65,7 @@ p-class IncomingRequestVoteRPC {
 }
 
 p-class OutgoingRequestVoteRPC {
-    const cPeerId : Int
-    const cPeerUrl : String
+    const cPeer : Node
     const cTerm : Int
     const cCandId : Int
     const cLastIdx : Int
@@ -77,12 +77,11 @@ p-class OutgoingRequestVoteRPC {
     var voteGrantedFlag : Boolean
 
     constructor startOutgoingRequestVote(
-        peerId : Int, peerUrl : String,
+        peer : Node,
         term : Int, candId : Int, lastIdx : Int, lastTerm : Int
     ) {
         transit:
-            cPeerId := peerId
-            cPeerUrl := peerUrl
+            cPeer := peer
             cTerm := term
             cCandId := candId
             cLastIdx := lastIdx
@@ -95,7 +94,7 @@ p-class OutgoingRequestVoteRPC {
     }
 
     transition beginHttpRV(peerUrl : String, reqBody : String) {
-        guard: step = "beginHttp" & peerUrl = cPeerUrl & reqBody = cReqBody
+        guard: step = "beginHttp" & peerUrl = cPeer.url & reqBody = cReqBody
         transit: step := "awaitHttp"
     }
 
@@ -117,14 +116,14 @@ p-class OutgoingRequestVoteRPC {
     transition recordVote(peerId : Int, term : Int, granted : Boolean) {
         guard:
             & step = "tally"
-            & peerId = cPeerId
+            & peerId = cPeer.id
             & term = voteTerm
             & granted = voteGrantedFlag
         transit: step := "finishElection"
     }
 
     transition finishRecordVote(peerId : Int) {
-        guard: step = "finishElection" & peerId = cPeerId
+        guard: step = "finishElection" & peerId = cPeer.id
         transit: step := "done"
     }
 }
