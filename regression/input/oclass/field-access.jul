@@ -12,7 +12,7 @@ p-class Worker {
             pos := Point { x := 0, y := 0, label := "" }
     }
 
-    transition move(newPos : Point) {
+    internal transition move(newPos : Point) {
         guard:
             let (cur : Point := pos) {
                 cur.x = newPos.x & cur.y = newPos.y
@@ -21,7 +21,7 @@ p-class Worker {
             pos := let (next : Point := newPos) { next }
     }
 
-    transition reportX(expected : Int) {
+    internal transition reportX(expected : Int) {
         guard:
             pos.x = expected
         transit:
@@ -30,7 +30,7 @@ p-class Worker {
 
     // String field access in concatenation must type as Expr<SeqSort<CharSort>>
     // for ctx.mkConcat (otherwise Kotlin picks the BitVec overload).
-    transition reportLabel(msg : String) {
+    internal transition reportLabel(msg : String) {
         guard:
             msg = "label:" + pos.label
         transit:

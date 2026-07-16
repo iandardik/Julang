@@ -22,7 +22,7 @@ public class JulayParser extends Parser {
 		DIV=17, MOD=18, PLUS=19, MINUS=20, LT=21, LTE=22, GT=23, GTE=24, EQ=25, 
 		NEQ=26, ASGN_EQ=27, IMPLIES=28, IF=29, ELSE=30, LET=31, WHEN=32, IN=33, 
 		ARROW=34, IMPORT=35, PCLASS=36, OCLASS=37, PROC=38, PROGRAM=39, SPEC=40, 
-		VAR=41, CONST=42, CONSTRUCTOR=43, TRANSITION=44, SERVICE=45, CONSUMER=46, 
+		VAR=41, CONST=42, CONSTRUCTOR=43, TRANSITION=44, INTERNAL=45, SERVICE=46, 
 		GUARD=47, TRANSIT=48, ERROR=49, EFFECT=50, FUN=51, REAL=52, INT=53, ID=54, 
 		STRING=55, WS=56, COMMENT=57, LINE_COMMENT=58;
 	public static final int
@@ -59,8 +59,8 @@ public class JulayParser extends Parser {
 			"'+'", "'-'", "'<'", "'<='", "'>'", "'>='", "'='", "'~='", "':='", "'=>'", 
 			"'if'", "'else'", "'let'", "'when'", "'in'", "'->'", "'import'", "'p-class'", 
 			"'o-class'", "'proc'", "'program'", "'spec'", "'var'", "'const'", "'constructor'", 
-			"'transition'", "'p2p-service'", "'p2p-consumer'", "'guard'", "'transit'", 
-			"'error'", "'effect'", "'fun'"
+			"'transition'", "'internal'", "'service'", "'guard'", "'transit'", "'error'", 
+			"'effect'", "'fun'"
 		};
 	}
 	private static final String[] _LITERAL_NAMES = makeLiteralNames();
@@ -71,7 +71,7 @@ public class JulayParser extends Parser {
 			"TIMES", "DIV", "MOD", "PLUS", "MINUS", "LT", "LTE", "GT", "GTE", "EQ", 
 			"NEQ", "ASGN_EQ", "IMPLIES", "IF", "ELSE", "LET", "WHEN", "IN", "ARROW", 
 			"IMPORT", "PCLASS", "OCLASS", "PROC", "PROGRAM", "SPEC", "VAR", "CONST", 
-			"CONSTRUCTOR", "TRANSITION", "SERVICE", "CONSUMER", "GUARD", "TRANSIT", 
+			"CONSTRUCTOR", "TRANSITION", "INTERNAL", "SERVICE", "GUARD", "TRANSIT", 
 			"ERROR", "EFFECT", "FUN", "REAL", "INT", "ID", "STRING", "WS", "COMMENT", 
 			"LINE_COMMENT"
 		};
@@ -1180,8 +1180,8 @@ public class JulayParser extends Parser {
 				}
 				break;
 			case TRANSITION:
+			case INTERNAL:
 			case SERVICE:
-			case CONSUMER:
 				enterOuterAlt(_localctx, 3);
 				{
 				setState(204);
@@ -1411,8 +1411,8 @@ public class JulayParser extends Parser {
 		public Action_bodyContext action_body(int i) {
 			return getRuleContext(Action_bodyContext.class,i);
 		}
+		public TerminalNode INTERNAL() { return getToken(JulayParser.INTERNAL, 0); }
 		public TerminalNode SERVICE() { return getToken(JulayParser.SERVICE, 0); }
-		public TerminalNode CONSUMER() { return getToken(JulayParser.CONSUMER, 0); }
 		public TransitionContext(ParserRuleContext parent, int invokingState) {
 			super(parent, invokingState);
 		}
@@ -1442,11 +1442,11 @@ public class JulayParser extends Parser {
 			setState(229);
 			_errHandler.sync(this);
 			_la = _input.LA(1);
-			if (_la==SERVICE || _la==CONSUMER) {
+			if (_la==INTERNAL || _la==SERVICE) {
 				{
 				setState(228);
 				_la = _input.LA(1);
-				if ( !(_la==SERVICE || _la==CONSUMER) ) {
+				if ( !(_la==INTERNAL || _la==SERVICE) ) {
 				_errHandler.recoverInline(this);
 				}
 				else {

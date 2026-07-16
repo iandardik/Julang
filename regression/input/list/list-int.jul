@@ -18,7 +18,7 @@ p-class ListIntDemo {
             println(args[0])
     }
 
-    transition step() {
+    internal transition step() {
         guard:
             ~print & length(xs) = 2 & gotCli
         transit:
@@ -27,14 +27,14 @@ p-class ListIntDemo {
             print := true
     }
 
-    p2p-consumer transition println(msg : String) {
+    transition println(msg : String) {
         guard:
             print & (msg = n + "")
         transit:
             print := false
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             ~print & n = 1
     }

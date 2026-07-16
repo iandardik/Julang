@@ -23,6 +23,15 @@ class TwoLocsCompileError(
     override fun toString() = "$locA incompatible with $locB: $msg"
 }
 
+interface CompileWarning {}
+
+class OneLocCompileWarning(
+    private val loc : ProgramLoc,
+    private val msg : String
+) : CompileWarning {
+    override fun toString() = "$loc: warning: $msg"
+}
+
 interface ProgramLoc {}
 
 class SourceLoc(

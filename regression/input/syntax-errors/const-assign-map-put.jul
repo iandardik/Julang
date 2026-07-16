@@ -6,7 +6,7 @@ p-class S {
             mp := ["a" -> 1]
     }
 
-    transition update() {
+    internal transition update() {
         transit:
             mp["b"] := 2
     }

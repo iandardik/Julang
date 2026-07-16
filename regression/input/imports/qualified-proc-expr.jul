@@ -5,14 +5,14 @@ p-class S {
         transit: x := 0
     }
 
-    p2p-consumer transition println(msg : String) {
+    transition println(msg : String) {
         guard:
             x < 2 & msg = x + ""
         transit:
             x := x + 1
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard: x >= 2
     }
 }

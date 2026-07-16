@@ -7,7 +7,7 @@ p-class ServerStarter {
         transit: started := false
     }
 
-    transition startServer(port : Int) {
+    transition createHttpServer(port : Int) {
         guard: ~started & port = 8000
         transit: started := true
     }
@@ -25,12 +25,12 @@ p-class IncReqHandler {
             localCounter := -1
     }
 
-    p2p-consumer transition increment() {
+    transition increment() {
         guard:   step = "A"
         transit: step := "B"
     }
 
-    p2p-consumer transition getCounter(counterVal : Int) {
+    transition getCounter(counterVal : Int) {
         guard: step = "B"
         transit:
             localCounter := counterVal

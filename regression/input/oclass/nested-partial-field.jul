@@ -23,7 +23,7 @@ p-class Worker {
             }
     }
 
-    transition patchStart(newLine : Line) {
+    internal transition patchStart(newLine : Line) {
         guard:
             steps = 0
         transit:
@@ -32,7 +32,7 @@ p-class Worker {
             steps := 1
     }
 
-    transition confirm(newLine : Line) {
+    internal transition confirm(newLine : Line) {
         guard:
             & steps = 1
             & segment.start.x = newLine.start.x
@@ -41,7 +41,7 @@ p-class Worker {
             steps := 2
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             steps = 2
     }

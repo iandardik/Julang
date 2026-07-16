@@ -33,7 +33,7 @@ p-class IncomingRequestVoteRPC {
             step := "parse"
     }
 
-    transition parseRV() {
+    internal transition parseRV() {
         guard: step = "parse"
         transit:
             rvTerm := parseInt(fieldValue(split(reqBody, "|")[0]))
@@ -106,7 +106,7 @@ p-class OutgoingRequestVoteRPC {
             step := "parse"
     }
 
-    transition parseVote() {
+    internal transition parseVote() {
         guard: step = "parse"
         transit:
             voteTerm := parseInt(fieldValue(split(respBody, "|")[0]))
@@ -120,6 +120,11 @@ p-class OutgoingRequestVoteRPC {
             & peerId = cPeerId
             & term = voteTerm
             & granted = voteGrantedFlag
+        transit: step := "finishElection"
+    }
+
+    transition finishRecordVote(peerId : Int) {
+        guard: step = "finishElection" & peerId = cPeerId
         transit: step := "done"
     }
 }

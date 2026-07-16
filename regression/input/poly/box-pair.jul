@@ -23,28 +23,28 @@ p-class Worker {
             pair := Pair<Int, Boolean> { left := 1, right := true }
     }
 
-    transition checkBox() {
+    internal transition checkBox() {
         guard:
             steps = 0 & box.value = 7
         transit:
             steps := 1
     }
 
-    transition checkNested() {
+    internal transition checkNested() {
         guard:
             steps = 1 & nested.value.value = 3
         transit:
             steps := 2
     }
 
-    transition checkPair() {
+    internal transition checkPair() {
         guard:
             steps = 2 & pair.left = 1 & pair.right
         transit:
             steps := 3
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             steps = 3
     }

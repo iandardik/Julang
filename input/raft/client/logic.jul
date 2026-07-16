@@ -32,11 +32,11 @@ p-class RaftClientLogic {
             respBody := ""
             respCode := 0
             retried := false
-            step := "startClient"
+            step := "createHttpClient"
     }
 
-    transition startClient() {
-        guard: step = "startClient"
+    transition createHttpClient() {
+        guard: step = "createHttpClient"
         transit: step := "send"
     }
 
@@ -59,14 +59,14 @@ p-class RaftClientLogic {
             step := "print"
     }
 
-    transition printResp() {
+    internal transition printResp() {
         guard: step = "print"
         transit: step := "afterPrint"
         effect:
             println("" + respCode + " " + respBody)
     }
 
-    transition retryLeader() {
+    internal transition retryLeader() {
         guard:
             & step = "afterPrint"
             & ~retried
@@ -78,7 +78,7 @@ p-class RaftClientLogic {
             step := "send"
     }
 
-    transition doneOk() {
+    internal transition doneOk() {
         guard:
             & step = "afterPrint"
             & (respCode = 200 | retried | respCode = 503 | ~(startsWith(respBody, "LEADER ")))

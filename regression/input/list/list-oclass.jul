@@ -15,14 +15,14 @@ p-class ListOClassDemo {
             done := false
     }
 
-    transition check() {
+    internal transition check() {
         guard:
             ~done & pts[0] = Point { x := 1, y := 2 } & pts[1] = Point { x := 3, y := 4 }
         transit:
             done := true
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             done
     }

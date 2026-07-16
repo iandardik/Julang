@@ -7,7 +7,7 @@ p-class ServerStarter {
         transit: started := false
     }
 
-    transition startServer(port : Int) {
+    transition createHttpServer(port : Int) {
         guard: ~started & port = 8000
         transit: started := true
     }
@@ -27,7 +27,7 @@ p-class IncReqHandler {
             list := []
     }
 
-    p2p-consumer transition getAndAppend(e : String, lst : List<String>) {
+    transition getAndAppend(e : String, lst : List<String>) {
         guard:
             step = "A" & e = reqBody
         transit:
@@ -47,7 +47,7 @@ p-class IncReqHandler {
             step := "C"
     }
 
-    p2p-consumer transition close() {
+    transition close() {
         guard: false // never close the server
     }
 }

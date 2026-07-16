@@ -6,7 +6,7 @@ p-class BadMapTransit {
             mp := ["a" -> 1]
     }
 
-    transition bad() {
+    internal transition bad() {
         guard:
             true
         transit:

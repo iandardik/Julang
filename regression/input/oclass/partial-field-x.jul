@@ -15,7 +15,7 @@ p-class Worker {
             pos := Point { x := 0, y := 10 }
     }
 
-    transition setX(newPos : Point) {
+    internal transition setX(newPos : Point) {
         guard:
             & newPos.x = 42
             & steps = 0
@@ -24,7 +24,7 @@ p-class Worker {
             steps := 1
     }
 
-    transition confirm() {
+    internal transition confirm() {
         guard:
             & pos.x = 42
             & pos.y = 10
@@ -33,7 +33,7 @@ p-class Worker {
             steps := 2
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             steps = 2
     }

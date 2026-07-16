@@ -15,7 +15,7 @@ p-class Worker {
             pos := Point { x := 0, y := 0 }
     }
 
-    transition moveSomewhere(newPos : Point) {
+    internal transition moveSomewhere(newPos : Point) {
         guard:
             count < 5
         transit:
@@ -23,7 +23,7 @@ p-class Worker {
             count := count + 1
     }
 
-    transition moveUp(newPos : Point) {
+    internal transition moveUp(newPos : Point) {
         guard:
             & newPos.y > 0
             & count < 5
@@ -32,7 +32,7 @@ p-class Worker {
             count := count + 1
     }
 
-    transition moveLeft(newPos : Point) {
+    internal transition moveLeft(newPos : Point) {
         guard:
             & newPos.x < 0
             & count < 5
@@ -41,7 +41,7 @@ p-class Worker {
             count := count + 1
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard: count = 5
     }
 }

@@ -1,4 +1,4 @@
-p-class ConsumerOnly {
+p-class A {
     var x : Int
 
     constructor initially(args : List<String>) {
@@ -6,15 +6,13 @@ p-class ConsumerOnly {
             x := 0
     }
 
-    p2p-consumer transition println(msg : String) {
-        guard:
-            true
+    internal transition tick() {
         transit:
             x := x + 1
     }
 }
 
-p-class ServiceOnly {
+p-class B {
     var y : Int
 
     constructor initially(args : List<String>) {
@@ -22,12 +20,10 @@ p-class ServiceOnly {
             y := 0
     }
 
-    transition println(msg : String) {
-        guard:
-            true
+    transition tick() {
         transit:
             y := y + 1
     }
 }
 
-program P := ConsumerOnly || ServiceOnly
+program P := A || B

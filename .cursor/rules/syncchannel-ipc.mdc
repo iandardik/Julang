@@ -6,8 +6,9 @@ alwaysApply: false
 
 # SyncChannel-only IPC
 
-All inter-process communication in Julay must go exclusively through `SyncChannel` (CSP or p2p action rendezvous). Do not add shared caches, mutable statics, or other cross-process shortcuts.
+All inter-process communication in Julay must go exclusively through `SyncChannel` (action rendezvous). Do not add shared caches, mutable statics, or other cross-process shortcuts.
 
-- Pairwise 1:1 sync → p2p actions (sync size 2)
-- CSP sync size → full alphabet/constructor peer set for that action
+- Default and `service` actions → sync size 2
+- `internal` actions → sync size 1
+- Intentional deadlock → a `service` with no consumers (not a synthetic `deadlock` action)
 - Do not reintroduce type-factory interning/caching in `ListType` / `MapType` / `SetType` as an optimization that blurs process isolation assumptions

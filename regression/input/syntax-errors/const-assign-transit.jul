@@ -6,7 +6,7 @@ p-class S {
             x := 0
     }
 
-    transition bump() {
+    internal transition bump() {
         transit:
             x := x + 1
     }

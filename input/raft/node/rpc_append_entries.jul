@@ -41,7 +41,7 @@ p-class IncomingAppendEntriesRPC {
             step := "parse"
     }
 
-    transition parseAE() {
+    internal transition parseAE() {
         guard: step = "parse"
         transit:
             aeTerm := parseInt(fieldValue(split(reqBody, "|")[0]))
@@ -135,7 +135,7 @@ p-class OutgoingAppendEntriesRPC {
             step := "parse"
     }
 
-    transition parseAEResp() {
+    internal transition parseAEResp() {
         guard: step = "parse"
         transit:
             respTerm := parseInt(fieldValue(split(respBody, "|")[0]))
@@ -153,6 +153,11 @@ p-class OutgoingAppendEntriesRPC {
             & inTerm = respTerm
             & success = respSuccess
             & matchIdx = respMatch
+        transit: step := "finishElection"
+    }
+
+    transition finishAppendEntriesResp(peerId : Int) {
+        guard: step = "finishElection" & peerId = cPeerId
         transit: step := "done"
     }
 }

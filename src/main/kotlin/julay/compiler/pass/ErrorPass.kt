@@ -15,23 +15,54 @@ fun ASTNode.errorPass(procs: Set<String>, librariesInUse: Set<String> = emptySet
     else -> children.flatMap { it.errorPass(procs, librariesInUse) }
 }
 
+fun ASTNode.warningPass(procs: Set<String>, librariesInUse: Set<String> = emptySet()): List<CompileWarning> =
+    if (this is RootNode) actionConsistencyWarnings(procs, librariesInUse) else emptyList()
+
+private data class ActionOffer(
+    val pclassKey: String,
+    val decl: ActionDecl,
+    val isConstructor: Boolean,
+)
+
+private fun RootNode.collectActionOffers(procs: Set<String>, librariesInUse: Set<String>): List<ActionOffer> {
+    val progOffers = declNodes()
+        .flatMap { it.procClassPass(procs) }
+        .flatMap { pc ->
+            pc.transitions.map { ActionOffer(pc.name, it, isConstructor = false) } +
+                pc.constructors.map { ActionOffer(pc.name, it, isConstructor = true) }
+        }
+    val libOffers = librariesInUse
+        .filter { it in procs && LibraryRegistry.isKotlinLibrary(it) }
+        .flatMap { libName ->
+            val info = LibraryRegistry.staticInfo(libName)
+            val key = info.name
+            val ctorActs = info.constructors.keys
+            val alphabet = info.alphabet
+            LibraryRegistry.actionDecls(libName).mapNotNull { decl ->
+                when {
+                    decl.action in ctorActs -> ActionOffer(key, decl, isConstructor = true)
+                    decl.action in alphabet -> ActionOffer(key, decl, isConstructor = false)
+                    else -> null
+                }
+            }
+        }
+    return progOffers + libOffers
+}
+
 private fun RootNode.errorPassRoot(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> =
     children.flatMap { it.errorPass(procs, librariesInUse) } +
         actionConsistencyErrors(procs, librariesInUse) +
         overlappingDeclNamesErrors()
 
 private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
-    val progTransitions = declNodes()
-        .flatMap { it.procClassPass(procs) }
-        .flatMap { it.transitions }
-    val libTransitions = librariesInUse
-        .filter { it in procs }
-        .flatMap { LibraryRegistry.actionDecls(it) }
-    val allTransitions = progTransitions + libTransitions
-    val actionOccurrences = allTransitions.groupBy { it.action.name }
-    return actionOccurrences.entries.flatMap { (name, actions) ->
-        val refAction = actions[0]
-        val argMismatches = actions.flatMap { act ->
+    val offers = collectActionOffers(procs, librariesInUse)
+    return offers.groupBy { it.decl.action.name }.entries.flatMap { (name, namedOffers) ->
+        if (name == "initially") {
+            return@flatMap initiallyConsistencyErrors(namedOffers)
+        }
+        val decls = namedOffers.map { it.decl }
+        val refAction = decls[0]
+        val argMismatches = decls.flatMap { act ->
             assertOrCompileError(
                 refAction.action.args == act.action.args,
                 TwoLocsCompileError(
@@ -41,30 +72,138 @@ private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse:
                 ),
             )
         }
-        val inconsistentSyncTypes = actions.flatMap { act ->
-            assertOrCompileError(
-                refAction.action.syncType == act.action.syncType,
-                TwoLocsCompileError(
-                    refAction.loc,
-                    act.loc,
-                    "Expected action \"$name\" to have the same modifiers",
+        val transitions = namedOffers.filter { !it.isConstructor }
+        val constructors = namedOffers.filter { it.isConstructor }
+        val services = transitions.filter { it.decl.modifier == TSAction.SyncRole.Service }
+        val internals = transitions.filter { it.decl.modifier == TSAction.SyncRole.Internal }
+        val defaults = transitions.filter {
+            it.decl.modifier == TSAction.SyncRole.Default || it.decl.modifier == TSAction.SyncRole.Consumer
+        }
+
+        val tagMixErrors = buildList {
+            if (internals.isNotEmpty() && (services.isNotEmpty() || defaults.isNotEmpty())) {
+                add(
+                    OneLocCompileError(
+                        internals[0].decl.loc,
+                        "Expected action \"$name\" not to mix internal with other transition tags",
+                    ),
+                )
+            }
+            if (services.size > 1) {
+                add(
+                    TwoLocsCompileError(
+                        services[0].decl.loc,
+                        services[1].decl.loc,
+                        "Expected at most one p-class to declare service for action \"$name\"",
+                    ),
+                )
+            }
+            if (services.isNotEmpty()) {
+                transitions.filter { it.decl.modifier == TSAction.SyncRole.Internal }.forEach { offer ->
+                    add(
+                        TwoLocsCompileError(
+                            services[0].decl.loc,
+                            offer.decl.loc,
+                            "Expected action \"$name\" not to mix service with internal",
+                        ),
+                    )
+                }
+            }
+        }
+
+        val constructorErrors = buildList {
+            if (constructors.size > 1) {
+                add(
+                    TwoLocsCompileError(
+                        constructors[0].decl.loc,
+                        constructors[1].decl.loc,
+                        "Expected at most one constructor for action \"$name\"",
+                    ),
+                )
+            }
+            if (constructors.isNotEmpty() && services.isNotEmpty()) {
+                add(
+                    TwoLocsCompileError(
+                        constructors[0].decl.loc,
+                        services[0].decl.loc,
+                        "Expected constructors not to use an action serviced by another p-class (\"$name\")",
+                    ),
+                )
+            }
+            if (constructors.isNotEmpty() && internals.isNotEmpty()) {
+                add(
+                    TwoLocsCompileError(
+                        constructors[0].decl.loc,
+                        internals[0].decl.loc,
+                        "Expected internal action \"$name\" not to have a constructor",
+                    ),
+                )
+            }
+        }
+
+        val peerErrors = when {
+            internals.isNotEmpty() -> {
+                val t = transitions.map { it.pclassKey }.toSet().size
+                assertOrCompileError(
+                    t == 1 && constructors.isEmpty(),
+                    OneLocCompileError(
+                        internals[0].decl.loc,
+                        "Expected internal action \"$name\" to be transitioned by exactly one p-class",
+                    ),
+                )
+            }
+            services.isNotEmpty() -> emptyList() // any number of default consumers OK
+            else -> {
+                val t = transitions.map { it.pclassKey }.toSet().size
+                val c = if (constructors.isNotEmpty()) 1 else 0
+                assertOrCompileError(
+                    t + c == 2,
+                    OneLocCompileError(
+                        refAction.loc,
+                        "Expected default action \"$name\" to have exactly two sync peers " +
+                            "(two transitioning p-classes, or one transition and one constructor), but found " +
+                            "$t transitioning p-class(es) and $c constructor offer(s)",
+                    ),
+                )
+            }
+        }
+
+        argMismatches + tagMixErrors + constructorErrors + peerErrors
+    }
+}
+
+private fun initiallyConsistencyErrors(offers: List<ActionOffer>): List<CompileError> {
+    val transitions = offers.filter { !it.isConstructor }
+    val transitionErrors = transitions.map {
+        OneLocCompileError(
+            it.decl.loc,
+            "only constructors (not transitions) can synchronize on the 'initially' action",
+        )
+    }
+    // Multiple initially constructors are allowed (spawn filtered by guards).
+    return transitionErrors
+}
+
+private fun RootNode.actionConsistencyWarnings(
+    procs: Set<String>,
+    librariesInUse: Set<String>,
+): List<CompileWarning> {
+    val offers = collectActionOffers(procs, librariesInUse)
+    return offers.groupBy { it.decl.action.name }.entries.flatMap { (name, namedOffers) ->
+        if (name == "initially") return@flatMap emptyList()
+        val transitions = namedOffers.filter { !it.isConstructor }
+        val services = transitions.filter { it.decl.modifier == TSAction.SyncRole.Service }
+        val consumers = transitions.filter { it.decl.modifier != TSAction.SyncRole.Service }
+        if (services.size == 1 && consumers.isEmpty()) {
+            listOf(
+                OneLocCompileWarning(
+                    services[0].decl.loc,
+                    "action \"$name\" is a service with no consumers and will never synchronize (intentional deadlock)",
                 ),
             )
+        } else {
+            emptyList()
         }
-        val p2pMissingASide = actions.let { actionList ->
-            val isP2P = actionList.any { act -> act.action.syncType == SymbolicAction.SyncType.P2P }
-            val hasService = actionList.any { act -> act.modifier == TSAction.SyncRole.P2PService }
-            val hasConsumer = actionList.any { act -> act.modifier == TSAction.SyncRole.P2PConsumer }
-            val missingType = if (hasService) "p2p-consumer" else "p2p-service"
-            assertOrCompileError(
-                !isP2P || (hasService && hasConsumer),
-                OneLocCompileError(
-                    refAction.loc,
-                    "Expected action \"$name\" to have at least one corresponding \"$missingType\" action",
-                ),
-            )
-        }
-        argMismatches + inconsistentSyncTypes + p2pMissingASide
     }
 }
 
@@ -250,10 +389,6 @@ private fun actionBodyAssignmentErrors(body: List<ActionBodyNode>): List<Compile
 
 private fun ConstructorNode.errorPassConstructor(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
     val assignmentErrors = actionBodyAssignmentErrors(body())
-    val noGuardErrors = assertOrCompileError(
-        body().flatMap { it.guards() }.isEmpty(),
-        OneLocCompileError(programLocation(), "Expected constructors not to have guards"),
-    )
     val initiallyArgs = actionArgs()
     val expectedInitiallyArgs = listOf(Variable("args", listType(stringType)))
     val initiallySignatureErrors = if (constructors().single().action.name != "initially") {
@@ -267,8 +402,7 @@ private fun ConstructorNode.errorPassConstructor(procs: Set<String>, librariesIn
             ),
         )
     }
-    return children.flatMap { it.errorPass(procs, librariesInUse) } + assignmentErrors + noGuardErrors +
-        initiallySignatureErrors
+    return children.flatMap { it.errorPass(procs, librariesInUse) } + assignmentErrors + initiallySignatureErrors
 }
 
 private fun TransitionNode.errorPassTransition(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {

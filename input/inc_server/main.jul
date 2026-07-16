@@ -8,15 +8,15 @@ p-class Counter {
         transit: counter := 0
     }
 
-    p2p-service transition increment() {
+    service transition increment() {
         transit: counter := counter + 1
     }
 
-    p2p-service transition getCounter(counterVal : Int) {
+    service transition getCounter(counterVal : Int) {
         guard: counterVal = counter
     }
 
-    p2p-consumer transition close() {
+    transition close() {
         guard: false // never close the server
     }
 }

@@ -6,13 +6,13 @@ p-class PeriodicPrint {
             step := "A"
     }
 
-    transition println() {
+    internal transition println() {
         guard:   step = "A"
         transit: step := "B"
         effect:  println("hi")
     }
 
-    transition wait() {
+    internal transition wait() {
         guard:   step = "B"
         transit: step := "A"
         effect:  delaySeconds(2)

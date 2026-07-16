@@ -18,7 +18,7 @@ p-class SetIntDemo {
             println(args[0])
     }
 
-    transition step() {
+    internal transition step() {
         guard:
             ~print & length(s) = 2 & gotCli & 1 in s & ~(3 in s)
         transit:
@@ -27,7 +27,7 @@ p-class SetIntDemo {
             print := true
     }
 
-    transition step2() {
+    internal transition step2() {
         guard:
             print & n = 3 & 3 in s
         transit:
@@ -36,14 +36,14 @@ p-class SetIntDemo {
             print := false
     }
 
-    p2p-consumer transition println(msg : String) {
+    transition println(msg : String) {
         guard:
             ~print & (msg = n + "")
         transit:
             print := true
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             print & n = 2 & s = {2, 3}
     }

@@ -27,7 +27,7 @@ p-class RaftInitializer {
             step := "load"
     }
 
-    transition readConfig() {
+    internal transition readConfig() {
         guard: step = "load"
         transit:
             rawLines := split(readFile(path), "\n")
@@ -36,7 +36,7 @@ p-class RaftInitializer {
             step := "scan"
     }
 
-    transition skipOrTake() {
+    internal transition skipOrTake() {
         guard: step = "scan" & idx < length(rawLines)
         transit:
             acc := let (line : String := trim(rawLines[idx])) {
@@ -45,10 +45,16 @@ p-class RaftInitializer {
             idx := idx + 1
     }
 
-    transition startRaft(urls : List<String>, id : Int) {
+    transition startRaftCore(urls : List<String>, id : Int) {
         guard:
             step = "scan" & idx = length(rawLines) & length(acc) > 0
             & urls = acc & id = selfId
+        transit: step := "startElection"
+    }
+
+    transition startElectionDriver(urls : List<String>, id : Int) {
+        guard:
+            step = "startElection" & urls = acc & id = selfId
         transit: step := "done"
     }
 }
@@ -63,27 +69,32 @@ p-class ServerInitializer {
             myPort := 0
     }
 
-    p2p-consumer transition getListenPort(port : Int) {
+    transition getListenPort(port : Int) {
         guard: ~started
         transit: myPort := port
     }
 
-    transition startServer(port : Int) {
+    transition createHttpServer(port : Int) {
         guard: ~started & port = myPort & myPort > 0
         transit: started := true
     }
 }
 
 p-class ClientInitializer {
-    var started : Boolean
+    var step : String
 
     constructor initially(args : List<String>) {
-        transit: started := false
+        transit: step := "createHttp"
+    }
+
+    transition createHttpClient() {
+        guard: step = "createHttp"
+        transit: step := "startRpc"
     }
 
     transition startClient() {
-        guard: ~started
-        transit: started := true
+        guard: step = "startRpc"
+        transit: step := "done"
     }
 }
 

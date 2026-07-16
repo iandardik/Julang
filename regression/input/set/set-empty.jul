@@ -11,14 +11,14 @@ p-class SetEmptyDemo {
             done := false
     }
 
-    transition check() {
+    internal transition check() {
         guard:
             ~done
         transit:
             done := length(s) = 0
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             done
     }

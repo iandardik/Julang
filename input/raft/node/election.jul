@@ -26,7 +26,7 @@ p-class ElectionDriver {
     var electTimeout : Int
     var armedEpoch : Int
 
-    constructor startRaft(urls : List<String>, id : Int) {
+    constructor startElectionDriver(urls : List<String>, id : Int) {
         transit:
             step := "arm"
             myId := id
@@ -49,7 +49,7 @@ p-class ElectionDriver {
             armedEpoch := 0
     }
 
-    p2p-consumer transition getSelfId(id : Int) {
+    transition getSelfId(id : Int) {
         guard: step = "hbSelf"
         transit:
             myId := id
@@ -57,7 +57,7 @@ p-class ElectionDriver {
             step := "hbNeedN"
     }
 
-    p2p-consumer transition getElectionSnapshot(
+    transition getElectionSnapshot(
         epoch : Int, term : Int, candId : Int, lastIdx : Int, lastT : Int, role : String
     ) {
         guard: step = "arm" | step = "checkEpoch" | step = "snap"
@@ -91,7 +91,7 @@ p-class ElectionDriver {
         transit: step := "dispatch"
     }
 
-    p2p-consumer transition isLeader(flag : Boolean) {
+    transition isLeader(flag : Boolean) {
         guard: step = "dispatch"
         transit: step := if (flag) { "hbSelf" } else { "checkEpoch" }
     }
@@ -101,7 +101,7 @@ p-class ElectionDriver {
         transit: step := "snap"
     }
 
-    p2p-consumer transition getClusterSize(size : Int) {
+    transition getClusterSize(size : Int) {
         guard: step = "needN" | step = "hbNeedN"
         transit:
             clusterN := size
@@ -109,17 +109,17 @@ p-class ElectionDriver {
             step := if (step = "hbNeedN") { "hbPeers" } else { "peers" }
     }
 
-    transition skipSelf() {
+    internal transition skipSelf() {
         guard: step = "peers" & curPeer = myId & curPeer < clusterN
         transit: curPeer := curPeer + 1
     }
 
-    transition peersDone() {
+    internal transition peersDone() {
         guard: step = "peers" & curPeer >= clusterN
         transit: step := "checkQ"
     }
 
-    p2p-consumer transition getPeerUrl(peerId : Int, url : String) {
+    transition getPeerUrl(peerId : Int, url : String) {
         guard: step = "peers" & peerId = curPeer & curPeer ~= myId & curPeer < clusterN
         transit:
             peer := url
@@ -141,14 +141,15 @@ p-class ElectionDriver {
         transit: step := "awaitRV"
     }
 
-    transition recordVote(peerId : Int, term : Int, granted : Boolean) {
+    /* Pairwise with OutgoingRequestVoteRPC after Core has recorded the vote. */
+    transition finishRecordVote(peerId : Int) {
         guard: step = "awaitRV" & peerId = curPeer
         transit:
             curPeer := curPeer + 1
             step := "peers"
     }
 
-    p2p-consumer transition hasQuorum(flag : Boolean) {
+    transition hasQuorum(flag : Boolean) {
         guard: step = "checkQ"
         transit: step := if (flag) { "doLeader" } else { "arm" }
     }
@@ -158,17 +159,17 @@ p-class ElectionDriver {
         transit: step := "hbWait"
     }
 
-    transition hbSkipSelf() {
+    internal transition hbSkipSelf() {
         guard: step = "hbPeers" & curPeer = myId & curPeer < clusterN
         transit: curPeer := curPeer + 1
     }
 
-    transition hbPeersDone() {
+    internal transition hbPeersDone() {
         guard: step = "hbPeers" & curPeer >= clusterN
         transit: step := "hbWait"
     }
 
-    p2p-consumer transition getLogMetadata(
+    transition getLogMetadata(
         peerId : Int, term : Int, leaderId : Int, prevLogIndex : Int, prevLogTerm : Int,
         entryTerm : Int, entryValue : String, entriesLen : Int, leaderCommit : Int, peerUrlOut : String
     ) {
@@ -206,9 +207,8 @@ p-class ElectionDriver {
         transit: step := "awaitAE"
     }
 
-    transition handleAppendEntriesResp(
-        peerId : Int, inTerm : Int, success : Boolean, matchIdx : Int
-    ) {
+    /* Pairwise with OutgoingAppendEntriesRPC after Core has applied the AE response. */
+    transition finishAppendEntriesResp(peerId : Int) {
         guard: step = "awaitAE" & peerId = curPeer
         transit:
             curPeer := curPeer + 1

@@ -8,7 +8,7 @@ p-class S {
             y := 0
     }
 
-    transition go() {
+    internal transition go() {
         effect:
             x := readln()
             x := readln()

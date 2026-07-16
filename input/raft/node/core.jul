@@ -26,7 +26,7 @@ p-class RaftCore {
     var leaderUrl : String
     var electionEpoch : Int
 
-    constructor startRaft(urls : List<String>, id : Int) {
+    constructor startRaftCore(urls : List<String>, id : Int) {
         transit:
             selfId := id
             clusterSize := length(urls)
@@ -60,6 +60,7 @@ p-class RaftCore {
             leaderUrl := ""
     }
 
+    /* Pairwise with OutgoingRequestVoteRPC (Election advances via finishRecordVote). */
     transition recordVote(peerId : Int, term : Int, granted : Boolean) {
         guard: state = "Candidate" & term = currentTerm & peerId >= 0 & peerId < clusterSize
         transit:
@@ -133,6 +134,7 @@ p-class RaftCore {
             currentTerm := if (inTerm > currentTerm) { inTerm } else { currentTerm }
     }
 
+    /* Pairwise with OutgoingAppendEntriesRPC (Election advances via finishAppendEntriesResp). */
     transition handleAppendEntriesResp(
         peerId : Int,
         inTerm : Int,
@@ -183,7 +185,7 @@ p-class RaftCore {
             }
     }
 
-    transition applyEntryToStateMachine() {
+    internal transition applyEntryToStateMachine() {
         guard: lastApplied < commitIndex & lastApplied < length(log)
         transit:
             stateMachine := stateMachine + [entryValueAt(log, lastApplied)]
@@ -195,29 +197,29 @@ p-class RaftCore {
      * Getters of RaftCore for accessing info from it.
      */
 
-    p2p-service transition getListenPort(port : Int) {
+    service transition getListenPort(port : Int) {
         guard: port = selfPort
     }
 
-    p2p-service transition getClusterSize(size : Int) {
+    service transition getClusterSize(size : Int) {
         guard: size = clusterSize
     }
 
-    p2p-service transition getSelfId(id : Int) {
+    service transition getSelfId(id : Int) {
         guard: id = selfId
     }
 
-    p2p-service transition isLeader(flag : Boolean) {
+    service transition isLeader(flag : Boolean) {
         guard: (flag & state = "Leader") | (~flag & state ~= "Leader")
     }
 
-    p2p-service transition hasQuorum(flag : Boolean) {
+    service transition hasQuorum(flag : Boolean) {
         guard:
             state = "Candidate"
             & ((flag & voteCount * 2 > clusterSize) | (~flag & voteCount * 2 <= clusterSize))
     }
 
-    p2p-service transition getElectionSnapshot(
+    service transition getElectionSnapshot(
         epoch : Int,
         term : Int,
         candId : Int,
@@ -234,18 +236,18 @@ p-class RaftCore {
             & role = state
     }
 
-    p2p-service transition getPeerUrl(peerId : Int, url : String) {
+    service transition getPeerUrl(peerId : Int, url : String) {
         guard:
             peerId >= 0 & peerId < clusterSize & peerId ~= selfId & url = clusterUrls[peerId]
     }
 
-    p2p-service transition getSerializedStateMachine(serializedSM : String, isLeader : Boolean) {
+    service transition getSerializedStateMachine(serializedSM : String, isLeader : Boolean) {
         guard:
             | (state = "Leader" & isLeader & serializedSM = stateMachine + "")
             | (state ~= "Leader" & ~isLeader & serializedSM = "")
     }
 
-    p2p-service transition getRedirectBody(body : String, code : Int) {
+    service transition getRedirectBody(body : String, code : Int) {
         guard:
             state ~= "Leader"
             & (
@@ -254,7 +256,7 @@ p-class RaftCore {
             )
     }
 
-    p2p-service transition getLogMetadata(
+    service transition getLogMetadata(
         peerId : Int,
         term : Int,
         leaderId : Int,

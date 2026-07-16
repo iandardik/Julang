@@ -8,7 +8,7 @@ p-class S {
             print := true
     }
 
-    transition step() {
+    internal transition step() {
         guard:
             step = "A" | step = "B"
         transit:
@@ -21,7 +21,7 @@ p-class S {
             println(step)
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
             step = "C"
         effect:

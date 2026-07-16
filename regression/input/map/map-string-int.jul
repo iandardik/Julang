@@ -18,7 +18,7 @@ p-class MapStringIntDemo {
             println(args[0])
     }
 
-    transition read() {
+    internal transition read() {
         guard:
             ~print & gotCli & length(mp) = 2 & "a" in mp & ~( "z" in mp )
         transit:
@@ -26,7 +26,7 @@ p-class MapStringIntDemo {
             print := true
     }
 
-    transition update() {
+    internal transition update() {
         guard:
             print & n = 1
         transit:
@@ -35,14 +35,14 @@ p-class MapStringIntDemo {
             print := false
     }
 
-    p2p-consumer transition println(msg : String) {
+    transition println(msg : String) {
         guard:
             ~print & (msg = n + "")
         transit:
             print := true
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             print & n = 3 & mp["c"] = 3
     }

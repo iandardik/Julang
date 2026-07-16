@@ -6,7 +6,7 @@ p-class S {
             msg := ""
     }
 
-    transition read() {
+    internal transition read() {
         effect:
             msg := readln()
     }

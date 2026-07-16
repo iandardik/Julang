@@ -10,7 +10,7 @@ p-class BadSlice {
             ys := xs[true:2]
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard: true
     }
 }

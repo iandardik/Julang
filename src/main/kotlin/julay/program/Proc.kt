@@ -32,17 +32,19 @@ class Proc(
         val enabledActions = transitionSystem.actions(ctx).filter { act ->
             solver.reset()
             solver.add(act.guard)
-            // deadlock is not enabled, but we let it pass on purpose to create a deadlock
-            act.symAction.name == "deadlock" || solver.check() == Status.SATISFIABLE
+            solver.check() == Status.SATISFIABLE
         }
         val cases = enabledActions.map { act ->
             val programAction = actionTable[act.symAction]!!
-            // the first anticonstraint ensures that processes from the same p-class never sync
-            // the second ensures that service transitions act like servers, and all others act like clients
+            // Default/Internal: processes from the same p-class never sync.
+            // Service/Consumer: service vs client rendezvous (serviceTransition).
             val anticonstraint = when (act.syncRole) {
-                TSAction.SyncRole.CSP -> ctx.mkEq(ctx.mkIntConst("classID"), ctx.mkInt(tsInfo.classID()))
-                TSAction.SyncRole.P2PService -> ctx.mkEq(ctx.mkBoolConst("serviceTransition"), ctx.mkTrue())
-                TSAction.SyncRole.P2PConsumer -> ctx.mkEq(ctx.mkBoolConst("serviceTransition"), ctx.mkFalse())
+                TSAction.SyncRole.Default, TSAction.SyncRole.Internal ->
+                    ctx.mkEq(ctx.mkIntConst("classID"), ctx.mkInt(tsInfo.classID()))
+                TSAction.SyncRole.Service ->
+                    ctx.mkEq(ctx.mkBoolConst("serviceTransition"), ctx.mkTrue())
+                TSAction.SyncRole.Consumer ->
+                    ctx.mkEq(ctx.mkBoolConst("serviceTransition"), ctx.mkFalse())
             }
             Select.SyncCase(programAction.channel, act.guard, anticonstraint) { concAct : ConcreteAction ->
                 nextAct = Optional.of(concAct)

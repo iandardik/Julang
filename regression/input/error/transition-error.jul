@@ -6,7 +6,7 @@ p-class S {
             x := 0
     }
 
-    transition tick() {
+    internal transition tick() {
         guard:
             true
         error:

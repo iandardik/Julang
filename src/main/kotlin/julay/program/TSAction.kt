@@ -12,17 +12,24 @@ import julay.tools.assert
 data class TSAction(
     val symAction : SymbolicAction,
     val guard : BoolExpr,
-    val syncRole : SyncRole = SyncRole.CSP,
+    val syncRole : SyncRole = SyncRole.Default,
 ) {
-    enum class SyncRole {CSP, P2PService, P2PConsumer}
+    /**
+     * [Default] / [Internal] come from source tags (untagged / `internal`).
+     * [Service] comes from the `service` tag.
+     * [Consumer] is assigned by the compiler to untagged transitions on a serviced action
+     * (there is no consumer source tag).
+     */
+    enum class SyncRole { Default, Internal, Service, Consumer }
 
     init {
-        // sanity checks
-        assert(!(syncRole == SyncRole.CSP) || (symAction.syncType == SymbolicAction.SyncType.CSP),
-            "Expected (syncRole == SyncRole.CSP) => (symAction.syncType == SymbolicAction.SyncType.CSP)")
-        assert(!(syncRole == SyncRole.P2PService) || (symAction.syncType == SymbolicAction.SyncType.P2P),
-            "Expected (syncRole == SyncRole.P2PService) => (symAction.syncType == SymbolicAction.SyncType.P2P)")
-        assert(!(syncRole == SyncRole.P2PConsumer) || (symAction.syncType == SymbolicAction.SyncType.P2P),
-            "Expected (syncRole == SyncRole.P2PConsumer) => (symAction.syncType == SymbolicAction.SyncType.P2P)")
+        assert(
+            !(syncRole == SyncRole.Internal) || symAction.isInternal,
+            "Expected Internal role => SymbolicAction.isInternal",
+        )
+        assert(
+            !(syncRole != SyncRole.Internal) || !symAction.isInternal,
+            "Expected non-Internal role => !SymbolicAction.isInternal",
+        )
     }
 }

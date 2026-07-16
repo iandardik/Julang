@@ -196,12 +196,12 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
 
     override fun visitTransition(ctx: JulayParser.TransitionContext?): ASTNode {
         val isService = ctx!!.SERVICE() != null
-        val isConsumer = ctx.CONSUMER() != null
-        assert(!isService || !isConsumer, "A transition cannot be both a service and consumer")
+        val isInternal = ctx.INTERNAL() != null
+        assert(!isService || !isInternal, "A transition cannot be both service and internal")
         val modifier = when {
-            isService -> TSAction.SyncRole.P2PService
-            isConsumer -> TSAction.SyncRole.P2PConsumer
-            else -> TSAction.SyncRole.CSP
+            isService -> TSAction.SyncRole.Service
+            isInternal -> TSAction.SyncRole.Internal
+            else -> TSAction.SyncRole.Default
         }
         val name = ctx.ID().text
         val args = visit(ctx.args()).let { argsNode ->

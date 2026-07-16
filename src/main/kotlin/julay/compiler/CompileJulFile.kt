@@ -5,6 +5,7 @@ import julay.compiler.decl.ProcDeclType
 import julay.compiler.pass.errorPass
 import julay.compiler.pass.resolvedProcPass
 import julay.compiler.pass.typePass
+import julay.compiler.pass.warningPass
 import java.nio.file.Path
 
 fun compileJulFile(
@@ -41,6 +42,7 @@ fun compileJulFile(
             println("Found errors while compiling the program \"${program.name}\"; exiting.")
             return
         }
+        ast.warningPass(components, librariesInUse).forEach { System.err.println(it) }
     }
 
     programs.forEach { compileProgram(it, ast, procDecls, librariesInUse, keepBuild, compilerJar) }

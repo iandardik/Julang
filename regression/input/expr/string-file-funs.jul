@@ -23,7 +23,7 @@ p-class StringFileDemo {
             n := 0
     }
 
-    transition checkPort() {
+    internal transition checkPort() {
         guard:
             phase = 0
         transit:
@@ -31,7 +31,7 @@ p-class StringFileDemo {
             phase := 1
     }
 
-    transition checkTrim() {
+    internal transition checkTrim() {
         guard:
             phase = 1 & port = 5001
         transit:
@@ -39,14 +39,14 @@ p-class StringFileDemo {
             phase := 2
     }
 
-    transition checkStartsWith() {
+    internal transition checkStartsWith() {
         guard:
             phase = 2 & startsWith(line, "#")
         transit:
             phase := 3
     }
 
-    transition checkSplit() {
+    internal transition checkSplit() {
         guard:
             phase = 3
         transit:
@@ -54,7 +54,7 @@ p-class StringFileDemo {
             phase := 4
     }
 
-    transition checkFile() {
+    internal transition checkFile() {
         guard:
             phase = 4 & n = 3
         transit:
@@ -62,7 +62,7 @@ p-class StringFileDemo {
             phase := 5
     }
 
-    transition done() {
+    internal transition done() {
         guard:
             phase = 5 & line = "hello-config"
         effect:

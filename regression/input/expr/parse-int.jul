@@ -12,14 +12,14 @@ p-class ParseIntDemo {
             print := true
     }
 
-    p2p-consumer transition println(msg : String) {
+    transition println(msg : String) {
         guard:
             print & (msg = n + "")
         transit:
             print := false
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             ~print & n = 42
     }

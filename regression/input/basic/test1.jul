@@ -16,7 +16,7 @@ p-class S {
             print := true
     }
 
-    transition println(msg : String) {
+    internal transition println(msg : String) {
         guard:
             print & (msg = x + "")
         transit:
@@ -25,7 +25,7 @@ p-class S {
             println(msg)
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard: ~print & x > 10
         effect:
             exitProcess()

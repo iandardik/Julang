@@ -7,6 +7,7 @@ p-class ClientDispatcher {
     const targetNumReqs : Int
     var numReqs : Int
     var numResps : Int
+    var step : String
 
     constructor initially(args : List<String>) {
         transit:
@@ -17,11 +18,17 @@ p-class ClientDispatcher {
             } else {
                 25
             }
+            step := "createHttp"
+    }
+
+    transition createHttpClient() {
+        guard: step = "createHttp"
+        transit: step := "run"
     }
 
     transition startReq(num : Int) {
         guard:
-            numReqs <= targetNumReqs & num = numReqs
+            step = "run" & numReqs <= targetNumReqs & num = numReqs
         transit:
             numReqs := numReqs + 1
     }
@@ -31,7 +38,7 @@ p-class ClientDispatcher {
             numResps := numResps + 1
     }
 
-    transition finish() {
+    internal transition finish() {
         guard:
             numResps = targetNumReqs
         effect:
@@ -70,7 +77,7 @@ p-class ClientLogic {
             state := "C"
     }
 
-    p2p-consumer transition println(msg : String) {
+    transition println(msg : String) {
         guard:
             state = "C" & msg = "response: " + respText
         transit:

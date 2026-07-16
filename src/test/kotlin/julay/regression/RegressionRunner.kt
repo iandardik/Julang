@@ -63,6 +63,20 @@ object RegressionRunner {
                 return
             }
 
+            case.expectCompileOutputContains.forEach { needle ->
+                assertTrue(
+                    compileResult.output.contains(needle),
+                    "Compiler output for case ${case.id} missing expected substring: $needle\n--- output ---\n${compileResult.output}",
+                )
+            }
+
+            if (case.programs.isEmpty()) {
+                check(compileResult.jars.isNotEmpty() || case.expectCompileOutputContains.isNotEmpty()) {
+                    "No program JARs produced for ${case.source}\n--- compiler output ---\n${compileResult.output}"
+                }
+                return
+            }
+
             check(compileResult.jars.isNotEmpty()) {
                 "No program JARs produced for ${case.source}\n--- compiler output ---\n${compileResult.output}"
             }

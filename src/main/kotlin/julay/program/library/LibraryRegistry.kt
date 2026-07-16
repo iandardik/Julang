@@ -45,4 +45,5 @@ object LibraryRegistry {
 
     fun staticInfoCodegenExpr(julName: String) = byJulName[julName]!!.staticInfoCodegenExpr()
     fun actionDecls(julName: String) = byJulName[julName]!!.actionDecls
+    fun staticInfo(julName: String) = byJulName[julName]!!.staticInfo()
 }

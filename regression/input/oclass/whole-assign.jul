@@ -13,7 +13,7 @@ p-class Worker {
             pos := Point { x := 0, y := 0 }
     }
 
-    transition move(newPos : Point) {
+    internal transition move(newPos : Point) {
         guard:
             steps < 2
         transit:
@@ -21,7 +21,7 @@ p-class Worker {
             steps := steps + 1
     }
 
-    transition verify(newPos : Point) {
+    internal transition verify(newPos : Point) {
         guard:
             & steps = 2
             & pos.x = newPos.x
@@ -30,7 +30,7 @@ p-class Worker {
             steps := 3
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
             steps = 3
         effect:

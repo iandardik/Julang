@@ -11,7 +11,7 @@ p-class S {
             print := true
     }
 
-    transition bump() {
+    internal transition bump() {
         guard:
             print & x = 0
         transit:
@@ -19,14 +19,14 @@ p-class S {
             print := false
     }
 
-    p2p-consumer transition println(msg : String) {
+    transition println(msg : String) {
         guard:
             ~print & (msg = x + "")
         transit:
             print := true
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             print
     }

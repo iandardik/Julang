@@ -1,0 +1,5 @@
+source: regression/input/syntax-errors/service-no-consumer.jul
+expectCompileFailure: false
+expectCompileOutputContains:
+  - "warning: action \"println\" is a service with no consumers and will never synchronize (intentional deadlock)"
+programs: []

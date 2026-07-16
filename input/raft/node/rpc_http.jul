@@ -93,7 +93,7 @@ p-class RpcServer {
             step := "resp"
     }
 
-    transition badPath() {
+    internal transition badPath() {
         guard: step = "bad"
         transit:
             respBody := "NOT_FOUND"
@@ -106,7 +106,7 @@ p-class RpcServer {
         transit: step := "done"
     }
 
-    p2p-consumer transition close() {
+    transition close() {
         guard: false
     }
 }

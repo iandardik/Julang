@@ -24,14 +24,14 @@ p-class Worker {
             steps := 1
     }
 
-    transition check() {
+    internal transition check() {
         guard:
             steps = 1 & box.value = 5
         transit:
             steps := 2
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             steps = 2
     }
@@ -45,7 +45,7 @@ p-class Driver {
             done := false
     }
 
-    transition kick() {
+    internal transition kick() {
         guard:
             ~done
         transit:

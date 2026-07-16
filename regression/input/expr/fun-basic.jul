@@ -23,14 +23,14 @@ p-class S {
             print := true
     }
 
-    p2p-consumer transition println(msg : String) {
+    transition println(msg : String) {
         guard:
             print & (msg = x + "")
         transit:
             print := false
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             ~print & x > 0.0
     }

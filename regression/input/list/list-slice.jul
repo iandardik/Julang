@@ -22,7 +22,7 @@ p-class ListSliceDemo {
             phase := 0
     }
 
-    transition sliceMid() {
+    internal transition sliceMid() {
         guard:
             phase = 0
         transit:
@@ -30,7 +30,7 @@ p-class ListSliceDemo {
             phase := 1
     }
 
-    transition sliceEmpty() {
+    internal transition sliceEmpty() {
         guard:
             phase = 1 & mid = [20, 30] & length(mid) = 2
         transit:
@@ -39,7 +39,7 @@ p-class ListSliceDemo {
             phase := 2
     }
 
-    transition sliceClampAndNest() {
+    internal transition sliceClampAndNest() {
         guard:
             phase = 2 & length(emptyEq) = 0 & length(emptyRev) = 0
         transit:
@@ -48,14 +48,14 @@ p-class ListSliceDemo {
             phase := 3
     }
 
-    p2p-consumer transition println(msg : String) {
+    transition println(msg : String) {
         guard:
             phase = 3 & clamped = [30, 40] & nested = 20 & (msg = mid + "")
         transit:
             phase := 4
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             phase = 4
     }

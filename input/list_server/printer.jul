@@ -19,7 +19,7 @@ p-class PeriodicPrint {
             step := "A"
     }
 
-    p2p-consumer transition getList(lst : List<String>) {
+    transition getList(lst : List<String>) {
         guard:
             step = "A"
         transit:
@@ -27,7 +27,7 @@ p-class PeriodicPrint {
             step := "B"
     }
 
-    p2p-consumer transition println(msg : String) {
+    transition println(msg : String) {
         guard:   step = "B" & (msg = list + "")
         transit: step := "C"
     }

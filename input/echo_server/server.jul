@@ -13,7 +13,7 @@ p-class ServerStarter {
         transit: started := false
     }
 
-    transition startServer(port : Int) {
+    transition createHttpServer(port : Int) {
         guard: ~started & port = 8000
         transit: started := true
     }
@@ -48,7 +48,7 @@ p-class EchoHandler {
             responded := true
     }
 
-    p2p-consumer transition println(msg : String) {
+    transition println(msg : String) {
         guard:
             & responded
             & ~done
@@ -57,7 +57,7 @@ p-class EchoHandler {
             done := true
     }
 
-    p2p-consumer transition close() {
+    transition close() {
         guard:
             // never close the server until the user hits ctrl-c
             false

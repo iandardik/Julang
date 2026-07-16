@@ -18,7 +18,7 @@ p-class PeriodicPrint {
             step := "A"
     }
 
-    p2p-consumer transition getCounter(counterVal : Int) {
+    transition getCounter(counterVal : Int) {
         guard:
             step = "A"
         transit:
@@ -26,7 +26,7 @@ p-class PeriodicPrint {
             step := "B"
     }
 
-    transition println() {
+    internal transition println() {
         guard:   step = "B"
         transit: step := "C"
         effect:  println(localCounter + "")

@@ -23,7 +23,7 @@ p-class Worker {
             }
     }
 
-    transition checkStart() {
+    internal transition checkStart() {
         guard:
             & segment.start.x = 1
             & segment.start.y = 2
@@ -32,7 +32,7 @@ p-class Worker {
             steps := 1
     }
 
-    transition checkEnd() {
+    internal transition checkEnd() {
         guard:
             & segment.end.x = 3
             & segment.end.y = 4
@@ -41,7 +41,7 @@ p-class Worker {
             steps := 2
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             steps = 2
     }

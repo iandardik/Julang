@@ -21,13 +21,13 @@ class JulHttpServer(
         val portArg = Variable("port", intType)
         val reqArg = Variable("req", httpServerRequestType)
         val respArg = Variable("resp", httpServerResponseType)
-        val startServerAct = SymbolicAction("startServer", listOf(portArg))
+        val createHttpServerAct = SymbolicAction("createHttpServer", listOf(portArg))
         val receiveRequestAct = SymbolicAction("receiveRequest", listOf(reqArg))
         // req correlates the response with the exchange that received it (avoids cross-wiring concurrent handlers)
         val sendResponseAct = SymbolicAction("sendResponse", listOf(reqArg, respArg))
-        val closeAct = SymbolicAction("close", listOf(), SymbolicAction.SyncType.P2P)
-        val startServerCtor: Pair<SymbolicAction, suspend (Program, ConcreteAction) -> JulHttpServer> = Pair(
-            startServerAct,
+        val closeAct = SymbolicAction("close", listOf())
+        val createHttpServerCtor: Pair<SymbolicAction, suspend (Program, ConcreteAction) -> JulHttpServer> = Pair(
+            createHttpServerAct,
         ) { prog, act ->
             val port = act.lookup(portArg).value as Int
             JulHttpServer(port, prog.actionTable)
@@ -36,13 +36,13 @@ class JulHttpServer(
         override fun staticInfo() = TransitionSystemStaticInfo(
             "JulHttpServer$",
             setOf(receiveRequestAct, sendResponseAct, closeAct),
-            mapOf(startServerCtor),
+            mapOf(createHttpServerCtor),
         )
         override val actionDecls = listOf(
-            ActionDecl(startServerAct, listOf(), emptyList(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
-            ActionDecl(receiveRequestAct, listOf(), emptyList(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
-            ActionDecl(sendResponseAct, listOf(), emptyList(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
-            ActionDecl(closeAct, listOf(), emptyList(), TSAction.SyncRole.P2PService, LibraryLoc(julName)),
+            ActionDecl(createHttpServerAct, listOf(), emptyList(), TSAction.SyncRole.Default, LibraryLoc(julName)),
+            ActionDecl(receiveRequestAct, listOf(), emptyList(), TSAction.SyncRole.Default, LibraryLoc(julName)),
+            ActionDecl(sendResponseAct, listOf(), emptyList(), TSAction.SyncRole.Default, LibraryLoc(julName)),
+            ActionDecl(closeAct, listOf(), emptyList(), TSAction.SyncRole.Service, LibraryLoc(julName)),
         )
     }
 
@@ -54,7 +54,7 @@ class JulHttpServer(
     }
     override suspend fun actions(ctx: Context): Set<TSAction> {
         return setOf(
-            TSAction(closeAct, ctx.mkTrue(), TSAction.SyncRole.P2PService),
+            TSAction(closeAct, ctx.mkTrue(), TSAction.SyncRole.Service),
         )
     }
     override suspend fun transit(act: ConcreteAction) {}

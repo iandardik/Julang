@@ -15,7 +15,7 @@ p-class Worker {
             matched := false
     }
 
-    transition check() {
+    internal transition check() {
         guard:
             when (pos) {
                 Point { x := 5, y := 6 } -> ~matched
@@ -25,7 +25,7 @@ p-class Worker {
             matched := true
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             matched
     }

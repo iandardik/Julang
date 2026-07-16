@@ -44,8 +44,8 @@ null
 'const'
 'constructor'
 'transition'
-'p2p-service'
-'p2p-consumer'
+'internal'
+'service'
 'guard'
 'transit'
 'error'
@@ -105,8 +105,8 @@ VAR
 CONST
 CONSTRUCTOR
 TRANSITION
+INTERNAL
 SERVICE
-CONSUMER
 GUARD
 TRANSIT
 ERROR

@@ -1,7 +1,7 @@
 p-class Println {
     constructor initially(args : List<String>) {}
 
-    p2p-service transition println(msg : String) {
+    service transition println(msg : String) {
         effect:
             println(msg)
     }

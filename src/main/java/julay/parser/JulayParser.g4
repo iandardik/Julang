@@ -83,7 +83,7 @@ constructor
     ;
 
 transition
-    : (SERVICE | CONSUMER)? TRANSITION ID args LCURLY action_body* RCURLY
+    : (INTERNAL | SERVICE)? TRANSITION ID args LCURLY action_body* RCURLY
     ;
 
 args

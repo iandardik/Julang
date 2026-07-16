@@ -1,5 +1,6 @@
 source: regression/input/syntax-errors/constructor-has-guard.jul
-expectCompileFailure: true
-expectCompileOutputContains:
-  - "Expected constructors not to have guards"
-  - "Found errors while compiling the program \"P\"; exiting."
+expectCompileFailure: false
+programs:
+  - name: P
+    run:
+      timeoutMs: 10000

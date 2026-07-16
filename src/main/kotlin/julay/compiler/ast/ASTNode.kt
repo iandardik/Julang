@@ -383,10 +383,10 @@ class ConstructorNode(
     override fun constructors(): List<ActionDecl> {
         return listOf(
             ActionDecl(
-                SymbolicAction(name, args.actionArgs(), SymbolicAction.SyncType.CSP),
+                SymbolicAction(name, args.actionArgs()),
                 body.flatMap { it.guards() },
                 body.flatMap { it.transits() },
-                TSAction.SyncRole.CSP,
+                TSAction.SyncRole.Default,
                 loc,
                 body.flatMap { it.effects() },
                 body.flatMap { it.errors() },
@@ -414,14 +414,9 @@ class TransitionNode(
     override fun programLocation() = loc
     override fun transitVars() = body.flatMap { it.transitVars() }
     override fun transitions(): List<ActionDecl> {
-        val syncType = when (modifier) {
-            TSAction.SyncRole.CSP -> SymbolicAction.SyncType.CSP
-            TSAction.SyncRole.P2PService -> SymbolicAction.SyncType.P2P
-            TSAction.SyncRole.P2PConsumer -> SymbolicAction.SyncType.P2P
-        }
         return listOf(
             ActionDecl(
-                SymbolicAction(name, args.actionArgs(), syncType),
+                SymbolicAction(name, args.actionArgs(), isInternal = modifier == TSAction.SyncRole.Internal),
                 body.flatMap { it.guards() },
                 body.flatMap { it.transits() },
                 modifier,
@@ -439,9 +434,9 @@ class TransitionNode(
         TransitionNode(modifier, name, args, newBody, programLocation())
     override fun toString(): String {
         val modifierStr = when (modifier) {
-            TSAction.SyncRole.CSP -> ""
-            TSAction.SyncRole.P2PService -> "p2p-service "
-            TSAction.SyncRole.P2PConsumer -> "p2p-consumer "
+            TSAction.SyncRole.Default, TSAction.SyncRole.Consumer -> ""
+            TSAction.SyncRole.Service -> "service "
+            TSAction.SyncRole.Internal -> "internal "
         }
         val bodyStr = body.joinToString("\n") { "$it".prependIndent() }
         return "${modifierStr}transition $name($args) {\n$bodyStr\n}"

@@ -33,8 +33,9 @@ object RegressionCases {
         val programsRaw = root["programs"] as? List<Map<String, Any>> ?: emptyList()
         val programs = programsRaw.map { parseProgram(it) }
         if (!disabled) {
-            check(expectCompileFailure || programs.isNotEmpty()) {
-                "Case ${file.name} must set expectCompileFailure: true or declare at least one program"
+            check(expectCompileFailure || programs.isNotEmpty() || expectCompileOutputContains.isNotEmpty()) {
+                "Case ${file.name} must set expectCompileFailure: true, declare at least one program, " +
+                    "or set expectCompileOutputContains"
             }
         }
         return CaseFile(

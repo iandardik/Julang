@@ -25,7 +25,7 @@ p-class Worker {
             }
     }
 
-    transition reset() {
+    internal transition reset() {
         guard:
             ~done
         transit:
@@ -37,7 +37,7 @@ p-class Worker {
             done := true
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             & done
             & pos.x = 0

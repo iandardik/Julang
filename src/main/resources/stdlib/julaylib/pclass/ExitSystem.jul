@@ -1,7 +1,7 @@
 p-class ExitSystem {
     constructor initially(args : List<String>) {}
 
-    p2p-service transition exitSystem() {
+    service transition exitSystem() {
         effect:
             exitProcess()
     }

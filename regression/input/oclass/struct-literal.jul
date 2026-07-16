@@ -21,7 +21,7 @@ p-class Worker {
             }
     }
 
-    transition reset() {
+    internal transition reset() {
         guard:
             pos = Point { x := 0, y := 0 }
         transit:

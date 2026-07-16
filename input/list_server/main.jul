@@ -9,15 +9,15 @@ p-class RunningList {
     }
 
     /*
-    p2p-service transition append(e : String) {
+    service transition append(e : String) {
         transit: list := list + [e]
     }*/
 
-    p2p-service transition getList(lst : List<String>) {
+    service transition getList(lst : List<String>) {
         guard: lst = list
     }
 
-    p2p-service transition getAndAppend(e : String, lst : List<String>) {
+    service transition getAndAppend(e : String, lst : List<String>) {
         guard: lst = list
         transit: list := list + [e]
     }

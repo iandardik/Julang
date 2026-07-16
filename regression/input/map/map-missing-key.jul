@@ -10,14 +10,14 @@ p-class MapMissingKey {
             n := 0
     }
 
-    transition bad() {
+    internal transition bad() {
         guard:
             n = 0
         transit:
             n := mp["missing"]
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             false
     }

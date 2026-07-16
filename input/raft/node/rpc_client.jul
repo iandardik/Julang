@@ -2,8 +2,9 @@
 /*
  * Client command RPCs (append / get).
  *
- * One pclass for both commands so getRedirectBody stays CSP size 2 with RaftCore
- * (two separate pclasses sharing getRedirectBody would require a 3-way sync and deadlock).
+ * One pclass for both commands so getRedirectBody stays a single default pairwise
+ * sync with RaftCore (splitting append/get into two pclasses would need two
+ * consumers on a service, or separate action names).
  * Constructors keep the startIncomingClientAppend / startIncomingClientGet names.
  */
 
@@ -45,7 +46,7 @@ p-class IncomingClientRPC {
             step := if (ok) { "caOk" } else { "redir" }
     }
 
-    transition finishAppendOk() {
+    internal transition finishAppendOk() {
         guard: step = "caOk"
         transit:
             respBody := "OK " + appendIdx
@@ -53,21 +54,21 @@ p-class IncomingClientRPC {
             step := "finishCA"
     }
 
-    p2p-consumer transition getSerializedStateMachine(serializedSM : String, isLeader : Boolean) {
+    transition getSerializedStateMachine(serializedSM : String, isLeader : Boolean) {
         guard: step = "cg"
         transit:
             respBody := serializedSM
             step := if (isLeader) { "cgOk" } else { "redir" }
     }
 
-    transition finishGetOk() {
+    internal transition finishGetOk() {
         guard: step = "cgOk"
         transit:
             respCode := 200
             step := "finishCG"
     }
 
-    p2p-consumer transition getRedirectBody(body : String, code : Int) {
+    transition getRedirectBody(body : String, code : Int) {
         guard: step = "redir"
         transit:
             respBody := body

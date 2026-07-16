@@ -1,7 +1,7 @@
 p-class S {
     var x : Int
 
-    transition tick() {
+    internal transition tick() {
         transit:
             x := 1
     }

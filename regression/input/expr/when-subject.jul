@@ -15,7 +15,7 @@ p-class S {
             numAssign := 0
     }
 
-    transition assign() {
+    internal transition assign() {
         guard:
             print & numAssign < 10
         transit:
@@ -28,14 +28,14 @@ p-class S {
             numAssign := numAssign + 1
     }
 
-    p2p-consumer transition println(msg : String) {
+    transition println(msg : String) {
         guard:
             ~print & (msg = x + "")
         transit:
             print := true
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             print
     }

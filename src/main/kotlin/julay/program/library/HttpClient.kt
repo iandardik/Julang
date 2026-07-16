@@ -18,7 +18,7 @@ import java.net.http.HttpRequest.BodyPublishers
 import java.net.http.HttpResponse.BodyHandlers
 
 /**
- * Long-lived outbound HTTP client. [startClient] constructs one process that owns a single JDK
+ * Long-lived outbound HTTP client. [createHttpClient] constructs one process that owns a single JDK
  * [HttpClient]; [sendRequest] / [receiveResponse] may be repeated on that process.
  */
 class JulHttpClient : TransitionSystem {
@@ -26,11 +26,11 @@ class JulHttpClient : TransitionSystem {
         override val julName = "HttpClient"
         val reqArg = Variable("req", httpClientRequestType)
         val respArg = Variable("resp", httpClientResponseType)
-        val startClientAct = SymbolicAction("startClient", listOf())
+        val createHttpClientAct = SymbolicAction("createHttpClient", listOf())
         val sendRequestAct = SymbolicAction("sendRequest", listOf(reqArg))
         val receiveResponseAct = SymbolicAction("receiveResponse", listOf(respArg))
-        val startClientCtor: Pair<SymbolicAction, suspend (Program, ConcreteAction) -> JulHttpClient> = Pair(
-            startClientAct,
+        val createHttpClientCtor: Pair<SymbolicAction, suspend (Program, ConcreteAction) -> JulHttpClient> = Pair(
+            createHttpClientAct,
         ) { _, _ ->
             JulHttpClient()
         }
@@ -38,12 +38,12 @@ class JulHttpClient : TransitionSystem {
         override fun staticInfo() = TransitionSystemStaticInfo(
             "JulHttpClient$",
             setOf(sendRequestAct, receiveResponseAct),
-            mapOf(startClientCtor),
+            mapOf(createHttpClientCtor),
         )
         override val actionDecls = listOf(
-            ActionDecl(startClientAct, listOf(), emptyList(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
-            ActionDecl(sendRequestAct, listOf(), emptyList(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
-            ActionDecl(receiveResponseAct, listOf(), emptyList(), TSAction.SyncRole.CSP, LibraryLoc(julName)),
+            ActionDecl(createHttpClientAct, listOf(), emptyList(), TSAction.SyncRole.Default, LibraryLoc(julName)),
+            ActionDecl(sendRequestAct, listOf(), emptyList(), TSAction.SyncRole.Default, LibraryLoc(julName)),
+            ActionDecl(receiveResponseAct, listOf(), emptyList(), TSAction.SyncRole.Default, LibraryLoc(julName)),
         )
     }
 

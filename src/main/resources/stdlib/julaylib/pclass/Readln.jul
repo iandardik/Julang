@@ -8,7 +8,7 @@ p-class Readln {
             readMsg := ""
     }
 
-    p2p-service transition prompt() {
+    service transition prompt() {
         guard: prompt
         transit:
             prompt := false
@@ -16,7 +16,7 @@ p-class Readln {
             readMsg := readln()
     }
 
-    p2p-service transition readln(msg : String) {
+    service transition readln(msg : String) {
         guard: ~prompt & (readMsg = msg)
         transit:
             prompt := true

@@ -6,7 +6,7 @@ p-class S {
             msg := ""
     }
 
-    transition go() {
+    internal transition go() {
         transit:
             msg := "pending"
         effect:

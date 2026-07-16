@@ -8,7 +8,7 @@ p-class BadMap {
             mp := ["a" -> 1, "b" -> true]
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard: true
     }
 }

@@ -17,7 +17,7 @@ p-class Worker {
             backup := Point { x := 9, y := 9 }
     }
 
-    transition swap() {
+    internal transition swap() {
         guard:
             steps = 0
         transit:
@@ -26,7 +26,7 @@ p-class Worker {
             steps := 1
     }
 
-    transition restore() {
+    internal transition restore() {
         guard:
             & steps = 1
             & current.x = 9
@@ -36,7 +36,7 @@ p-class Worker {
             steps := 2
     }
 
-    p2p-consumer transition exitSystem() {
+    transition exitSystem() {
         guard:
             & steps = 2
             & current.x = 1

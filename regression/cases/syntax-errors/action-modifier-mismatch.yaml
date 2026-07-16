@@ -1,5 +1,5 @@
 source: regression/input/syntax-errors/action-modifier-mismatch.jul
 expectCompileFailure: true
 expectCompileOutputContains:
-  - "Expected action \"println\" to have the same modifiers"
+  - "Expected action \"tick\" not to mix internal with other transition tags"
   - "Found errors while compiling the program \"P\"; exiting."

@@ -30,9 +30,17 @@ fun codegenPass(
         procClass
     }
 
+    val servicedActionNames = (
+        procClasses.flatMap { it.transitions } +
+            librariesInUse.flatMap { LibraryRegistry.actionDecls(it) }
+        )
+        .filter { it.modifier == TSAction.SyncRole.Service }
+        .map { it.action.name }
+        .toSet()
+
     val libProcs = kotlinLibProcs
     val staticInfoLib = libProcs.map { LibraryRegistry.staticInfoCodegenExpr(it) }
-    val staticInfoCompiledProcs = procClasses.map { it.kotlinStaticInfoString() }
+    val staticInfoCompiledProcs = procClasses.map { it.kotlinStaticInfoString(servicedActionNames) }
     val staticInfoBody = (staticInfoCompiledProcs + staticInfoLib).joinToString(",\n") { it }
     val staticInfo = "val tsInfo = setOf(\n" + staticInfoBody.prependIndent() + "\n)"
     val objClassDecls = ast.resolvedObjClassDecls()
@@ -90,7 +98,7 @@ fun codegenPass(
         dataClassSection +
         objClassSection +
         parametricTypeSection +
-        procClasses.joinToString("\n\n") { it.kotlinClassString(objClassDecls) } +
+        procClasses.joinToString("\n\n") { it.kotlinClassString(objClassDecls, servicedActionNames) } +
         "\n\n" +
         mainFunction
 
@@ -314,14 +322,19 @@ private fun ActionDecl.kotlinErrorString(
     }
 }
 
-private fun ProcClassDecl.kotlinClassString(objClassDecls: List<ObjClassDecl>): String {
+private fun ProcClassDecl.kotlinClassString(
+    objClassDecls: List<ObjClassDecl>,
+    servicedActionNames: Set<String>,
+): String {
     val stateVarTypes = stateVars.associate { Pair(it.name, it.type) }
     val stateVarsStr = stateVars.joinToString(",\n") {
         "private var ${it.name.toKotlinIdent()}: ${it.type.toKotlinTypeString()}"
     }
     val registerTypes = ""
     val actionsStr = "override suspend fun actions(ctx: Context): Set<TSAction> = setOf(\n" +
-        transitions.joinToString(",\n") { it.kotlinActionString(stateVarTypes).prependIndent() } +
+        transitions.joinToString(",\n") {
+            it.kotlinActionString(stateVarTypes, servicedActionNames).prependIndent()
+        } +
         "\n)"
     val transitStr = "override suspend fun transit(act: ConcreteAction) {" +
         "\nreturn when (act.symAction.name) {".prependIndent() +
@@ -340,11 +353,13 @@ private fun ProcClassDecl.kotlinClassString(objClassDecls: List<ObjClassDecl>): 
         "\n}"
 }
 
-private fun ProcClassDecl.kotlinStaticInfoString(): String {
-    val transitionInfo = transitions.joinToString(",\n") { it.kotlinStaticInfoString().prependIndent() }
+private fun ProcClassDecl.kotlinStaticInfoString(servicedActionNames: Set<String>): String {
+    val transitionInfo = transitions.joinToString(",\n") {
+        it.kotlinStaticInfoString(servicedActionNames).prependIndent()
+    }
     val constructorPairs = constructors
         .joinToString(",\n") { ctor ->
-            val actSigStr = ctor.kotlinStaticInfoString()
+            val actSigStr = ctor.kotlinStaticInfoString(servicedActionNames)
             val argSymbols = actionArgSymbols(ctor.action.args)
             val stateVarTypes = stateVars.associate { Pair(it.name, it.type) }
             val symbolTypes = stateVarTypes + actionArgEnv(ctor.action.args)
@@ -370,6 +385,18 @@ private fun ProcClassDecl.kotlinStaticInfoString(): String {
             }
             "Pair($actSigStr, $constructStr)".prependIndent()
         }
+    val constructorGuardPairs = constructors
+        .mapNotNull { ctor ->
+            val guardLambda = ctor.kotlinConstructorGuardLambda() ?: return@mapNotNull null
+            val actSigStr = ctor.kotlinStaticInfoString(servicedActionNames)
+            "Pair($actSigStr, $guardLambda)".prependIndent()
+        }
+        .joinToString(",\n")
+    val constructorGuardsArg = if (constructorGuardPairs.isEmpty()) {
+        ""
+    } else {
+        ",\nmapOf<SymbolicAction, (Context) -> BoolExpr>(\n$constructorGuardPairs\n)"
+    }
     return "TransitionSystemStaticInfo(" +
         ("\n\"$name\"," +
             "\nsetOf(" +
@@ -377,38 +404,60 @@ private fun ProcClassDecl.kotlinStaticInfoString(): String {
             "\n)," +
             "\nmapOf<SymbolicAction, suspend (Program, ConcreteAction) -> TransitionSystem>(" +
             "\n$constructorPairs" +
-            "\n))").prependIndent()
+            "\n)$constructorGuardsArg").prependIndent() +
+        "\n)"
 }
 
-private fun ActionDecl.kotlinActionString(stateVarTypes: Map<String, Type>): String {
+private fun ActionDecl.resolvedSyncRole(servicedActionNames: Set<String>): TSAction.SyncRole =
+    when {
+        modifier == TSAction.SyncRole.Default && action.name in servicedActionNames ->
+            TSAction.SyncRole.Consumer
+        else -> modifier
+    }
+
+private fun ActionDecl.kotlinActionString(
+    stateVarTypes: Map<String, Type>,
+    servicedActionNames: Set<String>,
+): String {
     val symbolTypes = stateVarTypes + actionArgEnv(action.args)
     val argSymbols = actionArgSymbols(action.args)
 
-    val actionArgsStr = action.args.joinToString(", ") {
-        "Variable(\"${it.name}\", ${it.type.toCodegenTypeVal()})"
-    }
-    val syncTypeStr = when (action.syncType) {
-        SymbolicAction.SyncType.CSP -> "SymbolicAction.SyncType.CSP"
-        SymbolicAction.SyncType.P2P -> "SymbolicAction.SyncType.P2P"
-    }
-    val actionSigStr = "SymbolicAction(\"${action.name}\", listOf($actionArgsStr), $syncTypeStr)"
-    val guardStr = if (guards.size == 1) {
-        val guard = guards[0]
-        guard.toZ3GuardString(symbolTypes, argSymbols)
+    val actionSigStr = kotlinStaticInfoString(servicedActionNames)
+    val guardStr = if (guards.isEmpty()) {
+        "ctx.mkTrue()"
+    } else if (guards.size == 1) {
+        guards[0].toZ3GuardString(symbolTypes, argSymbols)
     } else {
         val body = guards.joinToString(", ") { it.toZ3GuardString(symbolTypes, argSymbols) }
         "ctx.mkAnd($body)"
     }
-    val syncRoleStr = when (modifier) {
-        TSAction.SyncRole.CSP -> "TSAction.SyncRole.CSP"
-        TSAction.SyncRole.P2PService -> "TSAction.SyncRole.P2PService"
-        TSAction.SyncRole.P2PConsumer -> "TSAction.SyncRole.P2PConsumer"
+    val syncRoleStr = when (resolvedSyncRole(servicedActionNames)) {
+        TSAction.SyncRole.Default -> "TSAction.SyncRole.Default"
+        TSAction.SyncRole.Internal -> "TSAction.SyncRole.Internal"
+        TSAction.SyncRole.Service -> "TSAction.SyncRole.Service"
+        TSAction.SyncRole.Consumer -> "TSAction.SyncRole.Consumer"
     }
     return "TSAction(" +
         "\n$actionSigStr,".prependIndent() +
         "\n$guardStr,".prependIndent() +
         "\n$syncRoleStr".prependIndent() +
         "\n)"
+}
+
+private fun ActionDecl.kotlinConstructorGuardLambda(): String? {
+    if (guards.isEmpty()) {
+        return null
+    }
+    // Constructor offers / initially spawn filters only see action args (no p-class state yet).
+    val symbolTypes = actionArgEnv(action.args)
+    val argSymbols = actionArgSymbols(action.args)
+    val guardStr = if (guards.size == 1) {
+        guards[0].toZ3GuardString(symbolTypes, argSymbols)
+    } else {
+        val body = guards.joinToString(", ") { it.toZ3GuardString(symbolTypes, argSymbols) }
+        "ctx.mkAnd($body)"
+    }
+    return "{ ctx -> $guardStr }"
 }
 
 private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): String {
@@ -463,13 +512,14 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
         .joinToString("\n")
 }
 
-private fun ActionDecl.kotlinStaticInfoString(): String {
+private fun ActionDecl.kotlinStaticInfoString(servicedActionNames: Set<String> = emptySet()): String {
     val actionArgsStr = action.args.joinToString(", ") {
         "Variable(\"${it.name}\", ${it.type.toCodegenTypeVal()})"
     }
-    val syncTypeStr = when (action.syncType) {
-        SymbolicAction.SyncType.CSP -> "SymbolicAction.SyncType.CSP"
-        SymbolicAction.SyncType.P2P -> "SymbolicAction.SyncType.P2P"
+    val isInternal = action.isInternal || modifier == TSAction.SyncRole.Internal
+    return if (isInternal) {
+        "SymbolicAction(\"${action.name}\", listOf($actionArgsStr), isInternal = true)"
+    } else {
+        "SymbolicAction(\"${action.name}\", listOf($actionArgsStr))"
     }
-    return "SymbolicAction(\"${action.name}\", listOf($actionArgsStr), $syncTypeStr)"
 }

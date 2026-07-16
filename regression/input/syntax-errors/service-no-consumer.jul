@@ -6,7 +6,7 @@ p-class S {
             x := 0
     }
 
-    p2p-service transition println(msg : String) {
+    service transition println(msg : String) {
         guard:
             true
         transit:
