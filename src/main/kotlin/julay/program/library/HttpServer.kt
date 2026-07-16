@@ -7,14 +7,11 @@ import com.sun.net.httpserver.HttpServer
 import julay.compiler.decl.ActionDecl
 import julay.compiler.LibraryLoc
 import julay.program.*
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import java.net.InetSocketAddress
 
 class JulHttpServer(
     private val port: Int,
-    private val actionTable: Map<SymbolicAction, ProgramAction>,
+    private val program: Program,
 ) : TransitionSystem, HttpHandler {
     companion object : JulLibrary {
         override val julName = "HttpServer"
@@ -30,7 +27,7 @@ class JulHttpServer(
             createHttpServerAct,
         ) { prog, act ->
             val port = act.lookup(portArg).value as Int
-            JulHttpServer(port, prog.actionTable)
+            JulHttpServer(port, prog)
         }
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one
         override fun staticInfo() = TransitionSystemStaticInfo(
@@ -46,7 +43,6 @@ class JulHttpServer(
         )
     }
 
-    private val scope = CoroutineScope(Dispatchers.IO)
     init {
         val server = HttpServer.create(InetSocketAddress(port), 0)
         server.createContext("/", this)
@@ -60,7 +56,7 @@ class JulHttpServer(
     override suspend fun transit(act: ConcreteAction) {}
     override fun handle(exchange: HttpExchange?) {
         val resource = HttpResource(exchange!!)
-        scope.launch { Proc(resource, staticInfo(), actionTable).run() }
+        program.spawnProc(resource, staticInfo())
     }
 
     class HttpResource(

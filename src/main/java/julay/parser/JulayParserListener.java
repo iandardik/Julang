@@ -218,6 +218,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitArg(JulayParser.ArgContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#constructor_body}.
+	 * @param ctx the parse tree
+	 */
+	void enterConstructor_body(JulayParser.Constructor_bodyContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#constructor_body}.
+	 * @param ctx the parse tree
+	 */
+	void exitConstructor_body(JulayParser.Constructor_bodyContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#action_body}.
 	 * @param ctx the parse tree
 	 */

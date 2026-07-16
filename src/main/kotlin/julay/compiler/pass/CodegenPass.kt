@@ -385,18 +385,6 @@ private fun ProcClassDecl.kotlinStaticInfoString(servicedActionNames: Set<String
             }
             "Pair($actSigStr, $constructStr)".prependIndent()
         }
-    val constructorGuardPairs = constructors
-        .mapNotNull { ctor ->
-            val guardLambda = ctor.kotlinConstructorGuardLambda() ?: return@mapNotNull null
-            val actSigStr = ctor.kotlinStaticInfoString(servicedActionNames)
-            "Pair($actSigStr, $guardLambda)".prependIndent()
-        }
-        .joinToString(",\n")
-    val constructorGuardsArg = if (constructorGuardPairs.isEmpty()) {
-        ""
-    } else {
-        ",\nmapOf<SymbolicAction, (Context) -> BoolExpr>(\n$constructorGuardPairs\n)"
-    }
     return "TransitionSystemStaticInfo(" +
         ("\n\"$name\"," +
             "\nsetOf(" +
@@ -404,7 +392,7 @@ private fun ProcClassDecl.kotlinStaticInfoString(servicedActionNames: Set<String
             "\n)," +
             "\nmapOf<SymbolicAction, suspend (Program, ConcreteAction) -> TransitionSystem>(" +
             "\n$constructorPairs" +
-            "\n)$constructorGuardsArg").prependIndent() +
+            "\n)").prependIndent() +
         "\n)"
 }
 
@@ -442,22 +430,6 @@ private fun ActionDecl.kotlinActionString(
         "\n$guardStr,".prependIndent() +
         "\n$syncRoleStr".prependIndent() +
         "\n)"
-}
-
-private fun ActionDecl.kotlinConstructorGuardLambda(): String? {
-    if (guards.isEmpty()) {
-        return null
-    }
-    // Constructor offers / initially spawn filters only see action args (no p-class state yet).
-    val symbolTypes = actionArgEnv(action.args)
-    val argSymbols = actionArgSymbols(action.args)
-    val guardStr = if (guards.size == 1) {
-        guards[0].toZ3GuardString(symbolTypes, argSymbols)
-    } else {
-        val body = guards.joinToString(", ") { it.toZ3GuardString(symbolTypes, argSymbols) }
-        "ctx.mkAnd($body)"
-    }
-    return "{ ctx -> $guardStr }"
 }
 
 private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): String {

@@ -6,9 +6,10 @@ import julay.concurrency.Select
 import java.util.*
 
 class Proc(
-    private val transitionSystem : TransitionSystem,
-    private val tsInfo : TransitionSystemStaticInfo,
-    private val actionTable : Map<SymbolicAction,ProgramAction>
+    private val transitionSystem: TransitionSystem,
+    private val tsInfo: TransitionSystemStaticInfo,
+    private val actionTable: Map<SymbolicAction, ProgramAction>,
+    private val program: Program,
 ) {
     suspend fun run() {
         while (true) {
@@ -46,7 +47,7 @@ class Proc(
                 TSAction.SyncRole.Consumer ->
                     ctx.mkEq(ctx.mkBoolConst("serviceTransition"), ctx.mkFalse())
             }
-            Select.SyncCase(programAction.channel, act.guard, anticonstraint) { concAct : ConcreteAction ->
+            Select.SyncCase(programAction.channel, act.guard, anticonstraint) { concAct: ConcreteAction ->
                 nextAct = Optional.of(concAct)
             }
         }
@@ -57,8 +58,13 @@ class Proc(
             return false
         }
 
+        val act = nextAct.get()
         // transit to the next state
-        transitionSystem.transit(nextAct.get())
+        transitionSystem.transit(act)
+        // Constructor peer is a compile-time abstraction: spawn locally after the transition.
+        if (program.isConstructorAction(act.symAction)) {
+            program.spawn(act)
+        }
         return true
     }
 }

@@ -183,7 +183,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             }
             argsNode
         }
-        val body = ctx.action_body()
+        val body = ctx.constructor_body()
             .map { visit(it) }
             .map {
                 if (it !is ActionBodyNode) {

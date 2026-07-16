@@ -18,12 +18,7 @@ p-class ClientDispatcher {
             } else {
                 25
             }
-            step := "createHttp"
-    }
-
-    transition createHttpClient() {
-        guard: step = "createHttp"
-        transit: step := "run"
+            step := "run"
     }
 
     transition startReq(num : Int) {
@@ -54,8 +49,13 @@ p-class ClientLogic {
     constructor startReq(num : Int) {
         transit:
             reqNum := num
-            state := "A"
+            state := "createHttp"
             respText := ""
+    }
+
+    transition createHttpClient() {
+        guard: state = "createHttp"
+        transit: state := "A"
     }
 
     transition sendRequest(req : HttpClientRequest) {

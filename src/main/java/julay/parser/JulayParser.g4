@@ -79,7 +79,7 @@ var
     ;
 
 constructor
-    : CONSTRUCTOR ID args LCURLY action_body* RCURLY
+    : CONSTRUCTOR ID args LCURLY constructor_body* RCURLY
     ;
 
 transition
@@ -92,6 +92,12 @@ args
 
 arg
     : ID COLON typeExpr
+    ;
+
+constructor_body
+    : transit
+    | error
+    | effect
     ;
 
 action_body

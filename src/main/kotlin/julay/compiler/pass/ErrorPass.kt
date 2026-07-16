@@ -180,7 +180,7 @@ private fun initiallyConsistencyErrors(offers: List<ActionOffer>): List<CompileE
             "only constructors (not transitions) can synchronize on the 'initially' action",
         )
     }
-    // Multiple initially constructors are allowed (spawn filtered by guards).
+    // Multiple initially constructors are allowed (all are spawned at Program.run).
     return transitionErrors
 }
 

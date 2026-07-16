@@ -1,6 +1,2 @@
 source: regression/input/syntax-errors/constructor-has-guard.jul
-expectCompileFailure: false
-programs:
-  - name: P
-    run:
-      timeoutMs: 10000
+expectCompileFailure: true
