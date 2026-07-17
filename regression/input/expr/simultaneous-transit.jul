@@ -1,0 +1,48 @@
+import julaylib.pclass.Println
+import julaylib.pclass.ExitSystem
+
+/*
+ * Transit assignments are simultaneous: every RHS is evaluated against the
+ * pre-transit state, then all updates are applied. So `y := x` after
+ * `x := x + 1` still binds the old x.
+ */
+p-class SimultaneousTransitDemo {
+    var x : Int
+    var y : Int
+    var peersLeft : Int
+    var step : String
+    var print : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            x := 5
+            y := 0
+            peersLeft := 1
+            step := "advance"
+            print := false
+    }
+
+    internal transition bump() {
+        guard: ~print & x = 5 & y = 0 & peersLeft = 1
+        transit:
+            x := x + 1
+            y := x
+            peersLeft := peersLeft - 1
+            step := if (peersLeft - 1 = 0) { "doneRound" } else { "ready" }
+            print := true
+    }
+
+    transition println(msg : String) {
+        guard:
+            print & msg = ("" + x + "," + y + "," + peersLeft + "," + step)
+        transit:
+            print := false
+    }
+
+    transition exitSystem() {
+        guard:
+            ~print & x = 6 & y = 5 & peersLeft = 0 & step = "doneRound"
+    }
+}
+
+program SimultaneousTransitTest := SimultaneousTransitDemo || Println || ExitSystem

@@ -1,0 +1,7 @@
+source: regression/input/expr/simultaneous-transit.jul
+programs:
+  - name: SimultaneousTransitTest
+    run:
+      timeoutMs: 60000
+      expectStdoutContains:
+        - "6,5,0,doneRound"

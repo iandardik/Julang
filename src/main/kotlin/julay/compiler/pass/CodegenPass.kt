@@ -463,20 +463,35 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
     // Error checks run before transits and effects so they see pre-state variables
     // and no effect happens upon an error.
     val errorStr = kotlinErrorString(stateVarTypes)
-    val transitLines = transits.map { update ->
+    // Simultaneous assignment: evaluate every RHS against the pre-transit state, then
+    // apply updates. Later lines must not observe earlier assignments in the same block
+    // (e.g. `peersLeft := peersLeft - 1` then `step := if (peersLeft - 1 = 0) ...`).
+    // Temps are explicitly typed so untyped builders like emptyList() still compile.
+    val transitRhsSnapshots = mutableListOf<String>()
+    val transitLines = transits.mapIndexed { i, update ->
         when (update) {
             is TransitUpdate.Assign -> {
                 val rootVar = transitRootVar(update.key)
                 val rootType = stateVarTypes.getValue(rootVar)
                 val fieldPath = if (update.key.contains('.')) update.key.substringAfter('.').split('.') else emptyList()
+                val rhsType = transitAssignRhsType(rootType, fieldPath)
+                val temp = "__transitRhs_$i"
                 val rhs = update.expr.toTransitString(symbolTypes, argSymbols)
-                copyAssignmentString(rootVar, rootType, fieldPath, rhs)
+                transitRhsSnapshots += "val $temp: ${rhsType.toKotlinTypeString()} = $rhs"
+                copyAssignmentString(rootVar, rootType, fieldPath, temp)
             }
             is TransitUpdate.MapPut -> {
                 val mapVar = update.mapVar.toKotlinIdent()
-                val keyStr = update.key.toTransitString(symbolTypes, argSymbols)
-                val valStr = update.value.toTransitString(symbolTypes, argSymbols)
-                "$mapVar = $mapVar + ($keyStr to $valStr)"
+                val mapType = stateVarTypes.getValue(update.mapVar) as MapType
+                val keyTemp = "__transitRhs_${i}_key"
+                val valTemp = "__transitRhs_${i}_val"
+                transitRhsSnapshots +=
+                    "val $keyTemp: ${mapType.keyType.toKotlinTypeString()} = ${update.key.toTransitString(symbolTypes, argSymbols)}"
+                transitRhsSnapshots +=
+                    "val $valTemp: ${mapType.valueType.toKotlinTypeString()} = ${update.value.toTransitString(symbolTypes, argSymbols)}"
+                // Key/value are pre-state; applying puts in order composes multiple updates
+                // to the same map (TLA+-style EXCEPT with several fields).
+                "$mapVar = $mapVar + ($keyTemp to $valTemp)"
             }
         }
     }
@@ -504,6 +519,7 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
     }
     return listOfNotNull(errorStr.takeIf { it.isNotEmpty() })
         .plus(effectArgSnapshots)
+        .plus(transitRhsSnapshots)
         .plus(transitLines)
         .plus(effectLines)
         .joinToString("\n")
@@ -519,4 +535,20 @@ private fun ActionDecl.kotlinStaticInfoString(servicedActionNames: Set<String> =
     } else {
         "SymbolicAction(\"${action.name}\", listOf($actionArgsStr))"
     }
+}
+
+/** Type of the value written by `root.fieldPath := …` (leaf field, or the root itself). */
+private fun transitAssignRhsType(rootType: Type, fieldPath: List<String>): Type {
+    if (fieldPath.isEmpty()) {
+        return rootType
+    }
+    var current = rootType as ObjClassType
+    for ((index, fieldName) in fieldPath.withIndex()) {
+        val fieldType = current.fields.first { it.name == fieldName }.type
+        if (index == fieldPath.lastIndex) {
+            return fieldType
+        }
+        current = fieldType as ObjClassType
+    }
+    return rootType
 }

@@ -23,7 +23,7 @@ p-class SetIntDemo {
             ~print & length(s) = 2 & gotCli & 1 in s & ~(3 in s)
         transit:
             s := s + {3}
-            n := length(s)
+            n := length(s) + 1
             print := true
     }
 
@@ -32,7 +32,7 @@ p-class SetIntDemo {
             print & n = 3 & 3 in s
         transit:
             s := s - {1}
-            n := length(s)
+            n := length(s) - 1
             print := false
     }
 

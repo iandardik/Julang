@@ -31,7 +31,7 @@ p-class MapStringIntDemo {
             print & n = 1
         transit:
             mp["c"] := 3
-            n := length(mp)
+            n := length(mp) + 1
             print := false
     }
 
