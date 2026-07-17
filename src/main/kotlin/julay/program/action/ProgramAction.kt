@@ -5,5 +5,5 @@ import julay.program.Constraint
 
 data class ProgramAction(
     val action: SymbolicAction,
-    var channel: SyncChannel<ConcreteAction, Constraint>,
+    var channel: SyncChannel<SyncPayload, Constraint>,
 )

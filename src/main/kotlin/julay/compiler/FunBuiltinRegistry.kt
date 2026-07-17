@@ -1,7 +1,5 @@
 package julay.compiler
 
-import julay.program.Channel
-import julay.program.channelType
 import julay.program.type.ListType
 import julay.program.type.MapType
 import julay.program.type.SetType
@@ -150,44 +148,7 @@ object FunBuiltinRegistry {
         },
     )
 
-    private val createEmptyChannelBuiltin = FunBuiltin(
-        name = "createEmptyChannel",
-        arity = 0,
-        // Placeholder; TypePass sets ChannelType from createEmptyChannel<ActName>() type arg.
-        returnType = channelType("_"),
-        checkArgs = { argTypes ->
-            when {
-                argTypes.isNotEmpty() ->
-                    "Expected function \"createEmptyChannel\" to take 0 argument(s) but got ${argTypes.size}"
-                else -> null
-            }
-        },
-        kotlinCodegen = { _ ->
-            throw RuntimeException("createEmptyChannel codegen requires a type argument")
-        },
-        z3Codegen = { _ -> "ctx.mkInt(${Channel.EMPTY_ID})" },
-    )
 
-    private val createChannelBuiltin = FunBuiltin(
-        name = "createChannel",
-        arity = 0,
-        // Placeholder; TypePass sets ChannelType from createChannel<ActName>() type arg.
-        returnType = channelType("_"),
-        checkArgs = { argTypes ->
-            when {
-                argTypes.isNotEmpty() ->
-                    "Expected function \"createChannel\" to take 0 argument(s) but got ${argTypes.size}"
-                else -> null
-            }
-        },
-        kotlinCodegen = { _ ->
-            throw RuntimeException("createChannel codegen requires a type argument")
-        },
-        // Must not appear in guards (allocates); TypePass rejects guard use.
-        z3Codegen = { _ ->
-            throw RuntimeException("createChannel cannot be used in a guard")
-        },
-    )
 
     private val builtins = mapOf(
         lengthBuiltin.name to lengthBuiltin,
@@ -197,8 +158,6 @@ object FunBuiltinRegistry {
         trimBuiltin.name to trimBuiltin,
         portFromUrlBuiltin.name to portFromUrlBuiltin,
         startsWithBuiltin.name to startsWithBuiltin,
-        createEmptyChannelBuiltin.name to createEmptyChannelBuiltin,
-        createChannelBuiltin.name to createChannelBuiltin,
     )
 
     val all: Collection<FunBuiltin> get() = builtins.values

@@ -1,6 +1,0 @@
-tags:
-  - compile-only
-source: regression/input/syntax-errors/dynamic-channel-wrong-brand.jul
-expectCompileFailure: true
-expectCompileOutputContains:
-  - 'Expected dynamic-channel bind "httpChan" to have type Channel<sendResponse>'

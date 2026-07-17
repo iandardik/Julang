@@ -82,28 +82,28 @@ private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse:
             it.decl.modifier == TSAction.SyncRole.Default || it.decl.modifier == TSAction.SyncRole.Consumer
         }
 
-        val dynamicFlags = namedOffers.map { it.decl.requiresDynamicChannel }
-        val isDynamic = dynamicFlags.any { it }
-        val dynamicMixErrors = if (isDynamic && dynamicFlags.any { !it }) {
-            val withDyn = namedOffers.first { it.decl.requiresDynamicChannel }
-            val withoutDyn = namedOffers.first { !it.decl.requiresDynamicChannel }
+        val sessionFlags = namedOffers.map { it.decl.isSession }
+        val isSession = sessionFlags.any { it }
+        val sessionMixErrors = if (isSession && sessionFlags.any { !it }) {
+            val withSession = namedOffers.first { it.decl.isSession }
+            val withoutSession = namedOffers.first { !it.decl.isSession }
             listOf(
                 TwoLocsCompileError(
-                    withDyn.decl.loc,
-                    withoutDyn.decl.loc,
-                    "Expected action \"$name\" not to mix dynamic-channel and static-channel offers",
+                    withSession.decl.loc,
+                    withoutSession.decl.loc,
+                    "Expected action \"$name\" to have matching session tags on every offer",
                 ),
             )
         } else {
             emptyList()
         }
-        val dynamicTagErrors = if (isDynamic) {
+        val sessionTagErrors = if (isSession) {
             buildList {
                 if (services.isNotEmpty()) {
                     add(
                         OneLocCompileError(
                             services[0].decl.loc,
-                            "Expected dynamic-channel action \"$name\" not to use the service tag",
+                            "Expected session action \"$name\" not to use the service tag",
                         ),
                     )
                 }
@@ -111,7 +111,7 @@ private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse:
                     add(
                         OneLocCompileError(
                             internals[0].decl.loc,
-                            "Expected dynamic-channel action \"$name\" not to use the internal tag",
+                            "Expected session action \"$name\" not to use the internal tag",
                         ),
                     )
                 }
@@ -179,28 +179,9 @@ private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse:
                     ),
                 )
             }
-            if (constructors.isNotEmpty() && isDynamic) {
-                add(
-                    OneLocCompileError(
-                        constructors[0].decl.loc,
-                        "Expected dynamic-channel action \"$name\" not to have a constructor",
-                    ),
-                )
-            }
         }
 
         val peerErrors = when {
-            isDynamic -> {
-                val t = transitions.map { it.pclassKey }.toSet().size
-                assertOrCompileError(
-                    t == 2 && constructors.isEmpty(),
-                    OneLocCompileError(
-                        refAction.loc,
-                        "Expected dynamic-channel action \"$name\" to have exactly two transitioning p-classes, " +
-                            "but found $t transitioning p-class(es) and ${if (constructors.isNotEmpty()) 1 else 0} constructor offer(s)",
-                    ),
-                )
-            }
             internals.isNotEmpty() -> {
                 val t = transitions.map { it.pclassKey }.toSet().size
                 assertOrCompileError(
@@ -219,7 +200,7 @@ private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse:
                     t + c == 2,
                     OneLocCompileError(
                         refAction.loc,
-                        "Expected default action \"$name\" to have exactly two sync peers " +
+                        "Expected default/session action \"$name\" to have exactly two sync peers " +
                             "(two transitioning p-classes, or one transition and one constructor), but found " +
                             "$t transitioning p-class(es) and $c constructor offer(s)",
                     ),
@@ -227,34 +208,8 @@ private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse:
             }
         }
 
-        val channelArgErrors = channelArgConstraintErrors(name, namedOffers)
-
-        argMismatches + dynamicMixErrors + dynamicTagErrors + tagMixErrors +
-            constructorErrors + peerErrors + channelArgErrors
-    }
-}
-
-/**
- * Every Channel-typed action argument must be constrained somewhere: either in a Jul guard
- * (derived into [ActionDecl.constrainedChannelArgs]) or registered by a Kotlin library offer.
- */
-private fun channelArgConstraintErrors(actionName: String, namedOffers: List<ActionOffer>): List<CompileError> {
-    val refAction = namedOffers[0].decl.action
-    val channelArgs = refAction.args.filter { it.type is ChannelType }
-    if (channelArgs.isEmpty()) {
-        return emptyList()
-    }
-    val constrained = namedOffers.flatMap { it.decl.constrainedChannelArgs }.toSet()
-    return channelArgs.mapNotNull { arg ->
-        if (arg.name in constrained) {
-            null
-        } else {
-            OneLocCompileError(
-                namedOffers[0].decl.loc,
-                "Expected channel argument \"${arg.name}\" of action \"$actionName\" to be constrained " +
-                    "in at least one guard (or registered by a Kotlin library ActionDecl)",
-            )
-        }
+        argMismatches + sessionMixErrors + sessionTagErrors + tagMixErrors +
+            constructorErrors + peerErrors
     }
 }
 

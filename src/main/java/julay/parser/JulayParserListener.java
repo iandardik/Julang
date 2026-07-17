@@ -198,16 +198,6 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitTransition(JulayParser.TransitionContext ctx);
 	/**
-	 * Enter a parse tree produced by {@link JulayParser#channel_bind}.
-	 * @param ctx the parse tree
-	 */
-	void enterChannel_bind(JulayParser.Channel_bindContext ctx);
-	/**
-	 * Exit a parse tree produced by {@link JulayParser#channel_bind}.
-	 * @param ctx the parse tree
-	 */
-	void exitChannel_bind(JulayParser.Channel_bindContext ctx);
-	/**
 	 * Enter a parse tree produced by {@link JulayParser#args}.
 	 * @param ctx the parse tree
 	 */

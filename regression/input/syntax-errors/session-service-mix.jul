@@ -1,0 +1,23 @@
+import julaylib.pclass.Println
+
+p-class A {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    session transition ping() {
+        guard: false
+    }
+}
+
+p-class B {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    service transition ping() {
+        guard: false
+    }
+}
+
+program P := A || B || Println

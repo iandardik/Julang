@@ -1,7 +1,6 @@
 package julay.program.type
 
 import com.microsoft.z3.*
-import julay.program.ChannelType
 import julay.program.ContextLocalCache
 import julay.program.Value
 import julay.program.Variable
@@ -180,8 +179,6 @@ fun Type.toKotlinTypeString(): String = when (this) {
     is IntType -> "Int"
     is RealType -> "Double"
     is StringType -> "String"
-    // Brand is a Julay-only phantom; Kotlin runtime type is unparameterized Channel.
-    is ChannelType -> "Channel"
     is ObjClassType -> name
     is ListType -> "List<${elementType.toKotlinTypeString()}>"
     is SetType -> "Set<${elementType.toKotlinTypeString()}>"
@@ -195,7 +192,6 @@ fun Type.toCodegenTypeVal(): String = when (this) {
     is IntType -> "intType"
     is RealType -> "realType"
     is StringType -> "stringType"
-    is ChannelType -> "channelType(\"${actionName.escapeKotlinStringLiteral()}\")"
     is ObjClassType -> objClassTypeValName(name)
     is ListType -> listTypeValName(elementType)
     is SetType -> setTypeValName(elementType)

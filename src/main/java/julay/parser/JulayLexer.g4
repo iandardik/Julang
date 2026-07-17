@@ -50,6 +50,7 @@ CONSTRUCTOR : 'constructor' ;
 TRANSITION : 'transition' ;
 INTERNAL : 'internal' ;
 SERVICE : 'service' ;
+SESSION : 'session' ;
 GUARD : 'guard' ;
 TRANSIT : 'transit' ;
 ERROR : 'error' ;

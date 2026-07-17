@@ -2,8 +2,6 @@ import julaylib.pclass.HttpClient
 import julaylib.pclass.Println
 import julaylib.fun.length
 import julaylib.fun.parseInt
-import julaylib.fun.createEmptyChannel
-import julaylib.fun.createChannel
 
 p-class ClientDispatcher {
     const targetNumReqs : Int
@@ -47,31 +45,20 @@ p-class ClientLogic {
     const reqNum : Int
     var state : String
     var respText : String
-    var httpChan : Channel<receiveResponse>
-    var myCloseChan : Channel<closeHttpClient>
 
     constructor startReq(num : Int) {
         transit:
             reqNum := num
-            state := "allocClose"
-            respText := ""
-            httpChan := createEmptyChannel<receiveResponse>()
-            myCloseChan := createEmptyChannel<closeHttpClient>()
-    }
-
-    internal transition allocCloseChan() {
-        guard: state = "allocClose"
-        transit:
-            myCloseChan := createChannel<closeHttpClient>()
             state := "createHttp"
+            respText := ""
     }
 
-    transition createHttpClient(closeChan : Channel<closeHttpClient>) {
-        guard: state = "createHttp" & closeChan = myCloseChan
+    session transition createHttpClient() {
+        guard: state = "createHttp"
         transit: state := "A"
     }
 
-    transition sendRequest(req : HttpClientRequest, httpChan : Channel<receiveResponse>) {
+    session transition sendRequest(req : HttpClientRequest) {
         guard:
             state = "A" & req = HttpClientRequest {
                 url := "http://localhost:8000",
@@ -79,11 +66,10 @@ p-class ClientLogic {
                 body := "ReqNum: " + reqNum
             }
         transit:
-            httpChan := httpChan
             state := "B"
     }
 
-    transition receiveResponse<httpChan>(resp : HttpClientResponse) {
+    session transition receiveResponse(resp : HttpClientResponse) {
         guard:
             state = "B"
         transit:
@@ -98,7 +84,7 @@ p-class ClientLogic {
             state := "D"
     }
 
-    transition closeHttpClient<myCloseChan>() {
+    session transition closeHttpClient() {
         guard: state = "D"
         transit: state := "E"
     }

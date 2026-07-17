@@ -2,8 +2,6 @@ import julaylib.pclass.Println
 import julaylib.pclass.Timer
 import julaylib.pclass.HttpServer
 import julaylib.pclass.ExitSystem
-import julaylib.fun.createEmptyChannel
-import julaylib.fun.createChannel
 
 p-class Counter {
     var counter : Int
@@ -60,41 +58,31 @@ p-class PeriodicPrint {
 
 p-class ServerStarter {
     var started : Boolean
-    var myCloseChan : Channel<closeHttpServer>
 
     constructor initially(args : List<String>) {
         transit:
             started := false
-            myCloseChan := createEmptyChannel<closeHttpServer>()
     }
 
-    internal transition allocCloseChan() {
-        guard: ~started & myCloseChan = createEmptyChannel<closeHttpServer>()
-        transit: myCloseChan := createChannel<closeHttpServer>()
-    }
-
-    transition createHttpServer(port : Int, closeChan : Channel<closeHttpServer>) {
-        guard: ~started & port = 8000 & closeChan = myCloseChan
-            & myCloseChan ~= createEmptyChannel<closeHttpServer>()
+    session transition createHttpServer(port : Int) {
+        guard: ~started & port = 8000
         transit: started := true
     }
 
-    transition closeHttpServer<myCloseChan>() {
+    session transition closeHttpServer() {
         guard: false
     }
 }
 
 p-class IncReqHandler {
     var httpReq : HttpServerRequest
-    var httpChan : Channel<sendResponse>
     var localCounter : Int
     var step : String
     var exit : Boolean
 
-    constructor receiveRequest(req : HttpServerRequest, httpChan : Channel<sendResponse>) {
+    session constructor receiveRequest(req : HttpServerRequest) {
         transit:
             httpReq := req
-            httpChan := httpChan
             localCounter := -1 // TODO the reverse order causes a compiler bug
             step := "A"
             exit := (req.body = "exit")
@@ -112,7 +100,7 @@ p-class IncReqHandler {
             step := "C"
     }
 
-    transition sendResponse<httpChan>(resp : HttpServerResponse) {
+    session transition sendResponse(resp : HttpServerResponse) {
         guard:
             & step = "C"
             & resp = HttpServerResponse {

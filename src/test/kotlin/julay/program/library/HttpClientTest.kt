@@ -3,7 +3,6 @@ package julay.program.library
 import com.microsoft.z3.Context
 import com.microsoft.z3.Status
 import com.sun.net.httpserver.HttpServer
-import julay.program.ChannelType
 import julay.program.Program
 import julay.program.Value
 import julay.program.action.ConcreteAction
@@ -26,8 +25,7 @@ class HttpClientTest {
         try {
             val port = server.address.port
             val program = Program(setOf(JulHttpClient.staticInfo()))
-            val closeChan = program.createDynamicChannel(JulHttpClient.closeHttpClientAct)
-            val client = JulHttpClient(program, closeChan)
+            val client = JulHttpClient(program)
             for (payload in listOf("ping", "pong")) {
                 val req = HttpClientRequest("http://127.0.0.1:$port/", "POST", payload)
                 val ctxSend = Context()
@@ -43,9 +41,7 @@ class HttpClientTest {
                         ),
                     )
                     assert(solver.check() == Status.SATISFIABLE)
-                    val sendAct = ChannelType.withChannelLookup(client.heldChannels().associateBy { it.id }) {
-                        ConcreteAction(JulHttpClient.sendRequestAct, ctxSend, solver.model)
-                    }
+                    val sendAct = ConcreteAction(JulHttpClient.sendRequestAct, ctxSend, solver.model)
                     client.transit(sendAct)
                 } finally {
                     ctxSend.close()
@@ -65,16 +61,12 @@ class HttpClientTest {
                         ),
                     )
                     assert(solver.check() == Status.SATISFIABLE)
-                    val recvAct = ChannelType.withChannelLookup(client.heldChannels().associateBy { it.id }) {
-                        ConcreteAction(JulHttpClient.receiveResponseAct, ctxRecv, solver.model)
-                    }
+                    val recvAct = ConcreteAction(JulHttpClient.receiveResponseAct, ctxRecv, solver.model)
                     client.transit(recvAct)
                 } finally {
                     ctxRecv.close()
                 }
             }
-            assertEquals(0, program.openDynamicChannelCount(JulHttpClient.receiveResponseAct))
-            assertEquals(1, program.openDynamicChannelCount(JulHttpClient.closeHttpClientAct))
         } finally {
             server.stop(0)
         }

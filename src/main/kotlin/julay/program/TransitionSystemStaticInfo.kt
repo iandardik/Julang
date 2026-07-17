@@ -18,11 +18,6 @@ data class TransitionSystemStaticInfo(
      * For each constructor action, a function that constructs a new TransitionSystem.
      */
     val constructors: Map<SymbolicAction, suspend (Program, ConcreteAction) -> TransitionSystem>,
-
-    /**
-     * Alphabet actions that rendezvous only on dynamic [Channel]s (no static Program.actionTable entry).
-     */
-    val dynamicChannelActions: Set<SymbolicAction> = emptySet(),
 ) {
     fun classID() = hashCode()
 }

@@ -3,8 +3,6 @@ import julaylib.fun.readFile
 import julaylib.fun.split
 import julaylib.fun.trim
 import julaylib.fun.parseInt
-import julaylib.fun.createEmptyChannel
-import julaylib.fun.createChannel
 import node.lib.isBlankOrComment
 
 /*
@@ -70,13 +68,11 @@ p-class RaftInitializer {
 p-class ServerInitializer {
     var started : Boolean
     var myPort : Int
-    var myCloseChan : Channel<closeHttpServer>
 
     constructor initially(args : List<String>) {
         transit:
             started := false
             myPort := 0
-            myCloseChan := createEmptyChannel<closeHttpServer>()
     }
 
     transition getListenPort(port : Int) {
@@ -84,45 +80,30 @@ p-class ServerInitializer {
         transit: myPort := port
     }
 
-    internal transition allocServerCloseChan() {
-        guard: ~started & myPort > 0 & myCloseChan = createEmptyChannel<closeHttpServer>()
-        transit: myCloseChan := createChannel<closeHttpServer>()
-    }
-
-    transition createHttpServer(port : Int, closeChan : Channel<closeHttpServer>) {
-        guard: ~started & port = myPort & myPort > 0 & closeChan = myCloseChan
-            & myCloseChan ~= createEmptyChannel<closeHttpServer>()
+    session transition createHttpServer(port : Int) {
+        guard: ~started & port = myPort & myPort > 0
         transit: started := true
     }
 
-    transition closeHttpServer<myCloseChan>() {
+    session transition closeHttpServer() {
         guard: false
     }
 }
 
 p-class ClientInitializer {
     var step : String
-    var myCloseChan : Channel<closeHttpClient>
 
     constructor initially(args : List<String>) {
         transit:
-            step := "allocClose"
-            myCloseChan := createEmptyChannel<closeHttpClient>()
-    }
-
-    internal transition allocClientCloseChan() {
-        guard: step = "allocClose"
-        transit:
-            myCloseChan := createChannel<closeHttpClient>()
             step := "createHttp"
     }
 
-    transition createHttpClient(closeChan : Channel<closeHttpClient>) {
-        guard: step = "createHttp" & closeChan = myCloseChan
+    session transition createHttpClient() {
+        guard: step = "createHttp"
         transit: step := "startRpc"
     }
 
-    transition closeHttpClient<myCloseChan>() {
+    session transition closeHttpClient() {
         guard: false
     }
 

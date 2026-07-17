@@ -1,0 +1,5 @@
+source: regression/input/syntax-errors/session-service-mix.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - 'Expected action "ping" to have matching session tags on every offer'
+programs: []

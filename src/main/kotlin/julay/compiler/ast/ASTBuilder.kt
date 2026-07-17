@@ -192,20 +192,23 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 }
                 it
             }
-        return ConstructorNode(name, args, body, sourceLocation(ctx))
+        val isSession = ctx.SESSION() != null
+        return ConstructorNode(name, args, body, sourceLocation(ctx), isSession)
     }
 
     override fun visitTransition(ctx: JulayParser.TransitionContext?): ASTNode {
         val isService = ctx!!.SERVICE() != null
         val isInternal = ctx.INTERNAL() != null
+        val isSession = ctx.SESSION() != null
         assert(!isService || !isInternal, "A transition cannot be both service and internal")
+        assert(!isSession || !isService, "A transition cannot be both session and service")
+        assert(!isSession || !isInternal, "A transition cannot be both session and internal")
         val modifier = when {
             isService -> TSAction.SyncRole.Service
             isInternal -> TSAction.SyncRole.Internal
             else -> TSAction.SyncRole.Default
         }
         val name = ctx.ID().text
-        val dynamicChannelVar = ctx.channel_bind()?.ID()?.text
         val args = visit(ctx.args()).let { argsNode ->
             if (argsNode !is ArgsNode) {
                 throw RuntimeException("Expected ArgsNode but got $argsNode")
@@ -220,7 +223,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 }
                 it
             }
-        return TransitionNode(modifier, name, args, body, sourceLocation(ctx), dynamicChannelVar)
+        return TransitionNode(modifier, name, args, body, sourceLocation(ctx), isSession)
     }
 
     override fun visitArgs(ctx: JulayParser.ArgsContext?): ASTNode {

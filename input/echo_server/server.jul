@@ -1,7 +1,5 @@
 import julaylib.pclass.Println
 import julaylib.pclass.HttpServer
-import julaylib.fun.createEmptyChannel
-import julaylib.fun.createChannel
 
 o-class ReqInfo {
     req : String
@@ -10,26 +8,18 @@ o-class ReqInfo {
 
 p-class ServerStarter {
     var started : Boolean
-    var myCloseChan : Channel<closeHttpServer>
 
     constructor initially(args : List<String>) {
         transit:
             started := false
-            myCloseChan := createEmptyChannel<closeHttpServer>()
     }
 
-    internal transition allocCloseChan() {
-        guard: ~started & myCloseChan = createEmptyChannel<closeHttpServer>()
-        transit: myCloseChan := createChannel<closeHttpServer>()
-    }
-
-    transition createHttpServer(port : Int, closeChan : Channel<closeHttpServer>) {
-        guard: ~started & port = 8000 & closeChan = myCloseChan
-            & myCloseChan ~= createEmptyChannel<closeHttpServer>()
+    session transition createHttpServer(port : Int) {
+        guard: ~started & port = 8000
         transit: started := true
     }
 
-    transition closeHttpServer<myCloseChan>() {
+    session transition closeHttpServer() {
         guard: false
     }
 }
@@ -37,14 +27,12 @@ p-class ServerStarter {
 p-class EchoHandler {
     const info : ReqInfo
     const httpReq : HttpServerRequest
-    const httpChan : Channel<sendResponse>
     var responded : Boolean
     var done : Boolean
 
-    constructor receiveRequest(req : HttpServerRequest, httpChan : Channel<sendResponse>) {
+    session constructor receiveRequest(req : HttpServerRequest) {
         transit:
             httpReq := req
-            httpChan := httpChan
             info := ReqInfo {
                 req := req.body,
                 resp := req.body + " is a good point!"
@@ -53,7 +41,7 @@ p-class EchoHandler {
             done := false
     }
 
-    transition sendResponse<httpChan>(resp : HttpServerResponse) {
+    session transition sendResponse(resp : HttpServerResponse) {
         guard:
             & ~responded
             & resp = HttpServerResponse {

@@ -1,7 +1,8 @@
 package julay.program.action
 
 import com.microsoft.z3.BoolExpr
-import julay.program.Channel
+import julay.concurrency.SyncChannel
+import julay.program.Constraint
 import julay.tools.assert
 
 /**
@@ -11,19 +12,21 @@ import julay.tools.assert
  * (each TransitionSystem class decides how the transit should happen).
  */
 data class TSAction(
-    val symAction : SymbolicAction,
-    val guard : BoolExpr,
-    val syncRole : SyncRole = SyncRole.Default,
+    val symAction: SymbolicAction,
+    val guard: BoolExpr,
+    val syncRole: SyncRole = SyncRole.Default,
     /**
-     * When non-null, sync on this dynamic [Channel] instead of the static [Program.actionTable] channel.
+     * When non-null, sync on this dedicated session SyncChannel instead of the static
+     * [Program.actionTable] channel.
      */
-    val channel : Channel? = null,
+    val syncChannel: SyncChannel<SyncPayload, Constraint>? = null,
 ) {
     /**
      * [Default] / [Internal] come from source tags (untagged / `internal`).
      * [Service] comes from the `service` tag.
      * [Consumer] is assigned by the compiler to untagged transitions on a serviced action
      * (there is no consumer source tag).
+     * Session is tracked on [SymbolicAction.isSession], not as a sync role.
      */
     enum class SyncRole { Default, Internal, Service, Consumer }
 
@@ -35,6 +38,14 @@ data class TSAction(
         assert(
             !(syncRole != SyncRole.Internal) || !symAction.isInternal,
             "Expected non-Internal role => !SymbolicAction.isInternal",
+        )
+        assert(
+            !(symAction.isSession && syncRole == SyncRole.Service),
+            "Session actions cannot use Service sync role",
+        )
+        assert(
+            !(symAction.isSession && syncRole == SyncRole.Internal),
+            "Session actions cannot use Internal sync role",
         )
     }
 }

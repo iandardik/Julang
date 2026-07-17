@@ -1,44 +1,32 @@
 import julaylib.pclass.HttpServer
-import julaylib.fun.createEmptyChannel
-import julaylib.fun.createChannel
 
 p-class ServerStarter {
     var started : Boolean
-    var myCloseChan : Channel<closeHttpServer>
 
     constructor initially(args : List<String>) {
         transit:
             started := false
-            myCloseChan := createEmptyChannel<closeHttpServer>()
     }
 
-    internal transition allocCloseChan() {
-        guard: ~started & myCloseChan = createEmptyChannel<closeHttpServer>()
-        transit: myCloseChan := createChannel<closeHttpServer>()
-    }
-
-    transition createHttpServer(port : Int, closeChan : Channel<closeHttpServer>) {
-        guard: ~started & port = 8000 & closeChan = myCloseChan
-            & myCloseChan ~= createEmptyChannel<closeHttpServer>()
+    session transition createHttpServer(port : Int) {
+        guard: ~started & port = 8000
         transit: started := true
     }
 
-    transition closeHttpServer<myCloseChan>() {
+    session transition closeHttpServer() {
         guard: false
     }
 }
 
 p-class IncReqHandler {
     const httpReq : HttpServerRequest
-    const httpChan : Channel<sendResponse>
     var localCounter : Int
     var step : String
 
-    constructor receiveRequest(req : HttpServerRequest, httpChan : Channel<sendResponse>) {
+    session constructor receiveRequest(req : HttpServerRequest) {
         transit:
             step := "A"
             httpReq := req
-            httpChan := httpChan
             localCounter := -1
     }
 
@@ -54,7 +42,7 @@ p-class IncReqHandler {
             step := "C"
     }
 
-    transition sendResponse<httpChan>(resp : HttpServerResponse) {
+    session transition sendResponse(resp : HttpServerResponse) {
         guard:
             & step = "C"
             & resp = HttpServerResponse {

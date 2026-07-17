@@ -79,15 +79,11 @@ var
     ;
 
 constructor
-    : CONSTRUCTOR ID args LCURLY constructor_body* RCURLY
+    : SESSION? CONSTRUCTOR ID args LCURLY constructor_body* RCURLY
     ;
 
 transition
-    : (INTERNAL | SERVICE)? TRANSITION ID channel_bind? args LCURLY action_body* RCURLY
-    ;
-
-channel_bind
-    : LT ID GT
+    : (INTERNAL | SERVICE | SESSION)? TRANSITION ID args LCURLY action_body* RCURLY
     ;
 
 args

@@ -299,12 +299,6 @@ class FunCallExprNode(
                     else -> builtin.z3Codegen(argStrs)
                 }
             }
-            if (builtin.name == "createEmptyChannel") {
-                return "ctx.mkInt(${Channel.EMPTY_ID})"
-            }
-            if (builtin.name == "createChannel") {
-                throw RuntimeException("createChannel cannot be used in a guard at $loc")
-            }
             return builtin.z3Codegen(argStrs)
         }
         return inlinedBody().toZ3GuardString(symbolTypes, argSymbols, forceString)
@@ -313,16 +307,6 @@ class FunCallExprNode(
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
         resolvedBuiltin?.let { builtin ->
             val argStrs = args.map { it.toTransitString(symbolTypes, argSymbols) }
-            if (builtin.name == "createEmptyChannel") {
-                val actName = (typeArgs.singleOrNull() as? TypeExpr.Simple)?.name
-                    ?: throw RuntimeException("createEmptyChannel missing action type argument at $loc")
-                return "Channel.empty(\"${actName.escapeKotlinStringLiteral()}\")"
-            }
-            if (builtin.name == "createChannel") {
-                val actName = (typeArgs.singleOrNull() as? TypeExpr.Simple)?.name
-                    ?: throw RuntimeException("createChannel missing action type argument at $loc")
-                return "program.createDynamicChannel(\"${actName.escapeKotlinStringLiteral()}\")"
-            }
             return builtin.kotlinCodegen(argStrs)
         }
         return inlinedBody().toTransitString(symbolTypes, argSymbols)
@@ -379,7 +363,6 @@ class VarNode(
             is IntType -> "Int"
             is RealType -> "Real"
             is StringType -> "String"
-            is ChannelType -> "Channel<${type.actionName}>"
             else -> throw RuntimeException("Cannot create flattened VarNode for type $type")
         }
     }
@@ -394,10 +377,11 @@ class VarNode(
 }
 
 class ConstructorNode(
-    private val name : String,
-    private val args : ArgsNode,
-    private val body : List<ActionBodyNode>,
-    private val loc : ProgramLoc
+    private val name: String,
+    private val args: ArgsNode,
+    private val body: List<ActionBodyNode>,
+    private val loc: ProgramLoc,
+    private val isSession: Boolean = false,
 ) : ProcClassDeclNode(listOf(args) + body) {
     override fun programLocation() = loc
     override fun transitVars() = body.flatMap { it.transitVars() }
@@ -406,14 +390,13 @@ class ConstructorNode(
         val guards = body.flatMap { it.guards() }
         return listOf(
             ActionDecl(
-                SymbolicAction(name, actionArgs),
+                SymbolicAction(name, actionArgs, isSession = isSession),
                 guards,
                 body.flatMap { it.transits() },
                 TSAction.SyncRole.Default,
                 loc,
                 body.flatMap { it.effects() },
                 body.flatMap { it.errors() },
-                constrainedChannelArgs = channelArgsConstrainedInGuards(actionArgs, guards),
             )
         )
     }
@@ -421,20 +404,21 @@ class ConstructorNode(
     internal fun constructorArgs(): ArgsNode = args
     internal fun actionArgs(): List<Variable> = args.actionArgs()
     internal fun withBody(newBody: List<ActionBodyNode>): ConstructorNode =
-        ConstructorNode(name, args, newBody, programLocation())
+        ConstructorNode(name, args, newBody, programLocation(), isSession)
     override fun toString(): String {
+        val sessionStr = if (isSession) "session " else ""
         val bodyStr = body.joinToString("\n") { "$it".prependIndent() }
-        return "constructor $name($args) {\n$bodyStr\n}"
+        return "${sessionStr}constructor $name($args) {\n$bodyStr\n}"
     }
 }
 
 class TransitionNode(
-    private val modifier : TSAction.SyncRole,
-    private val name : String,
-    private val args : ArgsNode,
-    private val body : List<ActionBodyNode>,
-    private val loc : ProgramLoc,
-    private val dynamicChannelVar: String? = null,
+    private val modifier: TSAction.SyncRole,
+    private val name: String,
+    private val args: ArgsNode,
+    private val body: List<ActionBodyNode>,
+    private val loc: ProgramLoc,
+    private val isSession: Boolean = false,
 ) : ProcClassDeclNode(listOf(args) + body) {
     override fun programLocation() = loc
     override fun transitVars() = body.flatMap { it.transitVars() }
@@ -443,15 +427,18 @@ class TransitionNode(
         val guards = body.flatMap { it.guards() }
         return listOf(
             ActionDecl(
-                SymbolicAction(name, actionArgs, isInternal = modifier == TSAction.SyncRole.Internal),
+                SymbolicAction(
+                    name,
+                    actionArgs,
+                    isInternal = modifier == TSAction.SyncRole.Internal,
+                    isSession = isSession,
+                ),
                 guards,
                 body.flatMap { it.transits() },
                 modifier,
                 loc,
                 body.flatMap { it.effects() },
                 body.flatMap { it.errors() },
-                dynamicChannelVar = dynamicChannelVar,
-                constrainedChannelArgs = channelArgsConstrainedInGuards(actionArgs, guards),
             )
         )
     }
@@ -459,18 +446,17 @@ class TransitionNode(
     internal fun body(): List<ActionBodyNode> = body
     internal fun transitionArgs(): ArgsNode = args
     internal fun actionArgs(): List<Variable> = args.actionArgs()
-    internal fun dynamicChannelVar(): String? = dynamicChannelVar
     internal fun withBody(newBody: List<ActionBodyNode>): TransitionNode =
-        TransitionNode(modifier, name, args, newBody, programLocation(), dynamicChannelVar)
+        TransitionNode(modifier, name, args, newBody, programLocation(), isSession)
     override fun toString(): String {
-        val modifierStr = when (modifier) {
-            TSAction.SyncRole.Default, TSAction.SyncRole.Consumer -> ""
-            TSAction.SyncRole.Service -> "service "
-            TSAction.SyncRole.Internal -> "internal "
+        val modifierStr = when {
+            isSession -> "session "
+            modifier == TSAction.SyncRole.Service -> "service "
+            modifier == TSAction.SyncRole.Internal -> "internal "
+            else -> ""
         }
-        val chanStr = dynamicChannelVar?.let { "<$it>" } ?: ""
         val bodyStr = body.joinToString("\n") { "$it".prependIndent() }
-        return "${modifierStr}transition $name$chanStr($args) {\n$bodyStr\n}"
+        return "${modifierStr}transition $name($args) {\n$bodyStr\n}"
     }
 }
 
@@ -1815,14 +1801,6 @@ class SymbolValueExprNode(
                 "$typeVal.toZ3Expr(Value(${symbol.toKotlinIdent()}, $typeVal), ctx)"
             }
         }
-        if (type is ChannelType) {
-            val typeVal = type.toCodegenTypeVal()
-            return if (symbol in argSymbols) {
-                "ctx.mkIntConst(\"${symbol.escapeKotlinStringLiteral()}\")"
-            } else {
-                "$typeVal.toZ3Expr(Value(${symbol.toKotlinIdent()}, $typeVal), ctx)"
-            }
-        }
         if (symbol in argSymbols) {
             return when (type) {
                 is BoolType -> "ctx.mkBoolConst(\"${symbol.escapeKotlinStringLiteral()}\")"
@@ -1882,27 +1860,3 @@ class CompositeProcExprNode(
     }
 }
 
-/** Channel-typed [actionArgs] that appear in an equality constraint in [guards]. */
-internal fun channelArgsConstrainedInGuards(
-    actionArgs: List<Variable>,
-    guards: List<ExprNode>,
-): Set<String> {
-    val channelArgNames = actionArgs
-        .filter { it.type is ChannelType }
-        .map { it.name }
-        .toSet()
-    if (channelArgNames.isEmpty() || guards.isEmpty()) {
-        return emptySet()
-    }
-    return channelArgNames.filter { name -> guards.any { it.constrainsChannelArg(name) } }.toSet()
-}
-
-private fun ExprNode.constrainsChannelArg(argName: String): Boolean {
-    if (this is BinaryOpExprNode && op() == "=") {
-        val lhs = lhsOperand()
-        val rhs = rhsOperand()
-        if (lhs is SymbolValueExprNode && lhs.symbol == argName) return true
-        if (rhs is SymbolValueExprNode && rhs.symbol == argName) return true
-    }
-    return children.filterIsInstance<ExprNode>().any { it.constrainsChannelArg(argName) }
-}

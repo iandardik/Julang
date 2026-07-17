@@ -1,12 +1,13 @@
 package julay.program
 
 import com.microsoft.z3.BoolExpr
-import com.microsoft.z3.Context
 import com.microsoft.z3.Status
 import julay.concurrency.SyncChannel
 import julay.program.action.ConcreteAction
 import julay.program.action.ProgramAction
+import julay.program.action.SessionPeerMeta
 import julay.program.action.SymbolicAction
+import julay.program.action.SyncPayload
 import julay.program.type.listType
 import julay.program.type.stringType
 import kotlinx.coroutines.CoroutineScope
@@ -14,9 +15,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
-import java.util.*
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.Optional
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * A program represents one or more processes that interact together on a single computer.
@@ -25,37 +25,32 @@ import java.util.concurrent.atomic.AtomicInteger
  * "peers" with a constructor (compiler abstraction) self-syncs (size 1) and then [spawn]s the
  * constructed process on [godScope] so children can outlive their parent. [run] boots every
  * `initially` constructor the same way, then parks.
+ *
+ * Session affinity and dedicated session SyncChannels are process-local (see [Proc]); this class
+ * only allocates unique process ids and hosts the static per-action SyncChannel table.
+ *
+ * Session first contact: peers rendezvous on the static (global) action channel; that channel's
+ * compute creates exactly one dedicated SyncChannel delivered via [SyncPayload.sessionToInstall].
+ * Dedicated session channels never create a session to install.
  */
 class Program {
-    val actionTable: Map<SymbolicAction, ProgramAction>
+    val staticChannelTable: Map<SymbolicAction, ProgramAction>
     val godScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val componentInfo: Set<TransitionSystemStaticInfo>
     private val constructorsByAction:
         Map<SymbolicAction, List<Pair<TransitionSystemStaticInfo, suspend (Program, ConcreteAction) -> TransitionSystem>>>
     private val constructorActions: Set<SymbolicAction>
-    private val dynamicChannelActions: Set<SymbolicAction>
-    private val dynamicActionsByName: Map<String, SymbolicAction>
-    /** Debug/test open-channel counters (not an id→Channel table). */
-    private val openCountsByActionName = ConcurrentHashMap<String, AtomicInteger>()
-    private val totalOpenCount = AtomicInteger(0)
+    private val nextProcId = AtomicLong(1)
     private val initiallyAction: SymbolicAction
     private val initiallyConcrete: ConcreteAction
 
     /**
-     * The constructor sets up a channel for each alphabet action so that processes that engage
-     * in the action can communicate (synchronize on args) over the channel.
+     * Session actions in the program alphabet, keyed by name (for session install during sync).
      */
-    constructor(componentInfo: Set<TransitionSystemStaticInfo>, cliArgs: List<String> = emptyList()) {
-        // assumptions/requirements (enforced by the compiler):
-        // - all action signatures that have the same name should have the same params
-        // - no transition should be for initially (only constructors)
-        // - internal actions and constructor-paired actions: sync size 1; other defaults: sync size 2
-        // - service actions: at most one servicer; consumers are untagged defaults
-        // - a service with no consumers is a legal intentional deadlock (warned at compile time)
-        // - constructor peers are a compile-time sync abstraction; runtime spawns locally via spawn()
-        // - dynamic-channel actions have no static SyncChannel (rendezvous via Channel instances)
+    private val sessionActionsByName: Map<String, SymbolicAction>
 
+    constructor(componentInfo: Set<TransitionSystemStaticInfo>, cliArgs: List<String> = emptyList()) {
         this.componentInfo = componentInfo
 
         val argsVar = Variable("args", listType(stringType))
@@ -72,13 +67,9 @@ class Program {
             .groupBy({ it.first }, { it.second })
         constructorActions = constructorsByAction.keys
 
-        dynamicChannelActions = componentInfo.flatMap { it.dynamicChannelActions }.toSet()
-        dynamicActionsByName = dynamicChannelActions.associateBy { it.name }
-
-        // Channels for live alphabets only (constructors and dynamic-channel actions omitted).
         val allActions = componentInfo.flatMap { it.alphabet }.toSet()
-            .filter { it !in dynamicChannelActions }
-            .toSet()
+        sessionActionsByName = allActions.filter { it.isSession }.associateBy { it.name }
+
         val actionCounts = allActions.associateWith { setAct ->
             when {
                 setAct.isInternal -> 1
@@ -88,77 +79,55 @@ class Program {
         }
 
         val channelTable = actionCounts.keys.associateWith { act ->
-            makeStaticSyncChannel(act, actionCounts[act]!!)
+            // Global first-contact creates a session to install only for pairwise session actions.
+            val installSession = act.isSession && actionCounts[act]!! >= 2
+            makeSyncChannel(act, actionCounts[act]!!, installSession)
         }
 
-        actionTable = channelTable.keys.associateWith { ProgramAction(it, channelTable[it]!!) }
+        staticChannelTable = channelTable.keys.associateWith { ProgramAction(it, channelTable[it]!!) }
     }
 
     fun isConstructorAction(act: SymbolicAction): Boolean = act in constructorActions
 
-    /**
-     * Allocates a live dynamic [Channel] for [act] (sync size 2). Creator must [closeChannel] after use.
-     */
-    fun createDynamicChannel(act: SymbolicAction): Channel {
-        if (act !in dynamicChannelActions) {
-            throw IllegalArgumentException("Action ${act.name} is not a dynamic-channel action")
-        }
-        openCountsByActionName.getOrPut(act.name) { AtomicInteger(0) }.incrementAndGet()
-        totalOpenCount.incrementAndGet()
-        lateinit var channel: Channel
-        val sync = makeDynamicSyncChannel { channel.ownerAction!! }
-        channel = Channel.create(sync, act) {
-            openCountsByActionName[act.name]?.decrementAndGet()
-            totalOpenCount.decrementAndGet()
-        }
-        return channel
-    }
+    fun allocateProcId(): Long = nextProcId.getAndIncrement()
 
-    /**
-     * Allocates a live dynamic [Channel] for a dynamic-channel action by name (Jul [createChannel]).
-     */
-    fun createDynamicChannel(actionName: String): Channel {
-        val act = dynamicActionsByName[actionName]
-            ?: throw IllegalArgumentException(
-                "Action \"$actionName\" is not a dynamic-channel action in this program",
-            )
-        return createDynamicChannel(act)
-    }
+    fun sessionActions(): Collection<SymbolicAction> = sessionActionsByName.values
 
-    /** Open channels for [act] (for in-process leak tests / debug). */
-    fun openDynamicChannelCount(act: SymbolicAction): Int =
-        openCountsByActionName[act.name]?.get() ?: 0
+    fun sessionAction(name: String): SymbolicAction? = sessionActionsByName[name]
 
-    /** Sum of open dynamic channels (test-only probe via HttpServer debug). */
-    fun totalOpenDynamicChannelCount(): Int = totalOpenCount.get()
+    /** Dedicated session SyncChannel: payload never includes a session to install. */
+    fun makeSessionChannel(act: SymbolicAction): SyncChannel<SyncPayload, Constraint> =
+        makeSyncChannel(act, syncSize = 2, installSession = false)
 
     fun spawnProc(ts: TransitionSystem, tsInfo: TransitionSystemStaticInfo) {
         godScope.launch {
-            Proc(ts, tsInfo, actionTable, this@Program).run()
+            Proc(ts, tsInfo, staticChannelTable, this@Program).run()
         }
     }
 
-    fun spawn(act: ConcreteAction) {
+    /**
+     * Spawns constructor peers for [act]. When [parent] is non-null and [act] is a session action,
+     * establishes mutual affinity and installs sessions on both procs before the child runs.
+     */
+    fun spawn(act: ConcreteAction, parent: Proc? = null) {
         val entries = constructorsByAction[act.symAction] ?: return
         entries.forEach { (tsInfo, constructor) ->
             godScope.launch {
                 val ts = constructor(this@Program, act)
-                Proc(ts, tsInfo, actionTable, this@Program).run()
+                val child = Proc(ts, tsInfo, staticChannelTable, this@Program)
+                if (parent != null && act.symAction.isSession) {
+                    parent.establishSessionWithSpawnedChild(child, act.symAction)
+                }
+                child.run()
             }
         }
     }
 
     suspend fun run() {
-        // Spawn every p-class / library with an initially constructor (once per registry entry).
-        spawn(initiallyConcrete)
-        // Park so main does not return while godScope children run on Dispatchers.IO.
-        // Intentional process end uses exitProcess from a child (e.g. ExitSystem).
+        spawn(initiallyConcrete, parent = null)
         awaitCancellation()
     }
 
-    // Case-local Context ownership in Proc (cloneInto before Select) ensures concurrent Select
-    // arms do not share a source Context; SAT-time translate into this scratch ctx is then safe
-    // (per SyncChannel mutex for a given Case Context; distinct Case Contexts for different arms).
     private fun constraintsSatisfiable(constraints: Set<Constraint>): Boolean =
         withEphemeralContext { ctx ->
             val solver = ctx.mkSolver()
@@ -166,54 +135,56 @@ class Program {
             solver.check() == Status.SATISFIABLE
         }
 
-    private fun extractConcreteAction(
+    private fun extractSyncPayload(
         act: SymbolicAction,
         constraints: Set<Constraint>,
-    ): Optional<ConcreteAction> =
+        installSession: Boolean,
+    ): Optional<SyncPayload> =
         withEphemeralContext { ctx ->
             val solver = ctx.mkSolver()
             constraints.forEach { c -> solver.add(c.expr.translate(ctx) as BoolExpr) }
             if (solver.check() != Status.SATISFIABLE) {
                 Optional.empty()
-            } else if (act.args.isEmpty()) {
-                Optional.of(ConcreteAction(act, emptyMap()))
             } else {
-                val channelsById = constraints
-                    .flatMap { it.channels }
-                    .filter { !it.isEmpty() }
-                    .associateBy { it.id }
-                ChannelType.withChannelLookup(channelsById) {
-                    Optional.of(ConcreteAction(act, ctx, solver.model))
+                val concrete = if (act.args.isEmpty()) {
+                    ConcreteAction(act, emptyMap())
+                } else {
+                    ConcreteAction(act, ctx, solver.model)
                 }
+                val syncPeers = constraints
+                    .filter { it.procId >= 0 }
+                    .map { SessionPeerMeta(it.procId, it.classId) }
+                val sessionToInstall =
+                    if (installSession) {
+                        val actionName = act.name
+                        val channel = makeSessionChannel(act)
+                        val entry: java.util.Map.Entry<String, SyncChannel<SyncPayload, Constraint>> =
+                            object : java.util.Map.Entry<String, SyncChannel<SyncPayload, Constraint>> {
+                                override fun getKey(): String = actionName
+                                override fun getValue(): SyncChannel<SyncPayload, Constraint> = channel
+                                override fun setValue(
+                                    newValue: SyncChannel<SyncPayload, Constraint>,
+                                ): SyncChannel<SyncPayload, Constraint> {
+                                    throw UnsupportedOperationException()
+                                }
+                            }
+                        Optional.of(entry)
+                    } else {
+                        Optional.empty()
+                    }
+                Optional.of(SyncPayload(concrete, syncPeers, sessionToInstall))
             }
         }
 
-    private fun makeStaticSyncChannel(
+    private fun makeSyncChannel(
         act: SymbolicAction,
         syncSize: Int,
-    ): SyncChannel<ConcreteAction, Constraint> {
-        // Ephemeral Z3 Contexts: channels live for the program lifetime, but each SAT /
-        // model extraction uses a scratch Context that is closed immediately after.
-        // (ConcreteAction copies assignments into plain Java Values.)
-        // c.expr.translate(ctx) is required because each constraint comes from a different
-        // Case-local / peer Context.
+        installSession: Boolean,
+    ): SyncChannel<SyncPayload, Constraint> {
         return SyncChannel(
             syncSize,
             satisfiable = ::constraintsSatisfiable,
-            compute = { constraints -> extractConcreteAction(act, constraints) },
+            compute = { constraints -> extractSyncPayload(act, constraints, installSession) },
         )
     }
-
-    /**
-     * Dynamic SyncChannel: [ownerAction] is read from the Channel at sync time (not closed over
-     * a captured SymbolicAction at factory time).
-     */
-    private fun makeDynamicSyncChannel(
-        ownerAction: () -> SymbolicAction,
-    ): SyncChannel<ConcreteAction, Constraint> =
-        SyncChannel(
-            syncSize = 2,
-            satisfiable = ::constraintsSatisfiable,
-            compute = { constraints -> extractConcreteAction(ownerAction(), constraints) },
-        )
 }

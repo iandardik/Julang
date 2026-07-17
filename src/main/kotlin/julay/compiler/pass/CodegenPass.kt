@@ -348,13 +348,6 @@ private fun ProcClassDecl.kotlinClassString(
         "\nelse -> throw RuntimeException(\"Action is outside my alphabet: \${act.symAction}\")".prependIndent().prependIndent() +
         "\n}".prependIndent() +
         "\n}"
-    val channelStateVars = stateVars.filter { it.type is ChannelType }
-    val heldChannelsStr = if (channelStateVars.isEmpty()) {
-        ""
-    } else {
-        val body = channelStateVars.joinToString(", ") { it.name.toKotlinIdent() }
-        "\noverride fun heldChannels(): Set<Channel> = setOf($body)"
-    }
     val allParams = if (stateVars.isEmpty()) {
         "private val program: Program"
     } else {
@@ -365,7 +358,6 @@ private fun ProcClassDecl.kotlinClassString(
         "\n) : TransitionSystem {" +
         registerTypes +
         "\n$actionsStr".prependIndent() +
-        heldChannelsStr.prependIndent() +
         "\n$transitStr".prependIndent() +
         "\n}"
 }
@@ -374,11 +366,6 @@ private fun ProcClassDecl.kotlinStaticInfoString(servicedActionNames: Set<String
     val transitionInfo = transitions.joinToString(",\n") {
         it.kotlinStaticInfoString(servicedActionNames).prependIndent()
     }
-    val dynamicActs = transitions
-        .filter { it.requiresDynamicChannel }
-        .joinToString(",\n") {
-            it.kotlinStaticInfoString(servicedActionNames).prependIndent()
-        }
     val constructorPairs = constructors
         .joinToString(",\n") { ctor ->
             val actSigStr = ctor.kotlinStaticInfoString(servicedActionNames)
@@ -415,9 +402,6 @@ private fun ProcClassDecl.kotlinStaticInfoString(servicedActionNames: Set<String
             "\n)," +
             "\nmapOf<SymbolicAction, suspend (Program, ConcreteAction) -> TransitionSystem>(" +
             "\n$constructorPairs" +
-            "\n)," +
-            "\ndynamicChannelActions = setOf(" +
-            "\n$dynamicActs" +
             "\n)").prependIndent() +
         "\n)"
 }
@@ -451,13 +435,10 @@ private fun ActionDecl.kotlinActionString(
         TSAction.SyncRole.Service -> "TSAction.SyncRole.Service"
         TSAction.SyncRole.Consumer -> "TSAction.SyncRole.Consumer"
     }
-    val channelStr = dynamicChannelVar?.let { chanVar ->
-        ",\nchannel = ${chanVar.toKotlinIdent()}"
-    } ?: ""
     return "TSAction(" +
         "\n$actionSigStr,".prependIndent() +
         "\n$guardStr,".prependIndent() +
-        "\n$syncRoleStr$channelStr".prependIndent() +
+        "\n$syncRoleStr".prependIndent() +
         "\n)"
 }
 
@@ -533,12 +514,12 @@ private fun ActionDecl.kotlinStaticInfoString(servicedActionNames: Set<String> =
     val actionArgsStr = action.args.joinToString(", ") {
         "Variable(\"${it.name}\", ${it.type.toCodegenTypeVal()})"
     }
-    val isInternal = action.isInternal || modifier == TSAction.SyncRole.Internal
-    return if (isInternal) {
-        "SymbolicAction(\"${action.name}\", listOf($actionArgsStr), isInternal = true)"
-    } else {
-        "SymbolicAction(\"${action.name}\", listOf($actionArgsStr))"
+    val flags = buildList {
+        if (action.isInternal || modifier == TSAction.SyncRole.Internal) add("isInternal = true")
+        if (action.isSession) add("isSession = true")
     }
+    val flagStr = if (flags.isEmpty()) "" else ", " + flags.joinToString(", ")
+    return "SymbolicAction(\"${action.name}\", listOf($actionArgsStr)$flagStr)"
 }
 
 /** Type of the value written by `root.fieldPath := …` (leaf field, or the root itself). */

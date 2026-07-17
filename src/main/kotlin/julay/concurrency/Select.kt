@@ -16,6 +16,9 @@ class Select(private vararg val cases : Case) {
     private val caseDoneChan = Channel<Case>()
     private val winnerMutex = StratifiedMutex()
     var winner = Optional.empty<Int>() // TODO make private
+    /** Set when a SyncCase's SyncChannel closes; Select exits without waiting for other arms. */
+    @Volatile
+    private var exitDueToChannelClose = false
 
     init {
         // check to make sure no two cases use the same channel
@@ -42,6 +45,11 @@ class Select(private vararg val cases : Case) {
     fun doCommit(chanHash : Int) {
         julay.tools.assert(canCommit(chanHash))
         winner = Optional.of(chanHash)
+    }
+
+    /** Called by [SyncCase] when its channel closes so Select cancels remaining arms promptly. */
+    fun noteChannelClosed() {
+        exitDueToChannelClose = true
     }
 
     /**
@@ -73,7 +81,7 @@ class Select(private vararg val cases : Case) {
             val doneCases = mutableSetOf<Case>()
             var winnerCopy = Optional.empty<Int>()
             var winnerDone = false
-            while (!winnerDone && doneCases != allCases) {
+            while (!winnerDone && !exitDueToChannelClose && doneCases != allCases) {
                 val case = caseDoneChan.receive()
                 doneCases.add(case)
                 if (winnerCopy.isEmpty) {
@@ -81,11 +89,9 @@ class Select(private vararg val cases : Case) {
                 }
                 winnerDone = winnerCopy.isPresent && winnerCopy.get() == case.getChannelHash()
             }
-            // It's possible to reach here and have winnerDone equal false. This would most likely be because all
-            // channels have been closed. In this case, no case would fire; however--for now--we will not consider that
-            // a bug.
-            //assert(winnerDone, "Select $this expected a winner")
-            // Cancel losers, then join so SyncChannel participant cleanup finishes before
+            // No winner is OK when a case's SyncChannel closed (exitDueToChannelClose) or all
+            // arms aborted. Callers (e.g. Proc) rebuild Select after scrubbing closed sessions.
+            // Cancel remaining arms, then join so SyncChannel participant cleanup finishes before
             // callers (e.g. Proc) close Z3 Contexts that own those constraints.
             jobs.forEach { it.cancelAndJoin() }
             caseDoneChan.close()
@@ -125,6 +131,10 @@ class Select(private vararg val cases : Case) {
             if (ret.isPresent) {
                 assert(select.winner.get() == chan.hashCode(), "Expected winning case to have the winning channel")
                 callback.invoke(ret.result.get())
+            } else if (chan.isClosed()) {
+                // Exit the whole Select so callers can rebuild cases (e.g. fall back to a
+                // global session channel after a peer dies). Do not leave other arms waiting.
+                select.noteChannelClosed()
             }
             try {
                 select.caseDoneChan.send(this)

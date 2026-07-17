@@ -2,8 +2,6 @@ import julaylib.pclass.HttpClient
 import julaylib.fun.length
 import julaylib.fun.split
 import julaylib.fun.startsWith
-import julaylib.fun.createEmptyChannel
-import julaylib.fun.createChannel
 
 /*
  * Raft client — CLI:
@@ -23,8 +21,6 @@ p-class RaftClientLogic {
     var respBody : String
     var respCode : Int
     var retried : Boolean
-    var httpChan : Channel<receiveResponse>
-    var myCloseChan : Channel<closeHttpClient>
 
     constructor initially(args : List<String>) {
         transit:
@@ -36,24 +32,15 @@ p-class RaftClientLogic {
             respBody := ""
             respCode := 0
             retried := false
-            httpChan := createEmptyChannel<receiveResponse>()
-            myCloseChan := createEmptyChannel<closeHttpClient>()
-            step := "allocClose"
-    }
-
-    internal transition allocCloseChan() {
-        guard: step = "allocClose"
-        transit:
-            myCloseChan := createChannel<closeHttpClient>()
             step := "createHttpClient"
     }
 
-    transition createHttpClient(closeChan : Channel<closeHttpClient>) {
-        guard: step = "createHttpClient" & closeChan = myCloseChan
+    session transition createHttpClient() {
+        guard: step = "createHttpClient"
         transit: step := "send"
     }
 
-    transition sendRequest(req : HttpClientRequest, httpChan : Channel<receiveResponse>) {
+    session transition sendRequest(req : HttpClientRequest) {
         guard:
             & step = "send"
             & req = HttpClientRequest {
@@ -62,11 +49,10 @@ p-class RaftClientLogic {
                 body := reqBody
             }
         transit:
-            httpChan := httpChan
             step := "recv"
     }
 
-    transition receiveResponse<httpChan>(resp : HttpClientResponse) {
+    session transition receiveResponse(resp : HttpClientResponse) {
         guard: step = "recv"
         transit:
             respBody := resp.body
@@ -93,7 +79,7 @@ p-class RaftClientLogic {
             step := "send"
     }
 
-    transition closeHttpClient<myCloseChan>() {
+    session transition closeHttpClient() {
         guard:
             & step = "afterPrint"
             & (respCode = 200 | retried | respCode = 503 | ~(startsWith(respBody, "LEADER ")))
