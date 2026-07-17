@@ -225,7 +225,34 @@ private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse:
             }
         }
 
-        argMismatches + dynamicMixErrors + dynamicTagErrors + tagMixErrors + constructorErrors + peerErrors
+        val channelArgErrors = channelArgConstraintErrors(name, namedOffers)
+
+        argMismatches + dynamicMixErrors + dynamicTagErrors + tagMixErrors +
+            constructorErrors + peerErrors + channelArgErrors
+    }
+}
+
+/**
+ * Every Channel-typed action argument must be constrained somewhere: either in a Jul guard
+ * (derived into [ActionDecl.constrainedChannelArgs]) or registered by a Kotlin library offer.
+ */
+private fun channelArgConstraintErrors(actionName: String, namedOffers: List<ActionOffer>): List<CompileError> {
+    val refAction = namedOffers[0].decl.action
+    val channelArgs = refAction.args.filter { it.type is ChannelType }
+    if (channelArgs.isEmpty()) {
+        return emptyList()
+    }
+    val constrained = namedOffers.flatMap { it.decl.constrainedChannelArgs }.toSet()
+    return channelArgs.mapNotNull { arg ->
+        if (arg.name in constrained) {
+            null
+        } else {
+            OneLocCompileError(
+                namedOffers[0].decl.loc,
+                "Expected channel argument \"${arg.name}\" of action \"$actionName\" to be constrained " +
+                    "in at least one guard (or registered by a Kotlin library ActionDecl)",
+            )
+        }
     }
 }
 

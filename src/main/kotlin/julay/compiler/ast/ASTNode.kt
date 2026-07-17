@@ -301,6 +301,9 @@ class FunCallExprNode(
             if (builtin.name == "createEmptyChannel") {
                 return "ctx.mkInt(${Channel.EMPTY_ID})"
             }
+            if (builtin.name == "createChannel") {
+                throw RuntimeException("createChannel cannot be used in a guard at $loc")
+            }
             return builtin.z3Codegen(argStrs)
         }
         return inlinedBody().toZ3GuardString(symbolTypes, argSymbols, forceString)
@@ -313,6 +316,11 @@ class FunCallExprNode(
                 val actName = (typeArgs.singleOrNull() as? TypeExpr.Simple)?.name
                     ?: throw RuntimeException("createEmptyChannel missing action type argument at $loc")
                 return "Channel.empty(\"${actName.escapeKotlinStringLiteral()}\")"
+            }
+            if (builtin.name == "createChannel") {
+                val actName = (typeArgs.singleOrNull() as? TypeExpr.Simple)?.name
+                    ?: throw RuntimeException("createChannel missing action type argument at $loc")
+                return "program.createDynamicChannel(\"${actName.escapeKotlinStringLiteral()}\")"
             }
             return builtin.kotlinCodegen(argStrs)
         }
@@ -393,15 +401,18 @@ class ConstructorNode(
     override fun programLocation() = loc
     override fun transitVars() = body.flatMap { it.transitVars() }
     override fun constructors(): List<ActionDecl> {
+        val actionArgs = args.actionArgs()
+        val guards = body.flatMap { it.guards() }
         return listOf(
             ActionDecl(
-                SymbolicAction(name, args.actionArgs()),
-                body.flatMap { it.guards() },
+                SymbolicAction(name, actionArgs),
+                guards,
                 body.flatMap { it.transits() },
                 TSAction.SyncRole.Default,
                 loc,
                 body.flatMap { it.effects() },
                 body.flatMap { it.errors() },
+                constrainedChannelArgs = channelArgsConstrainedInGuards(actionArgs, guards),
             )
         )
     }
@@ -427,16 +438,19 @@ class TransitionNode(
     override fun programLocation() = loc
     override fun transitVars() = body.flatMap { it.transitVars() }
     override fun transitions(): List<ActionDecl> {
+        val actionArgs = args.actionArgs()
+        val guards = body.flatMap { it.guards() }
         return listOf(
             ActionDecl(
-                SymbolicAction(name, args.actionArgs(), isInternal = modifier == TSAction.SyncRole.Internal),
-                body.flatMap { it.guards() },
+                SymbolicAction(name, actionArgs, isInternal = modifier == TSAction.SyncRole.Internal),
+                guards,
                 body.flatMap { it.transits() },
                 modifier,
                 loc,
                 body.flatMap { it.effects() },
                 body.flatMap { it.errors() },
                 dynamicChannelVar = dynamicChannelVar,
+                constrainedChannelArgs = channelArgsConstrainedInGuards(actionArgs, guards),
             )
         )
     }
@@ -1853,4 +1867,29 @@ class CompositeProcExprNode(
     override fun toString(): String {
         return compositeProcs.joinToString(" || ") { it.toString() }
     }
+}
+
+/** Channel-typed [actionArgs] that appear in an equality constraint in [guards]. */
+internal fun channelArgsConstrainedInGuards(
+    actionArgs: List<Variable>,
+    guards: List<ExprNode>,
+): Set<String> {
+    val channelArgNames = actionArgs
+        .filter { it.type is ChannelType }
+        .map { it.name }
+        .toSet()
+    if (channelArgNames.isEmpty() || guards.isEmpty()) {
+        return emptySet()
+    }
+    return channelArgNames.filter { name -> guards.any { it.constrainsChannelArg(name) } }.toSet()
+}
+
+private fun ExprNode.constrainsChannelArg(argName: String): Boolean {
+    if (this is BinaryOpExprNode && op() == "=") {
+        val lhs = lhsOperand()
+        val rhs = rhsOperand()
+        if (lhs is SymbolValueExprNode && lhs.symbol == argName) return true
+        if (rhs is SymbolValueExprNode && rhs.symbol == argName) return true
+    }
+    return children.filterIsInstance<ExprNode>().any { it.constrainsChannelArg(argName) }
 }

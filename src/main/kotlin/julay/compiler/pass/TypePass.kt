@@ -898,13 +898,13 @@ private fun FunCallExprNode.typePassFunCall(
         builtin.checkArgs(argTypes)?.let { msg ->
             return listOf(OneLocCompileError(programLocation(), msg))
         }
-        if (builtin.name == "createEmptyChannel") {
+        if (builtin.name == "createEmptyChannel" || builtin.name == "createChannel") {
             val typeArgs = callTypeArgs()
             if (typeArgs.size != 1) {
                 return listOf(
                     OneLocCompileError(
                         programLocation(),
-                        "Expected function \"createEmptyChannel\" to take 1 type argument but got ${typeArgs.size}",
+                        "Expected function \"${builtin.name}\" to take 1 type argument but got ${typeArgs.size}",
                     ),
                 )
             }
@@ -913,7 +913,7 @@ private fun FunCallExprNode.typePassFunCall(
                 return listOf(
                     OneLocCompileError(
                         programLocation(),
-                        "Expected createEmptyChannel type argument to be an action name",
+                        "Expected ${builtin.name} type argument to be an action name",
                     ),
                 )
             }

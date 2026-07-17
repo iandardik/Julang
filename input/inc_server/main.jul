@@ -15,10 +15,6 @@ p-class Counter {
     service transition getCounter(counterVal : Int) {
         guard: counterVal = counter
     }
-
-    transition close() {
-        guard: false // never close the server
-    }
 }
 
 program CounterServer := Counter || Printer || ServerLogic

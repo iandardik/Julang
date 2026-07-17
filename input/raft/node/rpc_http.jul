@@ -109,10 +109,6 @@ p-class RpcServer {
         guard: step = "resp" & resp = HttpServerResponse { body := respBody, code := respCode }
         transit: step := "done"
     }
-
-    transition close() {
-        guard: false
-    }
 }
 
 p-class RpcClient {

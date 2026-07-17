@@ -26,15 +26,16 @@ class HttpClientTest {
         try {
             val port = server.address.port
             val program = Program(setOf(JulHttpClient.staticInfo()))
-            val client = JulHttpClient(program)
+            val closeChan = program.createDynamicChannel(JulHttpClient.closeHttpClientAct)
+            val client = JulHttpClient(program, closeChan)
             for (payload in listOf("ping", "pong")) {
                 val req = HttpClientRequest("http://127.0.0.1:$port/", "POST", payload)
                 val ctxSend = Context()
                 try {
                     val acts = client.actions(ctxSend)
-                    assertEquals(1, acts.size)
+                    val sendTs = acts.first { it.symAction == JulHttpClient.sendRequestAct }
                     val solver = ctxSend.mkSolver()
-                    solver.add(acts.first().guard)
+                    solver.add(sendTs.guard)
                     solver.add(
                         ctxSend.mkEq(
                             JulHttpClient.reqArg.toZ3Expr(ctxSend),
@@ -42,7 +43,7 @@ class HttpClientTest {
                         ),
                     )
                     assert(solver.check() == Status.SATISFIABLE)
-                    val sendAct = ChannelType.withProgramLookup(program) {
+                    val sendAct = ChannelType.withChannelLookup(client.heldChannels().associateBy { it.id }) {
                         ConcreteAction(JulHttpClient.sendRequestAct, ctxSend, solver.model)
                     }
                     client.transit(sendAct)
@@ -64,7 +65,7 @@ class HttpClientTest {
                         ),
                     )
                     assert(solver.check() == Status.SATISFIABLE)
-                    val recvAct = ChannelType.withProgramLookup(program) {
+                    val recvAct = ChannelType.withChannelLookup(client.heldChannels().associateBy { it.id }) {
                         ConcreteAction(JulHttpClient.receiveResponseAct, ctxRecv, solver.model)
                     }
                     client.transit(recvAct)
@@ -73,6 +74,7 @@ class HttpClientTest {
                 }
             }
             assertEquals(0, program.openDynamicChannelCount(JulHttpClient.receiveResponseAct))
+            assertEquals(1, program.openDynamicChannelCount(JulHttpClient.closeHttpClientAct))
         } finally {
             server.stop(0)
         }

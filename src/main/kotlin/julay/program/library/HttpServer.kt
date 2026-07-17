@@ -12,34 +12,45 @@ import java.net.InetSocketAddress
 class JulHttpServer(
     private val port: Int,
     private val program: Program,
+    private val closeChan: Channel,
 ) : TransitionSystem, HttpHandler {
     companion object : JulLibrary {
         override val julName = "HttpServer"
         val portArg = Variable("port", intType)
+        val closeHttpServerChanType = channelType("closeHttpServer")
+        val closeChanArg = Variable("closeChan", closeHttpServerChanType)
         val reqArg = Variable("req", httpServerRequestType)
         val sendResponseChanType = channelType("sendResponse")
         val httpChanArg = Variable("httpChan", sendResponseChanType)
         val respArg = Variable("resp", httpServerResponseType)
-        val createHttpServerAct = SymbolicAction("createHttpServer", listOf(portArg))
+        val createHttpServerAct = SymbolicAction("createHttpServer", listOf(portArg, closeChanArg))
         val receiveRequestAct = SymbolicAction("receiveRequest", listOf(reqArg, httpChanArg))
         val sendResponseAct = SymbolicAction("sendResponse", listOf(respArg))
-        val closeAct = SymbolicAction("close", listOf())
+        val closeHttpServerAct = SymbolicAction("closeHttpServer", listOf())
         val createHttpServerCtor: Pair<SymbolicAction, suspend (Program, ConcreteAction) -> JulHttpServer> = Pair(
             createHttpServerAct,
         ) { prog, act ->
             val port = act.lookup(portArg).value as Int
-            JulHttpServer(port, prog)
+            val closeChan = act.lookup(closeChanArg).value as Channel
+            JulHttpServer(port, prog, closeChan)
         }
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one
         override fun staticInfo() = TransitionSystemStaticInfo(
             "JulHttpServer$",
-            setOf(receiveRequestAct, sendResponseAct, closeAct),
+            setOf(receiveRequestAct, sendResponseAct, closeHttpServerAct),
             mapOf(createHttpServerCtor),
-            dynamicChannelActions = setOf(sendResponseAct),
+            dynamicChannelActions = setOf(sendResponseAct, closeHttpServerAct),
         )
         override val actionDecls = listOf(
             ActionDecl(createHttpServerAct, listOf(), emptyList(), TSAction.SyncRole.Default, LibraryLoc(julName)),
-            ActionDecl(receiveRequestAct, listOf(), emptyList(), TSAction.SyncRole.Default, LibraryLoc(julName)),
+            ActionDecl(
+                receiveRequestAct,
+                listOf(),
+                emptyList(),
+                TSAction.SyncRole.Default,
+                LibraryLoc(julName),
+                constrainedChannelArgs = setOf("httpChan"),
+            ),
             ActionDecl(
                 sendResponseAct,
                 listOf(),
@@ -48,28 +59,52 @@ class JulHttpServer(
                 LibraryLoc(julName),
                 dynamicChannelVar = "",
             ),
-            ActionDecl(closeAct, listOf(), emptyList(), TSAction.SyncRole.Service, LibraryLoc(julName)),
+            ActionDecl(
+                closeHttpServerAct,
+                listOf(),
+                emptyList(),
+                TSAction.SyncRole.Default,
+                LibraryLoc(julName),
+                dynamicChannelVar = "",
+            ),
         )
     }
 
+    private val jdkServer = HttpServer.create(InetSocketAddress(port), 0)
+    private var closed = false
+
     init {
-        val server = HttpServer.create(InetSocketAddress(port), 0)
-        server.createContext("/", this)
+        jdkServer.createContext("/", this)
         if (System.getProperty("julay.channelDebug") == "true") {
-            server.createContext("/.julay/openDynamicChannels") { exchange ->
+            jdkServer.createContext("/.julay/openDynamicChannels") { exchange ->
                 val body = program.totalOpenDynamicChannelCount().toString().toByteArray()
                 exchange.sendResponseHeaders(200, body.size.toLong())
                 exchange.responseBody.use { it.write(body) }
             }
         }
-        server.start()
+        jdkServer.start()
     }
+
+    override fun heldChannels(): Set<Channel> =
+        if (closed || closeChan.isEmpty()) emptySet() else setOf(closeChan)
+
     override suspend fun actions(ctx: Context): Set<TSAction> {
+        if (closed || closeChan.isEmpty()) {
+            return emptySet()
+        }
         return setOf(
-            TSAction(closeAct, ctx.mkTrue(), TSAction.SyncRole.Service),
+            TSAction(closeHttpServerAct, ctx.mkTrue(), TSAction.SyncRole.Default, channel = closeChan),
         )
     }
-    override suspend fun transit(act: ConcreteAction) {}
+
+    override suspend fun transit(act: ConcreteAction) {
+        if (act.symAction == closeHttpServerAct) {
+            closed = true
+            jdkServer.stop(0)
+            closeChannel(closeChan)
+        }
+    }
+
     override fun handle(exchange: HttpExchange?) {
         val resource = HttpResource(exchange!!, program)
         program.spawnProc(resource, staticInfo())
@@ -88,6 +123,9 @@ class JulHttpServer(
             val body = exchange.requestBody.bufferedReader().use { it.readText() }
             request = HttpServerRequest(path, body)
         }
+
+        override fun heldChannels(): Set<Channel> = setOf(responseChan)
+
         override suspend fun actions(ctx: Context): Set<TSAction> {
             if (initHttpReq) {
                 initHttpReq = false

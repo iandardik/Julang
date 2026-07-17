@@ -18,6 +18,7 @@ class ObjClassType(
     private val valueFromZ3: (Expr<*>, Model) -> Any,
 ) : Type {
     private val objClassCtx = Context()
+
     // Lazy so polymorphic o-class instantiations (fields still typed as TypeVar) can be
     // constructed during type checking without calling z3SortForField on TypeVars.
     // Concrete monomorphized types force this on first Z3 use; TypeVar schemas never should.

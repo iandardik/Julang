@@ -46,13 +46,15 @@ class DynamicChannelLeakTest {
         try {
             val port = jdkServer.address.port
             val program = Program(setOf(JulHttpClient.staticInfo()))
-            val client = JulHttpClient(program)
+            val closeChan = program.createDynamicChannel(JulHttpClient.closeHttpClientAct)
+            val client = JulHttpClient(program, closeChan)
             repeat(50) { i ->
                 val req = HttpClientRequest("http://127.0.0.1:$port/", "POST", "n=$i")
                 Context().use { ctx ->
                     val acts = client.actions(ctx)
+                    val sendTs = acts.first { it.symAction == JulHttpClient.sendRequestAct }
                     val solver = ctx.mkSolver()
-                    solver.add(acts.first().guard)
+                    solver.add(sendTs.guard)
                     solver.add(
                         ctx.mkEq(
                             JulHttpClient.reqArg.toZ3Expr(ctx),
@@ -60,7 +62,7 @@ class DynamicChannelLeakTest {
                         ),
                     )
                     assert(solver.check() == com.microsoft.z3.Status.SATISFIABLE)
-                    val sendAct = ChannelType.withProgramLookup(program) {
+                    val sendAct = ChannelType.withChannelLookup(client.heldChannels().associateBy { it.id }) {
                         ConcreteAction(JulHttpClient.sendRequestAct, ctx, solver.model)
                     }
                     client.transit(sendAct)
@@ -72,7 +74,7 @@ class DynamicChannelLeakTest {
                     val solver = ctx.mkSolver()
                     solver.add(acts.first().guard)
                     assert(solver.check() == com.microsoft.z3.Status.SATISFIABLE)
-                    val recvAct = ChannelType.withProgramLookup(program) {
+                    val recvAct = ChannelType.withChannelLookup(client.heldChannels().associateBy { it.id }) {
                         ConcreteAction(JulHttpClient.receiveResponseAct, ctx, solver.model)
                     }
                     client.transit(recvAct)
@@ -161,12 +163,12 @@ class DynamicChannelLeakTest {
             try {
                 ports.forEach { waitForPort(it, 90_000) }
                 Thread.sleep(12_000) // election settle (idle)
-                // Each Raft node has a long-lived HttpClient that pre-creates one Channel
-                // while Idle (ready for the next sendRequest). Baseline is therefore 1/node,
-                // not 0 — leak signal is growth above that baseline.
+                // Each Raft node has a closeHttpServer channel, a closeHttpClient channel,
+                // and a long-lived HttpClient that may pre-create one receiveResponse Channel
+                // while Idle. Leak signal is growth above that baseline.
                 val idleBaselines = ports.associateWith { fetchOpenChannelCount(it) }
                 idleBaselines.forEach { (port, n) ->
-                    assertTrue(n in 0..2, "Raft node :$port idle open channels out of range: $n")
+                    assertTrue(n in 2..4, "Raft node :$port idle open channels out of range: $n")
                 }
                 repeat(15) { i ->
                     ProcessBuilder(
@@ -219,12 +221,13 @@ class DynamicChannelLeakTest {
         try {
             waitForPort(8000, 60_000)
             Thread.sleep(idleMs)
-            assertEquals(0, fetchOpenChannelCount(8000), "$jarName idle open channels")
+            // One closeHttpServer channel stays open while the server is running.
+            assertEquals(1, fetchOpenChannelCount(8000), "$jarName idle open channels")
             repeat(loadPosts) { i ->
                 post(8000, "req-$i")
             }
             Thread.sleep(1500)
-            assertEquals(0, fetchOpenChannelCount(8000), "$jarName after load open channels")
+            assertEquals(1, fetchOpenChannelCount(8000), "$jarName after load open channels")
         } finally {
             proc.destroyForcibly()
             proc.waitFor(5, TimeUnit.SECONDS)

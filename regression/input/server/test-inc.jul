@@ -2,6 +2,8 @@ import julaylib.pclass.Println
 import julaylib.pclass.Timer
 import julaylib.pclass.HttpServer
 import julaylib.pclass.ExitSystem
+import julaylib.fun.createEmptyChannel
+import julaylib.fun.createChannel
 
 p-class Counter {
     var counter : Int
@@ -16,10 +18,6 @@ p-class Counter {
 
     service transition getCounter(counterVal : Int) {
         guard: counterVal = counter
-    }
-
-    transition close() {
-        guard: false // never close the server
     }
 }
 
@@ -62,14 +60,27 @@ p-class PeriodicPrint {
 
 p-class ServerStarter {
     var started : Boolean
+    var myCloseChan : Channel<closeHttpServer>
 
     constructor initially(args : List<String>) {
-        transit: started := false
+        transit:
+            started := false
+            myCloseChan := createEmptyChannel<closeHttpServer>()
     }
 
-    transition createHttpServer(port : Int) {
-        guard: ~started & port = 8000
+    internal transition allocCloseChan() {
+        guard: ~started & myCloseChan = createEmptyChannel<closeHttpServer>()
+        transit: myCloseChan := createChannel<closeHttpServer>()
+    }
+
+    transition createHttpServer(port : Int, closeChan : Channel<closeHttpServer>) {
+        guard: ~started & port = 8000 & closeChan = myCloseChan
+            & myCloseChan ~= createEmptyChannel<closeHttpServer>()
         transit: started := true
+    }
+
+    transition closeHttpServer<myCloseChan>() {
+        guard: false
     }
 }
 

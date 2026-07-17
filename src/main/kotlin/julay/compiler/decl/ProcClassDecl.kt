@@ -27,6 +27,11 @@ data class ActionDecl(
      * Libraries may pass `""` to mark the action dynamic-channel-only without a bind name.
      */
     val dynamicChannelVar: String? = null,
+    /**
+     * Channel-typed action arg names this offer constrains in its guard.
+     * Jul offers derive this from the guard AST; Kotlin libraries set it explicitly.
+     */
+    val constrainedChannelArgs: Set<String> = emptySet(),
 ) {
     val requiresDynamicChannel: Boolean get() = dynamicChannelVar != null
 }

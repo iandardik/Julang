@@ -1,5 +1,7 @@
 import julaylib.pclass.Println
 import julaylib.pclass.HttpServer
+import julaylib.fun.createEmptyChannel
+import julaylib.fun.createChannel
 
 o-class ReqInfo {
     req : String
@@ -8,14 +10,27 @@ o-class ReqInfo {
 
 p-class ServerStarter {
     var started : Boolean
+    var myCloseChan : Channel<closeHttpServer>
 
     constructor initially(args : List<String>) {
-        transit: started := false
+        transit:
+            started := false
+            myCloseChan := createEmptyChannel<closeHttpServer>()
     }
 
-    transition createHttpServer(port : Int) {
-        guard: ~started & port = 8000
+    internal transition allocCloseChan() {
+        guard: ~started & myCloseChan = createEmptyChannel<closeHttpServer>()
+        transit: myCloseChan := createChannel<closeHttpServer>()
+    }
+
+    transition createHttpServer(port : Int, closeChan : Channel<closeHttpServer>) {
+        guard: ~started & port = 8000 & closeChan = myCloseChan
+            & myCloseChan ~= createEmptyChannel<closeHttpServer>()
         transit: started := true
+    }
+
+    transition closeHttpServer<myCloseChan>() {
+        guard: false
     }
 }
 
@@ -56,12 +71,6 @@ p-class EchoHandler {
             & msg = "Req: '" + info.req + "', I responded: '" + info.resp + "'"
         transit:
             done := true
-    }
-
-    transition close() {
-        guard:
-            // never close the server until the user hits ctrl-c
-            false
     }
 }
 

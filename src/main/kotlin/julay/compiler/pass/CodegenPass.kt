@@ -344,11 +344,24 @@ private fun ProcClassDecl.kotlinClassString(
         "\nelse -> throw RuntimeException(\"Action is outside my alphabet: \${act.symAction}\")".prependIndent().prependIndent() +
         "\n}".prependIndent() +
         "\n}"
+    val channelStateVars = stateVars.filter { it.type is ChannelType }
+    val heldChannelsStr = if (channelStateVars.isEmpty()) {
+        ""
+    } else {
+        val body = channelStateVars.joinToString(", ") { it.name.toKotlinIdent() }
+        "\noverride fun heldChannels(): Set<Channel> = setOf($body)"
+    }
+    val allParams = if (stateVars.isEmpty()) {
+        "private val program: Program"
+    } else {
+        "private val program: Program,\n$stateVarsStr"
+    }
     return "class $name(" +
-        "\n$stateVarsStr".prependIndent() +
+        "\n$allParams".prependIndent() +
         "\n) : TransitionSystem {" +
         registerTypes +
         "\n$actionsStr".prependIndent() +
+        heldChannelsStr.prependIndent() +
         "\n$transitStr".prependIndent() +
         "\n}"
 }
@@ -373,20 +386,21 @@ private fun ProcClassDecl.kotlinStaticInfoString(servicedActionNames: Set<String
                 .joinToString(", ") { assign ->
                     "${transitRootVar(assign.key).toKotlinIdent()} = ${assign.expr.toTransitString(symbolTypes, argSymbols)}"
                 }
-            val constructor = "$name($constructorArgs)"
+            val stateArgs = if (constructorArgs.isEmpty()) "" else ", $constructorArgs"
+            val constructor = "$name(program$stateArgs)"
             // Error checks run before transits and effects so they see pre-state variables
             // and no effect happens upon an error.
             val errorStr = ctor.kotlinErrorString(stateVarTypes)
             val effectStr = ctor.kotlinEffectString(stateVarTypes, "result.")
             val constructStr = when {
                 errorStr.isEmpty() && effectStr.isEmpty() ->
-                    "{ _,act -> $constructor }"
+                    "{ program, act -> $constructor }"
                 errorStr.isEmpty() ->
-                    "{ _,act ->\nval result = $constructor\n$effectStr\nresult\n}"
+                    "{ program, act ->\nval result = $constructor\n$effectStr\nresult\n}"
                 effectStr.isEmpty() ->
-                    "{ _,act ->\n$errorStr\n$constructor\n}"
+                    "{ program, act ->\n$errorStr\n$constructor\n}"
                 else ->
-                    "{ _,act ->\n$errorStr\nval result = $constructor\n$effectStr\nresult\n}"
+                    "{ program, act ->\n$errorStr\nval result = $constructor\n$effectStr\nresult\n}"
             }
             "Pair($actSigStr, $constructStr)".prependIndent()
         }

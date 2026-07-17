@@ -10,6 +10,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * A program represents one or more processes that interact together on a single computer.
@@ -28,9 +30,10 @@ class Program {
         Map<SymbolicAction, List<Pair<TransitionSystemStaticInfo, suspend (Program, ConcreteAction) -> TransitionSystem>>>
     private val constructorActions: Set<SymbolicAction>
     private val dynamicChannelActions: Set<SymbolicAction>
-    /** Immutable once built — not a concurrent map. */
-    private val channelTables: Map<SymbolicAction, DynamicChannelTable>
-    private val channelTablesByName: Map<String, DynamicChannelTable>
+    private val dynamicActionsByName: Map<String, SymbolicAction>
+    /** Debug/test open-channel counters (not an id→Channel table). */
+    private val openCountsByActionName = ConcurrentHashMap<String, AtomicInteger>()
+    private val totalOpenCount = AtomicInteger(0)
     private val initiallyAction: SymbolicAction
     private val initiallyConcrete: ConcreteAction
 
@@ -65,8 +68,7 @@ class Program {
         constructorActions = constructorsByAction.keys
 
         dynamicChannelActions = componentInfo.flatMap { it.dynamicChannelActions }.toSet()
-        channelTables = dynamicChannelActions.associateWith { DynamicChannelTable() }
-        channelTablesByName = channelTables.mapKeys { it.key.name }
+        dynamicActionsByName = dynamicChannelActions.associateBy { it.name }
 
         // Channels for live alphabets only (constructors and dynamic-channel actions omitted).
         val allActions = componentInfo.flatMap { it.alphabet }.toSet()
@@ -89,33 +91,41 @@ class Program {
 
     fun isConstructorAction(act: SymbolicAction): Boolean = act in constructorActions
 
-    fun lookupDynamicChannel(actionName: String, id: Long): Channel {
-        val table = channelTablesByName[actionName]
-            ?: throw IllegalStateException("No dynamic channel table for action \"$actionName\"")
-        return table.lookup(id)
-    }
-
     /**
      * Allocates a live dynamic [Channel] for [act] (sync size 2). Creator must [closeChannel] after use.
-     * [act] selects the per-action [DynamicChannelTable] and stamps [Channel.ownerAction]; the
-     * underlying SyncChannel compute reads ownerAction from the Channel (not closed over [act]).
      */
     fun createDynamicChannel(act: SymbolicAction): Channel {
-        val table = channelTables[act]
-            ?: throw IllegalArgumentException("Action ${act.name} is not a dynamic-channel action")
+        if (act !in dynamicChannelActions) {
+            throw IllegalArgumentException("Action ${act.name} is not a dynamic-channel action")
+        }
+        openCountsByActionName.getOrPut(act.name) { AtomicInteger(0) }.incrementAndGet()
+        totalOpenCount.incrementAndGet()
         lateinit var channel: Channel
         val sync = makeDynamicSyncChannel { channel.ownerAction!! }
-        channel = Channel.create(sync, act, table)
+        channel = Channel.create(sync, act) {
+            openCountsByActionName[act.name]?.decrementAndGet()
+            totalOpenCount.decrementAndGet()
+        }
         return channel
     }
 
-    /** Open channels registered for [act] (for in-process leak tests). */
-    fun openDynamicChannelCount(act: SymbolicAction): Int =
-        channelTables[act]?.size() ?: 0
+    /**
+     * Allocates a live dynamic [Channel] for a dynamic-channel action by name (Jul [createChannel]).
+     */
+    fun createDynamicChannel(actionName: String): Channel {
+        val act = dynamicActionsByName[actionName]
+            ?: throw IllegalArgumentException(
+                "Action \"$actionName\" is not a dynamic-channel action in this program",
+            )
+        return createDynamicChannel(act)
+    }
 
-    /** Sum of open channels across all dynamic actions (test-only probe via HttpServer debug). */
-    fun totalOpenDynamicChannelCount(): Int =
-        channelTables.values.sumOf { it.size() }
+    /** Open channels for [act] (for in-process leak tests / debug). */
+    fun openDynamicChannelCount(act: SymbolicAction): Int =
+        openCountsByActionName[act.name]?.get() ?: 0
+
+    /** Sum of open dynamic channels (test-only probe via HttpServer debug). */
+    fun totalOpenDynamicChannelCount(): Int = totalOpenCount.get()
 
     fun spawnProc(ts: TransitionSystem, tsInfo: TransitionSystemStaticInfo) {
         godScope.launch {
@@ -141,46 +151,48 @@ class Program {
         awaitCancellation()
     }
 
-    private fun constraintsSatisfiable(constraints: Set<BoolExpr>): Boolean =
+    private fun constraintsSatisfiable(constraints: Set<Constraint>): Boolean =
         Context().use { ctx ->
             val solver = ctx.mkSolver()
-            constraints.forEach { c -> solver.add(c.translate(ctx) as BoolExpr) }
+            constraints.forEach { c -> solver.add(c.expr.translate(ctx) as BoolExpr) }
             solver.check() == Status.SATISFIABLE
         }
 
     private fun extractConcreteAction(
         act: SymbolicAction,
-        constraints: Set<BoolExpr>,
+        constraints: Set<Constraint>,
     ): Optional<ConcreteAction> =
         Context().use { ctx ->
             val solver = ctx.mkSolver()
-            constraints.forEach { c -> solver.add(c.translate(ctx) as BoolExpr) }
+            constraints.forEach { c -> solver.add(c.expr.translate(ctx) as BoolExpr) }
             if (solver.check() != Status.SATISFIABLE) {
                 Optional.empty()
             } else if (act.args.isEmpty()) {
                 Optional.of(ConcreteAction(act, emptyMap()))
             } else {
-                Optional.of(ConcreteAction(act, ctx, solver.model))
+                val channelsById = constraints
+                    .flatMap { it.channels }
+                    .filter { !it.isEmpty() }
+                    .associateBy { it.id }
+                ChannelType.withChannelLookup(channelsById) {
+                    Optional.of(ConcreteAction(act, ctx, solver.model))
+                }
             }
         }
 
     private fun makeStaticSyncChannel(
         act: SymbolicAction,
         syncSize: Int,
-    ): SyncChannel<ConcreteAction, BoolExpr> {
+    ): SyncChannel<ConcreteAction, Constraint> {
         // Ephemeral Z3 Contexts: channels live for the program lifetime, but each SAT /
         // model extraction uses a scratch Context that is closed immediately after.
         // (ConcreteAction copies assignments into plain Java Values.)
-        // c.translate(ctx) is required because each constraint comes from a different
+        // c.expr.translate(ctx) is required because each constraint comes from a different
         // proc thread / Context.
         return SyncChannel(
             syncSize,
             satisfiable = ::constraintsSatisfiable,
-            compute = { constraints ->
-                ChannelType.withProgramLookup(this@Program) {
-                    extractConcreteAction(act, constraints)
-                }
-            },
+            compute = { constraints -> extractConcreteAction(act, constraints) },
         )
     }
 
@@ -190,14 +202,10 @@ class Program {
      */
     private fun makeDynamicSyncChannel(
         ownerAction: () -> SymbolicAction,
-    ): SyncChannel<ConcreteAction, BoolExpr> =
+    ): SyncChannel<ConcreteAction, Constraint> =
         SyncChannel(
             syncSize = 2,
             satisfiable = ::constraintsSatisfiable,
-            compute = { constraints ->
-                ChannelType.withProgramLookup(this@Program) {
-                    extractConcreteAction(ownerAction(), constraints)
-                }
-            },
+            compute = { constraints -> extractConcreteAction(ownerAction(), constraints) },
         )
 }

@@ -1,6 +1,5 @@
 package julay.program
 
-import com.microsoft.z3.BoolExpr
 import com.microsoft.z3.Context
 import com.microsoft.z3.Expr
 import com.microsoft.z3.IntNum
@@ -12,39 +11,39 @@ import java.util.concurrent.atomic.AtomicLong
  * First-class dynamic sync channel. Live instances wrap a [SyncChannel] for one action
  * rendezvous; [empty] is a branded sentinel for state initialization and cannot be synced on.
  *
- * Only the creator (e.g. HttpServer / HttpClient) should [close] / [closeChannel] a live channel.
+ * Creators (Jul procs via createChannel, or library procs) should [close] / [closeChannel]
+ * after the protocol finishes. Channel ids are recovered at sync time from [Constraint] bags,
+ * not from a Program-wide table.
  */
 class Channel private constructor(
     val id: Long,
     val actionName: String,
     val ownerAction: SymbolicAction?,
-    @Volatile private var syncChannel: SyncChannel<ConcreteAction, BoolExpr>?,
+    @Volatile private var syncChannel: SyncChannel<ConcreteAction, Constraint>?,
     @Volatile private var closed: Boolean,
-    private val table: DynamicChannelTable?,
+    private val onClose: (() -> Unit)?,
 ) {
     companion object {
         const val EMPTY_ID = 0L
         private val nextId = AtomicLong(1)
 
         fun empty(actionName: String): Channel =
-            Channel(EMPTY_ID, actionName, ownerAction = null, syncChannel = null, closed = true, table = null)
+            Channel(EMPTY_ID, actionName, ownerAction = null, syncChannel = null, closed = true, onClose = null)
 
         fun create(
-            syncChannel: SyncChannel<ConcreteAction, BoolExpr>,
+            syncChannel: SyncChannel<ConcreteAction, Constraint>,
             ownerAction: SymbolicAction,
-            table: DynamicChannelTable,
+            onClose: (() -> Unit)? = null,
         ): Channel {
             val id = nextId.getAndIncrement()
-            val channel = Channel(
+            return Channel(
                 id,
                 ownerAction.name,
                 ownerAction,
                 syncChannel,
                 closed = false,
-                table,
+                onClose,
             )
-            table.register(id, channel)
-            return channel
         }
     }
 
@@ -55,7 +54,7 @@ class Channel private constructor(
     /**
      * Returns the underlying [SyncChannel] or throws if empty/closed.
      */
-    fun requireOpenSyncChannel(): SyncChannel<ConcreteAction, BoolExpr> {
+    fun requireOpenSyncChannel(): SyncChannel<ConcreteAction, Constraint> {
         if (isEmpty() || isClosed()) {
             throw IllegalStateException("Cannot sync on empty or closed Channel (id=$id)")
         }
@@ -69,7 +68,7 @@ class Channel private constructor(
         val sc = syncChannel
         syncChannel = null
         sc?.close()
-        table?.unregister(id)
+        onClose?.invoke()
     }
 
     override fun equals(other: Any?): Boolean = other is Channel && other.id == id
@@ -81,8 +80,8 @@ class Channel private constructor(
 }
 
 /**
- * Closes [chan] and unregisters it from its owner table. Idempotent. Prefer this over
- * calling [Channel.close] so Julay/Kotlin call sites share one entry point.
+ * Closes [chan]. Idempotent. Prefer this over calling [Channel.close] so Julay/Kotlin call
+ * sites share one entry point.
  */
 suspend fun closeChannel(chan: Channel) {
     chan.close()
@@ -92,18 +91,21 @@ fun channelType(actionName: String): ChannelType = ChannelType(actionName)
 
 class ChannelType(val actionName: String) : Type {
     companion object {
-        private val programLookup = ThreadLocal<Program>()
+        private val channelLookup = ThreadLocal<Map<Long, Channel>>()
 
-        fun <T> withProgramLookup(program: Program, block: () -> T): T {
-            val prev = programLookup.get()
-            programLookup.set(program)
+        /**
+         * Provides id→Channel recovery during [ConcreteAction] extraction from a sync model.
+         */
+        fun <T> withChannelLookup(channelsById: Map<Long, Channel>, block: () -> T): T {
+            val prev = channelLookup.get()
+            channelLookup.set(channelsById)
             try {
                 return block()
             } finally {
                 if (prev == null) {
-                    programLookup.remove()
+                    channelLookup.remove()
                 } else {
-                    programLookup.set(prev)
+                    channelLookup.set(prev)
                 }
             }
         }
@@ -125,9 +127,12 @@ class ChannelType(val actionName: String) : Type {
         if (id == Channel.EMPTY_ID) {
             return Channel.empty(actionName)
         }
-        val program = programLookup.get()
-            ?: throw IllegalStateException("ChannelType.fromZ3Expr requires Program lookup context")
-        return program.lookupDynamicChannel(actionName, id)
+        val channelsById = channelLookup.get()
+            ?: throw IllegalStateException("ChannelType.fromZ3Expr requires channel lookup from Constraint bags")
+        return channelsById[id]
+            ?: throw IllegalStateException(
+                "Unknown Channel id $id for action \"$actionName\" (not in sync Constraint bags)",
+            )
     }
 
     override fun isOfType(obj: Any): Boolean =

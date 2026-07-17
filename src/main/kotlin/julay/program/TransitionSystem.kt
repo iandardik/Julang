@@ -22,4 +22,10 @@ interface TransitionSystem {
      * The transition system transits to a (potentially new) state based on the given concrete action.
      */
     suspend fun transit(act: ConcreteAction)
+
+    /**
+     * Live [Channel] values this proc holds (state / fields). Included in sync [Constraint] bags
+     * so channel ids from Z3 models can be resolved without a Program-wide channel table.
+     */
+    fun heldChannels(): Set<Channel> = emptySet()
 }

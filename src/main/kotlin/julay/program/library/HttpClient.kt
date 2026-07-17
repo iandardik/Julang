@@ -24,36 +24,57 @@ import java.net.http.HttpResponse.BodyHandlers
  * Long-lived outbound HTTP client. [createHttpClient] constructs one process that owns a single JDK
  * [HttpClient]; [sendRequest] / [receiveResponse] may be repeated on that process.
  * Each request allocates a dynamic [Channel] for the response; the client closes it after receive.
+ * [closeHttpClient] tears down the client on the Jul-provided close channel.
  */
 class JulHttpClient(
     private val program: Program,
+    private val closeChan: Channel,
 ) : TransitionSystem {
     companion object : JulLibrary {
         override val julName = "HttpClient"
+        val closeHttpClientChanType = channelType("closeHttpClient")
+        val closeChanArg = Variable("closeChan", closeHttpClientChanType)
         val reqArg = Variable("req", httpClientRequestType)
         val receiveResponseChanType = channelType("receiveResponse")
         val httpChanArg = Variable("httpChan", receiveResponseChanType)
         val respArg = Variable("resp", httpClientResponseType)
-        val createHttpClientAct = SymbolicAction("createHttpClient", listOf())
+        val createHttpClientAct = SymbolicAction("createHttpClient", listOf(closeChanArg))
         val sendRequestAct = SymbolicAction("sendRequest", listOf(reqArg, httpChanArg))
         val receiveResponseAct = SymbolicAction("receiveResponse", listOf(respArg))
+        val closeHttpClientAct = SymbolicAction("closeHttpClient", listOf())
         val createHttpClientCtor: Pair<SymbolicAction, suspend (Program, ConcreteAction) -> JulHttpClient> = Pair(
             createHttpClientAct,
-        ) { prog, _ ->
-            JulHttpClient(prog)
+        ) { prog, act ->
+            val closeChan = act.lookup(closeChanArg).value as Channel
+            JulHttpClient(prog, closeChan)
         }
         // the $ in the name means that programs cannot create p-classes whose names conflict with this one
         override fun staticInfo() = TransitionSystemStaticInfo(
             "JulHttpClient$",
-            setOf(sendRequestAct, receiveResponseAct),
+            setOf(sendRequestAct, receiveResponseAct, closeHttpClientAct),
             mapOf(createHttpClientCtor),
-            dynamicChannelActions = setOf(receiveResponseAct),
+            dynamicChannelActions = setOf(receiveResponseAct, closeHttpClientAct),
         )
         override val actionDecls = listOf(
             ActionDecl(createHttpClientAct, listOf(), emptyList(), TSAction.SyncRole.Default, LibraryLoc(julName)),
-            ActionDecl(sendRequestAct, listOf(), emptyList(), TSAction.SyncRole.Default, LibraryLoc(julName)),
+            ActionDecl(
+                sendRequestAct,
+                listOf(),
+                emptyList(),
+                TSAction.SyncRole.Default,
+                LibraryLoc(julName),
+                constrainedChannelArgs = setOf("httpChan"),
+            ),
             ActionDecl(
                 receiveResponseAct,
+                listOf(),
+                emptyList(),
+                TSAction.SyncRole.Default,
+                LibraryLoc(julName),
+                dynamicChannelVar = "",
+            ),
+            ActionDecl(
+                closeHttpClientAct,
                 listOf(),
                 emptyList(),
                 TSAction.SyncRole.Default,
@@ -63,28 +84,48 @@ class JulHttpClient(
         )
     }
 
-    private enum class Phase { Idle, HaveResponse }
+    private enum class Phase { Idle, HaveResponse, Closed }
 
     private val jdkClient = HttpClient.newBuilder().build()
     private var phase = Phase.Idle
     private var response: HttpClientResponse? = null
     private var responseChan: Channel? = null
 
+    override fun heldChannels(): Set<Channel> = buildSet {
+        if (!closeChan.isEmpty() && phase != Phase.Closed) {
+            add(closeChan)
+        }
+        responseChan?.let { add(it) }
+    }
+
     override suspend fun actions(ctx: Context): Set<TSAction> {
         return when (phase) {
+            Phase.Closed -> emptySet()
             Phase.Idle -> {
                 val chan = responseChan ?: program.createDynamicChannel(receiveResponseAct).also {
                     responseChan = it
                 }
-                setOf(
-                    TSAction(
-                        sendRequestAct,
-                        ctx.mkEq(
-                            httpChanArg.toZ3Expr(ctx),
-                            receiveResponseChanType.toZ3Expr(Value(chan, receiveResponseChanType), ctx),
+                buildSet {
+                    add(
+                        TSAction(
+                            sendRequestAct,
+                            ctx.mkEq(
+                                httpChanArg.toZ3Expr(ctx),
+                                receiveResponseChanType.toZ3Expr(Value(chan, receiveResponseChanType), ctx),
+                            ),
                         ),
-                    ),
-                )
+                    )
+                    if (!closeChan.isEmpty()) {
+                        add(
+                            TSAction(
+                                closeHttpClientAct,
+                                ctx.mkTrue(),
+                                TSAction.SyncRole.Default,
+                                channel = closeChan,
+                            ),
+                        )
+                    }
+                }
             }
             Phase.HaveResponse -> {
                 val resp = response!!
@@ -117,6 +158,18 @@ class JulHttpClient(
                 responseChan = null
                 if (chan != null) {
                     closeChannel(chan)
+                }
+            }
+            closeHttpClientAct -> {
+                phase = Phase.Closed
+                val pending = responseChan
+                responseChan = null
+                response = null
+                if (pending != null) {
+                    closeChannel(pending)
+                }
+                if (!closeChan.isEmpty()) {
+                    closeChannel(closeChan)
                 }
             }
         }
