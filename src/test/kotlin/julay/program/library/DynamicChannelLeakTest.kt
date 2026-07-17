@@ -180,10 +180,16 @@ class DynamicChannelLeakTest {
                         .start()
                         .waitFor(45, TimeUnit.SECONDS)
                 }
-                Thread.sleep(3000)
+                // Heartbeats / in-flight RPC can leave a transient receiveResponse channel;
+                // wait for each node to return to its idle baseline.
                 ports.forEach { port ->
-                    val after = fetchOpenChannelCount(port)
                     val baseline = idleBaselines.getValue(port)
+                    var after = -1
+                    repeat(20) {
+                        Thread.sleep(500)
+                        after = fetchOpenChannelCount(port)
+                        if (after == baseline) return@forEach
+                    }
                     assertEquals(
                         baseline,
                         after,

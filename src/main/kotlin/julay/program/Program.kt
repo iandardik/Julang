@@ -151,8 +151,11 @@ class Program {
         awaitCancellation()
     }
 
+    // Case-local Context ownership in Proc (cloneInto before Select) ensures concurrent Select
+    // arms do not share a source Context; SAT-time translate into this scratch ctx is then safe
+    // (per SyncChannel mutex for a given Case Context; distinct Case Contexts for different arms).
     private fun constraintsSatisfiable(constraints: Set<Constraint>): Boolean =
-        Context().use { ctx ->
+        withEphemeralContext { ctx ->
             val solver = ctx.mkSolver()
             constraints.forEach { c -> solver.add(c.expr.translate(ctx) as BoolExpr) }
             solver.check() == Status.SATISFIABLE
@@ -162,7 +165,7 @@ class Program {
         act: SymbolicAction,
         constraints: Set<Constraint>,
     ): Optional<ConcreteAction> =
-        Context().use { ctx ->
+        withEphemeralContext { ctx ->
             val solver = ctx.mkSolver()
             constraints.forEach { c -> solver.add(c.expr.translate(ctx) as BoolExpr) }
             if (solver.check() != Status.SATISFIABLE) {
@@ -188,7 +191,7 @@ class Program {
         // model extraction uses a scratch Context that is closed immediately after.
         // (ConcreteAction copies assignments into plain Java Values.)
         // c.expr.translate(ctx) is required because each constraint comes from a different
-        // proc thread / Context.
+        // Case-local / peer Context.
         return SyncChannel(
             syncSize,
             satisfiable = ::constraintsSatisfiable,

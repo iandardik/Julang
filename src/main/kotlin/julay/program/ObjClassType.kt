@@ -11,29 +11,45 @@ class JulangDatatypeMetadata(
     val accessors: Array<FuncDecl<*>>,
 )
 
+/**
+ * Built-in o-class type. Datatype metadata is built directly in the caller's [Context]
+ * (no per-instance home Context); results are cached per live Context so the datatype is not
+ * redefined on every use, without retaining closed Contexts — same pattern as [SetType] / [MapType].
+ */
 class ObjClassType(
     val name: String,
     val fields: List<Variable>,
     private val valueToZ3: (Value, Context) -> Expr<*>,
     private val valueFromZ3: (Expr<*>, Model) -> Any,
 ) : Type {
-    private val objClassCtx = Context()
+    /**
+     * Z3 constructor symbol name (`mk-$name`). Stable across Contexts, so constructor-application
+     * matching in `fromZ3` can compare against this string without reading decls from another Context.
+     */
+    val constructorName: String = "mk-$name"
 
-    // Lazy so polymorphic o-class instantiations (fields still typed as TypeVar) can be
-    // constructed during type checking without calling z3SortForField on TypeVars.
-    // Concrete monomorphized types force this on first Z3 use; TypeVar schemas never should.
-    private val metadata : JulangDatatypeMetadata by lazy {
+    // TODO: this shared per-Context cache breaks the rule that interprocess communication
+    // must go only through SyncChannel (procs can observe/reuse metadata across contexts).
+    // Fix later; kept for now so fixed-name mkDatatypeSort is not redefined within a Context.
+    private val metaByCtx = ContextLocalCache<JulangDatatypeMetadata>()
+
+    private fun metadataFor(ctx: Context): JulangDatatypeMetadata =
+        metaByCtx.getOrPut(ctx) { buildMetadata(ctx) }
+
+    private fun buildMetadata(ctx: Context): JulangDatatypeMetadata {
+        // Polymorphic o-class instantiations (fields still typed as TypeVar) must not reach here;
+        // concrete monomorphized types force this on first Z3 use.
         val fieldNames = fields.map { it.name }.toTypedArray()
-        val fieldSorts = fields.map { field -> z3SortForField(field.type, objClassCtx) }.toTypedArray()
-        val constructor = objClassCtx.mkConstructor<Any>(
-            "mk-$name",
+        val fieldSorts = fields.map { field -> z3SortForField(field.type, ctx) }.toTypedArray()
+        val constructor = ctx.mkConstructor<Any>(
+            constructorName,
             "is-$name",
             fieldNames,
             fieldSorts,
             null,
         )
-        val sort: DatatypeSort<*> = objClassCtx.mkDatatypeSort(name, arrayOf(constructor))
-        JulangDatatypeMetadata(
+        val sort: DatatypeSort<*> = ctx.mkDatatypeSort(name, arrayOf(constructor))
+        return JulangDatatypeMetadata(
             sort = sort,
             constructorDecl = constructor.ConstructorDecl(),
             accessors = constructor.accessorDecls,
@@ -41,7 +57,7 @@ class ObjClassType(
     }
 
     override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {
-        return ctx.mkConst(variable.name, metadata.sort.translate(ctx))
+        return ctx.mkConst(variable.name, metadataFor(ctx).sort)
     }
 
     override fun toZ3Expr(value: Value, ctx: Context): Expr<*> =
@@ -60,17 +76,11 @@ class ObjClassType(
 
     fun sort(ctx: Context): DatatypeSort<*> = metadataFor(ctx).sort
 
-    /** Constructor FuncDecl translated into [ctx] (callers apply field exprs). */
+    /** Constructor FuncDecl in [ctx] (callers apply field exprs). */
     fun constructorDecl(ctx: Context): FuncDecl<*> = metadataFor(ctx).constructorDecl
 
-    /** Field accessor FuncDecl translated into [ctx] (callers apply the record expr). */
+    /** Field accessor FuncDecl in [ctx] (callers apply the record expr). */
     fun accessor(ctx: Context, fieldIndex: Int): FuncDecl<*> = metadataFor(ctx).accessors[fieldIndex]
-
-    /** Home-context constructor decl (for fromZ3 deconstruction without a target Context). */
-    fun homeConstructorDecl(): FuncDecl<*> = metadata.constructorDecl
-
-    /** Home-context accessor decl (for fromZ3 deconstruction without a target Context). */
-    fun homeAccessor(fieldIndex: Int): FuncDecl<*> = metadata.accessors[fieldIndex]
 
     fun literalToZ3Codegen(fieldExprStrs: List<String>): String {
         val args = fieldExprStrs.joinToString(", ")
@@ -82,18 +92,6 @@ class ObjClassType(
             "${field.name} = $exprStr"
         }
         return "$name($args)"
-    }
-
-    private fun metadataFor(ctx: Context): JulangDatatypeMetadata {
-        if (ctx === objClassCtx) {
-            return metadata
-        }
-        @Suppress("UNCHECKED_CAST")
-        return JulangDatatypeMetadata(
-            sort = metadata.sort.translate(ctx) as DatatypeSort<*>,
-            constructorDecl = metadata.constructorDecl.translate(ctx),
-            accessors = metadata.accessors.map { it.translate(ctx) }.toTypedArray(),
-        )
     }
 
     private fun z3SortForField(type: Type, ctx: Context): Sort = type.toZ3Sort(ctx)

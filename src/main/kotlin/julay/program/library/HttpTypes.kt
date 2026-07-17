@@ -140,11 +140,11 @@ fun httpClientResponseFromZ3(expr: Expr<*>, model: Model): HttpClientResponse {
 }
 
 /**
- * Deconstruct an o-class value using the model's Context (never [ObjClassType.homeAccessor],
- * which would allocate ASTs on the immortal home Context).
+ * Deconstruct an o-class value using the model's Context. Constructor matching compares against
+ * the stable [ObjClassType.constructorName] (metadata is built per Context like Set/Map).
  */
 private fun objClassFieldExprs(type: ObjClassType, expr: Expr<*>, model: Model): Array<Expr<*>> {
-    if (expr.isApp && expr.funcDecl.name == type.homeConstructorDecl().name) {
+    if (expr.isApp && expr.funcDecl.name.toString() == type.constructorName) {
         return expr.args
     }
     val ctx = model.julangContext()

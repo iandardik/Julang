@@ -44,6 +44,18 @@ class Select(private vararg val cases : Case) {
         winner = Optional.of(chanHash)
     }
 
+    /**
+     * Runs all [cases] concurrently (one coroutine per case).
+     *
+     * **Z3 / shared-Context invariant:** If a case's constraint type [C] embeds live Z3 ASTs
+     * (e.g. Julay [julay.program.Constraint] with a [com.microsoft.z3.BoolExpr]), those ASTs must
+     * **not** share one Context across multiple cases. [run] launches cases on different
+     * [SyncChannel]s in parallel; each channel may [com.microsoft.z3.Expr.translate] peer
+     * constraints into a scratch Context. Concurrent translates from the same source Context
+     * race on Z3 native state and can crash the JVM. Callers must clone each case's constraints
+     * into a Case-local ephemeral Context *before* constructing [SyncCase] / calling [run].
+     * Julay does this in [julay.program.Proc.runOneStep].
+     */
     suspend fun run() {
         // make sure that run() is only ever run once
         if (winner.isPresent) {
@@ -87,6 +99,10 @@ class Select(private vararg val cases : Case) {
         fun getChannelHash() : Int
         suspend fun run()
     }
+    /**
+     * One Select arm on [chan]. For Z3-backed [C], pass constraints already cloned into a
+     * Case-local Context (see [Select.run]); do not share one Context across multiple cases.
+     */
     class SyncCase<V : Any, C : Any>(
         private val chan : SyncChannel<V, C>,
         private val constraint : Optional<C> = Optional.empty(),

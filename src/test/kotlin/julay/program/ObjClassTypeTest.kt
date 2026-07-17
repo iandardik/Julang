@@ -4,10 +4,15 @@ import com.microsoft.z3.Context
 import com.microsoft.z3.Expr
 import com.microsoft.z3.Model
 import com.microsoft.z3.Status
+import com.microsoft.z3.julangContext
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
-
 data class Point(val x: Int, val y: Int)
 
 data class Line(val start: Point, val end: Point)
@@ -56,12 +61,13 @@ class ObjClassTypeTest {
         pointMk(ctx, ctx.mkInt(value.x), ctx.mkInt(value.y))
 
     private fun pointFromZ3(expr: Expr<*>, model: Model): Point {
-        val fieldExprs = if (expr.isApp && expr.funcDecl.name == pointType.homeConstructorDecl().name) {
+        val fieldExprs = if (expr.isApp && expr.funcDecl.name.toString() == pointType.constructorName) {
             expr.args
         } else {
+            val ctx = model.julangContext()
             arrayOf(
-                pointType.homeAccessor(0).apply(expr) as Expr<*>,
-                pointType.homeAccessor(1).apply(expr) as Expr<*>,
+                pointType.accessor(ctx, 0).apply(expr) as Expr<*>,
+                pointType.accessor(ctx, 1).apply(expr) as Expr<*>,
             )
         }
         return Point(
@@ -77,12 +83,13 @@ class ObjClassTypeTest {
         lineMk(ctx, pointToZ3(ctx, value.start), pointToZ3(ctx, value.end))
 
     private fun lineFromZ3(expr: Expr<*>, model: Model): Line {
-        val fieldExprs = if (expr.isApp && expr.funcDecl.name == lineType.homeConstructorDecl().name) {
+        val fieldExprs = if (expr.isApp && expr.funcDecl.name.toString() == lineType.constructorName) {
             expr.args
         } else {
+            val ctx = model.julangContext()
             arrayOf(
-                lineType.homeAccessor(0).apply(expr) as Expr<*>,
-                lineType.homeAccessor(1).apply(expr) as Expr<*>,
+                lineType.accessor(ctx, 0).apply(expr) as Expr<*>,
+                lineType.accessor(ctx, 1).apply(expr) as Expr<*>,
             )
         }
         return Line(
@@ -153,5 +160,68 @@ class ObjClassTypeTest {
     @Test
     fun isOfTypeRecognizesDataClass() {
         assertTrue(pointType.isOfType(Point(0, 0)))
+    }
+
+    @Test
+    fun constructorNameIsStableAcrossContexts() {
+        assertEquals("mk-Point", pointType.constructorName)
+        Context().use { ctx ->
+            val z3Value = pointToZ3(ctx, Point(1, 2))
+            assertEquals(pointType.constructorName, z3Value.funcDecl.name.toString())
+        }
+    }
+
+    /**
+     * Regression for concurrent per-Context o-class metadata: many threads call
+     * [ObjClassType.sort] / round-trip at once. Metadata is built in each caller's
+     * Context and cached via [ContextLocalCache] (Set/Map style) — no shared home Context.
+     *
+     * Contexts are closed only after all workers finish so [ContextLocalCache.pruneClosed]
+     * (which probes [Context.boolSort] on cached keys) cannot race with [Context.close].
+     */
+    @Test
+    fun concurrentPerContextMetadataDoesNotCrash() {
+        val threads = 16
+        val iters = 200
+        val start = CountDownLatch(1)
+        val done = CountDownLatch(threads)
+        val failure = AtomicReference<Throwable?>(null)
+        val contexts = java.util.concurrent.ConcurrentLinkedQueue<Context>()
+        val pool = Executors.newFixedThreadPool(threads)
+        try {
+            repeat(threads) {
+                pool.execute {
+                    try {
+                        start.await()
+                        repeat(iters) {
+                            val ctx = Context().also { contexts.add(it) }
+                            val p = ctx.mkConst("p", pointType.sort(ctx))
+                            val lit = pointToZ3(ctx, Point(it % 10, it % 7))
+                            val solver = ctx.mkSolver()
+                            solver.add(ctx.mkEq(p, lit))
+                            assertEquals(Status.SATISFIABLE, solver.check())
+                            val restored = pointType.fromZ3Expr(
+                                solver.model.eval(p, true),
+                                solver.model,
+                            ) as Point
+                            assertEquals(Point(it % 10, it % 7), restored)
+                        }
+                    } catch (t: Throwable) {
+                        failure.compareAndSet(null, t)
+                    } finally {
+                        done.countDown()
+                    }
+                }
+            }
+            start.countDown()
+            assertTrue(done.await(60, TimeUnit.SECONDS), "timed out waiting for concurrent Z3 work")
+            assertNull(failure.get(), failure.get()?.stackTraceToString() ?: "")
+        } finally {
+            pool.shutdownNow()
+            contexts.forEach {
+                ContextLocalCache.dropContext(it)
+                it.close()
+            }
+        }
     }
 }

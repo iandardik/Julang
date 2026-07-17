@@ -236,7 +236,7 @@ private fun ObjClassDecl.kotlinConversionHelpersString(): String {
         |    $mkFun(ctx, $toZ3Args)
         |
         |fun $fromZ3Fun(expr: Expr<*>, model: Model): $name {
-        |    val fieldExprs = if (expr.isApp && expr.funcDecl.name == $typeVal.homeConstructorDecl().name) {
+        |    val fieldExprs = if (expr.isApp && expr.funcDecl.name.toString() == $typeVal.constructorName) {
         |        expr.args
         |    } else {
         |        val modelCtx = model.julangContext()
