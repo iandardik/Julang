@@ -27,6 +27,8 @@ fi
 
 if [[ -n "${RAFT_NODE_JAR:-}" ]]; then
   JAR="$RAFT_NODE_JAR"
+elif [[ -f "$RAFT_DIR/RaftNode.jar" ]]; then
+  JAR="$RAFT_DIR/RaftNode.jar"
 elif [[ -f "$RAFT_DIR/../../RaftNode.jar" ]]; then
   JAR="$RAFT_DIR/../../RaftNode.jar"
 elif [[ -f "$PWD/RaftNode.jar" ]]; then

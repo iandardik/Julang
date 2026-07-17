@@ -29,6 +29,8 @@ class Proc(
     private val tsInfo: TransitionSystemStaticInfo,
     private val staticChannelTable: Map<SymbolicAction, ProgramAction>,
     private val program: Program,
+    /** When non-null, [TransitionSystem.finishConstruction] runs once before the select loop. */
+    private val constructorAct: ConcreteAction? = null,
 ) {
     val procId: Long = program.allocateProcId()
     val classId: Int = tsInfo.classID()
@@ -41,6 +43,7 @@ class Proc(
 
     suspend fun run() {
         try {
+            constructorAct?.let { transitionSystem.finishConstruction(it) }
             while (true) {
                 val cont = withEphemeralContextSuspend { ctx ->
                     runOneStep(ctx)

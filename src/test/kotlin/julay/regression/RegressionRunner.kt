@@ -174,6 +174,11 @@ object RegressionRunner {
                 }
                 else -> {
                     val result = JulProcess.runToCompletion(jar, workspace, capped, capped.timeoutMs)
+                    if (result.exitCode != 0) {
+                        throw AssertionError(
+                            "Program exited with code ${result.exitCode}\n--- stdout ---\n${result.stdout}",
+                        )
+                    }
                     result.stdout
                 }
             }

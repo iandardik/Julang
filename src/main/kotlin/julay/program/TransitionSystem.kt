@@ -24,4 +24,11 @@ interface TransitionSystem {
      * The transition system transits to a (potentially new) state based on the given concrete action.
      */
     suspend fun transit(act: ConcreteAction)
+
+    /**
+     * Completes construction for a TS allocated uninitialized by [Program.spawn]: apply constructor
+     * transit and effects. Called on the child proc before its select loop so effects never run as
+     * the parent. Default is a no-op for TSs that need no deferred init (e.g. [Program.spawnProc]).
+     */
+    suspend fun finishConstruction(act: ConcreteAction) {}
 }

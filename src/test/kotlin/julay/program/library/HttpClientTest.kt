@@ -26,6 +26,9 @@ class HttpClientTest {
             val port = server.address.port
             val program = Program(setOf(JulHttpClient.staticInfo()))
             val client = JulHttpClient(program)
+            client.finishConstruction(
+                ConcreteAction(JulHttpClient.createHttpClientAct, emptyMap()),
+            )
             for (payload in listOf("ping", "pong")) {
                 val req = HttpClientRequest("http://127.0.0.1:$port/", "POST", payload)
                 val ctxSend = Context()

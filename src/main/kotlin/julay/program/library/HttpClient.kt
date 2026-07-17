@@ -21,6 +21,9 @@ import java.net.http.HttpResponse.BodyHandlers
  * Long-lived outbound HTTP client. [createHttpClient] constructs one process that owns a single JDK
  * [HttpClient]; [sendRequest] / [receiveResponse] may be repeated on that process.
  * Request/response and close are session actions (affinity + sessions; no Julay Channel values).
+ *
+ * The JDK client is created in [finishConstruction] on the child proc, not during the parent's
+ * spawn allocation.
  */
 class JulHttpClient(
     private val program: Program,
@@ -71,9 +74,13 @@ class JulHttpClient(
 
     private enum class Phase { Idle, HaveResponse, Closed }
 
-    private val jdkClient = HttpClient.newBuilder().build()
+    private var jdkClient: HttpClient? = null
     private var phase = Phase.Idle
     private var response: HttpClientResponse? = null
+
+    override suspend fun finishConstruction(act: ConcreteAction) {
+        jdkClient = HttpClient.newBuilder().build()
+    }
 
     override suspend fun actions(ctx: Context): Set<TSAction> {
         return when (phase) {
@@ -116,13 +123,15 @@ class JulHttpClient(
     }
 
     private fun send(request: HttpClientRequest): HttpClientResponse {
+        val client = jdkClient
+            ?: throw IllegalStateException("JulHttpClient used before finishConstruction")
         val builder = HttpRequest.newBuilder().uri(URI.create(request.url))
         val method = request.method.uppercase()
         val jdkRequest = when (method) {
             "GET", "HEAD" -> builder.method(method, BodyPublishers.noBody()).build()
             else -> builder.method(method, BodyPublishers.ofString(request.body)).build()
         }
-        val jdkResponse = jdkClient.send(jdkRequest, BodyHandlers.ofString())
+        val jdkResponse = client.send(jdkRequest, BodyHandlers.ofString())
         return HttpClientResponse(jdkResponse.body(), jdkResponse.statusCode())
     }
 }

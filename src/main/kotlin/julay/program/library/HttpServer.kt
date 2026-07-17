@@ -14,9 +14,11 @@ import java.net.InetSocketAddress
 /**
  * HTTP server library. Request/response and close are [session] actions: sticky pairing uses
  * process-local affinity and SyncChannel sessions (no Julay Channel values).
+ *
+ * The JDK server is created and started in [finishConstruction] on the child proc, not during
+ * the parent's spawn allocation.
  */
 class JulHttpServer(
-    private val port: Int,
     private val program: Program,
 ) : TransitionSystem, HttpHandler {
     companion object : JulLibrary {
@@ -30,9 +32,8 @@ class JulHttpServer(
         val closeHttpServerAct = SymbolicAction("closeHttpServer", listOf(), isSession = true)
         val createHttpServerCtor: Pair<SymbolicAction, suspend (Program, ConcreteAction) -> JulHttpServer> = Pair(
             createHttpServerAct,
-        ) { prog, act ->
-            val port = act.lookup(portArg).value as Int
-            JulHttpServer(port, prog)
+        ) { prog, _ ->
+            JulHttpServer(prog)
         }
         override fun staticInfo() = TransitionSystemStaticInfo(
             "JulHttpServer$",
@@ -65,12 +66,17 @@ class JulHttpServer(
         )
     }
 
-    private val jdkServer = HttpServer.create(InetSocketAddress(port), 0)
+    private var port: Int? = null
+    private var jdkServer: HttpServer? = null
     private var closed = false
 
-    init {
-        jdkServer.createContext("/", this)
-        jdkServer.start()
+    override suspend fun finishConstruction(act: ConcreteAction) {
+        val listenPort = act.lookup(portArg).value as Int
+        port = listenPort
+        val server = HttpServer.create(InetSocketAddress(listenPort), 0)
+        server.createContext("/", this)
+        server.start()
+        jdkServer = server
     }
 
     override suspend fun actions(ctx: Context): Set<TSAction> {
@@ -85,7 +91,7 @@ class JulHttpServer(
     override suspend fun transit(act: ConcreteAction) {
         if (act.symAction == closeHttpServerAct) {
             closed = true
-            jdkServer.stop(0)
+            jdkServer?.stop(0)
         }
     }
 

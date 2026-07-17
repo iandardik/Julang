@@ -32,6 +32,10 @@ import java.util.concurrent.atomic.AtomicLong
  * Session first contact: peers rendezvous on the static (global) action channel; that channel's
  * compute creates exactly one dedicated SyncChannel delivered via [SyncPayload.sessionToInstall].
  * Dedicated session channels never create a session to install.
+ *
+ * Spawn allocates an uninitialized child TS (no constructor transit/effects), installs session
+ * affinity, then launches the child which runs [TransitionSystem.finishConstruction] on the child
+ * coroutine. The parent does not wait for child initialization or coordinate outside SyncChannel.
  */
 class Program {
     val staticChannelTable: Map<SymbolicAction, ProgramAction>
@@ -106,18 +110,28 @@ class Program {
     }
 
     /**
-     * Spawns constructor peers for [act]. When [parent] is non-null and [act] is a session action,
-     * establishes mutual affinity and installs sessions on both procs before the child runs.
+     * Spawns constructor peers for [act]. Allocates an uninitialized child TS, and when [parent]
+     * is non-null and [act] is a session action, establishes mutual affinity / sessions before the
+     * child starts. The child applies constructor transit and effects via
+     * [TransitionSystem.finishConstruction] on its own coroutine. The parent returns immediately
+     * after launch; startup dependencies must synchronize through Julay actions / SyncChannels.
      */
-    fun spawn(act: ConcreteAction, parent: Proc? = null) {
+    suspend fun spawn(act: ConcreteAction, parent: Proc? = null) {
         val entries = constructorsByAction[act.symAction] ?: return
-        entries.forEach { (tsInfo, constructor) ->
+        for ((tsInfo, constructor) in entries) {
+            // Factory must not run Julay effects; only allocate uninitialized state.
+            val ts = constructor(this@Program, act)
+            val child = Proc(
+                ts,
+                tsInfo,
+                staticChannelTable,
+                this@Program,
+                constructorAct = act,
+            )
+            if (parent != null && act.symAction.isSession) {
+                parent.establishSessionWithSpawnedChild(child, act.symAction)
+            }
             godScope.launch {
-                val ts = constructor(this@Program, act)
-                val child = Proc(ts, tsInfo, staticChannelTable, this@Program)
-                if (parent != null && act.symAction.isSession) {
-                    parent.establishSessionWithSpawnedChild(child, act.symAction)
-                }
                 child.run()
             }
         }

@@ -5,6 +5,7 @@
 #
 # Requires RaftNode.jar and RaftClient.jar (compile input/raft/main.jul), or set
 # RAFT_NODE_JAR / RAFT_CLIENT_JAR. Optional env:
+#   SMOKE_TIMEOUT_S    overall wall-clock timeout for the whole smoke test (default 120)
 #   LISTEN_TIMEOUT_S   max seconds to wait for all ports (default 40)
 #   ELECTION_WAIT_S    seconds after listen before client ops (default 12)
 #   CURL_TIMEOUT_S     curl max-time per request (default 8)
@@ -16,9 +17,31 @@ RAFT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$RAFT_DIR/../.." && pwd)"
 CONFIG="${1:-$RAFT_DIR/cluster.conf}"
 
+SMOKE_TIMEOUT_S="${SMOKE_TIMEOUT_S:-120}"
 LISTEN_TIMEOUT_S="${LISTEN_TIMEOUT_S:-40}"
 ELECTION_WAIT_S="${ELECTION_WAIT_S:-12}"
 CURL_TIMEOUT_S="${CURL_TIMEOUT_S:-8}"
+
+# Re-exec under an overall wall-clock timeout so a hang cannot run forever.
+if [[ -z "${SMOKE_UNDER_TIMEOUT:-}" ]]; then
+  export SMOKE_UNDER_TIMEOUT=1
+  # Kill the entire process group on expiry (covers hung java children).
+  if command -v perl >/dev/null 2>&1; then
+    exec perl -e 'my $t=shift; $SIG{ALRM}=sub{print STDERR "error: smoke test exceeded ${t}s\n"; kill "TERM", -$$; exit 124}; alarm $t; exec @ARGV' \
+      "$SMOKE_TIMEOUT_S" "$0" "$@"
+  elif command -v timeout >/dev/null 2>&1; then
+    exec timeout --foreground -k 5 "$SMOKE_TIMEOUT_S" "$0" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    exec gtimeout --foreground -k 5 "$SMOKE_TIMEOUT_S" "$0" "$@"
+  else
+    (
+      sleep "$SMOKE_TIMEOUT_S"
+      echo "error: smoke test exceeded SMOKE_TIMEOUT_S=${SMOKE_TIMEOUT_S}s" >&2
+      kill -TERM -$$ 2>/dev/null || kill -TERM 0 2>/dev/null || true
+    ) &
+    WATCHDOG_PID=$!
+  fi
+fi
 
 # Prefer a real JDK over macOS /usr/bin/java stub.
 if [[ -z "${JAVA:-}" ]]; then
@@ -36,6 +59,8 @@ find_jar() {
   local override="$2"
   if [[ -n "$override" && -f "$override" ]]; then
     echo "$override"
+  elif [[ -f "$RAFT_DIR/$name" ]]; then
+    echo "$RAFT_DIR/$name"
   elif [[ -f "$REPO_ROOT/$name" ]]; then
     echo "$REPO_ROOT/$name"
   elif [[ -f "$PWD/$name" ]]; then
@@ -89,9 +114,14 @@ done
 
 cleanup() {
   "$SCRIPT_DIR/stop_cluster.sh" "$CONFIG" >/dev/null 2>&1 || true
+  if [[ -n "${WATCHDOG_PID:-}" ]]; then
+    kill "$WATCHDOG_PID" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
 
+echo "=== smoke timeout ${SMOKE_TIMEOUT_S}s ==="
+echo "=== using NODE_JAR=$NODE_JAR CLIENT_JAR=$CLIENT_JAR ==="
 echo "=== stop any previous cluster ==="
 "$SCRIPT_DIR/stop_cluster.sh" "$CONFIG" || true
 
@@ -160,17 +190,42 @@ for url in "${URLS[@]}"; do
 done
 
 VALUE="smoke-$(date +%s)"
-echo "=== RaftClient append via $follower_url ==="
-append_out="$("$JAVA" -jar "$CLIENT_JAR" "$follower_url" append "$VALUE")"
+CLIENT_STEP_TIMEOUT_S="${CLIENT_STEP_TIMEOUT_S:-30}"
+echo "=== RaftClient append via $follower_url (≤${CLIENT_STEP_TIMEOUT_S}s) ==="
+set +e
+if command -v perl >/dev/null 2>&1; then
+  append_out="$(perl -e 'alarm shift; exec @ARGV' "$CLIENT_STEP_TIMEOUT_S" "$JAVA" -jar "$CLIENT_JAR" "$follower_url" append "$VALUE" 2>&1)"
+  append_rc=$?
+else
+  append_out="$("$JAVA" -jar "$CLIENT_JAR" "$follower_url" append "$VALUE" 2>&1)"
+  append_rc=$?
+fi
+set -e
 echo "$append_out"
+if [[ "$append_rc" -ne 0 ]]; then
+  echo "error: append timed out or failed (rc=$append_rc)" >&2
+  exit 1
+fi
 echo "$append_out" | grep -q '200 OK' || {
   echo "error: append did not report 200 OK" >&2
   exit 1
 }
 
-echo "=== RaftClient get via $follower_url ==="
-get_out="$("$JAVA" -jar "$CLIENT_JAR" "$follower_url" get)"
+echo "=== RaftClient get via $follower_url (≤${CLIENT_STEP_TIMEOUT_S}s) ==="
+set +e
+if command -v perl >/dev/null 2>&1; then
+  get_out="$(perl -e 'alarm shift; exec @ARGV' "$CLIENT_STEP_TIMEOUT_S" "$JAVA" -jar "$CLIENT_JAR" "$follower_url" get 2>&1)"
+  get_rc=$?
+else
+  get_out="$("$JAVA" -jar "$CLIENT_JAR" "$follower_url" get 2>&1)"
+  get_rc=$?
+fi
+set -e
 echo "$get_out"
+if [[ "$get_rc" -ne 0 ]]; then
+  echo "error: get timed out or failed (rc=$get_rc)" >&2
+  exit 1
+fi
 echo "$get_out" | grep -Fq "$VALUE" || {
   echo "error: get did not contain appended value '$VALUE'" >&2
   exit 1

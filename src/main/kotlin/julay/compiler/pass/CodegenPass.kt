@@ -331,8 +331,14 @@ private fun ProcClassDecl.kotlinClassString(
     servicedActionNames: Set<String>,
 ): String {
     val stateVarTypes = stateVars.associate { Pair(it.name, it.type) }
-    val stateVarsStr = stateVars.joinToString(",\n") {
-        "private var ${it.name.toKotlinIdent()}: ${it.type.toKotlinTypeString()}"
+    // Nullable backing fields start as null; property accessors throw until finishConstruction.
+    val stateFieldsStr = stateVars.joinToString("\n") {
+        val ident = it.name.toKotlinIdent()
+        val ty = it.type.toKotlinTypeString()
+        "private var _$ident: $ty? = null\n" +
+            "private var $ident: $ty\n" +
+            "    get() = _$ident!!\n" +
+            "    set(value) { _$ident = value }"
     }
     val registerTypes = ""
     val actionsStr = "override suspend fun actions(ctx: Context): Set<TSAction> = setOf(\n" +
@@ -348,15 +354,27 @@ private fun ProcClassDecl.kotlinClassString(
         "\nelse -> throw RuntimeException(\"Action is outside my alphabet: \${act.symAction}\")".prependIndent().prependIndent() +
         "\n}".prependIndent() +
         "\n}"
-    val allParams = if (stateVars.isEmpty()) {
-        "private val program: Program"
+    val finishConstructionBody = if (constructors.isEmpty()) {
+        ""
     } else {
-        "private val program: Program,\n$stateVarsStr"
+        constructors.joinToString("") { ctor ->
+            "\n\"${ctor.action.name}\" -> {" +
+                "\n${ctor.kotlinTransitString(stateVarTypes)}".prependIndent() +
+                "\n}"
+        }
     }
+    val finishConstructionStr = "override suspend fun finishConstruction(act: ConcreteAction) {" +
+        "\nwhen (act.symAction.name) {".prependIndent() +
+        finishConstructionBody.prependIndent().prependIndent() +
+        "\nelse -> {}".prependIndent().prependIndent() +
+        "\n}".prependIndent() +
+        "\n}"
     return "class $name(" +
-        "\n$allParams".prependIndent() +
+        "\nprivate val program: Program".prependIndent() +
         "\n) : TransitionSystem {" +
+        (if (stateFieldsStr.isEmpty()) "" else "\n${stateFieldsStr.prependIndent()}") +
         registerTypes +
+        "\n$finishConstructionStr".prependIndent() +
         "\n$actionsStr".prependIndent() +
         "\n$transitStr".prependIndent() +
         "\n}"
@@ -366,33 +384,12 @@ private fun ProcClassDecl.kotlinStaticInfoString(servicedActionNames: Set<String
     val transitionInfo = transitions.joinToString(",\n") {
         it.kotlinStaticInfoString(servicedActionNames).prependIndent()
     }
+    // Factory only allocates an uninitialized instance (null state). Constructor transit and
+    // effects run later on the child proc via TransitionSystem.finishConstruction.
     val constructorPairs = constructors
         .joinToString(",\n") { ctor ->
             val actSigStr = ctor.kotlinStaticInfoString(servicedActionNames)
-            val argSymbols = actionArgSymbols(ctor.action.args)
-            val stateVarTypes = stateVars.associate { Pair(it.name, it.type) }
-            val symbolTypes = stateVarTypes + actionArgEnv(ctor.action.args)
-            val constructorArgs = ctor.transits
-                .filterIsInstance<TransitUpdate.Assign>()
-                .joinToString(", ") { assign ->
-                    "${transitRootVar(assign.key).toKotlinIdent()} = ${assign.expr.toTransitString(symbolTypes, argSymbols)}"
-                }
-            val stateArgs = if (constructorArgs.isEmpty()) "" else ", $constructorArgs"
-            val constructor = "$name(program$stateArgs)"
-            // Error checks run before transits and effects so they see pre-state variables
-            // and no effect happens upon an error.
-            val errorStr = ctor.kotlinErrorString(stateVarTypes)
-            val effectStr = ctor.kotlinEffectString(stateVarTypes, "result.")
-            val constructStr = when {
-                errorStr.isEmpty() && effectStr.isEmpty() ->
-                    "{ program, act -> $constructor }"
-                errorStr.isEmpty() ->
-                    "{ program, act ->\nval result = $constructor\n$effectStr\nresult\n}"
-                effectStr.isEmpty() ->
-                    "{ program, act ->\n$errorStr\n$constructor\n}"
-                else ->
-                    "{ program, act ->\n$errorStr\nval result = $constructor\n$effectStr\nresult\n}"
-            }
+            val constructStr = "{ program, _ -> $name(program) }"
             "Pair($actSigStr, $constructStr)".prependIndent()
         }
     return "TransitionSystemStaticInfo(" +
