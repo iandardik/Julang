@@ -29,6 +29,7 @@ EQ : '=' ;
 NEQ : '~=' ;
 ASGN_EQ : ':=' ;
 IMPLIES : '=>' ;
+IFF : '<=>' ;
 IF : 'if' ;
 ELSE : 'else' ;
 LET : 'let' ;

@@ -1,0 +1,7 @@
+source: regression/input/expr/implies-iff.jul
+programs:
+  - name: P
+    run:
+      timeoutMs: 60000
+      expectStdoutLinesUnordered:
+        - "TTFTTFFTTFT"

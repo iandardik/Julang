@@ -65,6 +65,7 @@ fun ASTNode.typePass(
     is EffectNode -> typePassEffect(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is EffectCallNode -> typePassEffectCall(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is EffectAssignNode -> typePassEffectAssign(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    is UnaryOpExprNode -> typePassUnaryOp(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is BinaryOpExprNode -> typePassBinaryOp(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is IfElseExprNode -> typePassIfElse(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is LetExprNode -> typePassLet(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
@@ -407,6 +408,25 @@ private fun EffectAssignNode.typePassEffectAssign(
         }
     }
     return childrenErrors + callErrors + varErrors
+}
+
+private fun UnaryOpExprNode.typePassUnaryOp(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+): List<CompileError> {
+    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    if (childErrors.isNotEmpty()) {
+        return childErrors
+    }
+    try {
+        inferExprType(symbolEnv)
+    } catch (e: RuntimeException) {
+        return childErrors + listOf(OneLocCompileError(programLocation(), e.message ?: "Type error"))
+    }
+    return childErrors
 }
 
 private fun BinaryOpExprNode.typePassBinaryOp(

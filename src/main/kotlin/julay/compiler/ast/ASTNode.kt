@@ -669,11 +669,20 @@ class UnaryOpExprNode(
     }
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
         val transitStr = operand.toTransitString(symbolTypes, argSymbols)
-        return "($op $transitStr)"
+        return when (op) {
+            "~" -> "(!($transitStr))"
+            else -> "($op $transitStr)"
+        }
     }
     override fun inferType(symbolEnv: Map<String, Type>): Type {
         return when (op) {
-            "~" -> boolType
+            "~" -> {
+                val operandType = operand.getType()
+                if (operandType !is BoolType) {
+                    throw RuntimeException("Cannot apply \"~\" to type $operandType")
+                }
+                boolType
+            }
             else -> throw RuntimeException("Invalid unary op: $op")
         }
     }
@@ -873,9 +882,12 @@ class BinaryOpExprNode(
                     ?: throw RuntimeException("Cannot apply \"$op\" to types $lhsType and $rhsType")
                 boolType
             }
-            "&" -> boolType
-            "|" -> boolType
-            "=>" -> boolType
+            "&", "|", "=>" -> {
+                if (lhsType !is BoolType || rhsType !is BoolType) {
+                    throw RuntimeException("Cannot apply \"$op\" to types $lhsType and $rhsType")
+                }
+                boolType
+            }
             "+" -> {
                 when {
                     lhsType is IntType && rhsType is IntType -> intType

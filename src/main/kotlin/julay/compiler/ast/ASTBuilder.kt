@@ -397,6 +397,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 ctx.AND() != null && ctx.expr().size == 2 -> "&"
                 ctx.OR() != null && ctx.expr().size == 2 -> "|"
                 ctx.IMPLIES() != null -> "=>"
+                ctx.IFF() != null -> "<=>"
                 ctx.IN() != null -> "in"
                 ctx.PLUS() != null -> "+"
                 ctx.MINUS() != null -> "-"
@@ -437,6 +438,18 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                     throw RuntimeException("Expected expr children to be ExprNodes")
                 }
                 UnaryOpExprNode(unaryOpMapper(), innerNode, sourceLocation(ctx))
+            }
+            binaryOpMapper() == "<=>" -> {
+                // a <=> b ≡ (a => b) & (b => a)
+                val lhsNode = visit(ctx.expr(0))
+                val rhsNode = visit(ctx.expr(1))
+                if (lhsNode !is ExprNode || rhsNode !is ExprNode) {
+                    throw RuntimeException("Expected expr children to be ExprNodes")
+                }
+                val loc = sourceLocation(ctx)
+                val forward = BinaryOpExprNode("=>", lhsNode, rhsNode, loc)
+                val backward = BinaryOpExprNode("=>", rhsNode, lhsNode, loc)
+                BinaryOpExprNode("&", forward, backward, loc)
             }
             binaryOpMapper() != "N/A" -> {
                 val lhsNode = visit(ctx.expr(0))

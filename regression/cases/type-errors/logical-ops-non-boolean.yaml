@@ -1,0 +1,9 @@
+source: regression/input/type-errors/logical-ops-non-boolean.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Cannot apply \"~\" to type Int"
+  - "Cannot apply \"&\" to types Int and Boolean"
+  - "Cannot apply \"|\" to types Boolean and Int"
+  - "Cannot apply \"=>\" to types Int and Boolean"
+  - "Cannot apply \"=>\" to types Boolean and Int"
+  - "Found type errors; exiting."

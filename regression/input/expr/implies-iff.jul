@@ -1,0 +1,38 @@
+import julaylib.pclass.Println
+import julaylib.pclass.ExitSystem
+
+fun bstr(b : Boolean) : String = if (b) { "T" } else { "F" }
+
+p-class S {
+    var out : String
+    var print : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            // Truth tables: => is TTFT, <=> is TFFT
+            // Right-assoc: false => false => false ≡ false => (false => false) ≡ T
+            // Precedence: false <=> true => true ≡ false <=> (true => true) ≡ F
+            // Parentheses: (false <=> true) => true ≡ F => T ≡ T
+            out := bstr(false => false) + bstr(false => true) + bstr(true => false) + bstr(true => true)
+                + bstr(false <=> false) + bstr(false <=> true) + bstr(true <=> false) + bstr(true <=> true)
+                + bstr(false => false => false)
+                + bstr(false <=> true => true)
+                + bstr((false <=> true) => true)
+            print := true
+    }
+
+    // Exercise Z3 encoding of => and <=> in a guard
+    transition println(msg : String) {
+        guard:
+            print & (true => print) & (print <=> true) & (msg = out)
+        transit:
+            print := false
+    }
+
+    transition exitSystem() {
+        guard:
+            ~print
+    }
+}
+
+program P := S || Println || ExitSystem

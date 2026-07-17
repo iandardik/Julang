@@ -1,0 +1,38 @@
+p-class S {
+    var x : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            x := if (~1) { 0 } else { 1 }
+    }
+
+    transition badAnd() {
+        guard:
+            1 & true
+        transit:
+            x := 0
+    }
+
+    transition badOr() {
+        guard:
+            true | 2
+        transit:
+            x := 0
+    }
+
+    transition badImplies() {
+        guard:
+            1 => true
+        transit:
+            x := 0
+    }
+
+    transition badIff() {
+        guard:
+            true <=> 0
+        transit:
+            x := 0
+    }
+}
+
+program P := S

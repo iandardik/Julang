@@ -173,7 +173,10 @@ expr
     | expr NEQ expr
     | expr AND expr
     | expr OR expr
-    | expr IMPLIES expr
+    // Implication is right-associative: a => b => c ≡ a => (b => c)
+    | <assoc=right> expr IMPLIES expr
+    // Biconditional binds looser than implication
+    | expr IFF expr
     | IF LPAREN expr RPAREN LCURLY expr RCURLY ELSE LCURLY expr RCURLY
     | LET LPAREN ID COLON typeExpr ASGN_EQ expr RPAREN LCURLY expr RCURLY
     | WHEN LPAREN expr RPAREN LCURLY when_subject_arm+ RCURLY
