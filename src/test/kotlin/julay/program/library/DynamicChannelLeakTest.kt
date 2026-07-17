@@ -2,9 +2,9 @@ package julay.program.library
 
 import com.microsoft.z3.Context
 import julay.program.ChannelType
-import julay.program.ConcreteAction
 import julay.program.Program
 import julay.program.Value
+import julay.program.action.ConcreteAction
 import julay.program.closeChannel
 import julay.regression.JulCompiler
 import kotlinx.coroutines.runBlocking

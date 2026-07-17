@@ -1,4 +1,6 @@
-package julay.program
+package julay.program.action
+
+import julay.program.Variable
 
 /**
  * Represents a symbolic action. SymbolicActions are not particular to a given transition system / proc.

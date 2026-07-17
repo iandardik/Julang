@@ -1,7 +1,9 @@
-package julay.program
+package julay.program.action
 
 import com.microsoft.z3.Context
 import com.microsoft.z3.Model
+import julay.program.Value
+import julay.program.Variable
 
 class ConcreteAction {
     val symAction : SymbolicAction

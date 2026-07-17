@@ -1,6 +1,7 @@
-package julay.program
+package julay.program.action
 
 import com.microsoft.z3.BoolExpr
+import julay.program.Channel
 import julay.tools.assert
 
 /**

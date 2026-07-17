@@ -4,6 +4,8 @@ import julay.compiler.*
 import julay.compiler.ast.*
 import julay.compiler.decl.*
 import julay.program.*
+import julay.program.type.*
+import julay.program.action.*
 import julay.program.library.LibraryRegistry
 
 fun ASTNode.errorPass(procs: Set<String>, librariesInUse: Set<String> = emptySet()): List<CompileError> = when (this) {

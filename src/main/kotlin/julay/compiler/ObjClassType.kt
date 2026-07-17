@@ -1,6 +1,8 @@
 package julay.compiler
 
 import julay.program.*
+import julay.program.type.*
+import julay.program.action.*
 
 sealed interface FieldPathResult {
     data class Resolved(val type: Type, val relPath: String) : FieldPathResult

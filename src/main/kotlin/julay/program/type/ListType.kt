@@ -1,6 +1,8 @@
-package julay.program
+package julay.program.type
 
 import com.microsoft.z3.*
+import julay.program.Value
+import julay.program.Variable
 
 /**
  * Built-in parametric list type, backed by Z3 [SeqSort] and Kotlin [List] at runtime.

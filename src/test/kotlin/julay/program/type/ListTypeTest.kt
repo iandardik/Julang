@@ -1,5 +1,7 @@
-package julay.program
+package julay.program.type
 
+import julay.program.Value
+import julay.program.Variable
 import com.microsoft.z3.Context
 import com.microsoft.z3.Status
 import kotlin.test.Test

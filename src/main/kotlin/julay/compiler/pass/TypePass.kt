@@ -4,6 +4,8 @@ import julay.compiler.*
 import julay.compiler.ast.*
 import julay.compiler.decl.*
 import julay.program.*
+import julay.program.type.*
+import julay.program.action.*
 
 sealed interface TypePassType {
     data object Uninferred : TypePassType

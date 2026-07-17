@@ -1,16 +1,16 @@
 package julay.compiler
 
-import julay.program.ListType
-import julay.program.MapType
-import julay.program.SetType
-import julay.program.StringType
-import julay.program.Type
-import julay.program.boolType
 import julay.program.Channel
 import julay.program.channelType
-import julay.program.intType
-import julay.program.listType
-import julay.program.stringType
+import julay.program.type.ListType
+import julay.program.type.MapType
+import julay.program.type.SetType
+import julay.program.type.StringType
+import julay.program.type.Type
+import julay.program.type.boolType
+import julay.program.type.intType
+import julay.program.type.listType
+import julay.program.type.stringType
 
 /**
  * Kotlin-backed expression function (julaylib.fun.*), analogous to effect builtins

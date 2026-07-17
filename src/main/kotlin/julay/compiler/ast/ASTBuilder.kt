@@ -4,11 +4,11 @@ import julay.compiler.SourceLoc
 import julay.compiler.TypeExpr
 import julay.parser.JulayParser
 import julay.parser.JulayParserBaseVisitor
-import julay.program.TSAction
-import julay.program.boolType
-import julay.program.intType
-import julay.program.realType
-import julay.program.stringType
+import julay.program.action.TSAction
+import julay.program.type.boolType
+import julay.program.type.intType
+import julay.program.type.realType
+import julay.program.type.stringType
 import julay.tools.assert
 import org.antlr.v4.runtime.ParserRuleContext
 import java.nio.file.Path

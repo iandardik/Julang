@@ -2,6 +2,8 @@ package julay.compiler
 
 import julay.compiler.decl.containsTypeVar
 import julay.program.*
+import julay.program.type.*
+import julay.program.action.*
 
 sealed interface UnifyResult {
     data class Ok(val subst: Map<String, Type>) : UnifyResult

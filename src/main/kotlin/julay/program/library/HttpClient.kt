@@ -4,14 +4,14 @@ import com.microsoft.z3.Context
 import julay.compiler.decl.ActionDecl
 import julay.compiler.LibraryLoc
 import julay.program.Channel
-import julay.program.ConcreteAction
 import julay.program.Program
-import julay.program.SymbolicAction
-import julay.program.TSAction
 import julay.program.TransitionSystem
 import julay.program.TransitionSystemStaticInfo
 import julay.program.Value
 import julay.program.Variable
+import julay.program.action.ConcreteAction
+import julay.program.action.SymbolicAction
+import julay.program.action.TSAction
 import julay.program.channelType
 import julay.program.closeChannel
 import java.net.URI

@@ -3,6 +3,8 @@ package julay.program
 import com.microsoft.z3.Context
 import com.microsoft.z3.Expr
 import com.microsoft.z3.Model
+import julay.program.type.StringType
+import julay.program.type.Type
 import julay.tools.assert
 
 data class Value(

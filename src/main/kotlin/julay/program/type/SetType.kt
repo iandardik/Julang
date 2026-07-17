@@ -1,7 +1,10 @@
-package julay.program
+package julay.program.type
 
 import com.microsoft.z3.*
 import julay.compiler.decl.mangleTypeForName
+import julay.program.ContextLocalCache
+import julay.program.Value
+import julay.program.Variable
 import julay.tools.*
 
 class SetCellMetadata(

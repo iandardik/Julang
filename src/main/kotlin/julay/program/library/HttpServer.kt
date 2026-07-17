@@ -7,6 +7,8 @@ import com.sun.net.httpserver.HttpServer
 import julay.compiler.decl.ActionDecl
 import julay.compiler.LibraryLoc
 import julay.program.*
+import julay.program.action.*
+import julay.program.type.intType
 import java.net.InetSocketAddress
 
 class JulHttpServer(

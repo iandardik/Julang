@@ -1,6 +1,6 @@
 package julay.compiler
 
-import julay.program.ObjClassType
+import julay.program.type.ObjClassType
 import julay.program.library.httpClientRequestType
 import julay.program.library.httpClientResponseType
 import julay.program.library.httpServerRequestType

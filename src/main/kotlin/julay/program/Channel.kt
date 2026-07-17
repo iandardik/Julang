@@ -5,6 +5,9 @@ import com.microsoft.z3.Expr
 import com.microsoft.z3.IntNum
 import com.microsoft.z3.Model
 import julay.concurrency.SyncChannel
+import julay.program.action.ConcreteAction
+import julay.program.action.SymbolicAction
+import julay.program.type.Type
 import java.util.concurrent.atomic.AtomicLong
 
 /**

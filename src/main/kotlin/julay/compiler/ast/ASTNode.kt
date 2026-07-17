@@ -6,7 +6,8 @@ import julay.compiler.ProgramLoc
 import julay.compiler.*
 import julay.compiler.pass.TypePassType
 import julay.program.*
-import julay.program.TSAction
+import julay.program.type.*
+import julay.program.action.*
 
 abstract class ASTNode(
     val children : List<ASTNode>

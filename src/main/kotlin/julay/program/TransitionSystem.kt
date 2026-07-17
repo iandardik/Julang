@@ -1,6 +1,8 @@
 package julay.program
 
 import com.microsoft.z3.Context
+import julay.program.action.ConcreteAction
+import julay.program.action.TSAction
 
 /**
  * Transition systems do not worry about channels or any kind of communication--they simply deal with their own internal

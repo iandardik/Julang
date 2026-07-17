@@ -1,5 +1,8 @@
 package julay.program
 
+import julay.program.action.ConcreteAction
+import julay.program.action.SymbolicAction
+
 data class TransitionSystemStaticInfo(
     /**
      * A name that uniquely describes the process class.

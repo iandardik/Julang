@@ -2,6 +2,8 @@ package julay.compiler.decl
 
 import julay.compiler.*
 import julay.program.*
+import julay.program.type.*
+import julay.program.action.*
 
 /**
  * A fully resolved o-class declaration, ready for code generation.

@@ -1,10 +1,12 @@
-package julay.program
+package julay.program.type
 
 import com.microsoft.z3.Context
 import com.microsoft.z3.Expr
 import com.microsoft.z3.IntNum
 import com.microsoft.z3.Model
 import com.microsoft.z3.RatNum
+import julay.program.Value
+import julay.program.Variable
 import julay.tools.mkStringConst
 
 val boolType = BoolType()

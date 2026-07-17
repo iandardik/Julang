@@ -8,6 +8,8 @@ import julay.compiler.decl.ProcClassDecl
 import julay.compiler.decl.ProcDecl
 import julay.compiler.decl.TransitUpdate
 import julay.program.*
+import julay.program.type.*
+import julay.program.action.*
 import julay.program.library.LibraryRegistry
 
 data class CodegenResult(
@@ -54,6 +56,8 @@ fun codegenPass(
     val imports = "import com.microsoft.z3.*\n" +
         "import com.microsoft.z3.julangContext\n" +
         "import julay.program.*\n" +
+        "import julay.program.type.*\n" +
+        "import julay.program.action.*\n" +
         "import julay.program.library.*\n" +
         "import julay.tools.mkStringConst\n" +
         "import julay.tools.mkSeqLengthAny\n" +

@@ -6,10 +6,10 @@ import com.microsoft.z3.IntExpr
 import com.microsoft.z3.Model
 import com.microsoft.z3.SeqExpr
 import com.microsoft.z3.julangContext
-import julay.program.ObjClassType
 import julay.program.Variable
-import julay.program.intType
-import julay.program.stringType
+import julay.program.type.ObjClassType
+import julay.program.type.intType
+import julay.program.type.stringType
 
 data class HttpServerRequest(val path: String, val body: String)
 

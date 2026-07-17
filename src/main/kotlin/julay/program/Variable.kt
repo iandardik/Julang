@@ -2,6 +2,7 @@ package julay.program
 
 import com.microsoft.z3.Context
 import com.microsoft.z3.Expr
+import julay.program.type.Type
 
 /**
  * Represents a typed variable, including state variables and action arguments.

@@ -1,6 +1,10 @@
-package julay.program
+package julay.program.type
 
 import com.microsoft.z3.*
+import julay.program.ChannelType
+import julay.program.ContextLocalCache
+import julay.program.Value
+import julay.program.Variable
 
 // Z3 mkDatatypeSort artifacts for one o-class in a given Context.
 // sort: the record's Z3 sort; constructorDecl: mk-Name(...);

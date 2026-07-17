@@ -274,7 +274,7 @@ private fun substituteFieldAccess(
 private fun projectLiteralField(
     literal: ObjClassLiteralExprNode,
     fieldPath: List<String>,
-    leafType: julay.program.Type,
+    leafType: julay.program.type.Type,
 ): ExprNode {
     if (fieldPath.isEmpty()) {
         return literal

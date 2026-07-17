@@ -1,10 +1,13 @@
-package julay.program
+package julay.program.type
 
 import com.microsoft.z3.Context
 import com.microsoft.z3.Expr
 import com.microsoft.z3.Model
 import com.microsoft.z3.Status
 import com.microsoft.z3.julangContext
+import julay.program.ContextLocalCache
+import julay.program.Value
+import julay.program.Variable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -13,6 +16,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+
 data class Point(val x: Int, val y: Int)
 
 data class Line(val start: Point, val end: Point)

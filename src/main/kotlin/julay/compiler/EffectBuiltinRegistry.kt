@@ -4,6 +4,8 @@ import julay.compiler.ast.EffectAssignNode
 import julay.compiler.ast.EffectCallNode
 import julay.compiler.ast.EffectStmtNode
 import julay.program.*
+import julay.program.type.*
+import julay.program.action.*
 
 data class EffectBuiltin(
     val name: String,

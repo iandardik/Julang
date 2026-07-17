@@ -5,6 +5,8 @@ import julay.compiler.ast.EffectStmtNode
 import julay.compiler.ast.ErrorArmNode
 import julay.compiler.ast.ExprNode
 import julay.program.*
+import julay.program.type.*
+import julay.program.action.*
 
 data class ProcClassDecl(
     val name : String,
