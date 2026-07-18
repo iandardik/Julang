@@ -25,7 +25,9 @@ proc IncomingRPCs := HttpServer || RpcServer
 proc OutgoingRPCs := HttpClient || RpcClient
     || OutgoingRequestVoteRPC || OutgoingAppendEntriesRPC
 
+proc RPCs := IncomingRPCs || OutgoingRPCs
+
 proc Raft := RaftCore || ClusterInfo || ElectionDriver
-    || HeartbeatDriver || HeartbeatTarget || IncomingRPCs || OutgoingRPCs
+    || HeartbeatDriver || HeartbeatTarget || RPCs
 
 proc NodeLogic := Raft || Initializers

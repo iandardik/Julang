@@ -1,11 +1,5 @@
 package julay.compiler
 
-import julay.compiler.decl.ProcDecl
-import julay.compiler.decl.ProcDeclType
-import julay.compiler.pass.errorPass
-import julay.compiler.pass.resolvedProcPass
-import julay.compiler.pass.typePass
-import julay.compiler.pass.warningPass
 import java.nio.file.Path
 
 fun compileJulFile(
@@ -14,35 +8,18 @@ fun compileJulFile(
     extraLibraryPaths: List<Path> = emptyList(),
     compilerJar: Path = resolveCompilerJar(),
 ) {
-    val (unit, loadErrors) = loadCompilationUnit(source, extraLibraryPaths)
-    if (loadErrors.isNotEmpty()) {
-        loadErrors.forEach { println(it) }
-        println("Found compile errors, exiting.")
+    val checked = prepareCheckedCompilation(source, extraLibraryPaths) ?: return
+    val (_, ast, procDecls, programs, librariesInUse) = checked
+
+    if (programs.isEmpty()) {
         return
     }
 
-    val ast = unit.root
-    val procDecls = ast.resolvedProcPass(unit)
-    val programs = procDecls.filter { it.type == ProcDeclType.Program }
-
-    val typeErrors = ast.typePass(unit)
-    if (typeErrors.isNotEmpty()) {
-        typeErrors.forEach { println(it) }
-        println("Found type errors; exiting.")
-        return
-    }
-
-    val librariesInUse = unit.librariesInUse(procDecls)
-
-    programs.forEach { program ->
+    for (program in programs) {
         val components = program.allProcNames(procDecls)
-        val errors = ast.errorPass(components, librariesInUse)
-        if (errors.isNotEmpty()) {
-            errors.forEach { println(it) }
-            println("Found errors while compiling the program \"${program.name}\"; exiting.")
+        if (!runErrorAndWarningPasses(ast, components, librariesInUse, program.name)) {
             return
         }
-        ast.warningPass(components, librariesInUse).forEach { System.err.println(it) }
     }
 
     programs.forEach { compileProgram(it, ast, procDecls, librariesInUse, keepBuild, compilerJar) }
