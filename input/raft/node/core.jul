@@ -43,57 +43,11 @@ p-class RaftCore {
             electionEpoch := 0
     }
 
-    transition startElection(epoch : Int) {
-        guard:
-            (state = "Follower" | state = "Candidate") & epoch = electionEpoch
-        transit:
-            state := "Candidate"
-            currentTerm := currentTerm + 1
-            votedFor := selfId
-            votesGranted := {selfId}
-            voteCount := 1
-            electionEpoch := electionEpoch + 1
-            knownLeaderId := -1
-    }
-
-    /* Pairwise with OutgoingRequestVoteRPC (Election advances via finishRecordVote). */
-    transition recordVote(peerId : Int, term : Int, granted : Boolean) {
-        guard: state = "Candidate" & term = currentTerm & peerId >= 0 & peerId < clusterSize
-        transit:
-            votesGranted := if (granted) { votesGranted + {peerId} } else { votesGranted }
-            voteCount := if (granted) { voteCount + 1 } else { voteCount }
-    }
-
-    transition becomeLeader() {
-        guard: state = "Candidate" & voteCount * 2 > clusterSize
-        transit:
-            state := "Leader"
-            knownLeaderId := selfId
-            electionEpoch := electionEpoch + 1
-    }
-
-    transition clientAppendRequest(value : String, ok : Boolean, idx : Int) {
-        guard:
-            let (newLogLen : Int := length(log) + 1) {
-                | (state = "Leader" & ok & idx = newLogLen)
-                | (state ~= "Leader" & ~ok & idx = 0)
-            }
-        transit:
-            log := if (state = "Leader") {
-                log + [Entry { term := currentTerm, value := value }]
-            } else {
-                log
-            }
-            lastLogTermVar := if (state = "Leader") { currentTerm } else { lastLogTermVar }
-            commitIndex := if (state = "Leader") {
-                let (newLogLen : Int := length(log) + 1) { newLogLen }
-            } else {
-                commitIndex
-            }
-    }
-
-    /* Simplified RequestVote: grant if term ok and log at least as long */
-    transition handleRequestVote(
+    /*
+     * A candidate (from a different node) is requesting a vote from us.
+     * Simplified RequestVote: grant if term ok and log at least as long
+     */
+    transition receiveVoteRequest(
         inTerm : Int,
         candidateId : Int,
         lastLogIndex : Int,
@@ -102,7 +56,7 @@ p-class RaftCore {
         voteGranted : Boolean
     ) {
         guard:
-            candidateId >= 0 & candidateId < clusterSize
+            & candidateId >= 0 & candidateId < clusterSize
             & (
                 | (
                     & inTerm > currentTerm
@@ -130,20 +84,106 @@ p-class RaftCore {
             currentTerm := if (inTerm > currentTerm) { inTerm } else { currentTerm }
     }
 
-    /* Pairwise with OutgoingAppendEntriesRPC (Heartbeat advances via finishAppendEntriesResp). */
-    transition handleAppendEntriesResp(
+    /*
+     * Start an election in attempt to become the leader.
+     */
+    transition startElection(
+        epoch : Int,
+        term : Int,
+        candId : Int,
+        lastIdx : Int,
+        lastT : Int
+    ) {
+        guard:
+            & (state = "Follower" | state = "Candidate")
+            & epoch = electionEpoch
+            & term = currentTerm + 1
+            & candId = selfId
+            & lastIdx = length(log)
+            & lastT = lastLogTermVar
+        transit:
+            state := "Candidate"
+            currentTerm := currentTerm + 1
+            votedFor := selfId
+            votesGranted := {selfId}
+            voteCount := 1
+            electionEpoch := electionEpoch + 1
+            knownLeaderId := -1
+    }
+
+    /*
+     * Received a vote from another node--record it to see if we can garner a quorum.
+     */
+    transition recordVote(peerId : Int, term : Int, granted : Boolean) {
+        guard:
+            & state = "Candidate"
+            & term = currentTerm
+            & peerId >= 0
+            & peerId < clusterSize
+        transit:
+            votesGranted := if (granted) { votesGranted + {peerId} } else { votesGranted }
+            voteCount := if (granted) { voteCount + 1 } else { voteCount }
+    }
+
+    /*
+     * We have received enough votes to become the leader!
+     */
+    transition becomeLeader() {
+        guard:
+            & state = "Candidate"
+            & voteCount * 2 > clusterSize
+        transit:
+            state := "Leader"
+            knownLeaderId := selfId
+            electionEpoch := electionEpoch + 1
+    }
+
+    /*
+     * A ClientRequest message--add it to the log
+     */
+    transition clientAppendRequest(value : String, ok : Boolean, idx : Int) {
+        guard:
+            let (newLogLen : Int := length(log) + 1) {
+                | (state = "Leader" & ok & idx = newLogLen)
+                | (state ~= "Leader" & ~ok & idx = 0)
+            }
+        transit:
+            log := if (state = "Leader") {
+                log + [Entry { term := currentTerm, value := value }]
+            } else {
+                log
+            }
+            lastLogTermVar := if (state = "Leader") { currentTerm } else { lastLogTermVar }
+            commitIndex := if (state = "Leader") {
+                let (newLogLen : Int := length(log) + 1) { newLogLen }
+            } else {
+                commitIndex
+            }
+    }
+
+    /*
+     * Send an AppendEntries message to a follower.
+     * Pairwise with OutgoingAppendEntriesRPC (Heartbeat advances via endOutgoingAppendEntries).
+     */
+    transition sendAppendEntries(
         peerId : Int,
         inTerm : Int,
         success : Boolean,
         matchIdx : Int
     ) {
         guard:
-            state = "Leader" & peerId >= 0 & peerId < clusterSize & inTerm = currentTerm
+            & state = "Leader"
+            & peerId >= 0
+            & peerId < clusterSize
+            & inTerm = currentTerm
         transit:
             commitIndex := if (success & matchIdx > commitIndex) { matchIdx } else { commitIndex }
     }
 
-    transition handleAppendEntries(
+    /*
+     * Receive an AppendEntries message from a leader.
+     */
+    transition receiveAppendEntries(
         inTerm : Int,
         leaderId : Int,
         prevLogIndex : Int,
@@ -157,7 +197,8 @@ p-class RaftCore {
         matchIdx : Int
     ) {
         guard:
-            leaderId >= 0 & leaderId < clusterSize
+            & leaderId >= 0
+            & leaderId < clusterSize
             & (
                 | (inTerm < currentTerm & outTerm = currentTerm & ~success & matchIdx = 0)
                 | (
@@ -182,7 +223,9 @@ p-class RaftCore {
     }
 
     internal transition applyEntryToStateMachine() {
-        guard: lastApplied < commitIndex & lastApplied < length(log)
+        guard:
+            & lastApplied < commitIndex
+            & lastApplied < length(log)
         transit:
             stateMachine := stateMachine + [entryValueAt(log, lastApplied)]
             lastApplied := lastApplied + 1
@@ -195,12 +238,12 @@ p-class RaftCore {
      */
 
     service transition getIsLeader(isLeader : Boolean) {
-        guard: (isLeader & state = "Leader") | (~isLeader & state ~= "Leader")
+        guard: isLeader <=> (state = "Leader")
     }
 
     service transition hasQuorum(flag : Boolean) {
         guard:
-            state = "Candidate"
+            & state = "Candidate"
             & ((flag & voteCount * 2 > clusterSize) | (~flag & voteCount * 2 <= clusterSize))
     }
 
@@ -213,7 +256,7 @@ p-class RaftCore {
         role : String
     ) {
         guard:
-            epoch = electionEpoch
+            & epoch = electionEpoch
             & term = currentTerm
             & candId = selfId
             & lastIdx = length(log)
@@ -230,7 +273,7 @@ p-class RaftCore {
     /* Follower redirect: known leader id, or hasLeader false when unknown. */
     service transition getRedirectLeader(leaderIdOut : Int, hasLeader : Boolean) {
         guard:
-            state ~= "Leader"
+            & state ~= "Leader"
             & (
                 | (hasLeader & leaderIdOut = knownLeaderId & knownLeaderId >= 0)
                 | (~hasLeader & leaderIdOut = -1 & knownLeaderId < 0)

@@ -57,7 +57,7 @@ p-class IncomingAppendEntriesRPC {
             step := "handle"
     }
 
-    transition handleAppendEntries(
+    transition receiveAppendEntries(
         inTerm : Int, leaderId : Int, prevLogIndex : Int, prevLogTerm : Int,
         entriesLen : Int, entryTerm : Int, entryValue : String, leaderCommit : Int,
         outTerm : Int, success : Boolean, matchIdx : Int
@@ -90,7 +90,7 @@ p-class OutgoingAppendEntriesRPC {
     var respSuccess : Boolean
     var respMatch : Int
 
-    constructor startOutgoingAppendEntries(peer : Node, data : AppendEntriesData) {
+    constructor beginOutgoingAppendEntries(peer : Node, data : AppendEntriesData) {
         transit:
             cPeer := peer
             cData := data
@@ -123,7 +123,7 @@ p-class OutgoingAppendEntriesRPC {
             step := "apply"
     }
 
-    transition handleAppendEntriesResp(
+    transition sendAppendEntries(
         peerId : Int, inTerm : Int, success : Boolean, matchIdx : Int
     ) {
         guard:
@@ -136,7 +136,7 @@ p-class OutgoingAppendEntriesRPC {
     }
 
     /* Pairwise with HeartbeatDriver after Core has applied the AppendEntries response. */
-    transition finishAppendEntriesResp(peerId : Int) {
+    transition endOutgoingAppendEntries(peerId : Int) {
         guard: step = "finishElection" & peerId = cPeer.id
         transit: step := "done"
     }

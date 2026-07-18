@@ -28,7 +28,7 @@ p-class IncomingRequestVoteRPC {
             step := "handle"
     }
 
-    transition handleRequestVote(
+    transition receiveVoteRequest(
         inTerm : Int,
         candidateId : Int,
         lastLogIndex : Int,
@@ -69,7 +69,7 @@ p-class OutgoingRequestVoteRPC {
     var voteTerm : Int
     var voteGrantedFlag : Boolean
 
-    constructor startOutgoingRequestVote(
+    constructor beginOutgoingRequestVote(
         peer : Node,
         term : Int,
         candId : Int,
@@ -115,20 +115,13 @@ p-class OutgoingRequestVoteRPC {
             step := "tally"
     }
 
-    transition recordVote(peerId : Int, term : Int, granted : Boolean) {
+    /* Pairwise with ElectionCampaign: hand off vote result (Campaign records it with Core). */
+    transition endOutgoingRequestVote(peerId : Int, term : Int, granted : Boolean) {
         guard:
             & step = "tally"
             & peerId = cPeer.id
             & term = voteTerm
             & granted = voteGrantedFlag
-        transit:
-            step := "finishElection"
-    }
-
-    transition finishRecordVote(peerId : Int) {
-        guard:
-            & step = "finishElection"
-            & peerId = cPeer.id
         transit:
             step := "done"
     }

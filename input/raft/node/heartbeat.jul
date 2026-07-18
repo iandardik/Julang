@@ -2,8 +2,14 @@ import node.lib.AppendEntriesData
 import node.lib.Node
 
 /*
- * Leader heartbeat / AppendEntries orchestration.
+ * Leader heartbeat / AppendEntries orchestration (outgoing AppendEntries requests only).
  * HeartbeatTarget owns the peer cursor and resolves peers; HeartbeatDriver sends AEs.
+ *
+ * Lifecycle invariant: at most one of {ElectionTimeout, ElectionCampaign, HeartbeatDriver}
+ * is actively driving elections or leadership handoff. Winning an election spawns this
+ * driver via startHeartbeatDriver(me, n); on demotion this driver ends by calling
+ * resumeElectionTimeout(me, n). ElectionTimeout / ElectionCampaign and HeartbeatDriver
+ * are mutually exclusive.
  */
 
 p-class HeartbeatDriver {
@@ -71,13 +77,13 @@ p-class HeartbeatDriver {
             step := "sendAppendEntries"
     }
 
-    transition startOutgoingAppendEntries(peer : Node, data : AppendEntriesData) {
+    transition beginOutgoingAppendEntries(peer : Node, data : AppendEntriesData) {
         guard: step = "sendAppendEntries" & peer = target & data = ae
         transit: step := "awaitAppendEntries"
     }
 
     /* Pairwise with OutgoingAppendEntriesRPC after Core has applied the AppendEntries response. */
-    transition finishAppendEntriesResp(peerId : Int) {
+    transition endOutgoingAppendEntries(peerId : Int) {
         guard: step = "awaitAppendEntries" & peerId = target.id
         transit: step := "pickTarget"
     }
@@ -87,9 +93,9 @@ p-class HeartbeatDriver {
         transit: step := "handback"
     }
 
-    /* Spawn a fresh ElectionDriver after losing leadership, then end this instance. */
-    transition resumeElectionDriver(id : Int, n : Int) {
-        guard: step = "handback" & id = me.id & n = clusterSize
+    /* Lost leadership: spawn ElectionTimeout, then end this instance. */
+    transition resumeElectionTimeout(me : Node, n : Int) {
+        guard: step = "handback" & me = me & n = clusterSize
         transit: step := "done"
     }
 }

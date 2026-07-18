@@ -4,6 +4,7 @@ import julaylib.fun.split
 import julaylib.fun.trim
 import julaylib.fun.parseInt
 import node.lib.isBlankOrComment
+import node.lib.Node
 
 /*
  * Static cluster config loading, HTTP listen-port startup, and outbound HttpClient startup.
@@ -58,9 +59,11 @@ p-class RaftInitializer {
         transit: step := "startElection"
     }
 
-    transition startElectionDriver(urls : List<String>, id : Int) {
+    transition startElectionTimeout(me : Node, n : Int) {
         guard:
-            step = "startElection" & urls = acc & id = selfId
+            & step = "startElection"
+            & me = Node { id := selfId, url := acc[selfId] }
+            & n = length(acc)
         transit: step := "done"
     }
 }

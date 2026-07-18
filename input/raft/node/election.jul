@@ -1,121 +1,224 @@
-import julaylib.fun.length
 import node.lib.Node
 
 /*
- * Election timeout, RequestVote to peers, and leadership handoff.
- * On becomeLeader, spawns HeartbeatDriver and ends; Heartbeat respawns this via resumeElectionDriver.
+ * This file contains processes that handle an outgoing election, i.e. an election that is
+ * started by this node.
  */
 
-p-class ElectionDriver {
+/*
+ * Starts an election after a "random" timeout (it's currently not random). This process begins
+ * by recording an "election epoch" from RaftCore that represents the current RaftCore state. Then,
+ * the process sleeps for the timeout period. Upon waking up, the process checks whether the
+ * election epoch is still 'fresh'; if so then it spawns an ElectionCampaign, if not it restarts
+ * and sleeps again.
+ *
+ * Lifecycle invariant: at most one of {ElectionTimeout, ElectionCampaign, HeartbeatDriver}
+ * is actively driving elections or leadership handoff.
+ */
+p-class ElectionTimeout {
+    const selfNode : Node
+    const clusterSize : Int
+    const electTimeout : Int
     var step : String
-    var myId : Int
-    var curPeer : Int
-    var target : Node
-    var selfNode : Node
+    var currentEpoch : Int
     var snapTerm : Int
     var snapCand : Int
     var snapLastIdx : Int
     var snapLastTerm : Int
-    var clusterN : Int
-    var electTimeout : Int
-    var armedEpoch : Int
 
-    constructor startElectionDriver(urls : List<String>, id : Int) {
+    constructor startElectionTimeout(me : Node, n : Int) {
         transit:
-            step := "arm"
-            myId := id
-            curPeer := 0
-            target := Node { id := 0, url := "" }
-            selfNode := Node { id := id, url := "" }
+            selfNode := me
+            clusterSize := n
+            electTimeout := 2 + me.id
+            step := "start"
+            currentEpoch := 0
             snapTerm := 0
             snapCand := 0
             snapLastIdx := 0
             snapLastTerm := 0
-            clusterN := length(urls)
-            electTimeout := 2 + id
-            armedEpoch := 0
     }
 
-    /* Demotion restart from HeartbeatDriver (Initializer is already done). */
-    constructor resumeElectionDriver(id : Int, n : Int) {
+    /* Same as startElectionTimeout; distinct name so only HeartbeatDriver is the sync peer. */
+    constructor resumeElectionTimeout(me : Node, n : Int) {
         transit:
-            step := "arm"
-            myId := id
-            curPeer := 0
-            target := Node { id := 0, url := "" }
-            selfNode := Node { id := id, url := "" }
+            selfNode := me
+            clusterSize := n
+            electTimeout := 2 + me.id
+            step := "start"
+            currentEpoch := 0
             snapTerm := 0
             snapCand := 0
             snapLastIdx := 0
             snapLastTerm := 0
-            clusterN := n
-            electTimeout := 2 + id
-            armedEpoch := 0
     }
 
     transition getElectionSnapshot(
-        epoch : Int, term : Int, candId : Int, lastIdx : Int, lastT : Int, role : String
+        epoch : Int,
+        term : Int,
+        candId : Int,
+        lastIdx : Int,
+        lastT : Int,
+        role : String
     ) {
-        guard: step = "arm" | step = "checkEpoch" | step = "snap"
+        guard:
+            | step = "start"
+            | step = "checkEpoch"
         transit:
-            armedEpoch := if (step = "arm") { epoch } else { armedEpoch }
-            myId := if (step = "snap") { candId } else { myId }
-            electTimeout := if (step = "snap") { 2 + candId } else { electTimeout }
-            curPeer := if (step = "snap") { 0 } else { curPeer }
-            snapTerm := if (step = "snap") { term } else { snapTerm }
-            snapCand := if (step = "snap") { candId } else { snapCand }
-            snapLastIdx := if (step = "snap") { lastIdx } else { snapLastIdx }
-            snapLastTerm := if (step = "snap") { lastT } else { snapLastTerm }
-            step := if (step = "arm") {
-                "waitTimer"
-            } else {
-                if (step = "checkEpoch") {
-                    if (epoch = armedEpoch) { "doElect" } else { "arm" }
-                } else {
-                    "needN"
-                }
+            currentEpoch := if (step = "start") { epoch } else { currentEpoch }
+            step := when {
+                // sleep for a "random" amount of time before attempting to start the election
+                (step = "start") -> "sleep"
+
+                // if the epoch hasn't changed since sleeping then start the election
+                (epoch = currentEpoch) -> "doElect"
+
+                // if the epoch has changed since sleeping then start all over again
+                else -> "start"
             }
     }
 
-    internal transition waitElect() {
-        guard: step = "waitTimer"
-        transit: step := "checkEpoch"
-        effect: delaySeconds(electTimeout)
-    }
-
-    transition startElection(epoch : Int) {
-        guard: step = "doElect" & epoch = armedEpoch
-        transit: step := "snap"
-    }
-
-    transition getClusterSize(size : Int) {
-        guard: step = "needN"
+    internal transition sleepBeforeElect() {
+        guard:
+            step = "sleep"
         transit:
-            clusterN := size
-            curPeer := 0
-            step := "peers"
+            step := "checkEpoch"
+        effect:
+            delaySeconds(electTimeout)
     }
 
-    internal transition skipSelf() {
-        guard: step = "peers" & curPeer = myId & curPeer < clusterN
-        transit: curPeer := curPeer + 1
+    /* Pairwise with RaftCore: become candidate and bind candidacy metadata for the campaign. */
+    transition startElection(
+        epoch : Int,
+        term : Int,
+        candId : Int,
+        lastIdx : Int,
+        lastT : Int
+    ) {
+        guard:
+            & step = "doElect"
+            & epoch = currentEpoch
+        transit:
+            snapTerm := term
+            snapCand := candId
+            snapLastIdx := lastIdx
+            snapLastTerm := lastT
+            step := "startCampaign"
     }
 
-    internal transition peersDone() {
-        guard: step = "peers" & curPeer >= clusterN
-        transit: step := "checkQ"
+    transition startElectionCampaign(
+        me : Node,
+        n : Int,
+        term : Int,
+        candId : Int,
+        lastIdx : Int,
+        lastTerm : Int
+    ) {
+        guard:
+            & step = "startCampaign"
+            & me = selfNode
+            & n = clusterSize
+            & term = snapTerm
+            & candId = snapCand
+            & lastIdx = snapLastIdx
+            & lastTerm = snapLastTerm
+        transit:
+            step := "awaitCampaign"
+    }
+
+    /* Campaign lost quorum: go back to the start and reset the election timer. */
+    transition electionCampaignLost() {
+        guard:
+            step = "awaitCampaign"
+        transit:
+            step := "start"
+    }
+
+    /* Campaign won: this timeout instance ends; campaign will start HeartbeatDriver. */
+    transition electionCampaignWon() {
+        guard:
+            step = "awaitCampaign"
+        transit:
+            step := "done"
+    }
+}
+
+/*
+ * The election campaign cycles through each of the peer nodes and sends a vote request RPC
+ * to each one (called the target). The process notifies RaftCore of each decision. Then,
+ * once the processes has finished requesting a vote from each node, it checks if it has a
+ * quorum; if so then it tells RaftCore to become the leader, if not it simply terminates.
+ */
+p-class ElectionCampaign {
+    const selfNode : Node
+    const clusterSize : Int
+    const snapTerm : Int
+    const snapCand : Int
+    const snapLastIdx : Int
+    const snapLastTerm : Int
+    var step : String
+    var target : Node
+    var targetId : Int
+    var voteTerm : Int
+    var voteGranted : Boolean
+
+    constructor startElectionCampaign(
+        me : Node,
+        n : Int,
+        term : Int,
+        candId : Int,
+        lastIdx : Int,
+        lastTerm : Int
+    ) {
+        transit:
+            selfNode := me
+            clusterSize := n
+            snapTerm := term
+            snapCand := candId
+            snapLastIdx := lastIdx
+            snapLastTerm := lastTerm
+            step := "lookUpTarget"
+            target := Node { id := 0, url := "" }
+            targetId := 0
+            voteTerm := 0
+            voteGranted := false
+    }
+
+    // if the current target is me then move to the next target
+    internal transition skipMe() {
+        guard:
+            & step = "lookUpTarget"
+            & targetId = selfNode.id
+            & targetId < clusterSize
+        transit:
+            targetId := targetId + 1
+    }
+
+    internal transition allTargetsSent() {
+        guard:
+            & step = "lookUpTarget"
+            & targetId >= clusterSize
+        transit:
+            step := "checkIfWon"
+
     }
 
     transition lookupNodeById(id : Int, node : Node) {
-        guard: step = "peers" & id = curPeer
+        guard:
+            & step = "lookUpTarget"
+            & id = targetId
+            & id ~= selfNode.id // req votes from other nodes
         transit:
             target := node
             step := "sendRequestVote"
     }
 
-    transition startOutgoingRequestVote(
+    transition beginOutgoingRequestVote(
         peer : Node,
-        term : Int, candId : Int, lastIdx : Int, lastTerm : Int
+        term : Int,
+        candId : Int,
+        lastIdx : Int,
+        lastTerm : Int
     ) {
         guard:
             & step = "sendRequestVote"
@@ -124,37 +227,67 @@ p-class ElectionDriver {
             & candId = snapCand
             & lastIdx = snapLastIdx
             & lastTerm = snapLastTerm
-        transit: step := "awaitRequestVote"
+        transit:
+            step := "awaitRequestVote"
     }
 
-    /* Pairwise with OutgoingRequestVoteRPC after Core has recorded the vote. */
-    transition finishRecordVote(peerId : Int) {
-        guard: step = "awaitRequestVote" & peerId = curPeer
+    transition endOutgoingRequestVote(peerId : Int, term : Int, granted : Boolean) {
+        guard:
+            & step = "awaitRequestVote"
+            & peerId = targetId
         transit:
-            curPeer := curPeer + 1
-            step := "peers"
+            voteTerm := term
+            voteGranted := granted
+            step := "recordVote"
+    }
+
+    /* Pairwise with RaftCore: apply the vote result from the outbound RPC. */
+    transition recordVote(peerId : Int, term : Int, granted : Boolean) {
+        guard:
+            & step = "recordVote"
+            & peerId = targetId
+            & term = voteTerm
+            & granted = voteGranted
+        transit:
+            targetId := targetId + 1
+            step := "lookUpTarget"
     }
 
     transition hasQuorum(flag : Boolean) {
-        guard: step = "checkQ"
-        transit: step := if (flag) { "doLeader" } else { "arm" }
+        guard:
+            step = "checkIfWon"
+        transit:
+            step := if (flag) { "doLeader" } else { "lost" }
+    }
+
+    transition electionCampaignLost() {
+        guard:
+            step = "lost"
+        transit:
+            step := "done"
     }
 
     transition becomeLeader() {
-        guard: step = "doLeader"
-        transit: step := "needSelf"
-    }
-
-    transition getSelf(node : Node) {
-        guard: step = "needSelf" & node.id = myId
+        guard:
+            step = "doLeader"
         transit:
-            selfNode := node
-            step := "startHb"
+            step := "won"
     }
 
-    /* Spawn HeartbeatDriver, then end this election instance. */
+    transition electionCampaignWon() {
+        guard:
+            step = "won"
+        transit:
+            step := "startHeartbeat"
+    }
+
+    /* Spawn HeartbeatDriver, then end this campaign. */
     transition startHeartbeatDriver(me : Node, n : Int) {
-        guard: step = "startHb" & me = selfNode & n = clusterN
-        transit: step := "done"
+        guard:
+            & step = "startHeartbeat"
+            & me = selfNode
+            & n = clusterSize
+        transit:
+            step := "done"
     }
 }

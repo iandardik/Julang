@@ -25,17 +25,9 @@ p-class ClusterInfo {
         guard: port = selfPort
     }
 
-    service transition getClusterSize(size : Int) {
-        guard: size = clusterSize
-    }
-
     service transition lookupNodeById(id : Int, node : Node) {
         guard:
             id >= 0 & id < clusterSize & id ~= selfNode.id
             & node = Node { id := id, url := urls[id] }
-    }
-
-    service transition getSelf(node : Node) {
-        guard: node = selfNode
     }
 }
