@@ -11,56 +11,49 @@ import node.lib.parseBool
  */
 
 p-class IncomingRequestVoteRPC {
-    const httpReq : HttpServerRequest
-    const reqBody : String
-    var step : String
     var rvTerm : Int
     var rvCand : Int
     var rvLastIdx : Int
     var rvLastTerm : Int
     var respBody : String
-    var respCode : Int
+    var step : String
 
-    constructor startIncomingRequestVote(req : HttpServerRequest) {
+    constructor beginIncomingRequestVote(req : HttpServerRequest) {
         transit:
-            httpReq := req
-            reqBody := req.body
-            rvTerm := 0
-            rvCand := 0
-            rvLastIdx := 0
-            rvLastTerm := 0
+            rvTerm := parseInt(fieldValue(split(req.body, "|")[0]))
+            rvCand := parseInt(fieldValue(split(req.body, "|")[1]))
+            rvLastIdx := parseInt(fieldValue(split(req.body, "|")[2]))
+            rvLastTerm := parseInt(fieldValue(split(req.body, "|")[3]))
             respBody := ""
-            respCode := 500
-            step := "parse"
-    }
-
-    internal transition parseRV() {
-        guard: step = "parse"
-        transit:
-            rvTerm := parseInt(fieldValue(split(reqBody, "|")[0]))
-            rvCand := parseInt(fieldValue(split(reqBody, "|")[1]))
-            rvLastIdx := parseInt(fieldValue(split(reqBody, "|")[2]))
-            rvLastTerm := parseInt(fieldValue(split(reqBody, "|")[3]))
             step := "handle"
     }
 
     transition handleRequestVote(
-        inTerm : Int, candidateId : Int, lastLogIndex : Int, lastLogTerm : Int,
-        outTerm : Int, voteGranted : Boolean
+        inTerm : Int,
+        candidateId : Int,
+        lastLogIndex : Int,
+        lastLogTerm : Int,
+        outTerm : Int,
+        voteGranted : Boolean
     ) {
         guard:
             & step = "handle"
-            & inTerm = rvTerm & candidateId = rvCand
-            & lastLogIndex = rvLastIdx & lastLogTerm = rvLastTerm
+            & inTerm = rvTerm
+            & candidateId = rvCand
+            & lastLogIndex = rvLastIdx
+            & lastLogTerm = rvLastTerm
         transit:
             respBody := encodeRequestVoteResp(outTerm, voteGranted)
-            respCode := 200
-            step := "finish"
+            step := "resp"
     }
 
-    transition finishIncomingRequestVote(body : String, code : Int) {
-        guard: step = "finish" & body = respBody & code = respCode
-        transit: step := "done"
+    transition endIncomingRequestVote(body : String, code : Int) {
+        guard:
+            & step = "resp"
+            & body = respBody
+            & code = 200
+        transit:
+            step := "done"
     }
 }
 
@@ -78,7 +71,10 @@ p-class OutgoingRequestVoteRPC {
 
     constructor startOutgoingRequestVote(
         peer : Node,
-        term : Int, candId : Int, lastIdx : Int, lastTerm : Int
+        term : Int,
+        candId : Int,
+        lastIdx : Int,
+        lastTerm : Int
     ) {
         transit:
             cPeer := peer
@@ -93,20 +89,26 @@ p-class OutgoingRequestVoteRPC {
             step := "beginHttp"
     }
 
-    transition beginHttpRV(peerUrl : String, reqBody : String) {
-        guard: step = "beginHttp" & peerUrl = cPeer.url & reqBody = cReqBody
-        transit: step := "awaitHttp"
+    transition beginHttpRequestVote(peerUrl : String, reqBody : String) {
+        guard:
+            & step = "beginHttp"
+            & peerUrl = cPeer.url
+            & reqBody = cReqBody
+        transit:
+            step := "awaitHttp"
     }
 
-    transition endHttpRV(respOut : String) {
-        guard: step = "awaitHttp"
+    transition endHttpRequestVote(respOut : String) {
+        guard:
+            step = "awaitHttp"
         transit:
             respBody := respOut
             step := "parse"
     }
 
     internal transition parseVote() {
-        guard: step = "parse"
+        guard:
+            step = "parse"
         transit:
             voteTerm := parseInt(fieldValue(split(respBody, "|")[0]))
             voteGrantedFlag := parseBool(fieldValue(split(respBody, "|")[1]))
@@ -119,11 +121,15 @@ p-class OutgoingRequestVoteRPC {
             & peerId = cPeer.id
             & term = voteTerm
             & granted = voteGrantedFlag
-        transit: step := "finishElection"
+        transit:
+            step := "finishElection"
     }
 
     transition finishRecordVote(peerId : Int) {
-        guard: step = "finishElection" & peerId = cPeer.id
-        transit: step := "done"
+        guard:
+            & step = "finishElection"
+            & peerId = cPeer.id
+        transit:
+            step := "done"
     }
 }

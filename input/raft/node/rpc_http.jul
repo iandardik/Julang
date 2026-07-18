@@ -6,9 +6,8 @@
  * Incoming RPCs are not globally mutexed: each request gets its own
  * RpcServer, so concurrent inbound handlers may overlap. Outgoing RPCs
  * are serialized through RpcClient (at most one outbound send/recv in
- * flight). An inbound and an outbound RPC may run at the same time.
- * Where serialization shows up, it just happens to be the case — it is
- * not required for correctness.
+ * flight). An inbound and an outbound RPC may run at the same time (this
+ * just happens to be the case — it is not required for correctness).
  */
 
 p-class RpcServer {
@@ -26,67 +25,66 @@ p-class RpcServer {
             reqBody := req.body
             respBody := ""
             respCode := 500
-            step := if (req.path = "raft/requestVote") {
-                "startRV"
-            } else {
-                if (req.path = "raft/appendEntries") {
-                    "startAE"
-                } else {
-                    if (req.path = "client/append") {
-                        "startCA"
-                    } else {
-                        if (req.path = "client/get") { "startCG" } else { "bad" }
-                    }
-                }
+            step := when (req.path) {
+                "raft/requestVote" -> "beginRequestVote"
+                "raft/appendEntries" -> "beginAppendEntries"
+                "client/append" -> "beginClientAppendRequest"
+                "client/get" -> "beginClientGetRequest"
+                else -> "bad"
             }
     }
 
-    transition startIncomingRequestVote(req : HttpServerRequest) {
-        guard: step = "startRV" & req = httpReq
-        transit: step := "awaitRV"
+    session transition sendResponse(resp : HttpServerResponse) {
+        guard: step = "resp" & resp = HttpServerResponse { body := respBody, code := respCode }
+        transit: step := "done"
     }
 
-    transition startIncomingAppendEntries(req : HttpServerRequest) {
-        guard: step = "startAE" & req = httpReq
-        transit: step := "awaitAE"
+    transition beginIncomingRequestVote(req : HttpServerRequest) {
+        guard: step = "beginRequestVote" & req = httpReq
+        transit: step := "awaitRequestVote"
     }
 
-    transition startIncomingClientAppend(req : HttpServerRequest) {
-        guard: step = "startCA" & req = httpReq
-        transit: step := "awaitCA"
-    }
-
-    transition startIncomingClientGet(req : HttpServerRequest) {
-        guard: step = "startCG" & req = httpReq
-        transit: step := "awaitCG"
-    }
-
-    transition finishIncomingRequestVote(body : String, code : Int) {
-        guard: step = "awaitRV"
+    transition endIncomingRequestVote(body : String, code : Int) {
+        guard: step = "awaitRequestVote"
         transit:
             respBody := body
             respCode := code
             step := "resp"
     }
 
-    transition finishIncomingAppendEntries(body : String, code : Int) {
-        guard: step = "awaitAE"
+    transition beginIncomingAppendEntries(req : HttpServerRequest) {
+        guard: step = "beginAppendEntries" & req = httpReq
+        transit: step := "awaitAppendEntries"
+    }
+
+    transition endIncomingAppendEntries(body : String, code : Int) {
+        guard: step = "awaitAppendEntries"
         transit:
             respBody := body
             respCode := code
             step := "resp"
     }
 
-    transition finishIncomingClientAppend(body : String, code : Int) {
-        guard: step = "awaitCA"
+    transition beginIncomingClientAppendRequest(req : HttpServerRequest) {
+        guard: step = "beginClientAppendRequest" & req = httpReq
+        transit: step := "awaitClientAppendRequest"
+    }
+
+    transition endIncomingClientAppendRequest(body : String, code : Int) {
+        guard: step = "awaitClientAppendRequest"
         transit:
             respBody := body
             respCode := code
             step := "resp"
     }
 
-    transition finishIncomingClientGet(body : String, code : Int) {
-        guard: step = "awaitCG"
+    transition beginIncomingClientGetRequest(req : HttpServerRequest) {
+        guard: step = "beginClientGetRequest" & req = httpReq
+        transit: step := "awaitClientGetRequest"
+    }
+
+    transition endIncomingClientGetRequest(body : String, code : Int) {
+        guard: step = "awaitClientGetRequest"
         transit:
             respBody := body
             respCode := code
@@ -99,11 +97,6 @@ p-class RpcServer {
             respBody := "NOT_FOUND"
             respCode := 404
             step := "resp"
-    }
-
-    session transition sendResponse(resp : HttpServerResponse) {
-        guard: step = "resp" & resp = HttpServerResponse { body := respBody, code := respCode }
-        transit: step := "done"
     }
 }
 
@@ -121,48 +114,48 @@ p-class RpcClient {
             respBody := ""
     }
 
-    transition beginHttpRV(peerUrl : String, reqBody : String) {
+    transition beginHttpRequestVote(peerUrl : String, reqBody : String) {
         guard: step = "idle"
         transit:
             url := peerUrl
             body := reqBody
-            step := "sendRV"
+            step := "sendRequestVote"
     }
 
-    transition beginHttpAE(peerUrl : String, reqBody : String) {
+    transition endHttpRequestVote(respOut : String) {
+        guard: step = "endRequestVote" & respOut = respBody
+        transit: step := "idle"
+    }
+
+    transition beginHttpAppendEntries(peerUrl : String, reqBody : String) {
         guard: step = "idle"
         transit:
             url := peerUrl
             body := reqBody
-            step := "sendAE"
+            step := "sendAppendEntries"
+    }
+
+    transition endHttpAppendEntries(respOut : String) {
+        guard: step = "endAppendEntries" & respOut = respBody
+        transit: step := "idle"
     }
 
     session transition sendRequest(req : HttpClientRequest) {
         guard:
-            | (step = "sendRV" & req = HttpClientRequest {
+            | (step = "sendRequestVote" & req = HttpClientRequest {
                 url := url + "/raft/requestVote", method := "POST", body := body
             })
-            | (step = "sendAE" & req = HttpClientRequest {
+            | (step = "sendAppendEntries" & req = HttpClientRequest {
                 url := url + "/raft/appendEntries", method := "POST", body := body
             })
         transit:
-            step := if (step = "sendRV") { "recvRV" } else { "recvAE" }
+            step := if (step = "sendRequestVote") { "recvRequestVote" } else { "recvAppendEntries" }
     }
 
     session transition receiveResponse(resp : HttpClientResponse) {
-        guard: step = "recvRV" | step = "recvAE"
+        guard: step = "recvRequestVote" | step = "recvAppendEntries"
         transit:
             respBody := resp.body
-            step := if (step = "recvRV") { "endRV" } else { "endAE" }
-    }
-
-    transition endHttpRV(respOut : String) {
-        guard: step = "endRV" & respOut = respBody
-        transit: step := "idle"
-    }
-
-    transition endHttpAE(respOut : String) {
-        guard: step = "endAE" & respOut = respBody
-        transit: step := "idle"
+            step := if (step = "recvRequestVote") { "endRequestVote" } else { "endAppendEntries" }
     }
 }

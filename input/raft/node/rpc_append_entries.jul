@@ -26,7 +26,7 @@ p-class IncomingAppendEntriesRPC {
     var respBody : String
     var respCode : Int
 
-    constructor startIncomingAppendEntries(req : HttpServerRequest) {
+    constructor beginIncomingAppendEntries(req : HttpServerRequest) {
         transit:
             httpReq := req
             reqBody := req.body
@@ -43,7 +43,7 @@ p-class IncomingAppendEntriesRPC {
             step := "parse"
     }
 
-    internal transition parseAE() {
+    internal transition parseAppendEntries() {
         guard: step = "parse"
         transit:
             aeTerm := parseInt(fieldValue(split(reqBody, "|")[0]))
@@ -74,7 +74,7 @@ p-class IncomingAppendEntriesRPC {
             step := "finish"
     }
 
-    transition finishIncomingAppendEntries(body : String, code : Int) {
+    transition endIncomingAppendEntries(body : String, code : Int) {
         guard: step = "finish" & body = respBody & code = respCode
         transit: step := "done"
     }
@@ -102,19 +102,19 @@ p-class OutgoingAppendEntriesRPC {
             step := "beginHttp"
     }
 
-    transition beginHttpAE(peerUrl : String, reqBody : String) {
+    transition beginHttpAppendEntries(peerUrl : String, reqBody : String) {
         guard: step = "beginHttp" & peerUrl = cPeer.url & reqBody = cReqBody
         transit: step := "awaitHttp"
     }
 
-    transition endHttpAE(respOut : String) {
+    transition endHttpAppendEntries(respOut : String) {
         guard: step = "awaitHttp"
         transit:
             respBody := respOut
             step := "parse"
     }
 
-    internal transition parseAEResp() {
+    internal transition parseAppendEntriesResp() {
         guard: step = "parse"
         transit:
             respTerm := parseInt(fieldValue(split(respBody, "|")[0]))
@@ -135,7 +135,7 @@ p-class OutgoingAppendEntriesRPC {
         transit: step := "finishElection"
     }
 
-    /* Pairwise with HeartbeatDriver after Core has applied the AE response. */
+    /* Pairwise with HeartbeatDriver after Core has applied the AppendEntries response. */
     transition finishAppendEntriesResp(peerId : Int) {
         guard: step = "finishElection" & peerId = cPeer.id
         transit: step := "done"

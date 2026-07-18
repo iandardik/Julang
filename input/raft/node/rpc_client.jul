@@ -5,7 +5,7 @@ import node.lib.Node
  * Client command RPCs (append / get).
  *
  * One pclass for both commands so redirect stays coordinated with RaftCore + ClusterInfo.
- * Constructors keep the startIncomingClientAppend / startIncomingClientGet names.
+ * Constructors keep the beginIncomingClientAppendRequest / beginIncomingClientGetRequest names.
  */
 
 p-class IncomingClientRPC {
@@ -18,7 +18,7 @@ p-class IncomingClientRPC {
     var respCode : Int
     var redirLeaderId : Int
 
-    constructor startIncomingClientAppend(req : HttpServerRequest) {
+    constructor beginIncomingClientAppendRequest(req : HttpServerRequest) {
         transit:
             httpReq := req
             reqBody := req.body
@@ -27,10 +27,10 @@ p-class IncomingClientRPC {
             respBody := ""
             respCode := 500
             redirLeaderId := -1
-            step := "ca"
+            step := "clientAppendRequest"
     }
 
-    constructor startIncomingClientGet(req : HttpServerRequest) {
+    constructor beginIncomingClientGetRequest(req : HttpServerRequest) {
         transit:
             httpReq := req
             reqBody := req.body
@@ -39,36 +39,36 @@ p-class IncomingClientRPC {
             respBody := ""
             respCode := 500
             redirLeaderId := -1
-            step := "cg"
+            step := "clientGetRequest"
     }
 
-    transition clientAppend(value : String, ok : Boolean, idx : Int) {
-        guard: step = "ca" & value = reqBody
+    transition clientAppendRequest(value : String, ok : Boolean, idx : Int) {
+        guard: step = "clientAppendRequest" & value = reqBody
         transit:
             appendIdx := idx
-            step := if (ok) { "caOk" } else { "redir" }
+            step := if (ok) { "clientAppendRequestOk" } else { "redir" }
     }
 
     internal transition finishAppendOk() {
-        guard: step = "caOk"
+        guard: step = "clientAppendRequestOk"
         transit:
             respBody := "OK " + appendIdx
             respCode := 200
-            step := "finishCA"
+            step := "finishClientAppendRequest"
     }
 
     transition getSerializedStateMachine(serializedSM : String, isLeader : Boolean) {
-        guard: step = "cg"
+        guard: step = "clientGetRequest"
         transit:
             respBody := serializedSM
-            step := if (isLeader) { "cgOk" } else { "redir" }
+            step := if (isLeader) { "clientGetRequestOk" } else { "redir" }
     }
 
     internal transition finishGetOk() {
-        guard: step = "cgOk"
+        guard: step = "clientGetRequestOk"
         transit:
             respCode := 200
-            step := "finishCG"
+            step := "finishClientGetRequest"
     }
 
     transition getRedirectLeader(leaderIdOut : Int, hasLeader : Boolean) {
@@ -83,7 +83,7 @@ p-class IncomingClientRPC {
         transit:
             respBody := "LEADER " + node.url
             respCode := 303
-            step := if (kind = "append") { "finishCA" } else { "finishCG" }
+            step := if (kind = "append") { "finishClientAppendRequest" } else { "finishClientGetRequest" }
     }
 
     internal transition redirectNoLeader() {
@@ -91,16 +91,16 @@ p-class IncomingClientRPC {
         transit:
             respBody := "NO_LEADER"
             respCode := 503
-            step := if (kind = "append") { "finishCA" } else { "finishCG" }
+            step := if (kind = "append") { "finishClientAppendRequest" } else { "finishClientGetRequest" }
     }
 
-    transition finishIncomingClientAppend(body : String, code : Int) {
-        guard: step = "finishCA" & body = respBody & code = respCode
+    transition endIncomingClientAppendRequest(body : String, code : Int) {
+        guard: step = "finishClientAppendRequest" & body = respBody & code = respCode
         transit: step := "done"
     }
 
-    transition finishIncomingClientGet(body : String, code : Int) {
-        guard: step = "finishCG" & body = respBody & code = respCode
+    transition endIncomingClientGetRequest(body : String, code : Int) {
+        guard: step = "finishClientGetRequest" & body = respBody & code = respCode
         transit: step := "done"
     }
 }

@@ -68,17 +68,17 @@ p-class HeartbeatDriver {
         guard: step = "needMeta"
         transit:
             ae := data
-            step := "sendAE"
+            step := "sendAppendEntries"
     }
 
     transition startOutgoingAppendEntries(peer : Node, data : AppendEntriesData) {
-        guard: step = "sendAE" & peer = target & data = ae
-        transit: step := "awaitAE"
+        guard: step = "sendAppendEntries" & peer = target & data = ae
+        transit: step := "awaitAppendEntries"
     }
 
-    /* Pairwise with OutgoingAppendEntriesRPC after Core has applied the AE response. */
+    /* Pairwise with OutgoingAppendEntriesRPC after Core has applied the AppendEntries response. */
     transition finishAppendEntriesResp(peerId : Int) {
-        guard: step = "awaitAE" & peerId = target.id
+        guard: step = "awaitAppendEntries" & peerId = target.id
         transit: step := "pickTarget"
     }
 

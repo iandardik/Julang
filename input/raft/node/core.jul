@@ -4,7 +4,8 @@ import node.lib.AppendEntriesData
 import node.lib.entryValueAt
 
 /*
- * Local Raft state and Ongaro-style transitions for one node.
+ * Local Raft state for one node.
+ * RaftCore is a singleton--one RaftCore is expected to live on each node.
  * Peer URLs live in ClusterInfo; this core tracks leaderId for redirects.
  */
 
@@ -71,7 +72,7 @@ p-class RaftCore {
             electionEpoch := electionEpoch + 1
     }
 
-    transition clientAppend(value : String, ok : Boolean, idx : Int) {
+    transition clientAppendRequest(value : String, ok : Boolean, idx : Int) {
         guard:
             let (newLogLen : Int := length(log) + 1) {
                 | (state = "Leader" & ok & idx = newLogLen)

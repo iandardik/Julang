@@ -38,11 +38,4 @@ p-class ClusterInfo {
     service transition getSelf(node : Node) {
         guard: node = selfNode
     }
-
-    /* Nondeterministic: any peer other than self may be chosen. */
-    service transition chooseOtherPeer(peerId : Int, node : Node) {
-        guard:
-            peerId >= 0 & peerId < clusterSize & peerId ~= selfNode.id
-            & node = Node { id := peerId, url := urls[peerId] }
-    }
 }

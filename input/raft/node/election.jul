@@ -110,7 +110,7 @@ p-class ElectionDriver {
         guard: step = "peers" & id = curPeer
         transit:
             target := node
-            step := "sendRV"
+            step := "sendRequestVote"
     }
 
     transition startOutgoingRequestVote(
@@ -118,18 +118,18 @@ p-class ElectionDriver {
         term : Int, candId : Int, lastIdx : Int, lastTerm : Int
     ) {
         guard:
-            & step = "sendRV"
+            & step = "sendRequestVote"
             & peer = target
             & term = snapTerm
             & candId = snapCand
             & lastIdx = snapLastIdx
             & lastTerm = snapLastTerm
-        transit: step := "awaitRV"
+        transit: step := "awaitRequestVote"
     }
 
     /* Pairwise with OutgoingRequestVoteRPC after Core has recorded the vote. */
     transition finishRecordVote(peerId : Int) {
-        guard: step = "awaitRV" & peerId = curPeer
+        guard: step = "awaitRequestVote" & peerId = curPeer
         transit:
             curPeer := curPeer + 1
             step := "peers"
