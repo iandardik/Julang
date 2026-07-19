@@ -1,0 +1,31 @@
+o-class Peer {
+    id : Int
+    url : String
+}
+
+p-class Router {
+    var peer : Peer
+    var step : String
+
+    constructor initially(args : List<String>) {
+        transit:
+            peer := Peer { id := 0, url := "" }
+            step := "idle"
+    }
+
+    transition pick(peerArg : Peer) {
+        guard: peerArg.id >= 0 & peer.id >= 0
+        transit:
+            peer := peerArg
+            step := "have"
+    }
+
+    transition usePeer() {
+        guard: step = "have" & peer.id >= 0
+        transit: step := "done"
+    }
+}
+
+invariant Ok := all i : Int, Router[i].step ~= ""
+
+spec ObjFieldAccess := <true> Router[i : Int] <Ok>

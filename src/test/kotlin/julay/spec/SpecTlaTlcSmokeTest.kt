@@ -300,6 +300,51 @@ class SpecTlaTlcSmokeTest {
         }
     }
 
+    @Test
+    fun objFieldAccessEmitsDotNotUnderscore() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-objfield").toFile()
+        try {
+            val source = File("regression/input/spec/obj-field-access.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(
+                source.toPath(),
+                keepBuild = false,
+                targets = CompileTargets(compilePrograms = false, compileSpecs = true),
+            )
+            val tla = File("ObjFieldAccess.tla")
+            val cfg = File("ObjFieldAccess.cfg")
+            assertTrue(tla.exists(), "expected ObjFieldAccess.tla")
+            assertTrue(cfg.exists(), "expected ObjFieldAccess.cfg")
+            val tlaText = tla.readText()
+            assertTrue(
+                tlaText.contains("peerArg.id"),
+                "expected action-arg record field as peerArg.id;\n$tlaText",
+            )
+            assertTrue(
+                !tlaText.contains("peerArg_id"),
+                "action-arg field must not use underscore peerArg_id;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("peer[i].id"),
+                "expected parameterized state-var field as peer[i].id;\n$tlaText",
+            )
+            assertTrue(
+                !tlaText.contains("peer_id"),
+                "state-var field must not use underscore peer_id;\n$tlaText",
+            )
+            tla.copyTo(File(work, "ObjFieldAccess.tla"), overwrite = true)
+            cfg.copyTo(File(work, "ObjFieldAccess.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "ObjFieldAccess")
+        } finally {
+            work.deleteRecursively()
+            File("ObjFieldAccess.tla").delete()
+            File("ObjFieldAccess.cfg").delete()
+        }
+    }
+
     private fun assumeTlcPresent() {
         if (!TLC_JAR.isFile) {
             fail("TLC jar not found at ${TLC_JAR.path}")

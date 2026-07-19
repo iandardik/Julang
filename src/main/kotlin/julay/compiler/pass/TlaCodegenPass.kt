@@ -857,8 +857,26 @@ internal fun exprToTla(
             }
         }
         is FieldAccessExprNode -> {
-            val varName = expr.fieldPath.firstOrNull() ?: expr.baseSymbol
-            stateTlaName(expr.baseSymbol, varName, stateVarNames)
+            val base = expr.baseSymbol
+            val isObjectField = base in argNames || base in bareStateVars
+            val leafVarName = expr.fieldPath.singleOrNull()?.let { stateVarNames[base to it] }
+            if (!isObjectField && leafVarName != null) {
+                // Invariant / non-param Leaf.var
+                leafVarName
+            } else {
+                // Object field on arg or state var: base.field… (with indexing when needed)
+                val baseRendered = when {
+                    base in argNames -> base
+                    base in bareStateVars && leafCtx.size == 1 -> {
+                        val leaf = leafCtx.values.first()
+                        val v = stateTlaName(leaf.name, base, stateVarNames)
+                        if (self != null) "$v[$self]" else v
+                    }
+                    else -> base
+                }
+                if (expr.fieldPath.isEmpty()) baseRendered
+                else expr.fieldPath.fold(baseRendered) { acc, field -> "$acc.$field" }
+            }
         }
         is MemberAccessExprNode -> {
             val base = expr.baseExpr
