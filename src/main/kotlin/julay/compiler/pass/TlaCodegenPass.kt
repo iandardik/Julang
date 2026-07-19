@@ -63,8 +63,7 @@ fun tlaCodegenPass(
 
     val constants = linkedSetOf<String>()
     leaves.forEach { leaf ->
-        if (leaf.paramName != null) {
-            constants += leaf.paramName!!
+        if (leaf.paramType != null) {
             typeDomainConstant(leaf.paramType!!)?.let { name ->
                 // Int/Nat/Boolean/Real are provided by EXTENDS; only declare other domains (e.g. String).
                 if (name !in setOf("Int", "Nat", "Boolean", "Real")) {
@@ -101,32 +100,39 @@ fun tlaCodegenPass(
         collectIntLiteralsFromExpr(invNode.invariantFormula(), intModelValues)
     }
 
+    val reservedTlaIds = constants + setOf("Int", "Nat", "Boolean", "Real") +
+        actionArgNames(leaves, pclassNodes)
+    val stateVarNames = buildStateVarNames(leaves, pclassNodes, reservedTlaIds)
+
     val variables = mutableListOf<String>()
     val initParts = mutableListOf<String>()
     leaves.forEach { leaf ->
         val pc = pclassNodes[leaf.name] ?: return@forEach
-        val constructed = tlaVar(leaf.name, "constructed")
+        initParts += "\\* State variables for ${leaf.name}"
+        val constructed = stateTlaName(leaf.name, "constructed", stateVarNames)
         if (leaf.isParameterized) {
-            val i = leaf.paramName!!
+            val domain = typeDomainConstant(leaf.paramType!!) ?: leaf.paramType.toString()
+            val bareStateVars = pc.localDecls().filterIsInstance<VarNode>().map { it.name }.toSet()
+            val binder = indexBinderName(leaf, bareStateVars)
             variables += constructed
-            initParts += "/\\ $constructed = [x \\in $i |-> FALSE]"
+            initParts += "/\\ $constructed = [$binder \\in $domain |-> FALSE]"
             pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
-                val v = tlaVar(leaf.name, vn.name)
+                val v = stateTlaName(leaf.name, vn.name, stateVarNames)
                 variables += v
-                initParts += "/\\ $v = [x \\in $i |-> ${defaultTlaValue(safeType(vn))}]"
+                initParts += "/\\ $v = [$binder \\in $domain |-> ${defaultTlaValue(safeType(vn))}]"
             }
         } else {
             variables += constructed
             initParts += "/\\ $constructed = FALSE"
             pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
-                val v = tlaVar(leaf.name, vn.name)
+                val v = stateTlaName(leaf.name, vn.name, stateVarNames)
                 variables += v
                 initParts += "/\\ $v = ${defaultTlaValue(safeType(vn))}"
             }
         }
     }
 
-    val actions = buildTlaActions(leaves, pclassNodes, servicedActions)
+    val actions = buildTlaActions(leaves, pclassNodes, servicedActions, stateVarNames)
 
     val invDef = if (invNode != null) {
         val body = exprToTla(
@@ -136,6 +142,7 @@ fun tlaCodegenPass(
             self = null,
             bareStateVars = emptySet(),
             reservedNames = constants,
+            stateVarNames = stateVarNames,
         )
         "${invNode.name()} == $body"
     } else {
@@ -153,7 +160,9 @@ fun tlaCodegenPass(
         initParts += "/\\ dummy = 0"
     }
 
-    val actionDefs = actions.joinToString("\n\n") { it.def }
+    val actionDefs = actions.joinToString("\n\n") { action ->
+        if (action.comment != null) "\\* ${action.comment}\n${action.def}" else action.def
+    }
     val nextBody = if (actions.isEmpty()) {
         "FALSE"
     } else {
@@ -172,7 +181,13 @@ fun tlaCodegenPass(
         if (initParts.isEmpty()) {
             appendLine("  /\\ TRUE")
         } else {
-            initParts.forEach { appendLine("  $it") }
+            initParts.forEach { line ->
+                if (line.startsWith("\\*")) {
+                    appendLine("  $line")
+                } else {
+                    appendLine("  $line")
+                }
+            }
         }
         appendLine()
         if (actionDefs.isNotEmpty()) {
@@ -217,8 +232,10 @@ fun tlaCodegenPass(
 internal data class TlaAction(
     val name: String,
     val def: String,
-    /** Used action args as (name, TLA domain), in declaration order. */
+    /** Index binders (first) then used action args, as (name, TLA domain). */
     val params: List<Pair<String, String>> = emptyList(),
+    /** Present when [name] was renamed for disambiguation. */
+    val comment: String? = null,
 ) {
     fun nextDisjunct(): String {
         if (params.isEmpty()) return name
@@ -246,6 +263,7 @@ private fun buildTlaActions(
     leaves: List<SpecLeaf>,
     pclasses: Map<String, ProcClassNode>,
     servicedActions: Set<String>,
+    stateVarNames: Map<Pair<String, String>, String>,
 ): List<TlaAction> {
     val offers = mutableListOf<TlaActionOffer>()
     leaves.forEach { leaf ->
@@ -263,7 +281,7 @@ private fun buildTlaActions(
         }
     }
 
-    val allVars = allTlaVars(leaves, pclasses)
+    val allVars = allTlaVars(leaves, pclasses, stateVarNames)
     val stateVarsByLeaf = leaves.associate { leaf ->
         leaf.name to (
             pclasses[leaf.name]
@@ -277,6 +295,12 @@ private fun buildTlaActions(
     val result = mutableListOf<TlaAction>()
     val byName = offers.groupBy { it.decl.action.name }
 
+    fun emit(
+        name: String,
+        offerList: List<TlaActionOffer>,
+        comment: String? = null,
+    ) = emitConjoined(name, offerList, allVars, stateVarsByLeaf, stateVarNames, comment)
+
     byName.forEach { (actionName, group) ->
         val services = group.filter { it.role == TSAction.SyncRole.Service }
         val consumers = group.filter { it.role == TSAction.SyncRole.Consumer }
@@ -286,53 +310,99 @@ private fun buildTlaActions(
 
         if (services.size == 1 && consumers.isNotEmpty()) {
             val svc = services[0]
+            val needDisambiguate = consumers.size > 1
             consumers.forEach { cons ->
-                val name = "${actionName}_${svc.leaf.name}_${cons.leaf.name}"
-                result += emitConjoined(name, listOf(svc, cons), allVars, stateVarsByLeaf)
+                val name: String
+                val comment: String?
+                if (needDisambiguate) {
+                    name = "${actionName}_${svc.leaf.name}_${cons.leaf.name}"
+                    comment =
+                        "$actionName action where ${svc.leaf.name} is the servicer and ${cons.leaf.name} is the consumer"
+                } else {
+                    name = actionName
+                    comment = null
+                }
+                result += emit(name, listOf(svc, cons), comment)
             }
             return@forEach
         }
 
         // 1 constructor + 1 default transition → one hybrid shared action
         if (constructors.size == 1 && defaults.size == 1) {
-            result += emitConjoined(
-                actionName,
-                listOf(defaults[0], constructors[0]),
-                allVars,
-                stateVarsByLeaf,
-            )
+            result += emit(actionName, listOf(defaults[0], constructors[0]))
             return@forEach
         }
 
         // Solo constructors (any name, including initially) — valid leaf entry
+        val disambiguateCtors = constructors.size > 1
         constructors.forEach { offer ->
-            val name = if (offer.decl.action.name == "initially") {
-                "${offer.leaf.name}_initially"
+            val name: String
+            val comment: String?
+            if (disambiguateCtors) {
+                name = if (offer.decl.action.name == "initially") {
+                    "${offer.leaf.name}_initially"
+                } else {
+                    "${actionName}_${offer.leaf.name}"
+                }
+                comment = if (offer.decl.action.name == "initially") {
+                    "initially constructor on ${offer.leaf.name}"
+                } else {
+                    "$actionName action on ${offer.leaf.name}"
+                }
             } else {
-                "${offer.decl.action.name}_${offer.leaf.name}"
+                name = actionName
+                comment = null
             }
-            result += emitConjoined(name, listOf(offer), allVars, stateVarsByLeaf)
+            result += emit(name, listOf(offer), comment)
         }
 
+        val disambiguateInternals = internals.size > 1
         internals.forEach { offer ->
-            result += emitConjoined("${actionName}_${offer.leaf.name}", listOf(offer), allVars, stateVarsByLeaf)
+            val name: String
+            val comment: String?
+            if (disambiguateInternals) {
+                name = "${actionName}_${offer.leaf.name}"
+                comment = "$actionName action on ${offer.leaf.name}"
+            } else {
+                name = actionName
+                comment = null
+            }
+            result += emit(name, listOf(offer), comment)
         }
 
         when {
-            defaults.size >= 2 ->
-                result += emitConjoined(actionName, defaults, allVars, stateVarsByLeaf)
-            defaults.size == 1 ->
-                result += emitConjoined(actionName, defaults, allVars, stateVarsByLeaf)
+            defaults.size >= 2 -> result += emit(actionName, defaults)
+            defaults.size == 1 -> result += emit(actionName, defaults)
         }
 
         if (services.isNotEmpty() && consumers.isEmpty()) {
+            val disambiguate = services.size > 1
             services.forEach { svc ->
-                result += emitConjoined("${actionName}_${svc.leaf.name}", listOf(svc), allVars, stateVarsByLeaf)
+                val name: String
+                val comment: String?
+                if (disambiguate) {
+                    name = "${actionName}_${svc.leaf.name}"
+                    comment = "$actionName action on ${svc.leaf.name}"
+                } else {
+                    name = actionName
+                    comment = null
+                }
+                result += emit(name, listOf(svc), comment)
             }
         }
         if (consumers.isNotEmpty() && services.isEmpty()) {
+            val disambiguate = consumers.size > 1
             consumers.forEach { cons ->
-                result += emitConjoined("${actionName}_${cons.leaf.name}", listOf(cons), allVars, stateVarsByLeaf)
+                val name: String
+                val comment: String?
+                if (disambiguate) {
+                    name = "${actionName}_${cons.leaf.name}"
+                    comment = "$actionName action on ${cons.leaf.name}"
+                } else {
+                    name = actionName
+                    comment = null
+                }
+                result += emit(name, listOf(cons), comment)
             }
         }
     }
@@ -340,11 +410,17 @@ private fun buildTlaActions(
     return result.distinctBy { it.name }
 }
 
-private fun allTlaVars(leaves: List<SpecLeaf>, pclasses: Map<String, ProcClassNode>): List<String> =
+private fun allTlaVars(
+    leaves: List<SpecLeaf>,
+    pclasses: Map<String, ProcClassNode>,
+    stateVarNames: Map<Pair<String, String>, String>,
+): List<String> =
     leaves.flatMap { leaf ->
         val pc = pclasses[leaf.name] ?: return@flatMap emptyList()
-        listOf(tlaVar(leaf.name, "constructed")) +
-            pc.localDecls().filterIsInstance<VarNode>().map { tlaVar(leaf.name, it.name) }
+        listOf(stateTlaName(leaf.name, "constructed", stateVarNames)) +
+            pc.localDecls().filterIsInstance<VarNode>().map {
+                stateTlaName(leaf.name, it.name, stateVarNames)
+            }
     }
 
 private fun emitConjoined(
@@ -352,17 +428,42 @@ private fun emitConjoined(
     offers: List<TlaActionOffer>,
     allVars: List<String>,
     stateVarsByLeaf: Map<String, Set<String>>,
+    stateVarNames: Map<Pair<String, String>, String>,
+    comment: String? = null,
 ): TlaAction {
     val parts = mutableListOf<String>()
     val changed = mutableSetOf<String>()
     val argParams = mutableListOf<Pair<String, String>>()
 
-    // Instance binders for parameterized leaves in this action: leaf.paramName is the set CONSTANT.
-    // Use a fresh self_<leaf> variable as the element.
-    val selfBinders = linkedMapOf<String, String>() // leafName -> selfVar
+    // Collect action arg names that appear in this conjoined action (for binder clash checks).
+    val usedArgNames = mutableSetOf<String>()
+    offers.forEach { offer ->
+        fun refsArg(argName: String): Boolean {
+            return offer.decl.guards.any { exprReferencesSymbol(it, argName) } ||
+                offer.decl.transits.any { update ->
+                    when (update) {
+                        is TransitUpdate.Assign -> exprReferencesSymbol(update.expr, argName)
+                        is TransitUpdate.MapPut ->
+                            exprReferencesSymbol(update.key, argName) || exprReferencesSymbol(update.value, argName)
+                    }
+                }
+        }
+        offer.decl.action.args.filter { refsArg(it.name) }.forEach { usedArgNames += it.name }
+    }
+
+    // Instance binders for parameterized leaves: paramName indexes into the type domain.
+    val selfBinders = linkedMapOf<String, String>() // leafName -> binder
+    val reserved = usedArgNames.toMutableSet()
     offers.forEach { offer ->
         if (offer.leaf.isParameterized) {
-            selfBinders[offer.leaf.name] = "self_${offer.leaf.name}"
+            reserved += stateVarsByLeaf[offer.leaf.name].orEmpty()
+        }
+    }
+    offers.forEach { offer ->
+        if (offer.leaf.isParameterized) {
+            val binder = indexBinderName(offer.leaf, reserved)
+            selfBinders[offer.leaf.name] = binder
+            reserved += binder
         }
     }
 
@@ -370,7 +471,7 @@ private fun emitConjoined(
 
     // Participant-only constructed enabling (no constraints on non-offering leaves).
     offers.forEach { offer ->
-        val c = tlaVar(offer.leaf.name, "constructed")
+        val c = stateTlaName(offer.leaf.name, "constructed", stateVarNames)
         val self = selfOf(offer.leaf)
         if (offer.isConstructor) {
             parts += if (self != null) "/\\ ~$c[$self]" else "/\\ ~$c"
@@ -385,13 +486,13 @@ private fun emitConjoined(
         val leafCtx = mapOf(offer.leaf.name to offer.leaf)
 
         // Only include args that appear in guards/transits (skip unused initially args).
-        fun refsArg(name: String): Boolean {
-            return offer.decl.guards.any { exprReferencesSymbol(it, name) } ||
+        fun refsArg(argName: String): Boolean {
+            return offer.decl.guards.any { exprReferencesSymbol(it, argName) } ||
                 offer.decl.transits.any { update ->
                     when (update) {
-                        is TransitUpdate.Assign -> exprReferencesSymbol(update.expr, name)
+                        is TransitUpdate.Assign -> exprReferencesSymbol(update.expr, argName)
                         is TransitUpdate.MapPut ->
-                            exprReferencesSymbol(update.key, name) || exprReferencesSymbol(update.value, name)
+                            exprReferencesSymbol(update.key, argName) || exprReferencesSymbol(update.value, argName)
                     }
                 }
         }
@@ -400,18 +501,23 @@ private fun emitConjoined(
         }
 
         offer.decl.guards.forEach { g ->
-            parts += "/\\ ${exprToTla(g, leafCtx, argNames, self, bareStateVars = stateVarsByLeaf[offer.leaf.name].orEmpty())}"
+            parts += "/\\ ${exprToTla(
+                g, leafCtx, argNames, self,
+                bareStateVars = stateVarsByLeaf[offer.leaf.name].orEmpty(),
+                stateVarNames = stateVarNames,
+            )}"
         }
 
         offer.decl.transits.forEach { update ->
             when (update) {
                 is TransitUpdate.Assign -> {
                     val root = update.key.substringBefore('.')
-                    val v = tlaVar(offer.leaf.name, root)
+                    val v = stateTlaName(offer.leaf.name, root, stateVarNames)
                     changed += v
                     val rhs = exprToTla(
                         update.expr, leafCtx, argNames, self,
                         bareStateVars = stateVarsByLeaf[offer.leaf.name].orEmpty(),
+                        stateVarNames = stateVarNames,
                     )
                     parts += if (self != null) {
                         "/\\ $v' = [$v EXCEPT ![$self] = $rhs]"
@@ -420,11 +526,11 @@ private fun emitConjoined(
                     }
                 }
                 is TransitUpdate.MapPut -> {
-                    val v = tlaVar(offer.leaf.name, update.mapVar)
+                    val v = stateTlaName(offer.leaf.name, update.mapVar, stateVarNames)
                     changed += v
                     val bare = stateVarsByLeaf[offer.leaf.name].orEmpty()
-                    val k = exprToTla(update.key, leafCtx, argNames, self, bareStateVars = bare)
-                    val vv = exprToTla(update.value, leafCtx, argNames, self, bareStateVars = bare)
+                    val k = exprToTla(update.key, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames)
+                    val vv = exprToTla(update.value, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames)
                     parts += if (self != null) {
                         "/\\ $v' = [$v EXCEPT ![$self] = [@ EXCEPT ![$k] = $vv]]"
                     } else {
@@ -435,7 +541,7 @@ private fun emitConjoined(
         }
 
         if (offer.isConstructor) {
-            val c = tlaVar(offer.leaf.name, "constructed")
+            val c = stateTlaName(offer.leaf.name, "constructed", stateVarNames)
             changed += c
             parts += if (self != null) {
                 "/\\ $c' = [$c EXCEPT ![$self] = TRUE]"
@@ -450,21 +556,74 @@ private fun emitConjoined(
         parts += "/\\ UNCHANGED <<${unchanged.joinToString(", ")}>>"
     }
 
-    var body = parts.joinToString("\n  ")
-    selfBinders.forEach { (leafName, selfVar) ->
-        val setName = offers.first { it.leaf.name == leafName }.leaf.paramName!!
-        body = "\\E $selfVar \\in $setName :\n  $body"
+    val body = parts.joinToString("\n  ")
+    val indexParams = selfBinders.map { (leafName, binder) ->
+        val leaf = offers.first { it.leaf.name == leafName }.leaf
+        val domain = typeDomainConstant(leaf.paramType!!) ?: leaf.paramType.toString()
+        binder to domain
     }
-
-    val params = argParams.distinctBy { it.first }
+    val params = (indexParams + argParams).distinctBy { it.first }
     val signature = if (params.isEmpty()) {
         name
     } else {
         "$name(${params.joinToString(", ") { it.first }})"
     }
-    return TlaAction(name, "$signature ==\n  $body", params)
+    return TlaAction(name, "$signature ==\n  $body", params, comment)
 }
 
+/** Prefer [SpecLeaf.paramName] as the TLA binder; append `_<leaf>` on name clashes. */
+internal fun indexBinderName(leaf: SpecLeaf, reserved: Set<String>): String {
+    val base = leaf.paramName!!
+    return if (base !in reserved) base else "${base}_${leaf.name}"
+}
+
+/**
+ * Map (leafName, julayVarName) → TLA identifier.
+ * `constructed` is always `Leaf_constructed`; other vars are bare unless duplicated or reserved.
+ */
+internal fun buildStateVarNames(
+    leaves: List<SpecLeaf>,
+    pclasses: Map<String, ProcClassNode>,
+    reservedIds: Set<String>,
+): Map<Pair<String, String>, String> {
+    val ownersByVar = linkedMapOf<String, MutableList<String>>()
+    leaves.forEach { leaf ->
+        val pc = pclasses[leaf.name] ?: return@forEach
+        pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
+            ownersByVar.getOrPut(vn.name) { mutableListOf() }.add(leaf.name)
+        }
+    }
+    val out = linkedMapOf<Pair<String, String>, String>()
+    leaves.forEach { leaf ->
+        out[leaf.name to "constructed"] = "${leaf.name}_constructed"
+        val pc = pclasses[leaf.name] ?: return@forEach
+        pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
+            val clash = (ownersByVar[vn.name]?.size ?: 0) > 1 || vn.name in reservedIds
+            out[leaf.name to vn.name] = if (clash) "${leaf.name}_${vn.name}" else vn.name
+        }
+    }
+    return out
+}
+
+/** Action argument names across leaves — reserved so bare state vars do not shadow params. */
+internal fun actionArgNames(
+    leaves: List<SpecLeaf>,
+    pclasses: Map<String, ProcClassNode>,
+): Set<String> {
+    val names = linkedSetOf<String>()
+    leaves.forEach { leaf ->
+        val pc = pclasses[leaf.name] ?: return@forEach
+        (pc.localDecls().flatMap { it.constructors() } + pc.localDecls().flatMap { it.transitions() })
+            .forEach { action -> action.action.args.forEach { names += it.name } }
+    }
+    return names
+}
+
+internal fun stateTlaName(
+    leaf: String,
+    varName: String,
+    names: Map<Pair<String, String>, String>,
+): String = names[leaf to varName] ?: tlaVar(leaf, varName)
 
 internal fun tlaVar(leaf: String, varName: String): String = "${leaf}_$varName"
 
@@ -670,6 +829,7 @@ private fun tlaStringCoerce(expr: ExprNode, rendered: String): String =
  * @param self index variable for the current parameterized leaf, or null
  * @param bareStateVars state vars that may appear unqualified in action guards/transits
  * @param reservedNames CONSTANT names; quantifier binders that clash are renamed
+ * @param stateVarNames (leaf, julayVar) → TLA identifier
  */
 internal fun exprToTla(
     expr: ExprNode,
@@ -678,8 +838,10 @@ internal fun exprToTla(
     self: String?,
     bareStateVars: Set<String> = emptySet(),
     reservedNames: Set<String> = emptySet(),
+    stateVarNames: Map<Pair<String, String>, String> = emptyMap(),
 ): String {
-    fun rec(e: ExprNode): String = exprToTla(e, leafCtx, argNames, self, bareStateVars, reservedNames)
+    fun rec(e: ExprNode): String =
+        exprToTla(e, leafCtx, argNames, self, bareStateVars, reservedNames, stateVarNames)
     return when (expr) {
         is LiteralValueExprNode -> literalToTla(expr)
         is SymbolValueExprNode -> {
@@ -688,7 +850,7 @@ internal fun exprToTla(
                 sym in argNames -> sym
                 sym in bareStateVars && leafCtx.size == 1 -> {
                     val leaf = leafCtx.values.first()
-                    val v = tlaVar(leaf.name, sym)
+                    val v = stateTlaName(leaf.name, sym, stateVarNames)
                     if (self != null) "$v[$self]" else v
                 }
                 else -> sym
@@ -696,7 +858,7 @@ internal fun exprToTla(
         }
         is FieldAccessExprNode -> {
             val varName = expr.fieldPath.firstOrNull() ?: expr.baseSymbol
-            tlaVar(expr.baseSymbol, varName)
+            stateTlaName(expr.baseSymbol, varName, stateVarNames)
         }
         is FieldAccessOnExprNode -> {
             val base = rec(expr.baseExpr)
@@ -713,7 +875,7 @@ internal fun exprToTla(
         is IndexExprNode -> {
             val base = expr.base
             if (base is FieldAccessExprNode) {
-                val v = tlaVar(base.baseSymbol, base.fieldPath.first())
+                val v = stateTlaName(base.baseSymbol, base.fieldPath.first(), stateVarNames)
                 "$v[${rec(expr.index)}]"
             } else {
                 "${rec(base)}[${rec(expr.index)}]"

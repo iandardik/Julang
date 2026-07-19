@@ -59,6 +59,40 @@ class SpecTlaTlcSmokeTest {
             val cfg = File("ParamCounters.cfg")
             assertTrue(tla.exists(), "expected ParamCounters.tla")
             assertTrue(cfg.exists(), "expected ParamCounters.cfg")
+            val tlaText = tla.readText()
+            assertTrue(
+                tlaText.contains("CONSTANT String"),
+                "expected String domain as CONSTANT;\n$tlaText",
+            )
+            assertTrue(
+                !tlaText.contains("CONSTANT i") && !tlaText.contains("CONSTANT i,"),
+                "index name i should be a binder, not a CONSTANT;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("[i \\in String |->"),
+                "expected Init to index Counter over String with binder i;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("\\* State variables for Counter"),
+                "expected Init comment for Counter state;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("Counter_constructed") && tlaText.contains("/\\ n = [i \\in String |->"),
+                "expected bare state var n with Leaf_constructed;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("\\E i \\in String :"),
+                "expected Next to quantify binder i over String;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("bump(i) =="),
+                "expected bump(i) operator with index as parameter;\n$tlaText",
+            )
+            val bumpDef = tlaText.substringAfter("bump(i) ==").substringBefore("\n\n")
+            assertTrue(
+                !bumpDef.trimStart().startsWith("\\E i \\in String :"),
+                "index quantification should be in Next, not inside bump;\n$tlaText",
+            )
             tla.copyTo(File(work, "ParamCounters.tla"), overwrite = true)
             cfg.copyTo(File(work, "ParamCounters.cfg"), overwrite = true)
             tla.delete()
@@ -89,29 +123,61 @@ class SpecTlaTlcSmokeTest {
             assertTrue(cfg.exists(), "expected SpawnWorker.cfg")
             val tlaText = tla.readText()
             assertTrue(
-                tlaText.contains("spawnWorker(id) =="),
-                "expected spawnWorker(id) operator;\n$tlaText",
+                tlaText.contains("spawnWorker(i, id) =="),
+                "expected spawnWorker(i, id) operator with index first;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("~Worker_constructed[self_Worker]"),
+                tlaText.contains("~Worker_constructed[i]"),
                 "expected parameterized ctor enabling on Worker for spawnWorker;\n$tlaText",
             )
+            val spawnDef = tlaText.substringAfter("spawnWorker(i, id) ==").substringBefore("\n\n")
             assertTrue(
-                tlaText.contains("Worker_constructed' = [Worker_constructed EXCEPT ![self_Worker] = TRUE]"),
+                !spawnDef.trimStart().startsWith("\\E i \\in Int :"),
+                "index quantification should be in Next, not inside spawnWorker;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("Worker_constructed' = [Worker_constructed EXCEPT ![i] = TRUE]"),
                 "expected Worker_constructed' flip in spawnWorker;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("\\E id \\in Int : spawnWorker(id)"),
-                "expected Next to quantify spawnWorker args;\n$tlaText",
+                tlaText.contains("\\E i \\in Int : \\E id \\in Int : spawnWorker(i, id)"),
+                "expected Next to quantify index then args;\n$tlaText",
             )
-            val workBody = tlaText.substringAfter("work ==").substringBefore("\n\n")
             assertTrue(
-                workBody.contains("/\\ Worker_constructed[self_Worker]"),
-                "work should require Worker_constructed[self_Worker];\n$tlaText",
+                tlaText.contains("work(i) =="),
+                "expected work(i) operator;\n$tlaText",
+            )
+            val workBody = tlaText.substringAfter("work(i) ==").substringBefore("\n\n")
+            assertTrue(
+                workBody.contains("/\\ Worker_constructed[i]"),
+                "work should require Worker_constructed[i];\n$tlaText",
             )
             assertTrue(
                 workBody.lines().none { it.trim() == "/\\ Server_constructed" },
                 "work should not require Server_constructed;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("\\* State variables for Server") &&
+                    tlaText.contains("\\* State variables for Worker"),
+                "expected Init state-var comments;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("Worker_id") && tlaText.contains("/\\ ready = FALSE"),
+                "id clashes with action arg so stays Worker_id; ready is bare;\n$tlaText",
+            )
+            assertTrue(
+                workBody.contains("/\\ (Worker_id[i] >= 0)"),
+                "work guard should use Worker_id[i];\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("\\* initially constructor on Server") &&
+                    tlaText.contains("Server_initially =="),
+                "expected disambiguation comment for Server initially;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("\\* initially constructor on Worker") &&
+                    tlaText.contains("Worker_initially(i) =="),
+                "expected disambiguation comment for Worker initially;\n$tlaText",
             )
             tla.copyTo(File(work, "SpawnWorker.tla"), overwrite = true)
             cfg.copyTo(File(work, "SpawnWorker.cfg"), overwrite = true)
@@ -143,16 +209,24 @@ class SpecTlaTlcSmokeTest {
             assertTrue(cfg.exists(), "expected ComposedSystem.cfg")
             val tlaText = tla.readText()
             assertTrue(
-                tlaText.contains("Counter_n") && tlaText.contains("Counter_constructed"),
-                "expected expanded Counter state in TLA;\n$tlaText",
+                tlaText.contains("Counter_constructed") &&
+                    tlaText.contains("\\* State variables for Counter") &&
+                    tlaText.contains("/\\ n = 0"),
+                "expected Counter_constructed and bare n;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("Env_constructed"),
-                "expected expanded Env state in TLA;\n$tlaText",
+                tlaText.contains("Env_constructed") &&
+                    tlaText.contains("\\* State variables for Env") &&
+                    tlaText.contains("/\\ ready = FALSE"),
+                "expected Env_constructed and bare ready;\n$tlaText",
             )
             assertTrue(
                 !tlaText.contains("System_constructed"),
                 "program alias System should not appear as a leaf;\n$tlaText",
+            )
+            assertTrue(
+                !tlaText.contains("Counter_n") && !tlaText.contains("Env_ready"),
+                "unique state vars should not be leaf-prefixed;\n$tlaText",
             )
             tla.copyTo(File(work, "ComposedSystem.tla"), overwrite = true)
             cfg.copyTo(File(work, "ComposedSystem.cfg"), overwrite = true)
@@ -185,16 +259,25 @@ class SpecTlaTlcSmokeTest {
             assertTrue(cfg.exists(), "expected NestedSpec.cfg")
             val tlaText = tla.readText()
             assertTrue(
-                tlaText.contains("Counter_constructed") && tlaText.contains("Counter_n"),
-                "expected Counter state in TLA;\n$tlaText",
+                tlaText.contains("Counter_constructed") &&
+                    tlaText.contains("\\* State variables for Counter") &&
+                    !tlaText.contains("Counter_n"),
+                "expected Counter_constructed with bare n;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("Handler_constructed") && tlaText.contains("Handler_step"),
-                "expected nested HandlerSpec expanded to Handler;\n$tlaText",
+                tlaText.contains("Handler_constructed") &&
+                    tlaText.contains("\\* State variables for Handler") &&
+                    !tlaText.contains("Handler_step") &&
+                    tlaText.contains("step"),
+                "expected Handler_constructed with bare step;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("CONSTANT t") || tlaText.contains("CONSTANT t,"),
-                "expected parameter t from Handler[t : Int];\n$tlaText",
+                !tlaText.contains("CONSTANT t") && !tlaText.contains("CONSTANT t,"),
+                "parameter name t should be a binder, not a CONSTANT;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("[t \\in Int |->"),
+                "expected Init to index Handler over Int with binder t;\n$tlaText",
             )
             assertTrue(
                 !tlaText.contains("HandlerSpec_constructed"),
