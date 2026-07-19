@@ -23,8 +23,13 @@ fun compileJulFile(
     extraLibraryPaths: List<Path> = emptyList(),
     compilerJar: Path = resolveCompilerJar(),
     targets: CompileTargets = CompileTargets(),
+    allowUnindexedSpec: Boolean = false,
 ) {
-    val checked = prepareCheckedCompilation(source, extraLibraryPaths) ?: return
+    val checked = prepareCheckedCompilation(
+        source,
+        extraLibraryPaths,
+        allowUnindexedSpec = allowUnindexedSpec,
+    ) ?: return
     val (unit, ast, procDecls, programs, librariesInUse) = checked
 
     val specs = procDecls.filter { it.type == ProcDeclType.Spec }

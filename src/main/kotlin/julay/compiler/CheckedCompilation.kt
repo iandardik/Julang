@@ -24,10 +24,12 @@ data class CheckedCompilation(
 
 /**
  * Load, resolve procs, and type-check. Returns null if load or type errors were printed.
+ * Spec indexing warnings are printed to stderr even on success.
  */
 fun prepareCheckedCompilation(
     source: Path,
     extraLibraryPaths: List<Path> = emptyList(),
+    allowUnindexedSpec: Boolean = false,
 ): CheckedCompilation? {
     val (unit, loadErrors) = loadCompilationUnit(source, extraLibraryPaths)
     if (loadErrors.isNotEmpty()) {
@@ -40,9 +42,10 @@ fun prepareCheckedCompilation(
     val procDecls = ast.resolvedProcPass(unit)
     val programs = procDecls.filter { it.type == ProcDeclType.Program }
 
-    val typeErrors = ast.typePass(unit)
-    if (typeErrors.isNotEmpty()) {
-        typeErrors.forEach { println(it) }
+    val typeResult = ast.typePass(unit, allowUnindexedSpec)
+    typeResult.warnings.forEach { System.err.println(it) }
+    if (typeResult.errors.isNotEmpty()) {
+        typeResult.errors.forEach { println(it) }
         println("Found type errors; exiting.")
         return null
     }

@@ -12,7 +12,15 @@ sealed interface TypePassType {
     data class Inferred(val type: Type) : TypePassType
 }
 
-fun RootNode.typePass(unit: CompilationUnit): List<CompileError> {
+data class TypePassResult(
+    val errors: List<CompileError>,
+    val warnings: List<CompileWarning> = emptyList(),
+)
+
+fun RootNode.typePass(
+    unit: CompilationUnit,
+    allowUnindexedSpec: Boolean = false,
+): TypePassResult {
     val allRawObjClasses = unit.modules.flatMap { module ->
         module.root.declNodes().flatMap { it.objClassPass() }
     }
@@ -20,7 +28,7 @@ fun RootNode.typePass(unit: CompilationUnit): List<CompileError> {
     cacheObjClassRegistry(built)
     unit.modules.forEach { it.root.cacheObjClassRegistry(built) }
     if (built.errors.isNotEmpty()) {
-        return built.errors
+        return TypePassResult(built.errors)
     }
     val allFuns = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<FunNode>() }
@@ -43,8 +51,11 @@ fun RootNode.typePass(unit: CompilationUnit): List<CompileError> {
             .filter { it !is FunNode && it !is SpecNode && it !is InvariantNode }
             .flatMap { it.typePass(emptyMap(), built, callable, emptyMap(), builtins) }
     }
-    val specErrors = unit.root.specTypePass(unit)
-    return built.errors + signatureErrors + recursionErrors + funBodyErrors + otherErrors + specErrors
+    val specResult = unit.root.specTypePass(unit, allowUnindexedSpec)
+    return TypePassResult(
+        errors = built.errors + signatureErrors + recursionErrors + funBodyErrors + otherErrors + specResult.errors,
+        warnings = specResult.warnings,
+    )
 }
 
 fun ASTNode.typePass(

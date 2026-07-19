@@ -27,6 +27,6 @@ p-class Worker {
     }
 }
 
-invariant G := Worker.id >= 0
+invariant G := all i : Int, Worker.id[i] >= 0
 
-spec SpawnWorker := <true> Server || Worker <G>
+spec SpawnWorker := <true> Server || Worker[i : Int] <G>

@@ -5,16 +5,53 @@ import julay.compiler.ast.*
 import julay.compiler.decl.*
 import julay.program.type.*
 
-fun RootNode.specTypePass(unit: CompilationUnit): List<CompileError> {
-    val registry = cachedObjClassRegistry() ?: return emptyList()
+data class SpecTypePassResult(
+    val errors: List<CompileError>,
+    val warnings: List<CompileWarning> = emptyList(),
+)
+
+fun RootNode.specTypePass(
+    unit: CompilationUnit,
+    allowUnindexedSpec: Boolean = false,
+): SpecTypePassResult {
+    val registry = cachedObjClassRegistry() ?: return SpecTypePassResult(emptyList())
     val invariants = declNodes().filterIsInstance<InvariantNode>().associateBy { it.name() }
     val pclassNodes = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<ProcClassNode>() }
         .associateBy { it.name() }
+    val procAliases = unit.modules
+        .flatMap { it.root.declNodes().filterIsInstance<ProcNode>() }
+        .associateBy { it.name() }
+    val programAliases = unit.modules
+        .flatMap { it.root.declNodes().filterIsInstance<ProgramNode>() }
+        .associateBy { it.name() }
+    val specAliases = unit.modules
+        .flatMap { it.root.declNodes().filterIsInstance<SpecNode>() }
+        .associateBy { it.name() }
 
-    return declNodes().filterIsInstance<SpecNode>().flatMap { spec ->
-        typePassSpec(spec, invariants, pclassNodes, unit, registry)
+    val errors = mutableListOf<CompileError>()
+    val warnings = mutableListOf<CompileWarning>()
+    declNodes().filterIsInstance<SpecNode>().forEach { spec ->
+        val result = typePassSpec(
+            spec,
+            invariants,
+            pclassNodes,
+            procAliases,
+            programAliases,
+            specAliases,
+            unit,
+            registry,
+            allowUnindexedSpec,
+        )
+        errors += result.errors
+        warnings += result.warnings
     }
+    return SpecTypePassResult(errors, warnings)
+}
+
+private fun ProcClassNode.isInitiallyOnly(): Boolean {
+    val ctors = localDecls().flatMap { it.constructors() }
+    return ctors.isNotEmpty() && ctors.all { it.action.name == "initially" }
 }
 
 private fun resolveType(
@@ -29,10 +66,15 @@ private fun typePassSpec(
     spec: SpecNode,
     invariants: Map<String, InvariantNode>,
     pclassNodes: Map<String, ProcClassNode>,
+    procAliases: Map<String, ProcNode>,
+    programAliases: Map<String, ProgramNode>,
+    specAliases: Map<String, SpecNode>,
     unit: CompilationUnit,
     registry: ObjClassRegistry,
-): List<CompileError> {
+    allowUnindexedSpec: Boolean,
+): SpecTypePassResult {
     val errors = mutableListOf<CompileError>()
+    val warnings = mutableListOf<CompileWarning>()
     val value = spec.specNodeValue()
 
     fun checkLeaves(leaves: List<SpecLeaf>, role: String) {
@@ -57,12 +99,44 @@ private fun typePassSpec(
         }
     }
 
+    fun checkIndexing(leaves: List<SpecLeaf>) {
+        val expanded = expandLeavesToPclasses(
+            leaves,
+            pclassNodes,
+            procAliases,
+            programAliases,
+            specAliases,
+        )
+        expanded.forEach { leaf ->
+            val pc = pclassNodes[leaf.name] ?: return@forEach
+            if (pc.isInitiallyOnly()) {
+                if (leaf.isParameterized) {
+                    warnings += OneLocCompileWarning(
+                        spec.programLocation(),
+                        "p-class \"${leaf.name}\" only has constructor initially, so indexing is unnecessary",
+                    )
+                }
+            } else if (!leaf.isParameterized) {
+                val msg =
+                    "p-class \"${leaf.name}\" can have multiple instances and must be indexed in this spec " +
+                        "(e.g. ${leaf.name}[i : Type]); pass --allow-unindexed-spec to warn instead"
+                if (allowUnindexedSpec) {
+                    warnings += OneLocCompileWarning(spec.programLocation(), msg)
+                } else {
+                    errors += OneLocCompileError(spec.programLocation(), msg)
+                }
+            }
+        }
+    }
+
     when (value) {
         is AgSpecExprNode -> {
             val assumeLeaves = flattenSpecLeaves(value.assumeExpr())
             val systemLeaves = flattenSpecLeaves(value.systemExpr())
             checkLeaves(assumeLeaves, "assumption")
             checkLeaves(systemLeaves, "system")
+            checkIndexing(assumeLeaves)
+            checkIndexing(systemLeaves)
 
             val invName = value.invariantRef()
             val inv = invariants[invName]
@@ -72,15 +146,6 @@ private fun typePassSpec(
                     "unknown invariant \"$invName\"",
                 )
             } else {
-                val procAliases = unit.modules
-                    .flatMap { it.root.declNodes().filterIsInstance<ProcNode>() }
-                    .associateBy { it.name() }
-                val programAliases = unit.modules
-                    .flatMap { it.root.declNodes().filterIsInstance<ProgramNode>() }
-                    .associateBy { it.name() }
-                val specAliases = unit.modules
-                    .flatMap { it.root.declNodes().filterIsInstance<SpecNode>() }
-                    .associateBy { it.name() }
                 val expandedSystem = expandLeavesToPclasses(
                     systemLeaves,
                     pclassNodes,
@@ -99,9 +164,13 @@ private fun typePassSpec(
                 )
             }
         }
-        else -> checkLeaves(flattenSpecLeaves(value), "system")
+        else -> {
+            val systemLeaves = flattenSpecLeaves(value)
+            checkLeaves(systemLeaves, "system")
+            checkIndexing(systemLeaves)
+        }
     }
-    return errors
+    return SpecTypePassResult(errors, warnings)
 }
 
 private fun typePassInvariantFormula(

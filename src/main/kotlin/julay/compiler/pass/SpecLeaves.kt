@@ -27,13 +27,19 @@ fun flattenSpecLeaves(node: ASTNode?): List<SpecLeaf> {
     fun walk(n: ASTNode) {
         when (n) {
             is ValueProcExprNode -> add(SpecLeaf(n.valueProcName()))
-            is ParamProcExprNode -> add(
-                SpecLeaf(
-                    n.paramLeaf().valueProcName(),
-                    n.paramName(),
-                    n.paramType(),
-                ),
-            )
+            is ParamProcExprNode -> {
+                val paramName = n.paramName()
+                val paramType = n.paramType()
+                flattenSpecLeaves(n.paramBody()).forEach { child ->
+                    add(
+                        if (!child.isParameterized) {
+                            SpecLeaf(child.name, paramName, paramType)
+                        } else {
+                            child
+                        },
+                    )
+                }
+            }
             is CompositeProcExprNode -> n.compositeProcChildren().forEach { walk(it) }
             is AgSpecExprNode -> {
                 n.assumeExpr()?.let { walk(it) }

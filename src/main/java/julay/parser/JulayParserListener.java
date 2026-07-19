@@ -188,6 +188,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitSystem_atom(JulayParser.System_atomContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#system_primary}.
+	 * @param ctx the parse tree
+	 */
+	void enterSystem_primary(JulayParser.System_primaryContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#system_primary}.
+	 * @param ctx the parse tree
+	 */
+	void exitSystem_primary(JulayParser.System_primaryContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#system_leaf}.
 	 * @param ctx the parse tree
 	 */

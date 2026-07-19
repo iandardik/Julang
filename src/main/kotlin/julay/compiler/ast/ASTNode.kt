@@ -198,16 +198,16 @@ class AgSpecExprNode(
 }
 
 class ParamProcExprNode(
-    private val leaf: ValueProcExprNode,
+    private val body: ASTNode,
     private val paramName: String,
     private val paramType: TypeExpr,
     private val loc: ProgramLoc,
-) : ASTNode(listOf(leaf)) {
+) : ASTNode(listOf(body)) {
     override fun programLocation() = loc
-    internal fun paramLeaf() = leaf
+    internal fun paramBody() = body
     internal fun paramName() = paramName
     internal fun paramType() = paramType
-    override fun toString(): String = "$leaf[$paramName : $paramType]"
+    override fun toString(): String = "$body[$paramName : $paramType]"
 }
 
 class ObjClassNode(

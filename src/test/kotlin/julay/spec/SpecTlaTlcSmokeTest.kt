@@ -93,11 +93,11 @@ class SpecTlaTlcSmokeTest {
                 "expected spawnWorker(id) operator;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("~Worker_constructed"),
-                "expected ctor enabling on Worker for spawnWorker;\n$tlaText",
+                tlaText.contains("~Worker_constructed[self_Worker]"),
+                "expected parameterized ctor enabling on Worker for spawnWorker;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("Worker_constructed' = TRUE"),
+                tlaText.contains("Worker_constructed' = [Worker_constructed EXCEPT ![self_Worker] = TRUE]"),
                 "expected Worker_constructed' flip in spawnWorker;\n$tlaText",
             )
             assertTrue(
@@ -106,8 +106,8 @@ class SpecTlaTlcSmokeTest {
             )
             val workBody = tlaText.substringAfter("work ==").substringBefore("\n\n")
             assertTrue(
-                workBody.contains("/\\ Worker_constructed"),
-                "work should require Worker_constructed;\n$tlaText",
+                workBody.contains("/\\ Worker_constructed[self_Worker]"),
+                "work should require Worker_constructed[self_Worker];\n$tlaText",
             )
             assertTrue(
                 workBody.lines().none { it.trim() == "/\\ Server_constructed" },

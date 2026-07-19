@@ -193,14 +193,19 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     }
 
     override fun visitSystem_atom(ctx: JulayParser.System_atomContext?): ASTNode {
+        val primary = visit(ctx!!.system_primary())
+        return if (ctx.LBRACK() != null) {
+            val paramName = ctx.ID().text
+            val paramType = parseTypeExpr(ctx.typeExpr())
+            ParamProcExprNode(primary, paramName, paramType, sourceLocation(ctx))
+        } else {
+            primary
+        }
+    }
+
+    override fun visitSystem_primary(ctx: JulayParser.System_primaryContext?): ASTNode {
         return when {
             ctx!!.LPAREN() != null -> visit(ctx.system_expr())
-            ctx.LBRACK() != null -> {
-                val leaf = visit(ctx.system_leaf()) as ValueProcExprNode
-                val paramName = ctx.ID().text
-                val paramType = parseTypeExpr(ctx.typeExpr())
-                ParamProcExprNode(leaf, paramName, paramType, sourceLocation(ctx))
-            }
             else -> visit(ctx.system_leaf())
         }
     }

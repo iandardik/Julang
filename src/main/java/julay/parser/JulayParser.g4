@@ -81,8 +81,12 @@ system_expr
     ;
 
 system_atom
-    : system_leaf LBRACK ID COLON typeExpr RBRACK
-    | system_leaf
+    : system_primary LBRACK ID COLON typeExpr RBRACK
+    | system_primary
+    ;
+
+system_primary
+    : system_leaf
     | LPAREN system_expr RPAREN
     ;
 

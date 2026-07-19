@@ -13,7 +13,7 @@ fun ASTNode.procPass(): List<ProcDecl> = when (this) {
         val systemParts = systemExpr().procPass()
         assumeParts + systemParts
     }
-    is ParamProcExprNode -> paramLeaf().procPass()
+    is ParamProcExprNode -> paramBody().procPass()
     is ValueProcExprNode -> listOf(ProcDecl(valueProcName(), listOf(), ProcDeclType.Proc))
     is CompositeProcExprNode -> children.flatMap { it.procPass() }
     else -> children.flatMap { it.procPass() }
@@ -34,7 +34,7 @@ fun ASTNode.resolvedProcPass(unit: CompilationUnit): List<ProcDecl> = when (this
         val systemParts = systemExpr().resolvedProcPass(unit)
         assumeParts + systemParts
     }
-    is ParamProcExprNode -> paramLeaf().resolvedProcPass(unit)
+    is ParamProcExprNode -> paramBody().resolvedProcPass(unit)
     is ValueProcExprNode -> {
         val (resolved, _) = resolveProcLeaf(
             this,

@@ -42,6 +42,11 @@ class Julayc : CliktCommand(name = "julayc") {
         help = "Keep generated <program>-jul-build directories after a successful compile",
     ).flag()
 
+    private val allowUnindexedSpec by option(
+        "--allow-unindexed-spec",
+        help = "Warn instead of error when a multi-instance p-class appears unindexed in a spec",
+    ).flag()
+
     private val libraryPaths by option(
         "-L",
         help = "Add a directory to the module search path",
@@ -80,7 +85,13 @@ class Julayc : CliktCommand(name = "julayc") {
             compileSpecs = neither || specOpt != null,
             specNames = specOpt?.takeIf { it.isNotEmpty() }?.let { setOf(it) },
         )
-        compileJulFile(file, keepBuild, libraryPaths, targets = targets)
+        compileJulFile(
+            file,
+            keepBuild,
+            libraryPaths,
+            targets = targets,
+            allowUnindexedSpec = allowUnindexedSpec,
+        )
     }
 }
 
