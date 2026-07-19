@@ -1,5 +1,6 @@
 import printer.Printer
 import server.ServerLogic
+import server.IncReqHandler
 
 p-class Counter {
     var counter : Int
@@ -17,4 +18,8 @@ p-class Counter {
     }
 }
 
-program CounterServer := Counter || Printer || ServerLogic
+program IncServer := Counter || Printer || ServerLogic
+
+invariant NonNegative := Counter.counter >= 0
+spec HandlerSpec := IncReqHandler[t : Int]
+spec IncSpec := <true> Counter || HandlerSpec <NonNegative>

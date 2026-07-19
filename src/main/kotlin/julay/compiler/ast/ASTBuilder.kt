@@ -79,6 +79,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             ctx.proc(),
             ctx.program(),
             ctx.spec(),
+            ctx.invariant_decl(),
             ctx.fun_decl(),
         )
         return visit(decl)
@@ -160,8 +161,68 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
 
     override fun visitSpec(ctx: JulayParser.SpecContext?): ASTNode {
         val name = ctx!!.ID().text
-        val value = visit(ctx.proc_expr())
+        val value = when {
+            ctx.ag_spec() != null -> visit(ctx.ag_spec())
+            ctx.system_expr() != null -> visit(ctx.system_expr())
+            else -> throw RuntimeException("Invalid spec body")
+        }
         return SpecNode(name, value, sourceLocation(ctx))
+    }
+
+    override fun visitAg_spec(ctx: JulayParser.Ag_specContext?): ASTNode {
+        val assumeCtx = ctx!!.assume_expr()
+        val assume: ASTNode? = if (assumeCtx.TRUE() != null) {
+            null
+        } else {
+            visit(assumeCtx.system_expr())
+        }
+        val system = visit(ctx.system_expr())
+        val invName = ctx.ID().text
+        return AgSpecExprNode(assume, system, invName, sourceLocation(ctx))
+    }
+
+    override fun visitSystem_expr(ctx: JulayParser.System_exprContext?): ASTNode {
+        return when {
+            ctx!!.PARALLEL() != null -> {
+                val left = visit(ctx.system_expr(0))
+                val right = visit(ctx.system_expr(1))
+                CompositeProcExprNode(listOf(left, right), sourceLocation(ctx))
+            }
+            else -> visit(ctx.system_atom())
+        }
+    }
+
+    override fun visitSystem_atom(ctx: JulayParser.System_atomContext?): ASTNode {
+        return when {
+            ctx!!.LPAREN() != null -> visit(ctx.system_expr())
+            ctx.LBRACK() != null -> {
+                val leaf = visit(ctx.system_leaf()) as ValueProcExprNode
+                val paramName = ctx.ID().text
+                val paramType = parseTypeExpr(ctx.typeExpr())
+                ParamProcExprNode(leaf, paramName, paramType, sourceLocation(ctx))
+            }
+            else -> visit(ctx.system_leaf())
+        }
+    }
+
+    override fun visitSystem_leaf(ctx: JulayParser.System_leafContext?): ASTNode {
+        return when {
+            ctx!!.qualified_name() != null -> {
+                val qn = visit(ctx.qualified_name()) as QualifiedNameNode
+                val parts = qn.parts()
+                ValueProcExprNode(parts.last(), parts, sourceLocation(ctx))
+            }
+            else -> ValueProcExprNode(ctx.ID().text, null, sourceLocation(ctx))
+        }
+    }
+
+    override fun visitInvariant_decl(ctx: JulayParser.Invariant_declContext?): ASTNode {
+        val name = ctx!!.ID().text
+        val formula = visit(ctx.expr())
+        if (formula !is ExprNode) {
+            throw RuntimeException("Expected invariant formula to be an expression")
+        }
+        return InvariantNode(name, formula, sourceLocation(ctx))
     }
 
     override fun visitPclass_body(ctx: JulayParser.Pclass_bodyContext?): ASTNode {
@@ -493,6 +554,21 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                     val arms = ctx.when_guard_arm().map { parseWhenGuardArm(it) }
                     WhenExprNode(null, arms, sourceLocation(ctx))
                 }
+            }
+            ctx.ALL() != null || ctx.EXISTS() != null -> {
+                val binder = ctx.ID().text
+                val binderType = parseTypeExpr(ctx.typeExpr())
+                val bodyNode = visit(ctx.expr(0))
+                if (bodyNode !is ExprNode) {
+                    throw RuntimeException("Expected quantified body to be an expression")
+                }
+                QuantifiedExprNode(
+                    universal = ctx.ALL() != null,
+                    binder = binder,
+                    binderType = binderType,
+                    body = bodyNode,
+                    loc = sourceLocation(ctx),
+                )
             }
             ctx.LPAREN() != null -> visit(ctx.expr(0))
             else -> throw RuntimeException("Invalid expr node: ${ctx.text}")

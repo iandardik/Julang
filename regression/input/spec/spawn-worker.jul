@@ -1,0 +1,32 @@
+p-class Server {
+    var ready : Boolean
+
+    constructor initially(args : List<String>) {
+        transit: ready := false
+    }
+
+    transition spawnWorker(id : Int) {
+        guard: ready
+        transit: ready := true
+    }
+}
+
+p-class Worker {
+    var id : Int
+
+    constructor initially(args : List<String>) {
+        transit: id := 0
+    }
+
+    constructor spawnWorker(id : Int) {
+        transit: id := id
+    }
+
+    transition work() {
+        guard: id >= 0
+    }
+}
+
+invariant G := Worker.id >= 0
+
+spec SpawnWorker := <true> Server || Worker <G>

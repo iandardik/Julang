@@ -168,6 +168,48 @@ class SpecNode(
     }
 }
 
+class InvariantNode(
+    private val name: String,
+    private val formula: ExprNode,
+    private val loc: ProgramLoc,
+) : DeclNode(listOf(formula)) {
+    override fun programLocation() = loc
+    override fun name() = name
+    internal fun invariantName() = name
+    internal fun invariantFormula() = formula
+    override fun toString(): String = "invariant $name := $formula"
+}
+
+class AgSpecExprNode(
+    /** null means `<true>` (no assumption). */
+    private val assume: ASTNode?,
+    private val system: ASTNode,
+    private val invariantName: String,
+    private val loc: ProgramLoc,
+) : ASTNode(listOfNotNull(assume, system)) {
+    override fun programLocation() = loc
+    internal fun assumeExpr() = assume
+    internal fun systemExpr() = system
+    internal fun invariantRef() = invariantName
+    override fun toString(): String {
+        val a = assume?.toString() ?: "true"
+        return "<$a> $system <$invariantName>"
+    }
+}
+
+class ParamProcExprNode(
+    private val leaf: ValueProcExprNode,
+    private val paramName: String,
+    private val paramType: TypeExpr,
+    private val loc: ProgramLoc,
+) : ASTNode(listOf(leaf)) {
+    override fun programLocation() = loc
+    internal fun paramLeaf() = leaf
+    internal fun paramName() = paramName
+    internal fun paramType() = paramType
+    override fun toString(): String = "$leaf[$paramName : $paramType]"
+}
+
 class ObjClassNode(
     private val name: String,
     val typeParams: List<String>,
@@ -1855,8 +1897,45 @@ class CompositeProcExprNode(
     private val loc : ProgramLoc
 ) : ASTNode(compositeProcs) {
     override fun programLocation() = loc
+    internal fun compositeProcChildren() = compositeProcs
     override fun toString(): String {
         return compositeProcs.joinToString(" || ") { it.toString() }
+    }
+}
+
+/**
+ * First-order quantifier for invariant formulas: `all x : T, body` / `exists x : T, body`.
+ */
+class QuantifiedExprNode(
+    private val universal: Boolean,
+    private val binder: String,
+    private val binderType: TypeExpr,
+    private val body: ExprNode,
+    private val loc: ProgramLoc,
+) : ExprNode(listOf(body)) {
+    override fun programLocation() = loc
+    internal fun isUniversal() = universal
+    internal fun binderName() = binder
+    internal fun binderTypeExpr() = binderType
+    internal fun quantifiedBody() = body
+
+    override fun toZ3GuardString(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+        forceString: Boolean,
+    ): String {
+        throw RuntimeException("Quantified formulas are not allowed in guards at $loc")
+    }
+
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        throw RuntimeException("Quantified formulas are not allowed in transits at $loc")
+    }
+
+    override fun inferType(symbolEnv: Map<String, Type>): Type = boolType
+
+    override fun toString(): String {
+        val q = if (universal) "all" else "exists"
+        return "$q $binder : $binderType, $body"
     }
 }
 

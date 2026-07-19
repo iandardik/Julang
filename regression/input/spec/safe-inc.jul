@@ -1,0 +1,34 @@
+p-class Env {
+    var ready : Boolean
+
+    constructor initially(args : List<String>) {
+        transit: ready := false
+    }
+
+    transition arm() {
+        guard: ~ready
+        transit: ready := true
+    }
+
+    service transition inc() {
+        guard: ready
+        transit: ready := false
+    }
+}
+
+p-class Counter {
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit: n := 0
+    }
+
+    transition inc() {
+        guard: n < 3
+        transit: n := n + 1
+    }
+}
+
+invariant Bound := all k : Int, Counter.n <= 3
+
+spec SafeInc := <Env> Counter <Bound>

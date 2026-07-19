@@ -40,10 +40,11 @@ fun RootNode.typePass(unit: CompilationUnit): List<CompileError> {
         val callable = callableFuns(module)
         val builtins = callableFunBuiltins(module)
         module.root.declNodes()
-            .filter { it !is FunNode }
+            .filter { it !is FunNode && it !is SpecNode && it !is InvariantNode }
             .flatMap { it.typePass(emptyMap(), built, callable, emptyMap(), builtins) }
     }
-    return built.errors + signatureErrors + recursionErrors + funBodyErrors + otherErrors
+    val specErrors = unit.root.specTypePass(unit)
+    return built.errors + signatureErrors + recursionErrors + funBodyErrors + otherErrors + specErrors
 }
 
 fun ASTNode.typePass(

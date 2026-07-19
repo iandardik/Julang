@@ -1,0 +1,31 @@
+p-class Counter {
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit: n := 0
+    }
+
+    transition bump() {
+        guard: n < 3
+        transit: n := n + 1
+    }
+}
+
+p-class Env {
+    var ready : Boolean
+
+    constructor initially(args : List<String>) {
+        transit: ready := false
+    }
+
+    transition arm() {
+        guard: ~ready
+        transit: ready := true
+    }
+}
+
+program System := Counter || Env
+
+invariant Bound := Counter.n >= 0
+
+spec ComposedSystem := <true> System <Bound>

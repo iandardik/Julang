@@ -95,6 +95,42 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitSpec(JulayParser.SpecContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#ag_spec}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitAg_spec(JulayParser.Ag_specContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#assume_expr}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitAssume_expr(JulayParser.Assume_exprContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#system_expr}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitSystem_expr(JulayParser.System_exprContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#system_atom}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitSystem_atom(JulayParser.System_atomContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#system_leaf}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitSystem_leaf(JulayParser.System_leafContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#invariant_decl}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitInvariant_decl(JulayParser.Invariant_declContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#pclass_body}.
 	 * @param ctx the parse tree
 	 * @return the visitor result

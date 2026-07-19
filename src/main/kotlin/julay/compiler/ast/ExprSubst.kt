@@ -110,6 +110,19 @@ fun substituteExpr(expr: ExprNode, name: String, replacement: ExprNode): ExprNod
             } catch (_: RuntimeException) {
             }
         }.withTypeOf(expr)
+        is QuantifiedExprNode -> {
+            if (expr.binderName() == name) {
+                expr
+            } else {
+                QuantifiedExprNode(
+                    expr.isUniversal(),
+                    expr.binderName(),
+                    expr.binderTypeExpr(),
+                    substituteExpr(expr.quantifiedBody(), name, replacement),
+                    expr.programLocation(),
+                ).withTypeOf(expr)
+            }
+        }
         else -> throw RuntimeException("Unexpected expression node ${expr.javaClass.simpleName} during substitution")
     }
 }
@@ -168,6 +181,13 @@ fun exprReferencesSymbol(expr: ExprNode, symbol: String): Boolean {
                 exprReferencesSymbol(expr.start, symbol) ||
                 exprReferencesSymbol(expr.end, symbol)
         is FunCallExprNode -> expr.callArgs().any { exprReferencesSymbol(it, symbol) }
+        is QuantifiedExprNode -> {
+            if (expr.binderName() == symbol) {
+                false
+            } else {
+                exprReferencesSymbol(expr.quantifiedBody(), symbol)
+            }
+        }
         else -> throw RuntimeException("Unexpected expression node ${expr.javaClass.simpleName} during symbol reference check")
     }
 }
@@ -211,6 +231,7 @@ fun collectFunCallNames(expr: ExprNode): Set<String> {
         is SliceExprNode ->
             collectFunCallNames(expr.base) + collectFunCallNames(expr.start) + collectFunCallNames(expr.end)
         is SymbolValueExprNode -> emptySet()
+        is QuantifiedExprNode -> collectFunCallNames(expr.quantifiedBody())
         else -> throw RuntimeException("Unexpected expression node ${expr.javaClass.simpleName} during fun-call collection")
     }
 }

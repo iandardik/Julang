@@ -24,6 +24,7 @@ decl
     | proc
     | program
     | spec
+    | invariant_decl
     | fun_decl
     ;
 
@@ -61,7 +62,37 @@ program
     ;
 
 spec
-    : SPEC ID ASGN_EQ proc_expr
+    : SPEC ID ASGN_EQ ag_spec
+    | SPEC ID ASGN_EQ system_expr
+    ;
+
+ag_spec
+    : LT assume_expr GT system_expr LT ID GT
+    ;
+
+assume_expr
+    : TRUE
+    | system_expr
+    ;
+
+system_expr
+    : system_expr PARALLEL system_expr
+    | system_atom
+    ;
+
+system_atom
+    : system_leaf LBRACK ID COLON typeExpr RBRACK
+    | system_leaf
+    | LPAREN system_expr RPAREN
+    ;
+
+system_leaf
+    : qualified_name
+    | ID
+    ;
+
+invariant_decl
+    : INVARIANT ID ASGN_EQ expr
     ;
 
 pclass_body
@@ -177,6 +208,8 @@ expr
     | LET LPAREN ID COLON typeExpr ASGN_EQ expr RPAREN LCURLY expr RCURLY
     | WHEN LPAREN expr RPAREN LCURLY when_subject_arm+ RCURLY
     | WHEN LCURLY when_guard_arm+ RCURLY
+    | ALL ID COLON typeExpr COMMA expr
+    | EXISTS ID COLON typeExpr COMMA expr
     ;
 
 when_subject_arm

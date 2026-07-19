@@ -10,6 +10,7 @@ import com.github.ajalt.clikt.parameters.arguments.optional
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.options.optionalValue
 import com.github.ajalt.clikt.parameters.types.path
 import julay.compiler.analysis.AnalyzeOptions
 
@@ -46,6 +47,23 @@ class Julayc : CliktCommand(name = "julayc") {
         help = "Add a directory to the module search path",
     ).path(mustExist = true, canBeDir = true).multiple()
 
+    /**
+     * null = flag absent; "" = `--program` with no name (all programs);
+     * non-empty = exactly that program.
+     * Value must be `--program=Name` (not `--program Name`) so the input file is not consumed.
+     */
+    private val programOpt by option(
+        "--program",
+        metavar = "NAME",
+        help = "Compile programs only; optional NAME (--program=Name) selects exactly one program",
+    ).optionalValue("", acceptsUnattachedValue = false)
+
+    private val specOpt by option(
+        "--spec",
+        metavar = "NAME",
+        help = "Compile specs only; optional NAME (--spec=Name) selects exactly one spec",
+    ).optionalValue("", acceptsUnattachedValue = false)
+
     private val input by argument(
         help = "Jul source file to compile",
     ).path(mustExist = true, canBeFile = true).optional()
@@ -55,7 +73,14 @@ class Julayc : CliktCommand(name = "julayc") {
             return
         }
         val file = input ?: throw UsageError("Missing argument \"<input>\"")
-        compileJulFile(file, keepBuild, libraryPaths)
+        val neither = programOpt == null && specOpt == null
+        val targets = CompileTargets(
+            compilePrograms = neither || programOpt != null,
+            programNames = programOpt?.takeIf { it.isNotEmpty() }?.let { setOf(it) },
+            compileSpecs = neither || specOpt != null,
+            specNames = specOpt?.takeIf { it.isNotEmpty() }?.let { setOf(it) },
+        )
+        compileJulFile(file, keepBuild, libraryPaths, targets = targets)
     }
 }
 

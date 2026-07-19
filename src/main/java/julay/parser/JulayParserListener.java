@@ -148,6 +148,66 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitSpec(JulayParser.SpecContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#ag_spec}.
+	 * @param ctx the parse tree
+	 */
+	void enterAg_spec(JulayParser.Ag_specContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#ag_spec}.
+	 * @param ctx the parse tree
+	 */
+	void exitAg_spec(JulayParser.Ag_specContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#assume_expr}.
+	 * @param ctx the parse tree
+	 */
+	void enterAssume_expr(JulayParser.Assume_exprContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#assume_expr}.
+	 * @param ctx the parse tree
+	 */
+	void exitAssume_expr(JulayParser.Assume_exprContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#system_expr}.
+	 * @param ctx the parse tree
+	 */
+	void enterSystem_expr(JulayParser.System_exprContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#system_expr}.
+	 * @param ctx the parse tree
+	 */
+	void exitSystem_expr(JulayParser.System_exprContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#system_atom}.
+	 * @param ctx the parse tree
+	 */
+	void enterSystem_atom(JulayParser.System_atomContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#system_atom}.
+	 * @param ctx the parse tree
+	 */
+	void exitSystem_atom(JulayParser.System_atomContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#system_leaf}.
+	 * @param ctx the parse tree
+	 */
+	void enterSystem_leaf(JulayParser.System_leafContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#system_leaf}.
+	 * @param ctx the parse tree
+	 */
+	void exitSystem_leaf(JulayParser.System_leafContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#invariant_decl}.
+	 * @param ctx the parse tree
+	 */
+	void enterInvariant_decl(JulayParser.Invariant_declContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#invariant_decl}.
+	 * @param ctx the parse tree
+	 */
+	void exitInvariant_decl(JulayParser.Invariant_declContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#pclass_body}.
 	 * @param ctx the parse tree
 	 */
