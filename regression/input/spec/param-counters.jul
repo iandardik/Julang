@@ -11,6 +11,6 @@ p-class Counter {
     }
 }
 
-invariant G := all i : String, Counter.n[i] <= 3
+invariant G := all i : String, Counter[i].n <= 3
 
 spec ParamCounters := <true> Counter[i : String] <G>

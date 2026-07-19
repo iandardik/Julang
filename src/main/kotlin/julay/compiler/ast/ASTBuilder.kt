@@ -720,7 +720,13 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     }
 
     override fun visitIndex_expr(ctx: JulayParser.Index_exprContext?): ASTNode {
-        val indexOrSlice = ctx!!.index_or_slice()
+        // Postfix .field: index_expr DOT ID
+        if (ctx!!.DOT() != null && ctx.ID() != null) {
+            val base = visit(ctx.index_expr()) as ExprNode
+            return MemberAccessExprNode(base, ctx.ID().text, sourceLocation(ctx))
+        }
+        val indexOrSlice = ctx.index_or_slice()
+            ?: throw RuntimeException("Invalid index_expr at ${ctx.text}")
         val base: ExprNode = when {
             ctx.index_expr() != null -> visit(ctx.index_expr()) as ExprNode
             ctx.fun_call() != null -> visit(ctx.fun_call()) as ExprNode

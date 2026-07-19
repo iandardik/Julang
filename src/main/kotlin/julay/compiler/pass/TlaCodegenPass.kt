@@ -860,6 +860,17 @@ internal fun exprToTla(
             val varName = expr.fieldPath.firstOrNull() ?: expr.baseSymbol
             stateTlaName(expr.baseSymbol, varName, stateVarNames)
         }
+        is MemberAccessExprNode -> {
+            val base = expr.baseExpr
+            if (base is IndexExprNode && base.base is SymbolValueExprNode) {
+                val leafName = (base.base as SymbolValueExprNode).symbol
+                val v = stateTlaName(leafName, expr.fieldName, stateVarNames)
+                "$v[${rec(base.index)}]"
+            } else {
+                val rendered = rec(base)
+                "$rendered.${expr.fieldName}"
+            }
+        }
         is FieldAccessOnExprNode -> {
             val base = rec(expr.baseExpr)
             val path = expr.fieldPath
@@ -873,13 +884,7 @@ internal fun exprToTla(
             "[$fields]"
         }
         is IndexExprNode -> {
-            val base = expr.base
-            if (base is FieldAccessExprNode) {
-                val v = stateTlaName(base.baseSymbol, base.fieldPath.first(), stateVarNames)
-                "$v[${rec(expr.index)}]"
-            } else {
-                "${rec(base)}[${rec(expr.index)}]"
-            }
+            "${rec(expr.base)}[${rec(expr.index)}]"
         }
         is UnaryOpExprNode -> {
             val o = rec(expr.operand())

@@ -55,6 +55,11 @@ fun substituteExpr(expr: ExprNode, name: String, replacement: ExprNode): ExprNod
         ).withTypeOf(expr)
         is LiteralValueExprNode -> expr
         is FieldAccessExprNode -> substituteFieldAccess(expr, name, replacement)
+        is MemberAccessExprNode -> MemberAccessExprNode(
+            substituteExpr(expr.baseExpr, name, replacement),
+            expr.fieldName,
+            expr.programLocation(),
+        ).withTypeOf(expr)
         is FieldAccessOnExprNode -> FieldAccessOnExprNode(
             substituteExpr(expr.baseExpr, name, replacement),
             expr.fieldPath,
@@ -169,6 +174,7 @@ fun exprReferencesSymbol(expr: ExprNode, symbol: String): Boolean {
         }
         is LiteralValueExprNode -> false
         is FieldAccessExprNode -> expr.baseSymbol == symbol
+        is MemberAccessExprNode -> exprReferencesSymbol(expr.baseExpr, symbol)
         is FieldAccessOnExprNode -> exprReferencesSymbol(expr.baseExpr, symbol)
         is ObjClassLiteralExprNode -> expr.fieldEntries.any { exprReferencesSymbol(it.second, symbol) }
         is ListLiteralExprNode -> expr.elements.any { exprReferencesSymbol(it, symbol) }
@@ -222,6 +228,7 @@ fun collectFunCallNames(expr: ExprNode): Set<String> {
         }
         is LiteralValueExprNode -> emptySet()
         is FieldAccessExprNode -> emptySet()
+        is MemberAccessExprNode -> collectFunCallNames(expr.baseExpr)
         is FieldAccessOnExprNode -> collectFunCallNames(expr.baseExpr)
         is ObjClassLiteralExprNode -> expr.fieldEntries.flatMap { collectFunCallNames(it.second) }.toSet()
         is ListLiteralExprNode -> expr.elements.flatMap { collectFunCallNames(it) }.toSet()

@@ -1680,6 +1680,45 @@ class FieldAccessExprNode(
     override fun toString(): String = fieldPath.joinToString(".", prefix = "$baseSymbol.")
 }
 
+/** Postfix `.field` on an arbitrary expression (e.g. `xs[i].f` or `Pclass[i].sv`). */
+class MemberAccessExprNode(
+    val baseExpr: ExprNode,
+    val fieldName: String,
+    private val loc: ProgramLoc,
+) : ExprNode(listOf(baseExpr)) {
+    override fun programLocation() = loc
+
+    override fun toZ3GuardString(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+        forceString: Boolean,
+    ): String {
+        val leafType = getType()
+        if (forceString && (leafType is ListType || leafType is ObjClassType)) {
+            return "ctx.mkString((${toTransitString(symbolTypes, argSymbols)}).toString())"
+        }
+        val baseType = baseExpr.getType() as ObjClassType
+        val baseZ3 = baseExpr.toZ3GuardString(symbolTypes, argSymbols)
+        val fieldZ3 = ObjClassType.fieldAccessZ3Codegen(baseType, baseZ3, listOf(fieldName))
+        return castFieldZ3(fieldZ3, leafType, forceString)
+    }
+
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        val base = baseExpr.toTransitString(symbolTypes, argSymbols)
+        return "($base).$fieldName"
+    }
+
+    override fun inferType(symbolEnv: Map<String, Type>): Type {
+        return try {
+            getType()
+        } catch (_: RuntimeException) {
+            throw RuntimeException("Member access not typed at $loc")
+        }
+    }
+
+    override fun toString(): String = "$baseExpr.$fieldName"
+}
+
 class FieldAccessOnExprNode(
     val baseExpr: ExprNode,
     val fieldPath: List<String>,

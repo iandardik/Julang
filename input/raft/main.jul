@@ -3,3 +3,7 @@ import client.logic.Client
 
 program RaftNode := NodeLogic
 program RaftClient := Client
+
+invariant OneLeaderPerTerm := all n1 : Int, all n2 : Int,
+    (RaftCore[n1].knownLeaderId = RaftCore[n1].selfId & RaftCore[n2].knownLeaderId = RaftCore[n2].selfId) => (n1 = n2)
+spec RaftNodeSpec := <true> RaftNode[n : Int] <OneLeaderPerTerm>

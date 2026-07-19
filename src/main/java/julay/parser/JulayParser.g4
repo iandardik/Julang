@@ -262,6 +262,7 @@ set_literal
 
 index_expr
     : index_expr LBRACK index_or_slice RBRACK
+    | index_expr DOT ID
     | (fun_call | field_access | bracket_literal | set_literal | LPAREN expr RPAREN) LBRACK index_or_slice RBRACK
     ;
 

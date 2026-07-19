@@ -84,6 +84,7 @@ fun ASTNode.typePass(
     is WhenExprNode -> typePassWhen(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is ObjClassLiteralExprNode -> typePassObjClassLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is FieldAccessExprNode -> typePassFieldAccess(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    is MemberAccessExprNode -> typePassMemberAccess(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is ListLiteralExprNode -> typePassListLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is EmptyBracketLiteralExprNode -> typePassEmptyBracketLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is SetLiteralExprNode -> typePassSetLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
@@ -826,6 +827,31 @@ private fun FieldAccessExprNode.typePassFieldAccess(
             val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
             inferExprType(symbolEnv)
             childErrors
+        }
+    }
+}
+
+private fun MemberAccessExprNode.typePassMemberAccess(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+): List<CompileError> {
+    val baseErrors = baseExpr.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    if (baseErrors.isNotEmpty()) {
+        return baseErrors
+    }
+    val baseType = try {
+        baseExpr.getType()
+    } catch (_: RuntimeException) {
+        return listOf(OneLocCompileError(programLocation(), "Cannot resolve type of member-access base"))
+    }
+    return when (val result = resolveFieldPath(baseType, listOf(fieldName))) {
+        is FieldPathResult.Error -> listOf(OneLocCompileError(programLocation(), result.message))
+        is FieldPathResult.Resolved -> {
+            setInferredType(TypePassType.Inferred(result.type))
+            emptyList()
         }
     }
 }

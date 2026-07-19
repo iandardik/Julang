@@ -235,48 +235,48 @@ private fun typePassInvariantFormula(
                 if (leaf.isParameterized) {
                     errors += OneLocCompileError(
                         expr.programLocation(),
-                        "parameterized component \"${expr.baseSymbol}\" requires indexed access \"${expr.baseSymbol}.$varName[i]\"",
+                        "parameterized component \"${expr.baseSymbol}\" requires indexed access \"${expr.baseSymbol}[i].$varName\"",
                     )
                     return
                 }
                 expr.resolveFieldAccess(vt, varName)
             }
-            is IndexExprNode -> {
-                val base = expr.base
-                if (base !is FieldAccessExprNode || base.fieldPath.size != 1) {
+            is MemberAccessExprNode -> {
+                val indexed = expr.baseExpr
+                if (indexed !is IndexExprNode || indexed.base !is SymbolValueExprNode) {
                     errors += OneLocCompileError(
                         expr.programLocation(),
-                        "indexed invariant ref must be Leaf.var[index]",
+                        "invariant member access must be Leaf[i].var",
                     )
                     return
                 }
-                val leaf = leafByName[base.baseSymbol]
+                val leafName = (indexed.base as SymbolValueExprNode).symbol
+                val leaf = leafByName[leafName]
                 if (leaf == null) {
                     errors += OneLocCompileError(
                         expr.programLocation(),
-                        "invariant may only reference system components; unknown \"${base.baseSymbol}\"",
+                        "invariant may only reference system components; unknown \"$leafName\"",
                     )
                     return
                 }
                 if (!leaf.isParameterized) {
                     errors += OneLocCompileError(
                         expr.programLocation(),
-                        "component \"${base.baseSymbol}\" is not parameterized; use \"${base.baseSymbol}.${base.fieldPath[0]}\"",
+                        "component \"$leafName\" is not parameterized; use \"$leafName.${expr.fieldName}\"",
                     )
                     return
                 }
-                val varName = base.fieldPath[0]
-                val vt = stateVarType(base.baseSymbol, varName)
+                val vt = stateVarType(leafName, expr.fieldName)
                 if (vt == null) {
                     errors += OneLocCompileError(
                         expr.programLocation(),
-                        "unknown state variable \"${base.baseSymbol}.$varName\"",
+                        "unknown state variable \"$leafName.${expr.fieldName}\"",
                     )
                     return
                 }
-                errors += expr.index.typePass(env, registry)
+                check(indexed.index, env)
                 try {
-                    val actualIdx = expr.index.getType()
+                    val actualIdx = indexed.index.getType()
                     val expected = resolveType(registry, leaf.paramType!!)
                     if (expected != null && actualIdx != expected) {
                         errors += OneLocCompileError(
@@ -286,8 +286,70 @@ private fun typePassInvariantFormula(
                     }
                 } catch (_: RuntimeException) {
                 }
-                base.resolveFieldAccess(vt, varName)
                 expr.setInferredType(TypePassType.Inferred(vt))
+            }
+            is IndexExprNode -> {
+                val base = expr.base
+                // Bare Leaf[i] (missing .var)
+                if (base is SymbolValueExprNode && leafByName.containsKey(base.symbol)) {
+                    errors += OneLocCompileError(
+                        expr.programLocation(),
+                        "indexed component \"${base.symbol}\" requires a state variable: \"${base.symbol}[i].var\"",
+                    )
+                    return
+                }
+                // Leaf.var[j] on a parameterized leaf — instance access is Leaf[i].var
+                if (base is FieldAccessExprNode && base.fieldPath.size == 1) {
+                    val leaf = leafByName[base.baseSymbol]
+                    if (leaf != null && leaf.isParameterized) {
+                        val varName = base.fieldPath[0]
+                        errors += OneLocCompileError(
+                            expr.programLocation(),
+                            "parameterized component \"${base.baseSymbol}\" requires instance access \"${base.baseSymbol}[i].$varName\" " +
+                                "(list/map index: \"${base.baseSymbol}[i].$varName[j]\")",
+                        )
+                        return
+                    }
+                }
+                check(base, env)
+                try {
+                    when (val baseType = base.getType()) {
+                        is ListType -> {
+                            check(expr.index, env)
+                            try {
+                                if (expr.index.getType() !is IntType) {
+                                    errors += OneLocCompileError(
+                                        expr.index.programLocation(),
+                                        "Expected Int index but got ${expr.index.getType()}",
+                                    )
+                                }
+                            } catch (_: RuntimeException) {
+                            }
+                            expr.setInferredType(TypePassType.Inferred(baseType.elementType))
+                        }
+                        is MapType -> {
+                            check(expr.index, env)
+                            try {
+                                if (expr.index.getType() != baseType.keyType) {
+                                    errors += OneLocCompileError(
+                                        expr.index.programLocation(),
+                                        "Expected map key type ${baseType.keyType} but got ${expr.index.getType()}",
+                                    )
+                                }
+                            } catch (_: RuntimeException) {
+                            }
+                            expr.setInferredType(TypePassType.Inferred(baseType.valueType))
+                        }
+                        else -> {
+                            errors += OneLocCompileError(
+                                expr.programLocation(),
+                                "Expected list or map type for index base but got $baseType",
+                            )
+                        }
+                    }
+                } catch (_: RuntimeException) {
+                    // Base failed to type; error already recorded.
+                }
             }
             is SymbolValueExprNode -> {
                 val t = env[expr.symbol]
