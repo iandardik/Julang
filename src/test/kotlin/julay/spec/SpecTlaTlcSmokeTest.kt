@@ -345,6 +345,200 @@ class SpecTlaTlcSmokeTest {
         }
     }
 
+    @Test
+    fun sessionPairBothSidesEmitsAffinityAndEndSession() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-session-pair").toFile()
+        try {
+            val source = File("regression/input/spec/session-pair.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(
+                source.toPath(),
+                keepBuild = false,
+                targets = CompileTargets(compilePrograms = false, compileSpecs = true),
+            )
+            val tla = File("SessionPair.tla")
+            val cfg = File("SessionPair.cfg")
+            assertTrue(tla.exists(), "expected SessionPair.tla")
+            assertTrue(cfg.exists(), "expected SessionPair.cfg")
+            val tlaText = tla.readText()
+            assertTrue(
+                tlaText.contains("session_Alice_Bob"),
+                "expected session_Alice_Bob variable;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("CanStartSession_Alice_Bob =="),
+                "expected CanStartSession helper before Init;\n$tlaText",
+            )
+            val canStartIdx = tlaText.indexOf("CanStartSession_Alice_Bob ==")
+            val initIdx = tlaText.indexOf("Init ==")
+            assertTrue(
+                canStartIdx in 0 until initIdx,
+                "CanStartSession should appear before Init;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("Alice_dead ==") && tlaText.contains("Bob_dead =="),
+                "expected Alice_dead and Bob_dead;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains(
+                    "\\* True exactly when all of Alice's actions are no longer enabled, in which case Alice dies.",
+                ),
+                "expected Alice_dead comment;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("\\* Session connection semantics"),
+                "expected session connection comment in actions;\n$tlaText",
+            )
+            val meetDef = tlaText.substringAfter("meet ==").substringBefore("\n\n")
+            assertTrue(
+                meetDef.contains("session_Alice_Bob \\/ CanStartSession_Alice_Bob") ||
+                    meetDef.contains("(session_Alice_Bob \\/ CanStartSession_Alice_Bob)"),
+                "expected meet to gate on session or CanStartSession;\n$meetDef",
+            )
+            assertTrue(
+                meetDef.contains("session_Alice_Bob' = TRUE"),
+                "expected meet to set session TRUE;\n$meetDef",
+            )
+            val sessionCommentIdx = meetDef.indexOf("\\* Session connection semantics")
+            val unchangedIdx = meetDef.indexOf("UNCHANGED")
+            assertTrue(
+                sessionCommentIdx in 0 until unchangedIdx,
+                "session block should be last before UNCHANGED in meet;\n$meetDef",
+            )
+            assertTrue(
+                tlaText.contains("EndSession_Alice ==") && tlaText.contains("EndSession_Bob =="),
+                "expected EndSession_Alice and EndSession_Bob;\n$tlaText",
+            )
+            tla.copyTo(File(work, "SessionPair.tla"), overwrite = true)
+            cfg.copyTo(File(work, "SessionPair.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            File("SessionAliceOnly.tla").delete()
+            File("SessionAliceOnly.cfg").delete()
+            assertTlcHealthyStart(work, "SessionPair")
+        } finally {
+            work.deleteRecursively()
+            File("SessionPair.tla").delete()
+            File("SessionPair.cfg").delete()
+            File("SessionAliceOnly.tla").delete()
+            File("SessionAliceOnly.cfg").delete()
+        }
+    }
+
+    @Test
+    fun sessionPairOneSideOmitsAffinity() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-session-onesided").toFile()
+        try {
+            val source = File("regression/input/spec/session-pair.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(
+                source.toPath(),
+                keepBuild = false,
+                targets = CompileTargets(compilePrograms = false, compileSpecs = true),
+            )
+            val tla = File("SessionAliceOnly.tla")
+            val cfg = File("SessionAliceOnly.cfg")
+            assertTrue(tla.exists(), "expected SessionAliceOnly.tla")
+            assertTrue(cfg.exists(), "expected SessionAliceOnly.cfg")
+            val tlaText = tla.readText()
+            assertTrue(
+                !tlaText.contains("session_"),
+                "one-sided spec should not emit session_ vars;\n$tlaText",
+            )
+            assertTrue(
+                !tlaText.contains("CanStartSession_") && !tlaText.contains("EndSession_"),
+                "one-sided spec should not emit session helpers/EndSession;\n$tlaText",
+            )
+            assertTrue(
+                !tlaText.contains("_dead =="),
+                "one-sided spec should not emit *_dead operators;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("meet =="),
+                "expected meet action without session gating;\n$tlaText",
+            )
+            tla.copyTo(File(work, "SessionAliceOnly.tla"), overwrite = true)
+            cfg.copyTo(File(work, "SessionAliceOnly.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            File("SessionPair.tla").delete()
+            File("SessionPair.cfg").delete()
+            assertTlcHealthyStart(work, "SessionAliceOnly")
+        } finally {
+            work.deleteRecursively()
+            File("SessionPair.tla").delete()
+            File("SessionPair.cfg").delete()
+            File("SessionAliceOnly.tla").delete()
+            File("SessionAliceOnly.cfg").delete()
+        }
+    }
+
+    @Test
+    fun sessionPairParamBothSidesEmitsIndexedAffinity() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-session-pair-param").toFile()
+        try {
+            val source = File("regression/input/spec/session-pair-param.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(
+                source.toPath(),
+                keepBuild = false,
+                targets = CompileTargets(compilePrograms = false, compileSpecs = true),
+            )
+            val tla = File("SessionPairParam.tla")
+            val cfg = File("SessionPairParam.cfg")
+            assertTrue(tla.exists(), "expected SessionPairParam.tla")
+            assertTrue(cfg.exists(), "expected SessionPairParam.cfg")
+            val tlaText = tla.readText()
+            assertTrue(
+                tlaText.contains("session_Alice_Bob = [a \\in Int |-> [b \\in Int |-> FALSE]]"),
+                "expected indexed session_Alice_Bob init;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("CanStartSession_Alice_Bob(a, b) =="),
+                "expected parameterized CanStartSession;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("~\\E b2 \\in Int : session_Alice_Bob[a][b2]") &&
+                    tlaText.contains("~\\E a2 \\in Int : session_Alice_Bob[a2][b]"),
+                "expected CanStartSession exclusivity quantifiers;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("Alice_dead(a) ==") && tlaText.contains("Bob_dead(b) =="),
+                "expected parameterized *_dead operators;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("meet(a, b) ==") &&
+                    tlaText.contains("session_Alice_Bob[a][b] \\/ CanStartSession_Alice_Bob(a, b)"),
+                "expected meet(a, b) with session gate;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("EndSession_Alice(a, b) ==") &&
+                    tlaText.contains("EndSession_Bob(a, b) =="),
+                "expected parameterized EndSession operators;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("\\E a \\in Int : \\E b \\in Int : meet(a, b)"),
+                "expected Next to quantify meet over a and b;\n$tlaText",
+            )
+            tla.copyTo(File(work, "SessionPairParam.tla"), overwrite = true)
+            cfg.copyTo(File(work, "SessionPairParam.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            File("SessionAliceOnlyParam.tla").delete()
+            File("SessionAliceOnlyParam.cfg").delete()
+            assertTlcHealthyStart(work, "SessionPairParam")
+        } finally {
+            work.deleteRecursively()
+            File("SessionPairParam.tla").delete()
+            File("SessionPairParam.cfg").delete()
+            File("SessionAliceOnlyParam.tla").delete()
+            File("SessionAliceOnlyParam.cfg").delete()
+        }
+    }
+
     private fun assumeTlcPresent() {
         if (!TLC_JAR.isFile) {
             fail("TLC jar not found at ${TLC_JAR.path}")

@@ -1,0 +1,30 @@
+p-class Alice {
+    var done : Boolean
+
+    constructor initially() {
+        transit: done := false
+    }
+
+    session transition meet() {
+        guard: ~done
+        transit: done := true
+    }
+}
+
+p-class Bob {
+    var done : Boolean
+
+    constructor initially() {
+        transit: done := false
+    }
+
+    session transition meet() {
+        guard: ~done
+        transit: done := true
+    }
+}
+
+invariant Inv := true
+
+spec SessionPair := <true> Alice || Bob <Inv>
+spec SessionAliceOnly := <true> Alice <Inv>
