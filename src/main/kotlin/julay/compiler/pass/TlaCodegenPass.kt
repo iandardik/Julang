@@ -76,13 +76,16 @@ fun tlaCodegenPass(
     val invariants = ast.declNodes().filterIsInstance<InvariantNode>().associateBy { it.name() }
     val ag = spec.specNodeValue() as? AgSpecExprNode
     val invNode = ag?.let { invariants[it.invariantRef()] }
-    invNode?.let { collectTypeConstants(it.invariantFormula(), constants) }
+    val invClosure = if (invNode != null) {
+        topologicalInvariantClosure(invNode.name(), invariants)
+    } else {
+        emptyList()
+    }
+    invClosure.forEach { collectTypeConstants(it.invariantFormula(), constants) }
 
     // Finite TLC models for built-in domains used in the module (assigned in .cfg only).
     val cfgOverrides = linkedSetOf<String>()
-    if (invNode != null) {
-        collectBuiltinDomainUses(invNode.invariantFormula(), cfgOverrides)
-    }
+    invClosure.forEach { collectBuiltinDomainUses(it.invariantFormula(), cfgOverrides) }
     leaves.forEach { leaf ->
         leaf.paramType?.let { typeDomainConstant(it) }?.let { name ->
             if (name in setOf("Int", "Nat", "Real")) cfgOverrides += name
@@ -96,9 +99,7 @@ fun tlaCodegenPass(
 
     val intModelValues = linkedSetOf(0, 1, 2, 3, 4, 5)
     collectIntLiteralsFromLeaves(leaves, pclassNodes, intModelValues)
-    if (invNode != null) {
-        collectIntLiteralsFromExpr(invNode.invariantFormula(), intModelValues)
-    }
+    invClosure.forEach { collectIntLiteralsFromExpr(it.invariantFormula(), intModelValues) }
 
     val reservedTlaIds = constants + setOf("Int", "Nat", "Boolean", "Real") +
         actionArgNames(leaves, pclassNodes)
@@ -134,19 +135,21 @@ fun tlaCodegenPass(
 
     val actions = buildTlaActions(leaves, pclassNodes, servicedActions, stateVarNames)
 
-    val invDef = if (invNode != null) {
-        val body = exprToTla(
-            invNode.invariantFormula(),
-            leafCtx = emptyMap(),
-            argNames = emptySet(),
-            self = null,
-            bareStateVars = emptySet(),
-            reservedNames = constants,
-            stateVarNames = stateVarNames,
-        )
-        "${invNode.name()} == $body"
+    val invDefs = if (invClosure.isNotEmpty()) {
+        invClosure.map { node ->
+            val body = exprToTla(
+                node.invariantFormula(),
+                leafCtx = emptyMap(),
+                argNames = emptySet(),
+                self = null,
+                bareStateVars = emptySet(),
+                reservedNames = constants,
+                stateVarNames = stateVarNames,
+            )
+            "${node.name()} == $body"
+        }
     } else {
-        null
+        emptyList()
     }
 
     val constLine = if (constants.isEmpty()) "" else "CONSTANT ${constants.joinToString(", ")}\n\n"
@@ -197,9 +200,9 @@ fun tlaCodegenPass(
         appendLine("Next ==$nextBody")
         appendLine()
         appendLine("Spec == Init /\\ [][Next]_vars")
-        if (invDef != null) {
+        if (invDefs.isNotEmpty()) {
             appendLine()
-            appendLine(invDef)
+            invDefs.forEach { appendLine(it) }
         }
         appendLine("====")
     }
@@ -754,6 +757,65 @@ private fun collectActionArgDomainModels(
                 }
             }
     }
+}
+
+/** Invariants in the transitive closure of [rootName], dependencies before dependents. */
+internal fun topologicalInvariantClosure(
+    rootName: String,
+    invariants: Map<String, InvariantNode>,
+): List<InvariantNode> {
+    val root = invariants[rootName] ?: return emptyList()
+    val order = mutableListOf<InvariantNode>()
+    val visiting = mutableSetOf<String>()
+    val visited = mutableSetOf<String>()
+
+    fun visit(name: String) {
+        if (name in visited) return
+        check(name !in visiting) { "cyclic invariant reference involving \"$name\"" }
+        val node = invariants[name] ?: return
+        visiting += name
+        collectInvariantRefs(node.invariantFormula(), invariants).forEach { visit(it) }
+        visiting -= name
+        visited += name
+        order += node
+    }
+
+    visit(root.name())
+    return order
+}
+
+/** Names of invariants referenced (as bare symbols) in [expr]. */
+internal fun collectInvariantRefs(
+    expr: ExprNode,
+    invariants: Map<String, InvariantNode>,
+): Set<String> {
+    val refs = linkedSetOf<String>()
+    fun walk(e: ExprNode, bound: Set<String>) {
+        when (e) {
+            is SymbolValueExprNode -> {
+                if (e.symbol !in bound && invariants.containsKey(e.symbol)) refs += e.symbol
+            }
+            is QuantifiedExprNode -> walk(e.quantifiedBody(), bound + e.binderName())
+            is UnaryOpExprNode -> walk(e.operand(), bound)
+            is BinaryOpExprNode -> {
+                walk(e.lhsOperand(), bound)
+                walk(e.rhsOperand(), bound)
+            }
+            is IfElseExprNode -> {
+                walk(e.condExpr(), bound)
+                walk(e.thenExpr(), bound)
+                walk(e.elseExpr(), bound)
+            }
+            is IndexExprNode -> {
+                walk(e.base, bound)
+                walk(e.index, bound)
+            }
+            is MemberAccessExprNode -> walk(e.baseExpr, bound)
+            else -> e.children.filterIsInstance<ExprNode>().forEach { walk(it, bound) }
+        }
+    }
+    walk(expr, emptySet())
+    return refs
 }
 
 internal fun collectTypeConstants(expr: ExprNode, into: MutableSet<String>) {

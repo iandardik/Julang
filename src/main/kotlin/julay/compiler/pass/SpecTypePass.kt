@@ -156,8 +156,9 @@ private fun typePassSpec(
                 val systemPclasses = expandedSystem.mapNotNull { leaf ->
                     pclassNodes[leaf.name]?.let { leaf.name to it }
                 }.toMap()
-                errors += typePassInvariantFormula(
-                    inv.invariantFormula(),
+                errors += typePassInvariantNamed(
+                    invName,
+                    invariants,
                     expandedSystem,
                     systemPclasses,
                     registry,
@@ -173,11 +174,49 @@ private fun typePassSpec(
     return SpecTypePassResult(errors, warnings)
 }
 
+private fun typePassInvariantNamed(
+    invName: String,
+    invariants: Map<String, InvariantNode>,
+    systemLeaves: List<SpecLeaf>,
+    pclasses: Map<String, ProcClassNode>,
+    registry: ObjClassRegistry,
+    checking: MutableSet<String> = mutableSetOf(),
+    checked: MutableSet<String> = mutableSetOf(),
+): List<CompileError> {
+    if (invName in checked) return emptyList()
+    val inv = invariants[invName]
+        ?: error("internal: invariant \"$invName\" missing from map")
+    if (invName in checking) {
+        return listOf(
+            OneLocCompileError(
+                inv.programLocation(),
+                "cyclic invariant reference involving \"$invName\"",
+            ),
+        )
+    }
+    checking += invName
+    val errors = typePassInvariantFormula(
+        inv.invariantFormula(),
+        systemLeaves,
+        pclasses,
+        registry,
+        invariants,
+        checking,
+        checked,
+    )
+    checking -= invName
+    checked += invName
+    return errors
+}
+
 private fun typePassInvariantFormula(
     formula: ExprNode,
     systemLeaves: List<SpecLeaf>,
     pclasses: Map<String, ProcClassNode>,
     registry: ObjClassRegistry,
+    invariants: Map<String, InvariantNode>,
+    checking: MutableSet<String>,
+    checked: MutableSet<String>,
 ): List<CompileError> {
     val leafByName = systemLeaves.associateBy { it.name }
     val errors = mutableListOf<CompileError>()
@@ -353,13 +392,26 @@ private fun typePassInvariantFormula(
             }
             is SymbolValueExprNode -> {
                 val t = env[expr.symbol]
-                if (t == null) {
-                    errors += OneLocCompileError(
-                        expr.programLocation(),
-                        "unbound symbol \"${expr.symbol}\" in invariant (use Leaf.var for state)",
-                    )
-                } else {
-                    expr.setInferredType(TypePassType.Inferred(t))
+                when {
+                    t != null -> expr.setInferredType(TypePassType.Inferred(t))
+                    invariants.containsKey(expr.symbol) -> {
+                        errors += typePassInvariantNamed(
+                            expr.symbol,
+                            invariants,
+                            systemLeaves,
+                            pclasses,
+                            registry,
+                            checking,
+                            checked,
+                        )
+                        expr.setInferredType(TypePassType.Inferred(boolType))
+                    }
+                    else -> {
+                        errors += OneLocCompileError(
+                            expr.programLocation(),
+                            "unbound symbol \"${expr.symbol}\" in invariant (use Leaf.var for state)",
+                        )
+                    }
                 }
             }
             is LiteralValueExprNode -> {

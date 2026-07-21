@@ -21,5 +21,8 @@ p-class Counter {
 program IncServer := Counter || Printer || ServerLogic
 
 invariant NonNegative := Counter.counter >= 0
+invariant CorrectCounter := all t1 : Int,
+    (IncReqHandler[t1].step = "C" & all t2 : Int, IncReqHandler[t2].step ~= "B") => (IncReqHandler[t1].localCounter = Counter.counter)
+invariant AllInvs := NonNegative & CorrectCounter
 spec HandlerSpec := IncReqHandler[t : Int]
-spec IncSpec := <true> Counter || HandlerSpec <NonNegative>
+spec IncSpec := <true> Counter || HandlerSpec <AllInvs>
