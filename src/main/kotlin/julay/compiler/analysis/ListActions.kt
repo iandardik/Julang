@@ -14,6 +14,7 @@ private data class ListedActionOffer(
     val actionName: String,
     val pclassName: String,
     val kind: OfferKind,
+    val modifier: TSAction.SyncRole,
     val modifierLabel: String,
     val isInternal: Boolean,
 )
@@ -37,7 +38,7 @@ fun printAnalyzeViews(
         )
     }
     if (options.showActionView) {
-        printActionView(ast, scope, librariesInUse, options)
+        printActionView(ast, scope, librariesInUse, allPClassNames, options)
     }
     if (options.showPclassView) {
         printPclassView(ast, scope.leafComponents, librariesInUse, options)
@@ -48,18 +49,89 @@ fun printActionView(
     ast: ASTNode,
     scope: ResolvedAnalyzeScope,
     librariesInUse: Set<String>,
+    allPClassNames: Set<String>,
     options: AnalyzeOptions,
 ) {
     val unionLeaves = scope.leafComponents
     var offers = collectListedActionOffers(ast, unionLeaves, librariesInUse)
-    if (options.scopeIntersect && options.scopeNames.size > 1 && scope.leafSets.size > 1) {
+    val useAlphabetIntersect =
+        (options.scopeIntersect || options.scopeMutual) &&
+            options.scopeNames.size > 1 &&
+            scope.leafSets.size > 1
+    if (useAlphabetIntersect) {
         val alphabets = scope.leafSets.map { leaves ->
             collectListedActionOffers(ast, leaves, librariesInUse).map { it.actionName }.toSet()
         }
         val shared = alphabets.reduce { a, b -> a intersect b }
         offers = offers.filter { it.actionName in shared }
     }
+    if (options.scopeMutual && options.scopeNames.size > 1 && scope.leafSets.size > 1) {
+        // Serviced status is program-wide: the service offer may be outside the selected scopes.
+        val servicedNames = collectListedActionOffers(
+            ast,
+            allPClassNames + librariesInUse,
+            librariesInUse,
+        )
+            .filter { it.modifier == TSAction.SyncRole.Service }
+            .map { it.actionName }
+            .toSet()
+        val offersByAction = offers.groupBy { it.actionName }
+        val mutualNames = offersByAction.keys.filter { actionName ->
+            scopesMutuallySyncOn(actionName, scope.leafSets, offersByAction[actionName].orEmpty(), servicedNames)
+        }.toSet()
+        offers = offers.filter { it.actionName in mutualNames }
+    }
     printActions(filterOffers(offers, options), detail = options.actionsDetail)
+}
+
+/**
+ * True when every pair of selected scopes can sync on [actionName].
+ * Consumers of a serviced action do not sync with each other.
+ */
+private fun scopesMutuallySyncOn(
+    actionName: String,
+    leafSets: List<Set<String>>,
+    actionOffers: List<ListedActionOffer>,
+    servicedNames: Set<String>,
+): Boolean {
+    val rolesPerScope = leafSets.map { leaves ->
+        actionOffers
+            .filter { it.pclassName in leaves }
+            .map { it.resolvedRole(servicedNames) }
+            .toSet()
+    }
+    for (i in rolesPerScope.indices) {
+        for (j in i + 1 until rolesPerScope.size) {
+            if (!scopesSyncOn(rolesPerScope[i], rolesPerScope[j], actionName in servicedNames)) {
+                return false
+            }
+        }
+    }
+    return true
+}
+
+private fun ListedActionOffer.resolvedRole(servicedNames: Set<String>): TSAction.SyncRole =
+    when {
+        modifier == TSAction.SyncRole.Default && actionName in servicedNames ->
+            TSAction.SyncRole.Consumer
+        else -> modifier
+    }
+
+/** Whether two scopes' role sets for one action form a valid sync pair. */
+private fun scopesSyncOn(
+    rolesA: Set<TSAction.SyncRole>,
+    rolesB: Set<TSAction.SyncRole>,
+    serviced: Boolean,
+): Boolean {
+    if (serviced) {
+        val aService = TSAction.SyncRole.Service in rolesA
+        val bService = TSAction.SyncRole.Service in rolesB
+        val aConsumer = TSAction.SyncRole.Consumer in rolesA
+        val bConsumer = TSAction.SyncRole.Consumer in rolesB
+        return (aService && bConsumer) || (bService && aConsumer)
+    }
+    // Non-serviced pairwise rendezvous: Default (or session, still Default role) peers.
+    return TSAction.SyncRole.Default in rolesA && TSAction.SyncRole.Default in rolesB
 }
 
 fun printPclassView(
@@ -127,6 +199,7 @@ private fun ActionDecl.toListedOffer(pclassName: String, kind: OfferKind): Liste
         actionName = action.name,
         pclassName = pclassName,
         kind = kind,
+        modifier = modifier,
         modifierLabel = modifierLabel(kind),
         isInternal = modifier == TSAction.SyncRole.Internal,
     )

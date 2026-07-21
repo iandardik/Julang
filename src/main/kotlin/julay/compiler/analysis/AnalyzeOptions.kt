@@ -21,6 +21,12 @@ data class AnalyzeOptions(
     val includeInternal: Boolean = false,
     /** With multiple -s, restrict action views to ∩ of each scope's alphabet. */
     val scopeIntersect: Boolean = false,
+    /**
+     * With multiple -s, restrict action views to ∩ of each scope's alphabet and
+     * further omit actions those scopes do not sync on (e.g. service actions when
+     * every selected scope is only a consumer).
+     */
+    val scopeMutual: Boolean = false,
 ) {
     val showActionView: Boolean
         get() = showActions || actionsDetail

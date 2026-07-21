@@ -117,12 +117,17 @@ class AnalyzeCommand : CliktCommand(name = "analyze") {
     private val scopeNames by option(
         "-s", "--scope",
         metavar = "NAME",
-        help = "Restrict to proc/program/spec/pclass NAME (repeatable; action views use union unless --intersect)",
+        help = "Restrict to proc/program/spec/pclass NAME (repeatable; action views use union unless --intersect/--mutual)",
     ).multiple()
 
     private val scopeIntersect by option(
         "--intersect",
         help = "With multiple -s, list only actions that appear in every scope (default: union)",
+    ).flag()
+
+    private val scopeMutual by option(
+        "--mutual",
+        help = "With multiple -s, list only actions that appear in every scope and that those scopes sync on (default: union)",
     ).flag()
 
     private val showTree by option(
@@ -182,6 +187,7 @@ class AnalyzeCommand : CliktCommand(name = "analyze") {
             actionRegex = actionRegex,
             includeInternal = includeInternal,
             scopeIntersect = scopeIntersect,
+            scopeMutual = scopeMutual,
         )
         analyzeJulFile(input, options, libraryPaths)
     }
