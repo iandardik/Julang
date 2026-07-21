@@ -115,7 +115,7 @@ p-class OutgoingRequestVoteRPC {
             step := "tally"
     }
 
-    /* Pairwise with ElectionCampaign: hand off vote result (Campaign records it with Core). */
+    /* Pairwise with CandidateElection: hand off vote result (election records it with Core). */
     transition endOutgoingRequestVote(peerId : Int, term : Int, granted : Boolean) {
         guard:
             & step = "tally"

@@ -10,10 +10,10 @@ import node.rpc_vote.OutgoingRequestVoteRPC
 import node.rpc_append_entries.IncomingAppendEntriesRPC
 import node.rpc_append_entries.OutgoingAppendEntriesRPC
 import node.rpc_client.IncomingClientRPC
-import node.election.ElectionTimeout
-import node.election.ElectionCampaign
-import node.heartbeat.HeartbeatDriver
-import node.heartbeat.HeartbeatTarget
+import node.follower_heartbeat.FollowerHeartbeat
+import node.candidate_election.CandidateElection
+import node.leader_heartbeat.LeaderHeartbeat
+import node.leader_heartbeat.LeaderHeartbeatTarget
 
 /*
  * Single Raft node composition.
@@ -28,7 +28,11 @@ proc OutgoingRPCs := HttpClient || RpcClient
 
 proc RPCs := IncomingRPCs || OutgoingRPCs
 
-proc Raft := RaftCore || ClusterInfo || ElectionTimeout || ElectionCampaign
-    || HeartbeatDriver || HeartbeatTarget || RPCs
+/* Lifecycle invariant: at most one of {FollowerHeartbeat, CandidateElection, LeaderHeartbeat}
+ * is actively driving elections or leadership handoff. */
+proc StateCommunication := FollowerHeartbeat || CandidateElection
+    || (LeaderHeartbeat || LeaderHeartbeatTarget)
+
+proc Raft := RaftCore || ClusterInfo || StateCommunication || RPCs
 
 proc NodeLogic := Raft || Initializers

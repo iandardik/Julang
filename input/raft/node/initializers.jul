@@ -59,7 +59,7 @@ p-class RaftInitializer {
         transit: step := "startElection"
     }
 
-    transition startElectionTimeout(me : Node, n : Int) {
+    transition startFollowerHeartbeat(me : Node, n : Int) {
         guard:
             & step = "startElection"
             & me = Node { id := selfId, url := acc[selfId] }

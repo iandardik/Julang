@@ -1,0 +1,134 @@
+import node.lib.Node
+
+/*
+ * Follower-side election timeout. Records an "election epoch" from RaftCore, sleeps for the
+ * timeout period, then checks whether the epoch is still fresh; if so it spawns a
+ * CandidateElection, otherwise it restarts and sleeps again.
+ */
+p-class FollowerHeartbeat {
+    const selfNode : Node
+    const clusterSize : Int
+    const electTimeout : Int
+    var step : String
+    var currentEpoch : Int
+    var snapTerm : Int
+    var snapCand : Int
+    var snapLastIdx : Int
+    var snapLastTerm : Int
+
+    constructor startFollowerHeartbeat(me : Node, n : Int) {
+        transit:
+            selfNode := me
+            clusterSize := n
+            electTimeout := 2 + me.id
+            step := "start"
+            currentEpoch := 0
+            snapTerm := 0
+            snapCand := 0
+            snapLastIdx := 0
+            snapLastTerm := 0
+    }
+
+    /* Same as startFollowerHeartbeat; distinct name so only LeaderHeartbeat is the sync peer. */
+    constructor resumeFollowerHeartbeat(me : Node, n : Int) {
+        transit:
+            selfNode := me
+            clusterSize := n
+            electTimeout := 2 + me.id
+            step := "start"
+            currentEpoch := 0
+            snapTerm := 0
+            snapCand := 0
+            snapLastIdx := 0
+            snapLastTerm := 0
+    }
+
+    transition getElectionSnapshot(
+        epoch : Int,
+        term : Int,
+        candId : Int,
+        lastIdx : Int,
+        lastT : Int,
+        role : String
+    ) {
+        guard:
+            | step = "start"
+            | step = "checkEpoch"
+        transit:
+            currentEpoch := if (step = "start") { epoch } else { currentEpoch }
+            step := when {
+                // sleep for a "random" amount of time before attempting to start the election
+                (step = "start") -> "sleep"
+
+                // if the epoch hasn't changed since sleeping then start the election
+                (epoch = currentEpoch) -> "doElect"
+
+                // if the epoch has changed since sleeping then start all over again
+                else -> "start"
+            }
+    }
+
+    internal transition sleepBeforeElect() {
+        guard:
+            step = "sleep"
+        transit:
+            step := "checkEpoch"
+        effect:
+            delaySeconds(electTimeout)
+    }
+
+    /* Pairwise with RaftCore: become candidate and bind candidacy metadata for the campaign. */
+    transition startElection(
+        epoch : Int,
+        term : Int,
+        candId : Int,
+        lastIdx : Int,
+        lastT : Int
+    ) {
+        guard:
+            & step = "doElect"
+            & epoch = currentEpoch
+        transit:
+            snapTerm := term
+            snapCand := candId
+            snapLastIdx := lastIdx
+            snapLastTerm := lastT
+            step := "startCampaign"
+    }
+
+    transition startCandidateElection(
+        me : Node,
+        n : Int,
+        term : Int,
+        candId : Int,
+        lastIdx : Int,
+        lastTerm : Int
+    ) {
+        guard:
+            & step = "startCampaign"
+            & me = selfNode
+            & n = clusterSize
+            & term = snapTerm
+            & candId = snapCand
+            & lastIdx = snapLastIdx
+            & lastTerm = snapLastTerm
+        transit:
+            step := "awaitCampaign"
+    }
+
+    /* Election lost quorum: go back to the start and reset the election timer. */
+    transition candidateElectionLost() {
+        guard:
+            step = "awaitCampaign"
+        transit:
+            step := "start"
+    }
+
+    /* Election won: this timeout instance ends; CandidateElection will start LeaderHeartbeat. */
+    transition candidateElectionWon() {
+        guard:
+            step = "awaitCampaign"
+        transit:
+            step := "done"
+    }
+}

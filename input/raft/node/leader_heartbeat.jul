@@ -3,23 +3,19 @@ import node.lib.Node
 
 /*
  * Leader heartbeat / AppendEntries orchestration (outgoing AppendEntries requests only).
- * HeartbeatTarget owns the peer cursor and resolves peers; HeartbeatDriver sends AEs.
- *
- * Lifecycle invariant: at most one of {ElectionTimeout, ElectionCampaign, HeartbeatDriver}
- * is actively driving elections or leadership handoff. Winning an election spawns this
- * driver via startHeartbeatDriver(me, n); on demotion this driver ends by calling
- * resumeElectionTimeout(me, n). ElectionTimeout / ElectionCampaign and HeartbeatDriver
- * are mutually exclusive.
+ * LeaderHeartbeatTarget owns the peer cursor and resolves peers; LeaderHeartbeat sends AEs.
+ * Winning an election spawns this driver via startLeaderHeartbeat(me, n); on demotion this
+ * driver ends by calling resumeFollowerHeartbeat(me, n).
  */
 
-p-class HeartbeatDriver {
+p-class LeaderHeartbeat {
     const me : Node
     const clusterSize : Int
     var step : String
     var target : Node
     var ae : AppendEntriesData
 
-    constructor startHeartbeatDriver(me : Node, n : Int) {
+    constructor startLeaderHeartbeat(me : Node, n : Int) {
         transit:
             me := me
             clusterSize := n
@@ -37,7 +33,7 @@ p-class HeartbeatDriver {
             }
     }
 
-    transition startHeartbeatTarget(me : Node, n : Int) {
+    transition startLeaderHeartbeatTarget(me : Node, n : Int) {
         guard: step = "initTarget" & me = me & n = clusterSize
         transit: step := "sleep"
     }
@@ -63,7 +59,7 @@ p-class HeartbeatDriver {
         transit: step := "sleep"
     }
 
-    transition pickHeartbeatTarget(node : Node) {
+    transition pickLeaderHeartbeatTarget(node : Node) {
         guard: step = "pickTarget"
         transit:
             target := node
@@ -88,13 +84,13 @@ p-class HeartbeatDriver {
         transit: step := "pickTarget"
     }
 
-    transition stopHeartbeatTarget() {
+    transition stopLeaderHeartbeatTarget() {
         guard: step = "stopTarget"
         transit: step := "handback"
     }
 
-    /* Lost leadership: spawn ElectionTimeout, then end this instance. */
-    transition resumeElectionTimeout(me : Node, n : Int) {
+    /* Lost leadership: spawn FollowerHeartbeat, then end this instance. */
+    transition resumeFollowerHeartbeat(me : Node, n : Int) {
         guard: step = "handback" & me = me & n = clusterSize
         transit: step := "done"
     }
@@ -102,19 +98,19 @@ p-class HeartbeatDriver {
 
 /*
  * Tracks which cluster member should receive the next heartbeat in the current round.
- * Resolves peers via ClusterInfo.lookupNodeById; spawned with HeartbeatDriver and stopped on demotion.
+ * Resolves peers via ClusterInfo.lookupNodeById; spawned with LeaderHeartbeat and stopped on demotion.
  *
- * Starts idle so it cannot lookupNodeById before HeartbeatDriver begins a round (avoids deadlock
+ * Starts idle so it cannot lookupNodeById before LeaderHeartbeat begins a round (avoids deadlock
  * while the driver is in sleep). While ready, target.id is the next peer (never self).
  */
-p-class HeartbeatTarget {
+p-class LeaderHeartbeatTarget {
     const me : Node
     const clusterSize : Int
     var target : Node
     var peersLeft : Int
     var step : String
 
-    constructor startHeartbeatTarget(me : Node, n : Int) {
+    constructor startLeaderHeartbeatTarget(me : Node, n : Int) {
         transit:
             me := me
             clusterSize := n
@@ -138,7 +134,7 @@ p-class HeartbeatTarget {
             step := "havePeer"
     }
 
-    transition pickHeartbeatTarget(node : Node) {
+    transition pickLeaderHeartbeatTarget(node : Node) {
         guard: step = "havePeer" & node = target
         transit: step := "advance"
     }
@@ -164,7 +160,7 @@ p-class HeartbeatTarget {
         transit: step := "idle"
     }
 
-    transition stopHeartbeatTarget() {
+    transition stopLeaderHeartbeatTarget() {
         guard:
             step = "idle" | step = "ready" | step = "havePeer"
             | step = "advance" | step = "doneRound"

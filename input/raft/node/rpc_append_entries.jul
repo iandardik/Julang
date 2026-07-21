@@ -135,7 +135,7 @@ p-class OutgoingAppendEntriesRPC {
         transit: step := "finishElection"
     }
 
-    /* Pairwise with HeartbeatDriver after Core has applied the AppendEntries response. */
+    /* Pairwise with LeaderHeartbeat after Core has applied the AppendEntries response. */
     transition endOutgoingAppendEntries(peerId : Int) {
         guard: step = "finishElection" & peerId = cPeer.id
         transit: step := "done"

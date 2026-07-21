@@ -1,0 +1,149 @@
+import node.lib.Node
+
+/*
+ * Candidate election: cycles through each peer, sends a RequestVote RPC, and notifies RaftCore
+ * of each decision. After all peers are contacted, checks for quorum; if so, tells RaftCore to
+ * become leader and spawns LeaderHeartbeat; otherwise terminates.
+ */
+p-class CandidateElection {
+    const selfNode : Node
+    const clusterSize : Int
+    const snapTerm : Int
+    const snapCand : Int
+    const snapLastIdx : Int
+    const snapLastTerm : Int
+    var step : String
+    var target : Node
+    var targetId : Int
+    var voteTerm : Int
+    var voteGranted : Boolean
+
+    constructor startCandidateElection(
+        me : Node,
+        n : Int,
+        term : Int,
+        candId : Int,
+        lastIdx : Int,
+        lastTerm : Int
+    ) {
+        transit:
+            selfNode := me
+            clusterSize := n
+            snapTerm := term
+            snapCand := candId
+            snapLastIdx := lastIdx
+            snapLastTerm := lastTerm
+            step := "lookUpTarget"
+            target := Node { id := 0, url := "" }
+            targetId := 0
+            voteTerm := 0
+            voteGranted := false
+    }
+
+    // if the current target is me then move to the next target
+    internal transition skipMe() {
+        guard:
+            & step = "lookUpTarget"
+            & targetId = selfNode.id
+            & targetId < clusterSize
+        transit:
+            targetId := targetId + 1
+    }
+
+    internal transition allTargetsSent() {
+        guard:
+            & step = "lookUpTarget"
+            & targetId >= clusterSize
+        transit:
+            step := "checkIfWon"
+
+    }
+
+    transition lookupNodeById(id : Int, node : Node) {
+        guard:
+            & step = "lookUpTarget"
+            & id = targetId
+            & id ~= selfNode.id // req votes from other nodes
+        transit:
+            target := node
+            step := "sendRequestVote"
+    }
+
+    transition beginOutgoingRequestVote(
+        peer : Node,
+        term : Int,
+        candId : Int,
+        lastIdx : Int,
+        lastTerm : Int
+    ) {
+        guard:
+            & step = "sendRequestVote"
+            & peer = target
+            & term = snapTerm
+            & candId = snapCand
+            & lastIdx = snapLastIdx
+            & lastTerm = snapLastTerm
+        transit:
+            step := "awaitRequestVote"
+    }
+
+    transition endOutgoingRequestVote(peerId : Int, term : Int, granted : Boolean) {
+        guard:
+            & step = "awaitRequestVote"
+            & peerId = targetId
+        transit:
+            voteTerm := term
+            voteGranted := granted
+            step := "recordVote"
+    }
+
+    /* Pairwise with RaftCore: apply the vote result from the outbound RPC. */
+    transition recordVote(peerId : Int, term : Int, granted : Boolean) {
+        guard:
+            & step = "recordVote"
+            & peerId = targetId
+            & term = voteTerm
+            & granted = voteGranted
+        transit:
+            targetId := targetId + 1
+            step := "lookUpTarget"
+    }
+
+    transition hasQuorum(flag : Boolean) {
+        guard:
+            step = "checkIfWon"
+        transit:
+            step := if (flag) { "doLeader" } else { "lost" }
+    }
+
+    transition candidateElectionLost() {
+        guard:
+            step = "lost"
+        transit:
+            step := "done"
+    }
+
+    transition becomeLeader() {
+        guard:
+            step = "doLeader"
+        transit:
+            step := "won"
+    }
+
+    transition candidateElectionWon() {
+        guard:
+            step = "won"
+        transit:
+            step := "startHeartbeat"
+    }
+
+    /* Spawn LeaderHeartbeat, then end this election. */
+    transition startLeaderHeartbeat(me : Node, n : Int) {
+        guard:
+            & step = "startHeartbeat"
+            & me = selfNode
+            & n = clusterSize
+        transit:
+            step := "done"
+    }
+}
