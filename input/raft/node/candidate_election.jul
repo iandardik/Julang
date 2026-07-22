@@ -3,7 +3,8 @@ import node.lib.Node
 /*
  * Candidate election: cycles through each peer, sends a RequestVote RPC, and notifies RaftCore
  * of each decision. After all peers are contacted, checks for quorum; if so, tells RaftCore to
- * become leader and spawns LeaderHeartbeat; otherwise terminates.
+ * become leader (RaftCore spawns LeaderHeartbeat); otherwise reports loss so RaftCore can spawn
+ * FollowerHeartbeat.
  */
 p-class CandidateElection {
     const selfNode : Node
@@ -69,6 +70,7 @@ p-class CandidateElection {
             step := "sendRequestVote"
     }
 
+    // TODO: sendVoteRequest
     transition beginOutgoingRequestVote(
         peer : Node,
         term : Int,
@@ -87,6 +89,7 @@ p-class CandidateElection {
             step := "awaitRequestVote"
     }
 
+    // TODO: receiveResponseVoteRequest
     transition endOutgoingRequestVote(peerId : Int, term : Int, granted : Boolean) {
         guard:
             & step = "awaitRequestVote"
@@ -116,6 +119,7 @@ p-class CandidateElection {
             step := if (flag) { "doLeader" } else { "lost" }
     }
 
+    /* Pairwise with RaftCore: report loss so Core can spawn FollowerHeartbeat. */
     transition candidateElectionLost() {
         guard:
             step = "lost"
@@ -123,26 +127,10 @@ p-class CandidateElection {
             step := "done"
     }
 
+    /* Pairwise with RaftCore: become leader; this instance ends (Core spawns LeaderHeartbeat). */
     transition becomeLeader() {
         guard:
             step = "doLeader"
-        transit:
-            step := "won"
-    }
-
-    transition candidateElectionWon() {
-        guard:
-            step = "won"
-        transit:
-            step := "startHeartbeat"
-    }
-
-    /* Spawn LeaderHeartbeat, then end this election. */
-    transition startLeaderHeartbeat(me : Node, n : Int) {
-        guard:
-            & step = "startHeartbeat"
-            & me = selfNode
-            & n = clusterSize
         transit:
             step := "done"
     }

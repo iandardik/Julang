@@ -20,16 +20,16 @@ import node.leader_heartbeat.LeaderHeartbeatTarget
  * CLI: <configPath> <selfIndex>
  */
 
-proc IncomingRPCs := HttpServer || RpcServer
-    || IncomingRequestVoteRPC || IncomingAppendEntriesRPC || IncomingClientRPC
+proc RpcTransport := HttpServer || HttpClient || RpcServer || RpcClient
+proc RequestVoteRPCs := IncomingRequestVoteRPC || OutgoingRequestVoteRPC
+proc AppendEntriesRPCs := IncomingAppendEntriesRPC || OutgoingAppendEntriesRPC
+proc ClientRPCs := IncomingClientRPC
 
-proc OutgoingRPCs := HttpClient || RpcClient
-    || OutgoingRequestVoteRPC || OutgoingAppendEntriesRPC
-
-proc RPCs := IncomingRPCs || OutgoingRPCs
+proc RPCs := RpcTransport || RequestVoteRPCs || AppendEntriesRPCs || ClientRPCs
 
 /* Lifecycle invariant: at most one of {FollowerHeartbeat, CandidateElection, LeaderHeartbeat}
- * is actively driving elections or leadership handoff. */
+ * is actively driving elections or leadership handoff. RaftCore is the sole constructor of
+ * these three drivers. */
 proc StateCommunication := FollowerHeartbeat || CandidateElection
     || (LeaderHeartbeat || LeaderHeartbeatTarget)
 

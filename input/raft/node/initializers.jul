@@ -53,17 +53,12 @@ p-class RaftInitializer {
         transit: step := "startCore"
     }
 
-    transition startRaftCore(id : Int, n : Int) {
+    transition startRaftCore(id : Int, n : Int, url : String) {
         guard:
-            step = "startCore" & id = selfId & n = length(acc)
-        transit: step := "startElection"
-    }
-
-    transition startFollowerHeartbeat(me : Node, n : Int) {
-        guard:
-            & step = "startElection"
-            & me = Node { id := selfId, url := acc[selfId] }
+            & step = "startCore"
+            & id = selfId
             & n = length(acc)
+            & url = acc[selfId]
         transit: step := "done"
     }
 }

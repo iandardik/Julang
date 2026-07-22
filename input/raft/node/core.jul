@@ -1,5 +1,6 @@
 import julaylib.fun.length
 import node.lib.Entry
+import node.lib.Node
 import node.lib.AppendEntriesData
 import node.lib.entryValueAt
 
@@ -7,11 +8,13 @@ import node.lib.entryValueAt
  * Local Raft state for one node.
  * RaftCore is a singleton--one RaftCore is expected to live on each node.
  * Peer URLs live in ClusterInfo; this core tracks leaderId for redirects.
+ * RaftCore is the sole constructor of FollowerHeartbeat, CandidateElection, and LeaderHeartbeat.
  */
 
 p-class RaftCore {
     const selfId : Int
     const clusterSize : Int
+    var self : Node
     var currentTerm : Int
     var state : String
     var votedFor : Int
@@ -24,11 +27,15 @@ p-class RaftCore {
     var voteCount : Int
     var knownLeaderId : Int
     var electionEpoch : Int
+    var startFollowerHeartbeat : Boolean
+    var startElection : Boolean
+    var startLeaderHeartbeat : Boolean
 
-    constructor startRaftCore(id : Int, n : Int) {
+    constructor startRaftCore(id : Int, n : Int, url : String) {
         transit:
             selfId := id
             clusterSize := n
+            self := Node { id := id, url := url }
             currentTerm := 0
             state := "Follower"
             votedFor := -1
@@ -41,6 +48,9 @@ p-class RaftCore {
             voteCount := 0
             knownLeaderId := -1
             electionEpoch := 0
+            startFollowerHeartbeat := true
+            startElection := false
+            startLeaderHeartbeat := false
     }
 
     /*
@@ -85,7 +95,21 @@ p-class RaftCore {
     }
 
     /*
-     * Start an election in attempt to become the leader.
+     * Start the FollowerHeartbeat process.
+     */
+    transition startFollowerHeartbeat(me : Node, n : Int) {
+        guard:
+            & startFollowerHeartbeat
+            & me = self
+            & n = clusterSize
+        transit:
+            startFollowerHeartbeat := false
+    }
+
+    /*
+     * The FollowerHeartbeat process did not receive a heartbeat from
+     * a leader within the allotted timeout, and is now notifying /this/
+     * process.
      */
     transition startElection(
         epoch : Int,
@@ -109,6 +133,32 @@ p-class RaftCore {
             voteCount := 1
             electionEpoch := electionEpoch + 1
             knownLeaderId := -1
+            startElection := true
+    }
+
+    /*
+     * After the FollowerHeartbeat tells us to start an election, this
+     * process now starts a CandidateElection process in attempt to become
+     * the new leader.
+     */
+    transition startCandidateElection(
+        me : Node,
+        n : Int,
+        term : Int,
+        candId : Int,
+        lastIdx : Int,
+        lastTerm : Int
+    ) {
+        guard:
+            & startElection
+            & me = self
+            & n = clusterSize
+            & term = currentTerm
+            & candId = selfId
+            & lastIdx = length(log)
+            & lastTerm = lastLogTermVar
+        transit:
+            startElection := false
     }
 
     /*
@@ -126,6 +176,16 @@ p-class RaftCore {
     }
 
     /*
+     * CandidateElection failed to win quorum; spawn a new FollowerHeartbeat.
+     */
+    transition candidateElectionLost() {
+        guard:
+            state = "Candidate"
+        transit:
+            startFollowerHeartbeat := true
+    }
+
+    /*
      * We have received enough votes to become the leader!
      */
     transition becomeLeader() {
@@ -136,6 +196,29 @@ p-class RaftCore {
             state := "Leader"
             knownLeaderId := selfId
             electionEpoch := electionEpoch + 1
+            startLeaderHeartbeat := true
+    }
+
+    /*
+     * Spawn LeaderHeartbeat after winning an election.
+     */
+    transition startLeaderHeartbeat(me : Node, n : Int) {
+        guard:
+            & startLeaderHeartbeat
+            & me = self
+            & n = clusterSize
+        transit:
+            startLeaderHeartbeat := false
+    }
+
+    /*
+     * LeaderHeartbeat detected demotion; spawn a new FollowerHeartbeat.
+     */
+    transition lostLeadership() {
+        guard:
+            state ~= "Leader"
+        transit:
+            startFollowerHeartbeat := true
     }
 
     /*

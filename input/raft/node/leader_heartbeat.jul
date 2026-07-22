@@ -4,8 +4,8 @@ import node.lib.Node
 /*
  * Leader heartbeat / AppendEntries orchestration (outgoing AppendEntries requests only).
  * LeaderHeartbeatTarget owns the peer cursor and resolves peers; LeaderHeartbeat sends AEs.
- * Winning an election spawns this driver via startLeaderHeartbeat(me, n); on demotion this
- * driver ends by calling resumeFollowerHeartbeat(me, n).
+ * RaftCore spawns this driver via startLeaderHeartbeat(me, n); on demotion this driver reports
+ * lostLeadership to RaftCore, which then spawns FollowerHeartbeat.
  */
 
 p-class LeaderHeartbeat {
@@ -89,9 +89,9 @@ p-class LeaderHeartbeat {
         transit: step := "handback"
     }
 
-    /* Lost leadership: spawn FollowerHeartbeat, then end this instance. */
-    transition resumeFollowerHeartbeat(me : Node, n : Int) {
-        guard: step = "handback" & me = me & n = clusterSize
+    /* Lost leadership: report to RaftCore so it can spawn FollowerHeartbeat. */
+    transition lostLeadership() {
+        guard: step = "handback"
         transit: step := "done"
     }
 }
