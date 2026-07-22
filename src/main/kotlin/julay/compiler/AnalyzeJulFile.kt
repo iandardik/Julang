@@ -11,15 +11,15 @@ fun analyzeJulFile(
     extraLibraryPaths: List<Path> = emptyList(),
 ) {
     val checked = prepareCheckedCompilation(source, extraLibraryPaths) ?: return
-    val (unit, ast, procDecls, programs, librariesInUse) = checked
+    val (unit, ast, procDecls, jarTargets, _, librariesInUse) = checked
 
-    if (programs.isEmpty()) {
+    if (jarTargets.isEmpty()) {
         val components = unit.allPClassNames + librariesInUse
         if (!runErrorAndWarningPasses(ast, components, librariesInUse)) {
             return
         }
     } else {
-        for (program in programs) {
+        for (program in jarTargets) {
             val components = program.allProcNames(procDecls)
             if (!runErrorAndWarningPasses(ast, components, librariesInUse, program.name)) {
                 return

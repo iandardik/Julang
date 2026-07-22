@@ -2,7 +2,6 @@ package julay.compiler
 
 import julay.compiler.ast.*
 import julay.compiler.decl.ProcDecl
-import julay.compiler.decl.ProcDeclType
 import julay.program.library.LibraryRegistry
 import java.nio.file.Path
 
@@ -29,9 +28,8 @@ data class CompilationUnit(
         importTable.shortNames.values.any { it is ResolvedSymbol.Library && it.flatName == flatName } ||
             moduleSymbols.values.any { it is ResolvedSymbol.Library && it.flatName == flatName }
 
-    fun librariesInUse(procDecls: List<ProcDecl>): Set<String> {
-        val programLibs = procDecls
-            .filter { it.type == ProcDeclType.Program }
+    fun librariesInUse(jarRoots: List<ProcDecl>, procDecls: List<ProcDecl>): Set<String> {
+        val programLibs = jarRoots
             .flatMap { it.allProcNames(procDecls) }
             .filter { LibraryRegistry.isKotlinLibrary(it) }
             .toSet()
@@ -71,7 +69,7 @@ fun emptyCompilationUnit(entryPath: Path): CompilationUnit {
 }
 
 fun collectDeclNames(root: RootNode): Set<String> =
-    root.declNodes().filter { it !is FunNode }.map { it.name() }.toSet()
+    root.declNodes().filter { it !is FunNode && it !is CompileNode }.map { it.name() }.toSet()
 
 fun collectPClassNames(root: RootNode): Set<String> =
     root.declNodes().filterIsInstance<ProcClassNode>().map { it.name() }.toSet()

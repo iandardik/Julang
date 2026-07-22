@@ -1,9 +1,9 @@
-o-class Point {
+obj Point {
     x : Int
     y : Int
 }
 
-p-class Worker {
+proc Worker {
     var pos : Point
     var steps : Int
 
@@ -38,4 +38,6 @@ p-class Worker {
     }
 }
 
-program WholeAssignTest := Worker
+proc WholeAssignTest := Worker
+
+compile WholeAssignTest

@@ -1,4 +1,4 @@
-p-class BadIn {
+proc BadIn {
     var b : Boolean
 
     constructor initially(args : List<String>) {
@@ -7,4 +7,6 @@ p-class BadIn {
     }
 }
 
-program P := BadIn
+proc P := BadIn
+
+compile P

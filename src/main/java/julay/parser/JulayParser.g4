@@ -19,10 +19,9 @@ qual_segment
     ;
 
 decl
-    : pclass
-    | oclass
-    | proc
-    | program
+    : proc
+    | obj
+    | compile_decl
     | spec
     | invariant_decl
     | fun_decl
@@ -45,20 +44,17 @@ fun_decl
     : FUN ID typeParams? args COLON typeExpr EQ expr
     ;
 
-pclass
-    : PCLASS ID LCURLY pclass_body* RCURLY
-    ;
-
-oclass
-    : OCLASS ID typeParams? LCURLY field* RCURLY
-    ;
-
 proc
-    : PROC ID ASGN_EQ proc_expr
+    : PROC ID LCURLY pclass_body* RCURLY
+    | PROC ID ASGN_EQ proc_expr
     ;
 
-program
-    : PROGRAM ID ASGN_EQ proc_expr
+obj
+    : OBJ ID typeParams? LCURLY field* RCURLY
+    ;
+
+compile_decl
+    : COMPILE ID (COMMA ID)*
     ;
 
 spec

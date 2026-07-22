@@ -1,4 +1,4 @@
-p-class Readln {
+proc Readln {
     var prompt : Boolean
     var readMsg : String
 

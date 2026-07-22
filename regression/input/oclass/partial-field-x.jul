@@ -1,11 +1,11 @@
 import julaylib.pclass.ExitSystem
 
-o-class Point {
+obj Point {
     x : Int
     y : Int
 }
 
-p-class Worker {
+proc Worker {
     var pos : Point
     var steps : Int
 
@@ -39,4 +39,6 @@ p-class Worker {
     }
 }
 
-program PartialFieldXTest := Worker || ExitSystem
+proc PartialFieldXTest := Worker || ExitSystem
+
+compile PartialFieldXTest

@@ -1,4 +1,4 @@
-p-class Timer {
+proc Timer {
     var done : Boolean
 
     constructor timer(time : Int) {

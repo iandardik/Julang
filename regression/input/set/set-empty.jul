@@ -1,7 +1,7 @@
 import julaylib.pclass.ExitSystem
 import julaylib.fun.length
 
-p-class SetEmptyDemo {
+proc SetEmptyDemo {
     var s : Set<Int>
     var done : Boolean
 
@@ -24,4 +24,6 @@ p-class SetEmptyDemo {
     }
 }
 
-program SetEmptyTest := SetEmptyDemo || ExitSystem
+proc SetEmptyTest := SetEmptyDemo || ExitSystem
+
+compile SetEmptyTest

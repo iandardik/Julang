@@ -1,9 +1,9 @@
-o-class Point {
+obj Point {
     x : Int
     y : Int
 }
 
-p-class S {
+proc S {
     var p : Point
     var x : Int
 
@@ -18,4 +18,6 @@ p-class S {
     }
 }
 
-program P := S
+proc P := S
+
+compile P

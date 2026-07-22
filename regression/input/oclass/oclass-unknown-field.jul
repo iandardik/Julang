@@ -1,8 +1,8 @@
-o-class Point {
+obj Point {
     x : Int
 }
 
-p-class Bad {
+proc Bad {
     var pos : Point
 
     constructor initially(args : List<String>) {
@@ -16,4 +16,6 @@ p-class Bad {
     }
 }
 
-program BadTest := Bad
+proc BadTest := Bad
+
+compile BadTest

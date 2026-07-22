@@ -87,7 +87,7 @@ fun compositionLeavesOfSpec(spec: SpecNode): List<SpecLeaf> {
 }
 
 /**
- * Expand named `proc` / `program` / `spec` aliases to their nested p-class leaves.
+ * Expand named `proc` / `spec` aliases to their nested proc-class leaves.
  * Parameterization on an outer leaf is pushed down onto non-parameterized children.
  *
  * Nested AG specs contribute only their system expression (not assume/guarantee).
@@ -96,7 +96,6 @@ fun expandLeavesToPclasses(
     leaves: List<SpecLeaf>,
     pclasses: Map<String, ProcClassNode>,
     procAliases: Map<String, ProcNode>,
-    programAliases: Map<String, ProgramNode> = emptyMap(),
     specAliases: Map<String, SpecNode> = emptyMap(),
 ): List<SpecLeaf> {
     val out = LinkedHashMap<String, SpecLeaf>()
@@ -126,11 +125,6 @@ fun expandLeavesToPclasses(
             leaf.name in pclasses -> add(leaf)
             leaf.name in procAliases -> {
                 flattenSpecLeaves(procAliases.getValue(leaf.name).procNodeValue()).forEach { child ->
-                    expand(pushDown(leaf, child))
-                }
-            }
-            leaf.name in programAliases -> {
-                flattenSpecLeaves(programAliases.getValue(leaf.name).programNodeValue()).forEach { child ->
                     expand(pushDown(leaf, child))
                 }
             }

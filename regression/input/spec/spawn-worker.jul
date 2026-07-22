@@ -1,4 +1,4 @@
-p-class Server {
+proc Server {
     var ready : Boolean
 
     constructor initially(args : List<String>) {
@@ -11,7 +11,7 @@ p-class Server {
     }
 }
 
-p-class Worker {
+proc Worker {
     var id : Int
 
     constructor initially(args : List<String>) {
@@ -30,3 +30,5 @@ p-class Worker {
 invariant G := all i : Int, Worker[i].id >= 0
 
 spec SpawnWorker := <true> Server || Worker[i : Int] <G>
+
+compile SpawnWorker

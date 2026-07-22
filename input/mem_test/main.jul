@@ -1,4 +1,4 @@
-p-class PeriodicPrint {
+proc PeriodicPrint {
     var step : String
 
     constructor initially(args : List<String>) {
@@ -19,4 +19,6 @@ p-class PeriodicPrint {
     }
 }
 
-program MemTest := PeriodicPrint
+proc MemTest := PeriodicPrint
+
+compile MemTest

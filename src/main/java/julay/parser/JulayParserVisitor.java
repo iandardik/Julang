@@ -65,29 +65,23 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitFun_decl(JulayParser.Fun_declContext ctx);
 	/**
-	 * Visit a parse tree produced by {@link JulayParser#pclass}.
-	 * @param ctx the parse tree
-	 * @return the visitor result
-	 */
-	T visitPclass(JulayParser.PclassContext ctx);
-	/**
-	 * Visit a parse tree produced by {@link JulayParser#oclass}.
-	 * @param ctx the parse tree
-	 * @return the visitor result
-	 */
-	T visitOclass(JulayParser.OclassContext ctx);
-	/**
 	 * Visit a parse tree produced by {@link JulayParser#proc}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
 	T visitProc(JulayParser.ProcContext ctx);
 	/**
-	 * Visit a parse tree produced by {@link JulayParser#program}.
+	 * Visit a parse tree produced by {@link JulayParser#obj}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
-	T visitProgram(JulayParser.ProgramContext ctx);
+	T visitObj(JulayParser.ObjContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#compile_decl}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitCompile_decl(JulayParser.Compile_declContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link JulayParser#spec}.
 	 * @param ctx the parse tree

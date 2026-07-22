@@ -1,4 +1,4 @@
-p-class BadEmptySet {
+proc BadEmptySet {
     var n : Int
 
     constructor initially(args : List<String>) {
@@ -7,4 +7,6 @@ p-class BadEmptySet {
     }
 }
 
-program P := BadEmptySet
+proc P := BadEmptySet
+
+compile P

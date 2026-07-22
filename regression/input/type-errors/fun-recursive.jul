@@ -1,6 +1,6 @@
 fun fact(n : Int) : Int = if (n = 0) { 1 } else { n * fact(n - 1) }
 
-p-class S {
+proc S {
     var x : Int
 
     constructor initially(args : List<String>) {
@@ -16,4 +16,6 @@ p-class S {
     }
 }
 
-program P := S
+proc P := S
+
+compile P

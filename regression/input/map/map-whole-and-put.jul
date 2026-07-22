@@ -1,4 +1,4 @@
-p-class BadMapTransit {
+proc BadMapTransit {
     var mp : Map<String, Int>
 
     constructor initially(args : List<String>) {
@@ -15,4 +15,6 @@ p-class BadMapTransit {
     }
 }
 
-program P := BadMapTransit
+proc P := BadMapTransit
+
+compile P

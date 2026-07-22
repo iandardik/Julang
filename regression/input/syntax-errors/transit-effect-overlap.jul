@@ -1,4 +1,4 @@
-p-class S {
+proc S {
     var msg : String
 
     constructor initially(args : List<String>) {
@@ -14,4 +14,6 @@ p-class S {
     }
 }
 
-program P := S
+proc P := S
+
+compile P

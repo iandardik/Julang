@@ -1,6 +1,6 @@
 import julaylib.Nonexistent
 
-p-class S {
+proc S {
     var x : Int
 
     constructor initially(args : List<String>) {
@@ -8,4 +8,6 @@ p-class S {
     }
 }
 
-program ImportUnknownLibTest := S
+proc ImportUnknownLibTest := S
+
+compile ImportUnknownLibTest

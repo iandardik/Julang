@@ -6,17 +6,17 @@ import julaylib.fun.startsWith
  * Shared Raft types and helpers (RPC encoding, config parsing, log access).
  */
 
-o-class Entry {
+obj Entry {
     term : Int
     value : String
 }
 
-o-class Node {
+obj Node {
     id : Int
     url : String
 }
 
-o-class AppendEntriesData {
+obj AppendEntriesData {
     term : Int
     leaderId : Int
     prevLogIndex : Int

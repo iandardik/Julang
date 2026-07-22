@@ -1,6 +1,6 @@
 import julaylib.pclass.Println
 
-p-class Producer {
+proc Producer {
     var x : Int
 
     constructor initially(args : List<String>) {
@@ -16,7 +16,7 @@ p-class Producer {
     }
 }
 
-p-class Other {
+proc Other {
     var y : Int
 
     constructor initially(args : List<String>) {
@@ -32,4 +32,6 @@ p-class Other {
     }
 }
 
-program P := Producer || Other || Println
+proc P := Producer || Other || Println
+
+compile P

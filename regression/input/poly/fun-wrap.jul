@@ -1,12 +1,12 @@
 import julaylib.pclass.ExitSystem
 
-o-class Box<T> {
+obj Box<T> {
     value : T
 }
 
 fun wrap<T>(x : T) : Box<T> = Box<T> { value := x }
 
-p-class Worker {
+proc Worker {
     var box : Box<Int>
     var steps : Int
 
@@ -37,7 +37,7 @@ p-class Worker {
     }
 }
 
-p-class Driver {
+proc Driver {
     var done : Boolean
 
     constructor initially(args : List<String>) {
@@ -58,4 +58,6 @@ p-class Driver {
     }
 }
 
-program PolyFunWrapTest := Worker || Driver || ExitSystem
+proc PolyFunWrapTest := Worker || Driver || ExitSystem
+
+compile PolyFunWrapTest

@@ -3,7 +3,7 @@ import julaylib.pclass.Println
 import julaylib.fun.length
 import julaylib.fun.parseInt
 
-p-class ClientDispatcher {
+proc ClientDispatcher {
     const targetNumReqs : Int
     var numReqs : Int
     var numResps : Int
@@ -41,7 +41,7 @@ p-class ClientDispatcher {
     }
 }
 
-p-class ClientLogic {
+proc ClientLogic {
     const reqNum : Int
     var state : String
     var respText : String

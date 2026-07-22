@@ -1,8 +1,8 @@
-o-class Box<T> {
+obj Box<T> {
     value : T
 }
 
-p-class Worker {
+proc Worker {
     var x : Box
 
     constructor initially(args : List<String>) {
@@ -11,4 +11,6 @@ p-class Worker {
     }
 }
 
-program PolyBareParametricTest := Worker
+proc PolyBareParametricTest := Worker
+
+compile PolyBareParametricTest

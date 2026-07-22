@@ -1,6 +1,6 @@
 fun add(x : Int, y : Int) : Int = x + y
 
-p-class S {
+proc S {
     var x : Int
 
     constructor initially(args : List<String>) {
@@ -16,4 +16,6 @@ p-class S {
     }
 }
 
-program P := S
+proc P := S
+
+compile P

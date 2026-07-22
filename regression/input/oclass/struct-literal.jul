@@ -1,14 +1,14 @@
-o-class Point {
+obj Point {
     x : Int
     y : Int
 }
 
-o-class Line {
+obj Line {
     start : Point
     end : Point
 }
 
-p-class Worker {
+proc Worker {
     var pos : Point
     var segment : Line
 
@@ -29,4 +29,6 @@ p-class Worker {
     }
 }
 
-program ObjClassLiteralTest := Worker
+proc ObjClassLiteralTest := Worker
+
+compile ObjClassLiteralTest

@@ -98,26 +98,6 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitFun_decl(JulayParser.Fun_declContext ctx);
 	/**
-	 * Enter a parse tree produced by {@link JulayParser#pclass}.
-	 * @param ctx the parse tree
-	 */
-	void enterPclass(JulayParser.PclassContext ctx);
-	/**
-	 * Exit a parse tree produced by {@link JulayParser#pclass}.
-	 * @param ctx the parse tree
-	 */
-	void exitPclass(JulayParser.PclassContext ctx);
-	/**
-	 * Enter a parse tree produced by {@link JulayParser#oclass}.
-	 * @param ctx the parse tree
-	 */
-	void enterOclass(JulayParser.OclassContext ctx);
-	/**
-	 * Exit a parse tree produced by {@link JulayParser#oclass}.
-	 * @param ctx the parse tree
-	 */
-	void exitOclass(JulayParser.OclassContext ctx);
-	/**
 	 * Enter a parse tree produced by {@link JulayParser#proc}.
 	 * @param ctx the parse tree
 	 */
@@ -128,15 +108,25 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitProc(JulayParser.ProcContext ctx);
 	/**
-	 * Enter a parse tree produced by {@link JulayParser#program}.
+	 * Enter a parse tree produced by {@link JulayParser#obj}.
 	 * @param ctx the parse tree
 	 */
-	void enterProgram(JulayParser.ProgramContext ctx);
+	void enterObj(JulayParser.ObjContext ctx);
 	/**
-	 * Exit a parse tree produced by {@link JulayParser#program}.
+	 * Exit a parse tree produced by {@link JulayParser#obj}.
 	 * @param ctx the parse tree
 	 */
-	void exitProgram(JulayParser.ProgramContext ctx);
+	void exitObj(JulayParser.ObjContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#compile_decl}.
+	 * @param ctx the parse tree
+	 */
+	void enterCompile_decl(JulayParser.Compile_declContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#compile_decl}.
+	 * @param ctx the parse tree
+	 */
+	void exitCompile_decl(JulayParser.Compile_declContext ctx);
 	/**
 	 * Enter a parse tree produced by {@link JulayParser#spec}.
 	 * @param ctx the parse tree

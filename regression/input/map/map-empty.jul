@@ -1,7 +1,7 @@
 import julaylib.pclass.ExitSystem
 import julaylib.fun.length
 
-p-class MapEmptyDemo {
+proc MapEmptyDemo {
     var mp : Map<String, Int>
     var done : Boolean
 
@@ -24,4 +24,6 @@ p-class MapEmptyDemo {
     }
 }
 
-program MapEmptyTest := MapEmptyDemo || ExitSystem
+proc MapEmptyTest := MapEmptyDemo || ExitSystem
+
+compile MapEmptyTest

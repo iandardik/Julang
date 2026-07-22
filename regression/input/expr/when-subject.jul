@@ -1,7 +1,7 @@
 import julaylib.pclass.Println
 import julaylib.pclass.ExitSystem
 
-p-class S {
+proc S {
     var key : String
     var x : Int
     var print : Boolean
@@ -41,4 +41,6 @@ p-class S {
     }
 }
 
-program P := S || Println || ExitSystem
+proc P := S || Println || ExitSystem
+
+compile P

@@ -1,6 +1,6 @@
 import julaylib.pclass.ExitSystem
 
-p-class MapMissingKey {
+proc MapMissingKey {
     var mp : Map<String, Int>
     var n : Int
 
@@ -23,4 +23,6 @@ p-class MapMissingKey {
     }
 }
 
-program MapMissingKeyTest := MapMissingKey || ExitSystem
+proc MapMissingKeyTest := MapMissingKey || ExitSystem
+
+compile MapMissingKeyTest

@@ -19,5 +19,5 @@ data class ProcDecl(
 }
 
 enum class ProcDeclType {
-    Proc, Program, Spec
+    Proc, Spec
 }

@@ -5,7 +5,7 @@ import node.lib.Node
  * timeout period, then checks whether the epoch is still fresh; if so it asks RaftCore to start
  * an election (RaftCore then spawns CandidateElection), otherwise it restarts and sleeps again.
  */
-p-class FollowerHeartbeat {
+proc FollowerHeartbeat {
     const selfNode : Node
     const clusterSize : Int
     const electTimeout : Int

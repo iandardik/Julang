@@ -5,7 +5,7 @@ fun double(n : Real) : Real = n + n
 
 fun id<T>(x : T) : T = x
 
-p-class S {
+proc S {
     var x : Real
     var print : Boolean
 
@@ -36,7 +36,7 @@ p-class S {
     }
 }
 
-p-class T {
+proc T {
     var x : Real
 
     constructor initially(args : List<String>) {
@@ -52,4 +52,6 @@ p-class T {
     }
 }
 
-program FunBasicTest := S || T || Println || ExitSystem
+proc FunBasicTest := S || T || Println || ExitSystem
+
+compile FunBasicTest

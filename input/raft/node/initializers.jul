@@ -10,7 +10,7 @@ import node.lib.Node
  * Static cluster config loading, HTTP listen-port startup, and outbound HttpClient startup.
  */
 
-p-class RaftInitializer {
+proc RaftInitializer {
     const path : String
     const selfId : Int
     var rawLines : List<String>
@@ -63,7 +63,7 @@ p-class RaftInitializer {
     }
 }
 
-p-class ServerInitializer {
+proc ServerInitializer {
     var started : Boolean
     var myPort : Int
 
@@ -97,7 +97,7 @@ p-class ServerInitializer {
     }
 }
 
-p-class ClientInitializer {
+proc ClientInitializer {
     var step : String
 
     constructor initially(args : List<String>) {

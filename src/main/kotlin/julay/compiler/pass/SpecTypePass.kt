@@ -22,9 +22,6 @@ fun RootNode.specTypePass(
     val procAliases = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<ProcNode>() }
         .associateBy { it.name() }
-    val programAliases = unit.modules
-        .flatMap { it.root.declNodes().filterIsInstance<ProgramNode>() }
-        .associateBy { it.name() }
     val specAliases = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<SpecNode>() }
         .associateBy { it.name() }
@@ -37,7 +34,6 @@ fun RootNode.specTypePass(
             invariants,
             pclassNodes,
             procAliases,
-            programAliases,
             specAliases,
             unit,
             registry,
@@ -67,7 +63,6 @@ private fun typePassSpec(
     invariants: Map<String, InvariantNode>,
     pclassNodes: Map<String, ProcClassNode>,
     procAliases: Map<String, ProcNode>,
-    programAliases: Map<String, ProgramNode>,
     specAliases: Map<String, SpecNode>,
     unit: CompilationUnit,
     registry: ObjClassRegistry,
@@ -104,7 +99,6 @@ private fun typePassSpec(
             leaves,
             pclassNodes,
             procAliases,
-            programAliases,
             specAliases,
         )
         expanded.forEach { leaf ->
@@ -113,12 +107,12 @@ private fun typePassSpec(
                 if (leaf.isParameterized) {
                     warnings += OneLocCompileWarning(
                         spec.programLocation(),
-                        "p-class \"${leaf.name}\" only has constructor initially, so indexing is unnecessary",
+                        "proc \"${leaf.name}\" only has constructor initially, so indexing is unnecessary",
                     )
                 }
             } else if (!leaf.isParameterized) {
                 val msg =
-                    "p-class \"${leaf.name}\" can have multiple instances and must be indexed in this spec " +
+                    "proc \"${leaf.name}\" can have multiple instances and must be indexed in this spec " +
                         "(e.g. ${leaf.name}[i : Type]); pass --allow-unindexed-spec to warn instead"
                 if (allowUnindexedSpec) {
                     warnings += OneLocCompileWarning(spec.programLocation(), msg)
@@ -150,7 +144,6 @@ private fun typePassSpec(
                     systemLeaves,
                     pclassNodes,
                     procAliases,
-                    programAliases,
                     specAliases,
                 )
                 val systemPclasses = expandedSystem.mapNotNull { leaf ->

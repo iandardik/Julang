@@ -1,8 +1,8 @@
-o-class Box<T, T> {
+obj Box<T, T> {
     value : T
 }
 
-p-class Worker {
+proc Worker {
     var n : Int
 
     constructor initially(args : List<String>) {
@@ -11,4 +11,6 @@ p-class Worker {
     }
 }
 
-program PolyDupTypeParamTest := Worker
+proc PolyDupTypeParamTest := Worker
+
+compile PolyDupTypeParamTest

@@ -11,7 +11,7 @@ import node.lib.entryValueAt
  * RaftCore is the sole constructor of FollowerHeartbeat, CandidateElection, and LeaderHeartbeat.
  */
 
-p-class RaftCore {
+proc RaftCore {
     const selfId : Int
     const clusterSize : Int
     var self : Node

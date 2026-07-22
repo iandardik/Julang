@@ -1,4 +1,4 @@
-p-class S {
+proc S {
     var xs : List<Int>
     var n : Int
 
@@ -9,4 +9,6 @@ p-class S {
     }
 }
 
-program BadIndex := S
+proc BadIndex := S
+
+compile BadIndex

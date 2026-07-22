@@ -1,4 +1,4 @@
-p-class Alice {
+proc Alice {
     var done : Boolean
 
     constructor initially() {
@@ -11,7 +11,7 @@ p-class Alice {
     }
 }
 
-p-class Bob {
+proc Bob {
     var done : Boolean
 
     constructor initially() {
@@ -28,3 +28,5 @@ invariant Inv := true
 
 spec SessionPairParam := <true> Alice[a : Int] || Bob[b : Int] <Inv>
 spec SessionAliceOnlyParam := <true> Alice[a : Int] <Inv>
+
+compile SessionPairParam, SessionAliceOnlyParam

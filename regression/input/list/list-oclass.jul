@@ -1,11 +1,11 @@
 import julaylib.pclass.ExitSystem
 
-o-class Point {
+obj Point {
     x : Int
     y : Int
 }
 
-p-class ListOClassDemo {
+proc ListOClassDemo {
     var pts : List<Point>
     var done : Boolean
 
@@ -28,4 +28,6 @@ p-class ListOClassDemo {
     }
 }
 
-program ListOClassTest := ListOClassDemo || ExitSystem
+proc ListOClassTest := ListOClassDemo || ExitSystem
+
+compile ListOClassTest

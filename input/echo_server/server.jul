@@ -1,12 +1,12 @@
 import julaylib.pclass.Println
 import julaylib.pclass.HttpServer
 
-o-class ReqInfo {
+obj ReqInfo {
     req : String
     resp : String
 }
 
-p-class ServerStarter {
+proc ServerStarter {
     var started : Boolean
 
     constructor initially(args : List<String>) {
@@ -24,7 +24,7 @@ p-class ServerStarter {
     }
 }
 
-p-class EchoHandler {
+proc EchoHandler {
     const info : ReqInfo
     const httpReq : HttpServerRequest
     var responded : Boolean

@@ -1,6 +1,6 @@
 import julaylib.pclass.ExitSystem
 
-p-class BadMap {
+proc BadMap {
     var mp : Map<String, Int>
 
     constructor initially(args : List<String>) {
@@ -13,4 +13,6 @@ p-class BadMap {
     }
 }
 
-program BadMapTest := BadMap || ExitSystem
+proc BadMapTest := BadMap || ExitSystem
+
+compile BadMapTest

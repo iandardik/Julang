@@ -3,7 +3,7 @@ import julaylib.pclass.ExitSystem
 
 fun bstr(b : Boolean) : String = if (b) { "T" } else { "F" }
 
-p-class S {
+proc S {
     var out : String
     var print : Boolean
 
@@ -35,4 +35,6 @@ p-class S {
     }
 }
 
-program P := S || Println || ExitSystem
+proc P := S || Println || ExitSystem
+
+compile P

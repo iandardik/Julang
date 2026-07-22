@@ -2,7 +2,7 @@ import julaylib.pclass.Println
 import julaylib.pclass.ExitSystem
 import julaylib.fun.length
 
-p-class ListSliceDemo {
+proc ListSliceDemo {
     var xs : List<Int>
     var mid : List<Int>
     var emptyEq : List<Int>
@@ -61,4 +61,6 @@ p-class ListSliceDemo {
     }
 }
 
-program ListSliceTest := ListSliceDemo || Println || ExitSystem
+proc ListSliceTest := ListSliceDemo || Println || ExitSystem
+
+compile ListSliceTest

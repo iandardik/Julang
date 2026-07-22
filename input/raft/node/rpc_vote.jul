@@ -10,7 +10,7 @@ import node.lib.parseBool
  * RequestVote RPCs (incoming and outgoing).
  */
 
-p-class IncomingRequestVoteRPC {
+proc IncomingRequestVoteRPC {
     var rvTerm : Int
     var rvCand : Int
     var rvLastIdx : Int
@@ -57,7 +57,7 @@ p-class IncomingRequestVoteRPC {
     }
 }
 
-p-class OutgoingRequestVoteRPC {
+proc OutgoingRequestVoteRPC {
     const cPeer : Node
     const cTerm : Int
     const cCandId : Int

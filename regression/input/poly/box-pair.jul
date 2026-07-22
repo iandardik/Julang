@@ -1,15 +1,15 @@
 import julaylib.pclass.ExitSystem
 
-o-class Box<T> {
+obj Box<T> {
     value : T
 }
 
-o-class Pair<A, B> {
+obj Pair<A, B> {
     left : A
     right : B
 }
 
-p-class Worker {
+proc Worker {
     var box : Box<Int>
     var nested : Box<Box<Int>>
     var pair : Pair<Int, Boolean>
@@ -50,4 +50,6 @@ p-class Worker {
     }
 }
 
-program PolyBoxPairTest := Worker || ExitSystem
+proc PolyBoxPairTest := Worker || ExitSystem
+
+compile PolyBoxPairTest

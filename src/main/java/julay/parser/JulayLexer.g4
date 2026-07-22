@@ -39,10 +39,9 @@ ARROW : '->' ;
 IMPORT : 'import' ;
 
 
-PCLASS : 'p-class' ;
-OCLASS : 'o-class' ;
+OBJ : 'obj' ;
 PROC : 'proc' ;
-PROGRAM : 'program' ;
+COMPILE : 'compile' ;
 SPEC : 'spec' ;
 INVARIANT : 'invariant' ;
 ALL : 'all' ;

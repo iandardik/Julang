@@ -65,7 +65,7 @@ fun resolveAnalyzeScope(
                 !(name in librariesInUse && LibraryRegistry.isKotlinLibrary(name))
         }
         if (unknown.isNotEmpty()) {
-            unknown.forEach { println("Unknown proc, program, or pclass: \"$it\"") }
+            unknown.forEach { println("Unknown proc or spec: \"$it\"") }
             return null
         }
         scopeNames.distinct()
@@ -83,8 +83,9 @@ fun defaultScopeRoots(
     allProcAliasNames: Set<String>,
     allPClassNames: Set<String>,
 ): List<String> {
-    val programs = procDecls.filter { it.type == ProcDeclType.Program }.map { it.name }
-    return (programs + allProcAliasNames + allPClassNames).distinct().sorted()
+    val specs = procDecls.filter { it.type == ProcDeclType.Spec }.map { it.name }
+    val procs = procDecls.filter { it.type == ProcDeclType.Proc }.map { it.name }
+    return (specs + procs + allProcAliasNames + allPClassNames).distinct().sorted()
 }
 
 private fun resolveNameToLeaves(

@@ -2,7 +2,7 @@ import julaylib.pclass.Println
 import julaylib.pclass.ExitSystem
 import julaylib.fun.length
 
-p-class ListIntDemo {
+proc ListIntDemo {
     var xs : List<Int>
     var n : Int
     var print : Boolean
@@ -40,4 +40,6 @@ p-class ListIntDemo {
     }
 }
 
-program ListIntTest := ListIntDemo || Println || ExitSystem
+proc ListIntTest := ListIntDemo || Println || ExitSystem
+
+compile ListIntTest

@@ -1,6 +1,6 @@
 import julaylib.pclass.ExitSystem
 
-p-class BadList {
+proc BadList {
     var xs : List<Int>
 
     constructor initially(args : List<String>) {
@@ -13,4 +13,6 @@ p-class BadList {
     }
 }
 
-program BadListTest := BadList || ExitSystem
+proc BadListTest := BadList || ExitSystem
+
+compile BadListTest

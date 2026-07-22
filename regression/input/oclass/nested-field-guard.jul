@@ -1,16 +1,16 @@
 import julaylib.pclass.ExitSystem
 
-o-class Point {
+obj Point {
     x : Int
     y : Int
 }
 
-o-class Line {
+obj Line {
     start : Point
     end : Point
 }
 
-p-class Worker {
+proc Worker {
     var segment : Line
     var steps : Int
 
@@ -47,4 +47,6 @@ p-class Worker {
     }
 }
 
-program NestedFieldGuardTest := Worker || ExitSystem
+proc NestedFieldGuardTest := Worker || ExitSystem
+
+compile NestedFieldGuardTest

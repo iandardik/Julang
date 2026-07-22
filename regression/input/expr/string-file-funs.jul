@@ -5,7 +5,7 @@ import julaylib.fun.portFromUrl
 import julaylib.fun.startsWith
 import julaylib.fun.length
 
-p-class StringFileDemo {
+proc StringFileDemo {
     var phase : Int
     var url : String
     var port : Int
@@ -71,4 +71,6 @@ p-class StringFileDemo {
     }
 }
 
-program StringFileFunsTest := StringFileDemo
+proc StringFileFunsTest := StringFileDemo
+
+compile StringFileFunsTest

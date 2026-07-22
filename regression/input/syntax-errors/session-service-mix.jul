@@ -1,6 +1,6 @@
 import julaylib.pclass.Println
 
-p-class A {
+proc A {
     constructor initially(args : List<String>) {
         transit:
     }
@@ -10,7 +10,7 @@ p-class A {
     }
 }
 
-p-class B {
+proc B {
     constructor initially(args : List<String>) {
         transit:
     }
@@ -20,4 +20,6 @@ p-class B {
     }
 }
 
-program P := A || B || Println
+proc P := A || B || Println
+
+compile P

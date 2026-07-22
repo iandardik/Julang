@@ -1,6 +1,6 @@
 import julaylib.pclass.ExitSystem
 
-p-class BadSet {
+proc BadSet {
     var s : Set<Int>
 
     constructor initially(args : List<String>) {
@@ -13,4 +13,6 @@ p-class BadSet {
     }
 }
 
-program BadSetTest := BadSet || ExitSystem
+proc BadSetTest := BadSet || ExitSystem
+
+compile BadSetTest

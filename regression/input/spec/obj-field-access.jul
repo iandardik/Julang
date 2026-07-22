@@ -1,9 +1,9 @@
-o-class Peer {
+obj Peer {
     id : Int
     url : String
 }
 
-p-class Router {
+proc Router {
     var peer : Peer
     var step : String
 
@@ -29,3 +29,5 @@ p-class Router {
 invariant Ok := all i : Int, Router[i].step ~= ""
 
 spec ObjFieldAccess := <true> Router[i : Int] <Ok>
+
+compile ObjFieldAccess

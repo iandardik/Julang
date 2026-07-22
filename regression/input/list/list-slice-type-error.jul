@@ -1,6 +1,6 @@
 import julaylib.pclass.ExitSystem
 
-p-class BadSlice {
+proc BadSlice {
     var xs : List<Int>
     var ys : List<Int>
 
@@ -15,4 +15,6 @@ p-class BadSlice {
     }
 }
 
-program BadSliceTest := BadSlice || ExitSystem
+proc BadSliceTest := BadSlice || ExitSystem
+
+compile BadSliceTest

@@ -1,4 +1,4 @@
-p-class Env {
+proc Env {
     var ready : Boolean
 
     constructor initially(args : List<String>) {
@@ -16,7 +16,7 @@ p-class Env {
     }
 }
 
-p-class Counter {
+proc Counter {
     var n : Int
 
     constructor initially(args : List<String>) {
@@ -32,3 +32,5 @@ p-class Counter {
 invariant Bound := all k : Int, Counter.n <= 3
 
 spec SafeInc := <Env> Counter <Bound>
+
+compile SafeInc

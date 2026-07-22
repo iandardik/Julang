@@ -2,4 +2,4 @@ source: regression/input/syntax-errors/action-modifier-mismatch.jul
 expectCompileFailure: true
 expectCompileOutputContains:
   - "Expected action \"tick\" not to mix internal with other transition tags"
-  - "Found errors while compiling the program \"P\"; exiting."
+  - "Found errors while compiling \"P\"; exiting."

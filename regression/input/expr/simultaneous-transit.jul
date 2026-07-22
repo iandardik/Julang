@@ -6,7 +6,7 @@ import julaylib.pclass.ExitSystem
  * pre-transit state, then all updates are applied. So `y := x` after
  * `x := x + 1` still binds the old x.
  */
-p-class SimultaneousTransitDemo {
+proc SimultaneousTransitDemo {
     var x : Int
     var y : Int
     var peersLeft : Int
@@ -45,4 +45,6 @@ p-class SimultaneousTransitDemo {
     }
 }
 
-program SimultaneousTransitTest := SimultaneousTransitDemo || Println || ExitSystem
+proc SimultaneousTransitTest := SimultaneousTransitDemo || Println || ExitSystem
+
+compile SimultaneousTransitTest

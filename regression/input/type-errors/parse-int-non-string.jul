@@ -1,6 +1,6 @@
 import julaylib.fun.parseInt
 
-p-class Bad {
+proc Bad {
     var n : Int
 
     constructor initially(args : List<String>) {
@@ -9,4 +9,6 @@ p-class Bad {
     }
 }
 
-program BadParseInt := Bad
+proc BadParseInt := Bad
+
+compile BadParseInt

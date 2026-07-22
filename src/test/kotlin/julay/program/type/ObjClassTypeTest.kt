@@ -176,7 +176,7 @@ class ObjClassTypeTest {
     }
 
     /**
-     * Regression for concurrent per-Context o-class metadata: many threads call
+     * Regression for concurrent per-Context obj metadata: many threads call
      * [ObjClassType.sort] / round-trip at once. Metadata is built in each caller's
      * Context and cached via [ContextLocalCache] (Set/Map style) — no shared home Context.
      *

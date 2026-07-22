@@ -2,7 +2,7 @@ import julaylib.pclass.Println
 import julaylib.pclass.ExitSystem
 import julaylib.fun.length
 
-p-class SetIntDemo {
+proc SetIntDemo {
     var s : Set<Int>
     var n : Int
     var print : Boolean
@@ -49,4 +49,6 @@ p-class SetIntDemo {
     }
 }
 
-program SetIntTest := SetIntDemo || Println || ExitSystem
+proc SetIntTest := SetIntDemo || Println || ExitSystem
+
+compile SetIntTest

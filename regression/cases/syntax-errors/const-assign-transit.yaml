@@ -2,4 +2,4 @@ source: regression/input/syntax-errors/const-assign-transit.jul
 expectCompileFailure: true
 expectCompileOutputContains:
   - "Cannot assign to const variable \"x\""
-  - "Found errors while compiling the program \"P\"; exiting."
+  - "Found errors while compiling \"P\"; exiting."

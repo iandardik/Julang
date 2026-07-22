@@ -1,6 +1,7 @@
 package julay.compiler
 
 import julay.compiler.ast.ASTNode
+import julay.compiler.ast.CompileNode
 import julay.compiler.ast.RootNode
 import julay.compiler.decl.ProcDecl
 import julay.compiler.decl.ProcDeclType
@@ -18,9 +19,45 @@ data class CheckedCompilation(
     val unit: CompilationUnit,
     val ast: RootNode,
     val procDecls: List<ProcDecl>,
-    val programs: List<ProcDecl>,
+    /** JAR roots named by `compile` directives (proc aliases or leaf proc classes). */
+    val jarTargets: List<ProcDecl>,
+    /** Specs named by `compile` directives. */
+    val specTargets: List<ProcDecl>,
     val librariesInUse: Set<String>,
 )
+
+/**
+ * Resolve the union of all `compile` directive names into JAR and TLA targets.
+ * Returns null if any name is unknown (errors already printed).
+ */
+fun resolveCompileTargets(
+    ast: RootNode,
+    unit: CompilationUnit,
+    procDecls: List<ProcDecl>,
+): Pair<List<ProcDecl>, List<ProcDecl>>? {
+    val names = ast.declNodes()
+        .filterIsInstance<CompileNode>()
+        .flatMap { it.compileNames() }
+        .distinct()
+    val byName = procDecls.associateBy { it.name }
+    val jars = mutableListOf<ProcDecl>()
+    val specs = mutableListOf<ProcDecl>()
+    val missing = mutableListOf<String>()
+    for (name in names) {
+        val decl = byName[name]
+        when {
+            decl?.type == ProcDeclType.Spec -> specs += decl
+            decl?.type == ProcDeclType.Proc -> jars += decl
+            name in unit.allPClassNames -> jars += ProcDecl(name, emptyList(), ProcDeclType.Proc)
+            else -> missing += name
+        }
+    }
+    if (missing.isNotEmpty()) {
+        println("Unknown compile name(s): ${missing.joinToString(", ")}")
+        return null
+    }
+    return jars to specs
+}
 
 /**
  * Load, resolve procs, and type-check. Returns null if load or type errors were printed.
@@ -40,7 +77,6 @@ fun prepareCheckedCompilation(
 
     val ast = unit.root
     val procDecls = ast.resolvedProcPass(unit)
-    val programs = procDecls.filter { it.type == ProcDeclType.Program }
 
     val typeResult = ast.typePass(unit, allowUnindexedSpec)
     typeResult.warnings.forEach { System.err.println(it) }
@@ -50,12 +86,19 @@ fun prepareCheckedCompilation(
         return null
     }
 
+    val targets = resolveCompileTargets(ast, unit, procDecls) ?: run {
+        println("Found compile errors, exiting.")
+        return null
+    }
+    val (jarTargets, specTargets) = targets
+
     return CheckedCompilation(
         unit = unit,
         ast = ast,
         procDecls = procDecls,
-        programs = programs,
-        librariesInUse = unit.librariesInUse(procDecls),
+        jarTargets = jarTargets,
+        specTargets = specTargets,
+        librariesInUse = unit.librariesInUse(jarTargets, procDecls),
     )
 }
 
@@ -69,7 +112,7 @@ fun runErrorAndWarningPasses(
     if (errors.isNotEmpty()) {
         errors.forEach { println(it) }
         if (programName != null) {
-            println("Found errors while compiling the program \"$programName\"; exiting.")
+            println("Found errors while compiling \"$programName\"; exiting.")
         } else {
             println("Found errors; exiting.")
         }

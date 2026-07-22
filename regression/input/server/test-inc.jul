@@ -3,7 +3,7 @@ import julaylib.pclass.Timer
 import julaylib.pclass.HttpServer
 import julaylib.pclass.ExitSystem
 
-p-class Counter {
+proc Counter {
     var counter : Int
     
     constructor initially(args : List<String>) {
@@ -21,7 +21,7 @@ p-class Counter {
 
 /* prints the current value of the counter every 5 seconds
 */
-p-class PeriodicPrint {
+proc PeriodicPrint {
     var localCounter : Int
     var step : String
 
@@ -56,7 +56,7 @@ p-class PeriodicPrint {
     }
 }
 
-p-class ServerStarter {
+proc ServerStarter {
     var started : Boolean
 
     constructor initially(args : List<String>) {
@@ -74,7 +74,7 @@ p-class ServerStarter {
     }
 }
 
-p-class IncReqHandler {
+proc IncReqHandler {
     var httpReq : HttpServerRequest
     var localCounter : Int
     var step : String
@@ -118,4 +118,6 @@ p-class IncReqHandler {
 
 proc Printer := PeriodicPrint || Println || Timer
 proc ServerLogic := ServerStarter || IncReqHandler || HttpServer || ExitSystem
-program CounterServerTest := Counter || Printer || ServerLogic
+proc CounterServerTest := Counter || Printer || ServerLogic
+
+compile CounterServerTest

@@ -1,4 +1,4 @@
-p-class S {
+proc S {
     var x : Int
     var y : Int
 
@@ -8,4 +8,6 @@ p-class S {
     }
 }
 
-program P := S
+proc P := S
+
+compile P

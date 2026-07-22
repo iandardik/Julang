@@ -2,4 +2,4 @@ source: regression/input/syntax-errors/duplicate-transit-var.jul
 expectCompileFailure: true
 expectCompileOutputContains:
   - "Expected at most one assignment per variable, but found multiple assignments for \"x\""
-  - "Found errors while compiling the program \"P\"; exiting."
+  - "Found errors while compiling \"P\"; exiting."

@@ -122,7 +122,7 @@ class ProcClassNode(
         ProcClassNode(name, decls, programLocation())
     override fun toString(): String {
         val body = localDecls.joinToString("\n") { "$it".prependIndent() }
-        return "p-class $name {\n$body\n}"
+        return "proc $name {\n$body\n}"
     }
 }
 
@@ -140,18 +140,14 @@ class ProcNode(
     }
 }
 
-class ProgramNode(
-    private val name : String,
-    private val value : ASTNode,
-    private val loc : ProgramLoc
-) : DeclNode(listOf(value)) {
+class CompileNode(
+    private val names: List<String>,
+    private val loc: ProgramLoc,
+) : DeclNode(listOf()) {
     override fun programLocation() = loc
-    override fun name() = name
-    internal fun programNodeName() = name
-    internal fun programNodeValue() = value
-    override fun toString(): String {
-        return "program $name := $value"
-    }
+    override fun name() = names.joinToString(", ")
+    internal fun compileNames() = names
+    override fun toString(): String = "compile ${names.joinToString(", ")}"
 }
 
 class SpecNode(
@@ -224,7 +220,7 @@ class ObjClassNode(
     override fun toString(): String {
         val params = if (typeParams.isEmpty()) "" else typeParams.joinToString(", ", "<", ">")
         val body = fields.joinToString("\n") { "$it".prependIndent() }
-        return "o-class $name$params {\n$body\n}"
+        return "obj $name$params {\n$body\n}"
     }
 }
 

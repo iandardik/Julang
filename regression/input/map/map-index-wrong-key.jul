@@ -1,4 +1,4 @@
-p-class BadMapKey {
+proc BadMapKey {
     var mp : Map<String, Int>
     var n : Int
 
@@ -16,4 +16,6 @@ p-class BadMapKey {
     }
 }
 
-program P := BadMapKey
+proc P := BadMapKey
+
+compile P

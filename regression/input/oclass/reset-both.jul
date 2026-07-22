@@ -1,16 +1,16 @@
 import julaylib.pclass.ExitSystem
 
-o-class Point {
+obj Point {
     x : Int
     y : Int
 }
 
-o-class Line {
+obj Line {
     start : Point
     end : Point
 }
 
-p-class Worker {
+proc Worker {
     var pos : Point
     var segment : Line
     var done : Boolean
@@ -45,4 +45,6 @@ p-class Worker {
     }
 }
 
-program ResetBothTest := Worker || ExitSystem
+proc ResetBothTest := Worker || ExitSystem
+
+compile ResetBothTest

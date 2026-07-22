@@ -241,7 +241,7 @@ private fun VarTransitNode.typePassVarTransit(
                         false,
                         OneLocCompileError(
                             programLocation(),
-                            "Cannot assign a scalar to o-class field \"${transitKey()}\"; assign the whole value instead",
+                            "Cannot assign a scalar to obj field \"${transitKey()}\"; assign the whole value instead",
                         ),
                     )
                 } else {
@@ -400,10 +400,10 @@ private fun BinaryOpExprNode.typePassBinaryOp(
                 lhsType == rhsType,
                 OneLocCompileError(
                     programLocation(),
-                    "Expected both sides of \"${op()}\" to have the same o-class type, got $lhsType and $rhsType",
+                    "Expected both sides of \"${op()}\" to have the same obj type, got $lhsType and $rhsType",
                 ),
             )
-            else -> listOf(OneLocCompileError(programLocation(), "Cannot apply \"${op()}\" to o-class type $lhsType"))
+            else -> listOf(OneLocCompileError(programLocation(), "Cannot apply \"${op()}\" to obj type $lhsType"))
         }
     } else if (lhsType is ListType || rhsType is ListType) {
         when (op()) {
@@ -662,7 +662,7 @@ private fun WhenExprNode.whenTypeErrors(): List<CompileError> {
                         errors.add(
                             OneLocCompileError(
                                 pattern.literal.programLocation(),
-                                "Expected when subject to be an o-class type for struct pattern but got $subjectType",
+                                "Expected when subject to be an obj type for struct pattern but got $subjectType",
                             ),
                         )
                     } else if (pattern.literal.structType != subjectType) {
@@ -747,10 +747,10 @@ private fun ObjClassLiteralExprNode.typePassObjClassLiteral(
 ): List<CompileError> {
     val classErrors = when (val classResult = registry.resolveTypeExpr(typeExpr, typeParamEnv, programLocation())) {
         is TypeResolveResult.Error ->
-            listOf(OneLocCompileError(programLocation(), "Unknown o-class \"$typeExpr\" in o-class literal"))
+            listOf(OneLocCompileError(programLocation(), "Unknown obj \"$typeExpr\" in obj literal"))
         is TypeResolveResult.Found -> {
             if (classResult.type !is ObjClassType) {
-                listOf(OneLocCompileError(programLocation(), "\"$typeExpr\" is not an o-class type"))
+                listOf(OneLocCompileError(programLocation(), "\"$typeExpr\" is not an obj type"))
             } else {
                 resolveLiteralType(classResult.type)
                 emptyList()
@@ -770,7 +770,7 @@ private fun ObjClassLiteralExprNode.typePassObjClassLiteral(
                 TwoLocsCompileError(
                     entries[0].second.programLocation(),
                     entries[1].second.programLocation(),
-                    "Expected o-class literal fields to have unique names, but found duplicate \"$name\"",
+                    "Expected obj literal fields to have unique names, but found duplicate \"$name\"",
                 ),
             )
         }

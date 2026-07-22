@@ -1,4 +1,4 @@
-p-class S {
+proc S {
     var step : String
     var print : Boolean
 
@@ -29,4 +29,6 @@ p-class S {
     }
 }
 
-program P := S
+proc P := S
+
+compile P

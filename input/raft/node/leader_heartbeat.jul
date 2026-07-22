@@ -8,7 +8,7 @@ import node.lib.Node
  * lostLeadership to RaftCore, which then spawns FollowerHeartbeat.
  */
 
-p-class LeaderHeartbeat {
+proc LeaderHeartbeat {
     const me : Node
     const clusterSize : Int
     var step : String
@@ -103,7 +103,7 @@ p-class LeaderHeartbeat {
  * Starts idle so it cannot lookupNodeById before LeaderHeartbeat begins a round (avoids deadlock
  * while the driver is in sleep). While ready, target.id is the next peer (never self).
  */
-p-class LeaderHeartbeatTarget {
+proc LeaderHeartbeatTarget {
     const me : Node
     const clusterSize : Int
     var target : Node

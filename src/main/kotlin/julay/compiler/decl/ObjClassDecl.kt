@@ -254,7 +254,7 @@ internal class ObjClassResolver(
         typeExprSubst: Map<String, TypeExpr> = emptyMap(),
     ): ObjClassResolveResult {
         if (concreteName in resolving) {
-            return ObjClassResolveResult.Failed("Cyclic o-class nesting involving \"${raw.name}\"")
+            return ObjClassResolveResult.Failed("Cyclic obj nesting involving \"${raw.name}\"")
         }
         resolving.add(concreteName)
         val fields = mutableListOf<Variable>()
@@ -286,7 +286,7 @@ internal class ObjClassResolver(
 }
 
 /**
- * The compilation-unit registry of resolved o-class types (nullary + monomorphized).
+ * The compilation-unit registry of resolved obj types (nullary + monomorphized).
  */
 class ObjClassRegistry private constructor(
     private val resolvedTypes: MutableMap<String, ObjClassType>,
@@ -399,14 +399,14 @@ class ObjClassRegistry private constructor(
                     errors.add(
                         OneLocCompileError(
                             raw.loc,
-                            "o-class \"${raw.name}\" conflicts with a builtin o-class type",
+                            "obj \"${raw.name}\" conflicts with a builtin obj type",
                         ),
                     )
                 }
                 val dupParams = raw.typeParams.groupingBy { it }.eachCount().filter { it.value > 1 }.keys
                 for (dup in dupParams) {
                     errors.add(
-                        OneLocCompileError(raw.loc, "Duplicate type parameter \"$dup\" on o-class \"${raw.name}\""),
+                        OneLocCompileError(raw.loc, "Duplicate type parameter \"$dup\" on obj \"${raw.name}\""),
                     )
                 }
             }

@@ -15,7 +15,7 @@ class JulangDatatypeMetadata(
 )
 
 /**
- * Built-in o-class type. Datatype metadata is built directly in the caller's [Context]
+ * Built-in obj type. Datatype metadata is built directly in the caller's [Context]
  * (no per-instance home Context); results are cached per live Context so the datatype is not
  * redefined on every use, without retaining closed Contexts — same pattern as [SetType] / [MapType].
  */
@@ -119,7 +119,7 @@ class ObjClassType(
                 val objType = currentType as ObjClassType
                 val fieldIndex = objType.fields.indexOfFirst { it.name == segment }
                 if (fieldIndex < 0) {
-                    throw RuntimeException("Unknown field \"$segment\" on o-class ${objType.name}")
+                    throw RuntimeException("Unknown field \"$segment\" on obj ${objType.name}")
                 }
                 val field = objType.fields[fieldIndex]
                 expr = "${objClassAccessorFunName(objType.name, field.name)}(ctx, $expr)"

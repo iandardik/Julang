@@ -10,7 +10,6 @@ import com.github.ajalt.clikt.parameters.arguments.optional
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
-import com.github.ajalt.clikt.parameters.options.optionalValue
 import com.github.ajalt.clikt.parameters.types.path
 import julay.compiler.analysis.AnalyzeOptions
 
@@ -32,42 +31,25 @@ class Julayc : CliktCommand(name = "julayc") {
 
         Stdlib: julaylib.pclass.Println, ExitSystem, Readln, and Timer are Julay modules shipped in the
         compiler jar. julaylib.pclass.HttpServer and julaylib.pclass.HttpClient remain Kotlin-native libraries
-        (with builtin HttpServerRequest/Response and HttpClientRequest/Response o-classes).
+        (with builtin HttpServerRequest/Response and HttpClientRequest/Response obj types).
 
         Use `julayc analyze --help` to inspect program structure without codegen.
     """.trimIndent()
 
     private val keepBuild by option(
         "--keep-build",
-        help = "Keep generated <program>-jul-build directories after a successful compile",
+        help = "Keep generated <name>-jul-build directories after a successful compile",
     ).flag()
 
     private val allowUnindexedSpec by option(
         "--allow-unindexed-spec",
-        help = "Warn instead of error when a multi-instance p-class appears unindexed in a spec",
+        help = "Warn instead of error when a multi-instance proc appears unindexed in a spec",
     ).flag()
 
     private val libraryPaths by option(
         "-L",
         help = "Add a directory to the module search path",
     ).path(mustExist = true, canBeDir = true).multiple()
-
-    /**
-     * null = flag absent; "" = `--program` with no name (all programs);
-     * non-empty = exactly that program.
-     * Value must be `--program=Name` (not `--program Name`) so the input file is not consumed.
-     */
-    private val programOpt by option(
-        "--program",
-        metavar = "NAME",
-        help = "Compile programs only; optional NAME (--program=Name) selects exactly one program",
-    ).optionalValue("", acceptsUnattachedValue = false)
-
-    private val specOpt by option(
-        "--spec",
-        metavar = "NAME",
-        help = "Compile specs only; optional NAME (--spec=Name) selects exactly one spec",
-    ).optionalValue("", acceptsUnattachedValue = false)
 
     private val input by argument(
         help = "Jul source file to compile",
@@ -78,18 +60,10 @@ class Julayc : CliktCommand(name = "julayc") {
             return
         }
         val file = input ?: throw UsageError("Missing argument \"<input>\"")
-        val neither = programOpt == null && specOpt == null
-        val targets = CompileTargets(
-            compilePrograms = neither || programOpt != null,
-            programNames = programOpt?.takeIf { it.isNotEmpty() }?.let { setOf(it) },
-            compileSpecs = neither || specOpt != null,
-            specNames = specOpt?.takeIf { it.isNotEmpty() }?.let { setOf(it) },
-        )
         compileJulFile(
             file,
             keepBuild,
             libraryPaths,
-            targets = targets,
             allowUnindexedSpec = allowUnindexedSpec,
         )
     }
@@ -117,7 +91,7 @@ class AnalyzeCommand : CliktCommand(name = "analyze") {
     private val scopeNames by option(
         "-s", "--scope",
         metavar = "NAME",
-        help = "Restrict to proc/program/spec/pclass NAME (repeatable; action views use union unless --intersect/--mutual)",
+        help = "Restrict to proc/spec NAME (repeatable; action views use union unless --intersect/--mutual)",
     ).multiple()
 
     private val scopeIntersect by option(
@@ -142,17 +116,17 @@ class AnalyzeCommand : CliktCommand(name = "analyze") {
 
     private val actionsDetail by option(
         "--actions-detail",
-        help = "Per action: offering pclasses and modifiers (internal omitted unless --include-internal)",
+        help = "Per action: offering procs and modifiers (internal omitted unless --include-internal)",
     ).flag()
 
     private val showPclasses by option(
         "--pclasses",
-        help = "List pclass names in the scope",
+        help = "List proc class names in the scope",
     ).flag()
 
     private val pclassesDetail by option(
         "--pclasses-detail",
-        help = "Per pclass: its actions and modifiers (internal omitted unless --include-internal)",
+        help = "Per proc class: its actions and modifiers (internal omitted unless --include-internal)",
     ).flag()
 
     private val actionNames by option(

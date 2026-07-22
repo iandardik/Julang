@@ -1,4 +1,4 @@
-p-class S {
+proc S {
     var x : Int
     var print : Boolean
 
@@ -32,7 +32,7 @@ p-class S {
     }
 }
 
-p-class T {
+proc T {
     var x : Int
 
     constructor initially(args : List<String>) {
@@ -48,4 +48,6 @@ p-class T {
     }
 }
 
-program TermTest1 := S || T
+proc TermTest1 := S || T
+
+compile TermTest1

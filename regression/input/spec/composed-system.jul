@@ -1,4 +1,4 @@
-p-class Counter {
+proc Counter {
     var n : Int
 
     constructor initially(args : List<String>) {
@@ -11,7 +11,7 @@ p-class Counter {
     }
 }
 
-p-class Env {
+proc Env {
     var ready : Boolean
 
     constructor initially(args : List<String>) {
@@ -24,8 +24,10 @@ p-class Env {
     }
 }
 
-program System := Counter || Env
+proc System := Counter || Env
 
 invariant Bound := Counter.n >= 0
 
 spec ComposedSystem := <true> System <Bound>
+
+compile ComposedSystem

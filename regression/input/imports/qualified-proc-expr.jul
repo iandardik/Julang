@@ -1,4 +1,4 @@
-p-class S {
+proc S {
     var x : Int
 
     constructor initially(args : List<String>) {
@@ -17,4 +17,6 @@ p-class S {
     }
 }
 
-program QualifiedProcExprTest := S || julaylib.pclass.Println || julaylib.pclass.ExitSystem
+proc QualifiedProcExprTest := S || julaylib.pclass.Println || julaylib.pclass.ExitSystem
+
+compile QualifiedProcExprTest

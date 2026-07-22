@@ -1,8 +1,8 @@
-o-class Box<T> {
+obj Box<T> {
     value : T
 }
 
-p-class Worker {
+proc Worker {
     var box : Box<Int>
 
     constructor initially(args : List<String>) {
@@ -11,4 +11,6 @@ p-class Worker {
     }
 }
 
-program PolyLiteralFieldMismatchTest := Worker
+proc PolyLiteralFieldMismatchTest := Worker
+
+compile PolyLiteralFieldMismatchTest

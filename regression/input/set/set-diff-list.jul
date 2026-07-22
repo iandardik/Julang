@@ -1,4 +1,4 @@
-p-class BadSetOp {
+proc BadSetOp {
     var s : Set<Int>
 
     constructor initially(args : List<String>) {
@@ -7,4 +7,6 @@ p-class BadSetOp {
     }
 }
 
-program P := BadSetOp
+proc P := BadSetOp
+
+compile P

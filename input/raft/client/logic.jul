@@ -11,7 +11,7 @@ import julaylib.fun.startsWith
  * Prints every response; on 303 LEADER <url>, retries once against the leader.
  */
 
-p-class RaftClientLogic {
+proc RaftClientLogic {
     const command : String
     const value : String
     const path : String

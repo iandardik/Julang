@@ -3,7 +3,7 @@ import julaylib.pclass.Timer
 
 /* prints the current value of the counter every 5 seconds
 */
-p-class PeriodicPrint {
+proc PeriodicPrint {
     var list : List<String>
     var step : String
 

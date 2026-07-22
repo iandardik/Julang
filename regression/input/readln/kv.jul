@@ -1,4 +1,4 @@
-p-class FrontEnd {
+proc FrontEnd {
     var state : String
     var keyReq : String
     var valReq : String
@@ -50,7 +50,7 @@ p-class FrontEnd {
     }
 }
 
-p-class DB {
+proc DB {
     constructor initially(args : List<String>) {}
 
     transition readDB(key : String, val : String) {
@@ -65,7 +65,7 @@ p-class DB {
     }
 }
 
-p-class DB2 {
+proc DB2 {
     constructor initially(args : List<String>) {}
 
     transition readDB(key : String, val : String) {
@@ -77,7 +77,7 @@ p-class DB2 {
     }
 }
 
-p-class Readln {
+proc Readln {
     var prompt : Boolean
     var readMsg : String
 
@@ -102,5 +102,7 @@ p-class Readln {
     }
 }
 
-program KVOne := FrontEnd || DB || Readln
-program KVTwo := FrontEnd || DB2 || Readln
+proc KVOne := FrontEnd || DB || Readln
+proc KVTwo := FrontEnd || DB2 || Readln
+
+compile KVOne, KVTwo

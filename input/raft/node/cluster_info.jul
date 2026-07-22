@@ -7,7 +7,7 @@ import node.lib.Node
  * Constructed once by RaftInitializer from the config file.
  */
 
-p-class ClusterInfo {
+proc ClusterInfo {
     const selfNode : Node
     const clusterSize : Int
     const urls : List<String>

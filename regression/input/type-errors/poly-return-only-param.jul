@@ -1,10 +1,10 @@
-o-class Box<T> {
+obj Box<T> {
     value : T
 }
 
 fun constFn<T>(x : Int) : T = x
 
-p-class Worker {
+proc Worker {
     var n : Int
 
     constructor initially(args : List<String>) {
@@ -13,4 +13,6 @@ p-class Worker {
     }
 }
 
-program PolyReturnOnlyParamTest := Worker
+proc PolyReturnOnlyParamTest := Worker
+
+compile PolyReturnOnlyParamTest

@@ -17,11 +17,11 @@ fun resolveFieldPath(rootType: Type, path: List<String>): FieldPathResult {
     val pathParts = mutableListOf<String>()
     for (segment in path) {
         if (current !is ObjClassType) {
-            return FieldPathResult.Error("Cannot access field \"$segment\" on non o-class type $current")
+            return FieldPathResult.Error("Cannot access field \"$segment\" on non obj type $current")
         }
         val field = current.fields.find { it.name == segment }
         if (field == null) {
-            return FieldPathResult.Error("Unknown field \"$segment\" on o-class ${current.name}")
+            return FieldPathResult.Error("Unknown field \"$segment\" on obj ${current.name}")
         }
         pathParts.add(segment)
         current = field.type

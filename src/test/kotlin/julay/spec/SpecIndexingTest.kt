@@ -17,7 +17,7 @@ class SpecIndexingTest {
     fun multiInstanceUnindexedIsError() {
         val result = typeCheck(
             """
-            p-class Worker {
+            proc Worker {
                 var id : Int
                 constructor initially(args : List<String>) { transit: id := 0 }
                 constructor spawnWorker(id : Int) { transit: id := id }
@@ -33,7 +33,7 @@ class SpecIndexingTest {
     fun multiInstanceUnindexedWarnsWithFlag() {
         val result = typeCheck(
             """
-            p-class Worker {
+            proc Worker {
                 var id : Int
                 constructor initially(args : List<String>) { transit: id := 0 }
                 constructor spawnWorker(id : Int) { transit: id := id }
@@ -50,7 +50,7 @@ class SpecIndexingTest {
     fun initiallyOnlyIndexedWarns() {
         val result = typeCheck(
             """
-            p-class Counter {
+            proc Counter {
                 var n : Int
                 constructor initially(args : List<String>) { transit: n := 0 }
                 transition bump() { transit: n := n + 1 }
@@ -69,7 +69,7 @@ class SpecIndexingTest {
     fun initiallyOnlyUnindexedIsOk() {
         val result = typeCheck(
             """
-            p-class Counter {
+            proc Counter {
                 var n : Int
                 constructor initially(args : List<String>) { transit: n := 0 }
                 transition bump() { transit: n := n + 1 }
@@ -85,12 +85,12 @@ class SpecIndexingTest {
     fun compositionIndexCoversNestedLeaves() {
         val result = typeCheck(
             """
-            p-class A {
+            proc A {
                 var x : Int
                 constructor initially(args : List<String>) { transit: x := 0 }
                 constructor makeA(x : Int) { transit: x := x }
             }
-            p-class B {
+            proc B {
                 var y : Int
                 constructor initially(args : List<String>) { transit: y := 0 }
                 constructor makeB(y : Int) { transit: y := y }
@@ -109,7 +109,7 @@ class SpecIndexingTest {
     fun multiInstanceIndexedIsOk() {
         val result = typeCheck(
             """
-            p-class Worker {
+            proc Worker {
                 var id : Int
                 constructor initially(args : List<String>) { transit: id := 0 }
                 constructor spawnWorker(id : Int) { transit: id := id }

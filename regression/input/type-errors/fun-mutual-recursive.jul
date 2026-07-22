@@ -2,7 +2,7 @@ fun even(n : Int) : Boolean = if (n = 0) { true } else { odd(n - 1) }
 
 fun odd(n : Int) : Boolean = if (n = 0) { false } else { even(n - 1) }
 
-p-class S {
+proc S {
     var x : Int
 
     constructor initially(args : List<String>) {
@@ -18,4 +18,6 @@ p-class S {
     }
 }
 
-program P := S
+proc P := S
+
+compile P

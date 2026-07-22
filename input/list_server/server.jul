@@ -1,6 +1,6 @@
 import julaylib.pclass.HttpServer
 
-p-class ServerStarter {
+proc ServerStarter {
     var started : Boolean
 
     constructor initially(args : List<String>) {
@@ -18,7 +18,7 @@ p-class ServerStarter {
     }
 }
 
-p-class IncReqHandler {
+proc IncReqHandler {
     const httpReq : HttpServerRequest
     const reqBody : String
     var step : String

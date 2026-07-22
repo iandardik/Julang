@@ -1,10 +1,10 @@
-o-class Point {
+obj Point {
     x : Int
     y : Int
     label : String
 }
 
-p-class Worker {
+proc Worker {
     var pos : Point
 
     constructor initially(args : List<String>) {
@@ -38,4 +38,6 @@ p-class Worker {
     }
 }
 
-program FieldAccessTest := Worker
+proc FieldAccessTest := Worker
+
+compile FieldAccessTest

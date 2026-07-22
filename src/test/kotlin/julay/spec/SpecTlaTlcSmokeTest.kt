@@ -1,6 +1,5 @@
 package julay.spec
 
-import julay.compiler.CompileTargets
 import julay.compiler.compileJulFile
 import java.io.File
 import java.nio.file.Files
@@ -23,8 +22,7 @@ class SpecTlaTlcSmokeTest {
             assertTrue(source.exists(), "missing ${source.path}")
             compileJulFile(
                 source.toPath(),
-                keepBuild = false,
-                targets = CompileTargets(compilePrograms = false, compileSpecs = true),
+                keepBuild = false
             )
             // compileJulFile writes to CWD; move artifacts into work dir
             val tla = File("SafeInc.tla")
@@ -52,8 +50,7 @@ class SpecTlaTlcSmokeTest {
             assertTrue(source.exists(), "missing ${source.path}")
             compileJulFile(
                 source.toPath(),
-                keepBuild = false,
-                targets = CompileTargets(compilePrograms = false, compileSpecs = true),
+                keepBuild = false
             )
             val tla = File("ParamCounters.tla")
             val cfg = File("ParamCounters.cfg")
@@ -114,8 +111,7 @@ class SpecTlaTlcSmokeTest {
             assertTrue(source.exists(), "missing ${source.path}")
             compileJulFile(
                 source.toPath(),
-                keepBuild = false,
-                targets = CompileTargets(compilePrograms = false, compileSpecs = true),
+                keepBuild = false
             )
             val tla = File("SpawnWorker.tla")
             val cfg = File("SpawnWorker.cfg")
@@ -200,8 +196,7 @@ class SpecTlaTlcSmokeTest {
             assertTrue(source.exists(), "missing ${source.path}")
             compileJulFile(
                 source.toPath(),
-                keepBuild = false,
-                targets = CompileTargets(compilePrograms = false, compileSpecs = true),
+                keepBuild = false
             )
             val tla = File("ComposedSystem.tla")
             val cfg = File("ComposedSystem.cfg")
@@ -222,7 +217,7 @@ class SpecTlaTlcSmokeTest {
             )
             assertTrue(
                 !tlaText.contains("System_constructed"),
-                "program alias System should not appear as a leaf;\n$tlaText",
+                "proc alias System should not appear as a leaf;\n$tlaText",
             )
             assertTrue(
                 !tlaText.contains("Counter_n") && !tlaText.contains("Env_ready"),
@@ -249,8 +244,7 @@ class SpecTlaTlcSmokeTest {
             assertTrue(source.exists(), "missing ${source.path}")
             compileJulFile(
                 source.toPath(),
-                keepBuild = false,
-                targets = CompileTargets(compilePrograms = false, compileSpecs = true),
+                keepBuild = false
             )
             // Only NestedSpec is AG; HandlerSpec is a bare alias used inside it.
             val tla = File("NestedSpec.tla")
@@ -309,8 +303,7 @@ class SpecTlaTlcSmokeTest {
             assertTrue(source.exists(), "missing ${source.path}")
             compileJulFile(
                 source.toPath(),
-                keepBuild = false,
-                targets = CompileTargets(compilePrograms = false, compileSpecs = true),
+                keepBuild = false
             )
             val tla = File("ObjFieldAccess.tla")
             val cfg = File("ObjFieldAccess.cfg")
@@ -354,8 +347,7 @@ class SpecTlaTlcSmokeTest {
             assertTrue(source.exists(), "missing ${source.path}")
             compileJulFile(
                 source.toPath(),
-                keepBuild = false,
-                targets = CompileTargets(compilePrograms = false, compileSpecs = true),
+                keepBuild = false
             )
             val tla = File("SessionPair.tla")
             val cfg = File("SessionPair.cfg")
@@ -435,8 +427,7 @@ class SpecTlaTlcSmokeTest {
             assertTrue(source.exists(), "missing ${source.path}")
             compileJulFile(
                 source.toPath(),
-                keepBuild = false,
-                targets = CompileTargets(compilePrograms = false, compileSpecs = true),
+                keepBuild = false
             )
             val tla = File("SessionAliceOnly.tla")
             val cfg = File("SessionAliceOnly.cfg")
@@ -484,8 +475,7 @@ class SpecTlaTlcSmokeTest {
             assertTrue(source.exists(), "missing ${source.path}")
             compileJulFile(
                 source.toPath(),
-                keepBuild = false,
-                targets = CompileTargets(compilePrograms = false, compileSpecs = true),
+                keepBuild = false
             )
             val tla = File("SessionPairParam.tla")
             val cfg = File("SessionPairParam.cfg")

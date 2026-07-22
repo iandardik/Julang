@@ -40,6 +40,7 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
     fun registerModuleSymbols(module: LoadedModule, symbols: MutableMap<String, ResolvedSymbol>) {
         if (module.isStub) return
         module.root.declNodes().forEach { decl ->
+            if (decl is CompileNode) return@forEach
             val key = if (module.modulePath.startsWith("$JULAYLIB_MODULE.")) {
                 module.modulePath
             } else {
@@ -97,11 +98,11 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
         val root = parseResult.root
 
         if (!isEntry) {
-            root.declNodes().filterIsInstance<ProgramNode>().forEach { program ->
+            root.declNodes().filterIsInstance<CompileNode>().forEach { compile ->
                 errors.add(
                     OneLocCompileError(
-                        program.programLocation(),
-                        "Programs are only allowed in the entry file",
+                        compile.programLocation(),
+                        "Compile directives are only allowed in the entry file",
                     ),
                 )
             }

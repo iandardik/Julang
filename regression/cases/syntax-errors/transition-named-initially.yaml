@@ -2,4 +2,4 @@ source: regression/input/syntax-errors/transition-named-initially.jul
 expectCompileFailure: true
 expectCompileOutputContains:
   - "only constructors (not transitions) can synchronize on the 'initially' action"
-  - "Found errors while compiling the program \"P\"; exiting."
+  - "Found errors while compiling \"P\"; exiting."

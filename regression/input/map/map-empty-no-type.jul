@@ -1,4 +1,4 @@
-p-class BadEmptyBracket {
+proc BadEmptyBracket {
     var n : Int
 
     constructor initially(args : List<String>) {
@@ -7,4 +7,6 @@ p-class BadEmptyBracket {
     }
 }
 
-program P := BadEmptyBracket
+proc P := BadEmptyBracket
+
+compile P

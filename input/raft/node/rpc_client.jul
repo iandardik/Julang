@@ -8,7 +8,7 @@ import node.lib.Node
  * Constructors keep the beginIncomingClientAppendRequest / beginIncomingClientGetRequest names.
  */
 
-p-class IncomingClientRPC {
+proc IncomingClientRPC {
     const httpReq : HttpServerRequest
     const reqBody : String
     const kind : String

@@ -6,7 +6,7 @@ import node.lib.Node
  * become leader (RaftCore spawns LeaderHeartbeat); otherwise reports loss so RaftCore can spawn
  * FollowerHeartbeat.
  */
-p-class CandidateElection {
+proc CandidateElection {
     const selfNode : Node
     const clusterSize : Int
     const snapTerm : Int

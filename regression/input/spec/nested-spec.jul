@@ -1,4 +1,4 @@
-p-class Counter {
+proc Counter {
     var n : Int
 
     constructor initially(args : List<String>) {
@@ -11,7 +11,7 @@ p-class Counter {
     }
 }
 
-p-class Handler {
+proc Handler {
     var step : String
 
     constructor initially(args : List<String>) {
@@ -28,3 +28,5 @@ invariant Bound := Counter.n >= 0
 
 spec HandlerSpec := Handler[t : Int]
 spec NestedSpec := <true> Counter || HandlerSpec <Bound>
+
+compile HandlerSpec, NestedSpec

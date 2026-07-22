@@ -1,4 +1,4 @@
-p-class A {
+proc A {
     var x : Int
 
     constructor initially(args : List<String>) {
@@ -12,7 +12,7 @@ p-class A {
     }
 }
 
-p-class B {
+proc B {
     var y : Int
 
     constructor initially(args : List<String>) {
@@ -26,4 +26,6 @@ p-class B {
     }
 }
 
-program P := A || B
+proc P := A || B
+
+compile P

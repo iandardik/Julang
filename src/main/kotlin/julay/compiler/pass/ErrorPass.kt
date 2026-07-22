@@ -134,7 +134,7 @@ private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse:
                     TwoLocsCompileError(
                         services[0].decl.loc,
                         services[1].decl.loc,
-                        "Expected at most one p-class to declare service for action \"$name\"",
+                        "Expected at most one proc to declare service for action \"$name\"",
                     ),
                 )
             }
@@ -166,7 +166,7 @@ private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse:
                     TwoLocsCompileError(
                         constructors[0].decl.loc,
                         services[0].decl.loc,
-                        "Expected constructors not to use an action serviced by another p-class (\"$name\")",
+                        "Expected constructors not to use an action serviced by another proc (\"$name\")",
                     ),
                 )
             }
@@ -188,7 +188,7 @@ private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse:
                     t == 1 && constructors.isEmpty(),
                     OneLocCompileError(
                         internals[0].decl.loc,
-                        "Expected internal action \"$name\" to be transitioned by exactly one p-class",
+                        "Expected internal action \"$name\" to be transitioned by exactly one proc",
                     ),
                 )
             }
@@ -201,8 +201,8 @@ private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse:
                     OneLocCompileError(
                         refAction.loc,
                         "Expected default/session action \"$name\" to have exactly two sync peers " +
-                            "(two transitioning p-classes, or one transition and one constructor), but found " +
-                            "$t transitioning p-class(es) and $c constructor offer(s)",
+                            "(two transitioning procs, or one transition and one constructor), but found " +
+                            "$t transitioning proc(s) and $c constructor offer(s)",
                     ),
                 )
             }
@@ -249,7 +249,7 @@ private fun RootNode.actionConsistencyWarnings(
 }
 
 private fun RootNode.overlappingDeclNamesErrors(): List<CompileError> {
-    val decls = declNodes()
+    val decls = declNodes().filter { it !is CompileNode }
     return decls.flatMap { refDecl ->
         decls
             .filter { decl -> refDecl != decl && refDecl.name() == decl.name() }
@@ -349,7 +349,7 @@ private fun ObjClassNode.errorPassObjClass(procs: Set<String>, librariesInUse: S
         .filter { it.value > 1 }
         .keys
         .map { dup ->
-            OneLocCompileError(programLocation(), "Duplicate type parameter \"$dup\" on o-class \"${name()}\"")
+            OneLocCompileError(programLocation(), "Duplicate type parameter \"$dup\" on obj \"${name()}\"")
         }
     val repeatFieldErrors = objClassFields()
         .groupBy { it.fieldName }
@@ -359,7 +359,7 @@ private fun ObjClassNode.errorPassObjClass(procs: Set<String>, librariesInUse: S
                 TwoLocsCompileError(
                     nodes[0].programLocation(),
                     nodes[1].programLocation(),
-                    "Expected o-class fields to have unique names",
+                    "Expected obj fields to have unique names",
                 ),
             )
         }

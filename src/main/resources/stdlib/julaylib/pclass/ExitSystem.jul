@@ -1,4 +1,4 @@
-p-class ExitSystem {
+proc ExitSystem {
     constructor initially(args : List<String>) {}
 
     service transition exitSystem() {

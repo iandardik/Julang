@@ -1,4 +1,4 @@
-p-class Bad {
+proc Bad {
     var n : Int
 
     constructor initially(args : List<String>) {
@@ -11,4 +11,6 @@ p-class Bad {
     }
 }
 
-program BadThen := Bad
+proc BadThen := Bad
+
+compile BadThen

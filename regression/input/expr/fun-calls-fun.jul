@@ -5,7 +5,7 @@ fun add(x : Int, y : Int) : Int = x + y
 
 fun double(n : Int) : Int = add(n, n)
 
-p-class S {
+proc S {
     var x : Int
     var print : Boolean
 
@@ -36,7 +36,7 @@ p-class S {
     }
 }
 
-p-class T {
+proc T {
     var x : Int
 
     constructor initially(args : List<String>) {
@@ -52,4 +52,6 @@ p-class T {
     }
 }
 
-program FunCallsFunTest := S || T || Println || ExitSystem
+proc FunCallsFunTest := S || T || Println || ExitSystem
+
+compile FunCallsFunTest

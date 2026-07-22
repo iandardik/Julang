@@ -38,9 +38,6 @@ fun tlaCodegenPass(
     val procAliases = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<ProcNode>() }
         .associateBy { it.name() }
-    val programAliases = unit.modules
-        .flatMap { it.root.declNodes().filterIsInstance<ProgramNode>() }
-        .associateBy { it.name() }
     val specAliases = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<SpecNode>() }
         .associateBy { it.name() }
@@ -49,7 +46,6 @@ fun tlaCodegenPass(
         compositionLeavesOfSpec(spec),
         pclassNodes,
         procAliases,
-        programAliases,
         specAliases,
     )
 

@@ -74,10 +74,9 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
 
     override fun visitDecl(ctx: JulayParser.DeclContext?): ASTNode {
         val decl = oneChoice(
-            ctx!!.pclass(),
-            ctx.oclass(),
-            ctx.proc(),
-            ctx.program(),
+            ctx!!.proc(),
+            ctx.obj(),
+            ctx.compile_decl(),
             ctx.spec(),
             ctx.invariant_decl(),
             ctx.fun_decl(),
@@ -114,7 +113,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         return FunCallExprNode(name, args, sourceLocation(ctx), typeArgs = typeArgs)
     }
 
-    override fun visitOclass(ctx: JulayParser.OclassContext?): ASTNode {
+    override fun visitObj(ctx: JulayParser.ObjContext?): ASTNode {
         val name = ctx!!.ID().text
         val typeParams = parseTypeParams(ctx.typeParams())
         val fields = ctx.field()
@@ -134,29 +133,26 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         return FieldNode(fieldName, typeExpr, sourceLocation(ctx))
     }
 
-    override fun visitPclass(ctx: JulayParser.PclassContext?): ASTNode {
-        val name = ctx!!.ID().text
-        val localDecls = ctx.pclass_body()
-            .map { visit(it) }
-            .map {
-                if (it !is ProcClassDeclNode) {
-                    throw RuntimeException("Expected ProcClassDeclNode but got $it")
-                }
-                it
-            }
-        return ProcClassNode(name, localDecls, sourceLocation(ctx))
-    }
-
     override fun visitProc(ctx: JulayParser.ProcContext?): ASTNode {
         val name = ctx!!.ID().text
+        if (ctx.LCURLY() != null) {
+            val localDecls = ctx.pclass_body()
+                .map { visit(it) }
+                .map {
+                    if (it !is ProcClassDeclNode) {
+                        throw RuntimeException("Expected ProcClassDeclNode but got $it")
+                    }
+                    it
+                }
+            return ProcClassNode(name, localDecls, sourceLocation(ctx))
+        }
         val value = visit(ctx.proc_expr())
         return ProcNode(name, value, sourceLocation(ctx))
     }
 
-    override fun visitProgram(ctx: JulayParser.ProgramContext?): ASTNode {
-        val name = ctx!!.ID().text
-        val value = visit(ctx.proc_expr())
-        return ProgramNode(name, value, sourceLocation(ctx))
+    override fun visitCompile_decl(ctx: JulayParser.Compile_declContext?): ASTNode {
+        val names = ctx!!.ID().map { it.text }
+        return CompileNode(names, sourceLocation(ctx))
     }
 
     override fun visitSpec(ctx: JulayParser.SpecContext?): ASTNode {

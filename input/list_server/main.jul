@@ -1,7 +1,7 @@
 import printer.Printer
 import server.ServerLogic
 
-p-class RunningList {
+proc RunningList {
     var list : List<String>
     
     constructor initially(args : List<String>) {
@@ -23,4 +23,6 @@ p-class RunningList {
     }
 }
 
-program ListServer := RunningList || Printer || ServerLogic
+proc ListServer := RunningList || Printer || ServerLogic
+
+compile ListServer

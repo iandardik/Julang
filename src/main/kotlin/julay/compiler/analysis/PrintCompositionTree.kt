@@ -86,14 +86,10 @@ private fun nodeLabel(
 ): String {
     if (decl != null && decl.components.isNotEmpty()) {
         val kind = when (decl.type) {
-            ProcDeclType.Program -> "program"
             ProcDeclType.Spec -> "spec"
             ProcDeclType.Proc -> "proc"
         }
         return "$kind $name"
-    }
-    if (decl != null && decl.type == ProcDeclType.Program) {
-        return "program $name"
     }
     if (decl != null && decl.type == ProcDeclType.Spec) {
         return "spec $name"
@@ -105,7 +101,7 @@ private fun nodeLabel(
         return "lib $name"
     }
     if (name in allPClassNames) {
-        return "pclass $name"
+        return "proc $name"
     }
     if (decl != null) {
         return "proc $name"

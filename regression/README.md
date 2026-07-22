@@ -40,14 +40,14 @@ source: regression/input/basic/test1.jul   # required: path to .jul file
 tags:                           # optional
   - http
 programs:                       # required for positive cases
-  - name: TermTest1             # must match `program <Name> := ...` in the .jul file
+  - name: TermTest1             # must match a name listed in `compile ...` (JAR target)
     dependsOn: EchoServer       # optional: start another program’s JAR first
     expectFailure: false        # optional: set true when the program run should fail
     run:                        # required per program entry (unless expectFailure-only)
       # ... run options below
 ```
 
-A single `.jul` file may define **multiple** `program` declarations (e.g. `EchoServer` and `EchoClient`). List each program you want to exercise under `programs`. The harness compiles the file **once** per case and produces one JAR per program name (e.g. `TermTest1.jar`).
+A single `.jul` file may list **multiple** JAR targets in `compile` (e.g. `compile EchoServer, EchoClient`). List each target you want to exercise under `programs`. The harness compiles the file **once** per case and produces one JAR per name (e.g. `TermTest1.jar`).
 
 ### `tags`
 
@@ -57,7 +57,7 @@ A single `.jul` file may define **multiple** `program` declarations (e.g. `EchoS
 
 ### `programs[].name`
 
-Must match the program identifier in the source file exactly (case-sensitive). This is also the JAR base name: `TermTest1` → `TermTest1.jar`.
+Must match a `compile` JAR target in the source file exactly (case-sensitive). This is also the JAR base name: `TermTest1` → `TermTest1.jar`.
 
 ### `programs[].dependsOn`
 
