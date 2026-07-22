@@ -2,6 +2,8 @@
 
 End-to-end checks for Julang programs. Each case compiles a `.jul` file, runs the generated JAR(s), and compares terminal output and/or HTTP responses to what you declare in YAML.
 
+Language documentation for users lives under [`docs/`](../docs/README.md). This page is for contributors extending the test harness.
+
 ## Layout
 
 ```
