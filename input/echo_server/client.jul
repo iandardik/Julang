@@ -1,7 +1,7 @@
-import julaylib.pclass.HttpClient
-import julaylib.pclass.Println
-import julaylib.fun.length
-import julaylib.fun.parseInt
+import julay.proclib.HttpClient
+import julay.proclib.Println
+import julay.funlib.length
+import julay.funlib.parseInt
 
 proc ClientDispatcher {
     const targetNumReqs : Int

@@ -1,4 +1,4 @@
-import julaylib.pclass.ExitSystem
+import julay.proclib.ExitSystem
 
 proc BadSet {
     var s : Set<Int>

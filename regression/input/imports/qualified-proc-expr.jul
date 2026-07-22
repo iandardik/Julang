@@ -17,6 +17,6 @@ proc S {
     }
 }
 
-proc QualifiedProcExprTest := S || julaylib.pclass.Println || julaylib.pclass.ExitSystem
+proc QualifiedProcExprTest := S || julay.proclib.Println || julay.proclib.ExitSystem
 
 compile QualifiedProcExprTest

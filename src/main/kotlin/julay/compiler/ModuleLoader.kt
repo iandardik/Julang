@@ -4,7 +4,8 @@ import julay.compiler.ast.*
 import julay.compiler.pass.validateProcExprsInModule
 import julay.parser.JulayLexer
 import julay.parser.JulayParser
-import julay.program.library.JULAYLIB_MODULE
+import julay.program.library.JULAY_FUNLIB
+import julay.program.library.JULAY_MODULE
 import julay.program.library.LibraryRegistry
 import org.antlr.v4.runtime.CharStreams
 import org.antlr.v4.runtime.CommonTokenStream
@@ -41,7 +42,7 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
         if (module.isStub) return
         module.root.declNodes().forEach { decl ->
             if (decl is CompileNode) return@forEach
-            val key = if (module.modulePath.startsWith("$JULAYLIB_MODULE.")) {
+            val key = if (module.modulePath.startsWith("$JULAY_MODULE.")) {
                 module.modulePath
             } else {
                 qualifiedKey(listOf(module.modulePath, decl.name()))
@@ -53,10 +54,10 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
             }
         }
         LibraryRegistry.kotlinLibraries.forEach { lib ->
-            symbols[LibraryRegistry.pclassModulePath(lib.julName)] = ResolvedSymbol.Library(lib)
+            symbols[LibraryRegistry.proclibModulePath(lib.julName)] = ResolvedSymbol.Library(lib)
         }
         FunBuiltinRegistry.all.forEach { builtin ->
-            symbols[qualifiedKey(listOf(JULAYLIB_MODULE, "fun", builtin.name))] = ResolvedSymbol.FunLib(builtin)
+            symbols[qualifiedKey(listOf(JULAY_MODULE, JULAY_FUNLIB, builtin.name))] = ResolvedSymbol.FunLib(builtin)
         }
     }
 
@@ -114,10 +115,10 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
                 if (FunBuiltinRegistry.resolveQualified(parts) != null) {
                     return@forEach
                 }
-                if (LibraryRegistry.isPclassImport(parts) && LibraryRegistry.isKotlinLibrary(parts[2])) {
+                if (LibraryRegistry.isProclibImport(parts) && LibraryRegistry.isKotlinLibrary(parts[2])) {
                     return@forEach
                 }
-                val importedModule = if (parts.first() == JULAYLIB_MODULE) {
+                val importedModule = if (parts.first() == JULAY_MODULE) {
                     parts.joinToString(".")
                 } else {
                     parts.dropLast(1).joinToString(".")
@@ -126,7 +127,7 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
             }
         }
 
-        collectJulaylibStdlibModulePaths(root).forEach { modulePath ->
+        collectJulayStdlibModulePaths(root).forEach { modulePath ->
             loadModule(modulePath, isEntry = false)
         }
 
@@ -192,12 +193,12 @@ fun buildModuleSearchPath(entryPath: Path, extraLibraryPaths: List<Path>): List<
     return paths.distinct()
 }
 
-fun collectJulaylibStdlibModulePaths(node: ASTNode): Set<String> {
+fun collectJulayStdlibModulePaths(node: ASTNode): Set<String> {
     val paths = mutableSetOf<String>()
     fun walk(n: ASTNode) {
         if (n is ValueProcExprNode && n.isQualified()) {
             val parts = n.qualifiedParts()!!
-            if (LibraryRegistry.isPclassImport(parts) &&
+            if (LibraryRegistry.isProclibImport(parts) &&
                 LibraryRegistry.isJulayStdlib(parts[2])
             ) {
                 paths.add(parts.joinToString("."))

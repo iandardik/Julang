@@ -1,4 +1,4 @@
-import julaylib.pclass.Timer
+import julay.proclib.Timer
 
 /* prints the current value of the counter every 5 seconds
 */

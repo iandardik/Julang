@@ -9,9 +9,11 @@ import julay.program.type.boolType
 import julay.program.type.intType
 import julay.program.type.listType
 import julay.program.type.stringType
+import julay.program.library.JULAY_FUNLIB
+import julay.program.library.JULAY_MODULE
 
 /**
- * Kotlin-backed expression function (julaylib.fun.*), analogous to effect builtins
+ * Kotlin-backed expression function (julay.funlib.*), analogous to effect builtins
  * but usable in guards/transit via [julay.compiler.ast.FunCallExprNode].
  */
 data class FunBuiltin(
@@ -166,10 +168,10 @@ object FunBuiltinRegistry {
 
     fun isFunBuiltin(name: String): Boolean = name in builtins
 
-    /** Qualified import path parts, e.g. ["julaylib", "fun", "length"]. */
+    /** Qualified import path parts, e.g. ["julay", "funlib", "length"]. */
     fun resolveQualified(parts: List<String>): FunBuiltin? {
         if (parts.size != 3) return null
-        if (parts[0] != "julaylib" || parts[1] != "fun") return null
+        if (parts[0] != JULAY_MODULE || parts[1] != JULAY_FUNLIB) return null
         return lookup(parts[2])
     }
 }

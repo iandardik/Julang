@@ -15,7 +15,6 @@ qualified_name
 
 qual_segment
     : ID
-    | FUN
     ;
 
 decl

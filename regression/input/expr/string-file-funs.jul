@@ -1,9 +1,9 @@
-import julaylib.fun.readFile
-import julaylib.fun.split
-import julaylib.fun.trim
-import julaylib.fun.portFromUrl
-import julaylib.fun.startsWith
-import julaylib.fun.length
+import julay.funlib.readFile
+import julay.funlib.split
+import julay.funlib.trim
+import julay.funlib.portFromUrl
+import julay.funlib.startsWith
+import julay.funlib.length
 
 proc StringFileDemo {
     var phase : Int

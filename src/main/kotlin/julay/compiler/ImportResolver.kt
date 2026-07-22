@@ -1,7 +1,7 @@
 package julay.compiler
 
 import julay.compiler.ast.*
-import julay.program.library.JULAYLIB_MODULE
+import julay.program.library.JULAY_MODULE
 import julay.program.library.JulLibrary
 import julay.program.library.LibraryRegistry
 import java.nio.file.Path
@@ -49,8 +49,8 @@ fun resolveImportTarget(
     val parts = qn.parts()
     if (parts.size < 2) return null
     resolveQualifiedName(parts, moduleSymbols)?.let { return it }
-    if (LibraryRegistry.isPclassImport(parts)) {
-        LibraryRegistry.resolve(JULAYLIB_MODULE, parts[2])?.let { return ResolvedSymbol.Library(it) }
+    if (LibraryRegistry.isProclibImport(parts)) {
+        LibraryRegistry.resolve(JULAY_MODULE, parts[2])?.let { return ResolvedSymbol.Library(it) }
     }
     return null
 }
@@ -69,7 +69,7 @@ fun buildImportTable(
         val symbol = parts.last()
         val resolved = resolveImportTarget(qn, entryPath, moduleSymbols)
         if (resolved == null) {
-            val msg = if (parts.first() == JULAYLIB_MODULE) {
+            val msg = if (parts.first() == JULAY_MODULE) {
                 "Unknown library ${qualifiedKey(parts)}"
             } else {
                 val modulePath = parts.dropLast(1).joinToString(".")
@@ -137,7 +137,7 @@ fun resolveProcLeaf(
     if (LibraryRegistry.isKnownJulaylibSymbol(name)) {
         return null to OneLocCompileError(
             node.programLocation(),
-            "Unknown process \"$name\"; did you mean to import julaylib.pclass.$name?",
+            "Unknown process \"$name\"; did you mean to import julay.proclib.$name?",
         )
     }
     return null to OneLocCompileError(

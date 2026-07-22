@@ -1,8 +1,8 @@
-import julaylib.fun.length
-import julaylib.fun.readFile
-import julaylib.fun.split
-import julaylib.fun.trim
-import julaylib.fun.parseInt
+import julay.funlib.length
+import julay.funlib.readFile
+import julay.funlib.split
+import julay.funlib.trim
+import julay.funlib.parseInt
 import node.lib.isBlankOrComment
 import node.lib.Node
 

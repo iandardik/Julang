@@ -1,5 +1,5 @@
-import julaylib.pclass.Println
-import julaylib.pclass.ExitSystem
+import julay.proclib.Println
+import julay.proclib.ExitSystem
 import funmath.add
 import funmath.id
 

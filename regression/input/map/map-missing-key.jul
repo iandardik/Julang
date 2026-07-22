@@ -1,4 +1,4 @@
-import julaylib.pclass.ExitSystem
+import julay.proclib.ExitSystem
 
 proc MapMissingKey {
     var mp : Map<String, Int>

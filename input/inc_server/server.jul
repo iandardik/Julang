@@ -1,4 +1,4 @@
-import julaylib.pclass.HttpServer
+import julay.proclib.HttpServer
 
 proc ServerStarter {
     var started : Boolean

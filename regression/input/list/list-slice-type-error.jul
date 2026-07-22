@@ -1,4 +1,4 @@
-import julaylib.pclass.ExitSystem
+import julay.proclib.ExitSystem
 
 proc BadSlice {
     var xs : List<Int>

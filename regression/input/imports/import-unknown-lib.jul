@@ -1,4 +1,4 @@
-import julaylib.Nonexistent
+import julay.Nonexistent
 
 proc S {
     var x : Int

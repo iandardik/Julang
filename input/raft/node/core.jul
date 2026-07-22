@@ -1,4 +1,4 @@
-import julaylib.fun.length
+import julay.funlib.length
 import node.lib.Entry
 import node.lib.Node
 import node.lib.AppendEntriesData

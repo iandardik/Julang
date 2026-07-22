@@ -42,7 +42,7 @@ fun RootNode.typePass(
             funNode.typePassFunBody(callable, built, builtins)
         }
     }
-    // Typecheck each module with that module's imports so julaylib.fun.* (and imported
+    // Typecheck each module with that module's imports so julay.funlib.* (and imported
     // user funs) resolve in dependency modules, not only in the entry file.
     val otherErrors = unit.modules.flatMap { module ->
         val callable = callableFuns(module)

@@ -1,4 +1,4 @@
-import julaylib.pclass.Println
+import julay.proclib.Println
 
 proc A {
     constructor initially(args : List<String>) {

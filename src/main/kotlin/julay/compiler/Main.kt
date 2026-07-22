@@ -29,8 +29,8 @@ class Julayc : CliktCommand(name = "julayc") {
           JULAY_PATH  Colon-separated list of directories searched for imported .jul modules
                       (after the entry file's directory, any -L paths, and the embedded stdlib).
 
-        Stdlib: julaylib.pclass.Println, ExitSystem, Readln, and Timer are Julay modules shipped in the
-        compiler jar. julaylib.pclass.HttpServer and julaylib.pclass.HttpClient remain Kotlin-native libraries
+        Stdlib: julay.proclib.Println, ExitSystem, Readln, and Timer are Julay modules shipped in the
+        compiler jar. julay.proclib.HttpServer and julay.proclib.HttpClient remain Kotlin-native libraries
         (with builtin HttpServerRequest/Response and HttpClientRequest/Response obj types).
 
         Use `julayc analyze --help` to inspect program structure without codegen.
@@ -78,8 +78,8 @@ class AnalyzeCommand : CliktCommand(name = "analyze") {
           julayc analyze input/raft/main.jul
           julayc analyze -s NodeLogic --actions input/raft/main.jul
           julayc analyze -s NodeLogic --actions-detail --action-regex '^handle' input/raft/main.jul
-          julayc analyze -s Raft -s Client --pclasses input/raft/main.jul
-          julayc analyze -s RaftCore --pclasses-detail input/raft/main.jul
+          julayc analyze -s Raft -s Client --procs input/raft/main.jul
+          julayc analyze -s RaftCore --procs-detail input/raft/main.jul
           julayc analyze -s NodeLogic --tree --actions input/raft/main.jul
     """.trimIndent()
 
@@ -119,13 +119,13 @@ class AnalyzeCommand : CliktCommand(name = "analyze") {
         help = "Per action: offering procs and modifiers (internal omitted unless --include-internal)",
     ).flag()
 
-    private val showPclasses by option(
-        "--pclasses",
+    private val showProcs by option(
+        "--procs",
         help = "List proc class names in the scope",
     ).flag()
 
-    private val pclassesDetail by option(
-        "--pclasses-detail",
+    private val procsDetail by option(
+        "--procs-detail",
         help = "Per proc class: its actions and modifiers (internal omitted unless --include-internal)",
     ).flag()
 
@@ -149,14 +149,14 @@ class AnalyzeCommand : CliktCommand(name = "analyze") {
     ).path(mustExist = true, canBeFile = true)
 
     override fun run() {
-        val anyView = showTree || showActions || actionsDetail || showPclasses || pclassesDetail
+        val anyView = showTree || showActions || actionsDetail || showProcs || procsDetail
         val options = AnalyzeOptions(
             scopeNames = scopeNames,
             showTree = if (anyView) showTree else true,
             showActions = showActions,
             actionsDetail = actionsDetail,
-            showPclasses = showPclasses,
-            pclassesDetail = pclassesDetail,
+            showProcs = showProcs,
+            procsDetail = procsDetail,
             actionNames = actionNames,
             actionRegex = actionRegex,
             includeInternal = includeInternal,

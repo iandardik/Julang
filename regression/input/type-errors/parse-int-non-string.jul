@@ -1,4 +1,4 @@
-import julaylib.fun.parseInt
+import julay.funlib.parseInt
 
 proc Bad {
     var n : Int

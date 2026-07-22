@@ -1,7 +1,7 @@
-import julaylib.pclass.Println
-import julaylib.pclass.Timer
-import julaylib.pclass.HttpServer
-import julaylib.pclass.ExitSystem
+import julay.proclib.Println
+import julay.proclib.Timer
+import julay.proclib.HttpServer
+import julay.proclib.ExitSystem
 
 proc Counter {
     var counter : Int

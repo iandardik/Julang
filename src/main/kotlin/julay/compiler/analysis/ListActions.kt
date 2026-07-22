@@ -40,7 +40,7 @@ fun printAnalyzeViews(
     if (options.showActionView) {
         printActionView(ast, scope, librariesInUse, allPClassNames, options)
     }
-    if (options.showPclassView) {
+    if (options.showProcView) {
         printPclassView(ast, scope.leafComponents, librariesInUse, options)
     }
 }
@@ -143,7 +143,7 @@ fun printPclassView(
     require(ast is RootNode)
     val offers = filterOffers(collectListedActionOffers(ast, procs, librariesInUse), options)
     val pclassNames = collectPclassNames(ast, procs, librariesInUse)
-    if (options.pclassesDetail) {
+    if (options.procsDetail) {
         printPclassDetail(offers, pclassNames)
     } else {
         pclassNames.forEach { println(it) }

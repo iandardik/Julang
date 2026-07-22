@@ -1,5 +1,5 @@
-import julaylib.pclass.HttpServer
-import julaylib.pclass.HttpClient
+import julay.proclib.HttpServer
+import julay.proclib.HttpClient
 import node.core.RaftCore
 import node.cluster_info.ClusterInfo
 import node.initializers.Initializers

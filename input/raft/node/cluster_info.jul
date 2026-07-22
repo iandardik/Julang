@@ -1,5 +1,5 @@
-import julaylib.fun.length
-import julaylib.fun.portFromUrl
+import julay.funlib.length
+import julay.funlib.portFromUrl
 import node.lib.Node
 
 /*

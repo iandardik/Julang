@@ -1,5 +1,5 @@
-import julaylib.fun.split
-import julaylib.fun.parseInt
+import julay.funlib.split
+import julay.funlib.parseInt
 import node.lib.fieldValue
 import node.lib.AppendEntriesData
 import node.lib.Node

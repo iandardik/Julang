@@ -1,4 +1,4 @@
-import julaylib.pclass.Println
+import julay.proclib.Println
 
 proc Producer {
     var x : Int

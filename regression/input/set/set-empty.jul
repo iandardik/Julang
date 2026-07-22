@@ -1,5 +1,5 @@
-import julaylib.pclass.ExitSystem
-import julaylib.fun.length
+import julay.proclib.ExitSystem
+import julay.funlib.length
 
 proc SetEmptyDemo {
     var s : Set<Int>

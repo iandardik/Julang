@@ -14,8 +14,8 @@ data class AnalyzeOptions(
     val showTree: Boolean = false,
     val showActions: Boolean = false,
     val actionsDetail: Boolean = false,
-    val showPclasses: Boolean = false,
-    val pclassesDetail: Boolean = false,
+    val showProcs: Boolean = false,
+    val procsDetail: Boolean = false,
     val actionNames: List<String> = emptyList(),
     val actionRegex: String? = null,
     val includeInternal: Boolean = false,
@@ -31,8 +31,8 @@ data class AnalyzeOptions(
     val showActionView: Boolean
         get() = showActions || actionsDetail
 
-    val showPclassView: Boolean
-        get() = showPclasses || pclassesDetail
+    val showProcView: Boolean
+        get() = showProcs || procsDetail
 }
 
 /**

@@ -1,6 +1,6 @@
-import julaylib.pclass.Println
-import julaylib.pclass.ExitSystem
-import julaylib.fun.length
+import julay.proclib.Println
+import julay.proclib.ExitSystem
+import julay.funlib.length
 
 proc ListIntDemo {
     var xs : List<Int>

@@ -1,6 +1,6 @@
-import julaylib.pclass.Println
-import julaylib.pclass.ExitSystem
-import julaylib.fun.parseInt
+import julay.proclib.Println
+import julay.proclib.ExitSystem
+import julay.funlib.parseInt
 
 proc ParseIntDemo {
     const n : Int

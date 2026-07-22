@@ -67,7 +67,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     override fun visitQualified_name(ctx: JulayParser.Qualified_nameContext?): ASTNode {
         val parts = mutableListOf(ctx!!.ID().text)
         ctx.qual_segment().forEach { seg ->
-            parts.add(seg.ID()?.text ?: seg.FUN().text)
+            parts.add(seg.ID().text)
         }
         return QualifiedNameNode(parts, sourceLocation(ctx))
     }

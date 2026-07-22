@@ -1,5 +1,5 @@
-import julaylib.pclass.Println
-import julaylib.pclass.HttpServer
+import julay.proclib.Println
+import julay.proclib.HttpServer
 
 obj ReqInfo {
     req : String

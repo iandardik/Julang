@@ -1,8 +1,8 @@
 package julay.program.library
 
-const val JULAYLIB_MODULE = "julaylib"
-const val JULAYLIB_PCLASS = "pclass"
-const val JULAYLIB_FUN = "fun"
+const val JULAY_MODULE = "julay"
+const val JULAY_PROCLIB = "proclib"
+const val JULAY_FUNLIB = "funlib"
 
 object LibraryRegistry {
     val julayStdlibNames: Set<String> = setOf("Println", "ExitSystem", "Readln", "Timer")
@@ -21,22 +21,22 @@ object LibraryRegistry {
 
     fun isKnownJulaylibSymbol(name: String) = isJulayStdlib(name) || isKotlinLibrary(name)
 
-    fun isJulaylibModule(module: String) = module == JULAYLIB_MODULE
+    fun isJulayModule(module: String) = module == JULAY_MODULE
 
-    /** True for imports like julaylib.pclass.Println or julaylib.pclass.HttpServer. */
-    fun isPclassImport(parts: List<String>): Boolean =
-        parts.size == 3 && parts[0] == JULAYLIB_MODULE && parts[1] == JULAYLIB_PCLASS
+    /** True for imports like julay.proclib.Println or julay.proclib.HttpServer. */
+    fun isProclibImport(parts: List<String>): Boolean =
+        parts.size == 3 && parts[0] == JULAY_MODULE && parts[1] == JULAY_PROCLIB
 
-    fun pclassModulePath(name: String): String =
-        listOf(JULAYLIB_MODULE, JULAYLIB_PCLASS, name).joinToString(".")
+    fun proclibModulePath(name: String): String =
+        listOf(JULAY_MODULE, JULAY_PROCLIB, name).joinToString(".")
 
     fun resolve(module: String, symbol: String): JulLibrary? {
-        if (!isJulaylibModule(module)) return null
+        if (!isJulayModule(module)) return null
         return byJulName[symbol]
     }
 
     fun resolveQualified(parts: List<String>): JulLibrary? {
-        if (isPclassImport(parts) && isKotlinLibrary(parts[2])) {
+        if (isProclibImport(parts) && isKotlinLibrary(parts[2])) {
             return byJulName[parts[2]]
         }
         // Legacy two-part form is no longer supported for resolution of Kotlin libs.

@@ -1,6 +1,6 @@
-import julaylib.fun.length
-import julaylib.fun.split
-import julaylib.fun.startsWith
+import julay.funlib.length
+import julay.funlib.split
+import julay.funlib.startsWith
 
 /*
  * Shared Raft types and helpers (RPC encoding, config parsing, log access).
