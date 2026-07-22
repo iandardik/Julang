@@ -7,3 +7,5 @@ build
 .iml
 .gradle
 .kotlin
+*.swp
+*.swo
