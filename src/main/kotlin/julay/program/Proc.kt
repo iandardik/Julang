@@ -59,8 +59,29 @@ class Proc(
     /**
      * Called by [Program.spawn] when this proc's session constructor action spawned [child].
      * Establishes mutual affinity and installs sessions for other shared session actions.
+     *
+     * Throws [JulayException] if this proc already has live affinity to another peer of
+     * [child]'s class (session-ctor rebind). After that peer exits and sessions are scrubbed,
+     * a later spawn may establish again.
      */
-    fun establishSessionWithSpawnedChild(child: Proc, constructorAct: SymbolicAction) {
+    /**
+     * Called by [Program.spawn] when this proc's session constructor action spawned [child].
+     * Establishes mutual affinity and installs sessions for other shared session actions.
+     *
+     * Throws [JulayException] if this proc already has live affinity to another peer of
+     * [child]'s class (session-ctor rebind). After that peer exits and sessions are scrubbed,
+     * a later spawn may establish again.
+     */
+    suspend fun establishSessionWithSpawnedChild(child: Proc, constructorAct: SymbolicAction) {
+        scrubClosedSessionsAndAffinity()
+        val existingPeerId = affinity[child.classId]
+        if (existingPeerId != null && existingPeerId != child.procId) {
+            throw JulayException(
+                "Session constructor \"${constructorAct.name}\" cannot rebind: " +
+                    "proc $procId already has affinity to peer $existingPeerId " +
+                    "of class ${child.classId} (attempted peer ${child.procId})",
+            )
+        }
         affinity[child.classId] = child.procId
         child.affinity[classId] = procId
         val parentSession = tsInfo.alphabet.filter { it.isSession && it.name != constructorAct.name }

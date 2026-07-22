@@ -3,6 +3,7 @@ package julay.program.library
 import com.microsoft.z3.Context
 import julay.concurrency.Select
 import julay.concurrency.SyncChannel
+import julay.program.JulayException
 import julay.program.Constraint
 import julay.program.Proc
 import julay.program.Program
@@ -24,6 +25,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -53,6 +55,55 @@ class SessionAffinityTest {
         parent.establishSessionWithSpawnedChild(child, ctorAct)
         assertNotNull(program.sessionAction("followOn"))
         assertTrue(true) // session install completed without throw
+    }
+
+    @Test
+    fun sessionConstructorRebindThrowsWhileAffinityLive() = runBlocking {
+        val followOn = SymbolicAction("followOn", listOf(Variable("x", stringType)), isSession = true)
+        val ctorAct = SymbolicAction("makeChild", listOf(), isSession = true)
+        val parentInfo = TransitionSystemStaticInfo(
+            "ParentTS$",
+            setOf(followOn),
+            mapOf(ctorAct to { _, _ -> EmptyTS() }),
+        )
+        val childInfo = TransitionSystemStaticInfo(
+            "ChildTS$",
+            setOf(followOn),
+            emptyMap(),
+        )
+        val program = Program(setOf(parentInfo, childInfo))
+        val parent = Proc(EmptyTS(), parentInfo, program.staticChannelTable, program)
+        val child1 = Proc(EmptyTS(), childInfo, program.staticChannelTable, program)
+        val child2 = Proc(EmptyTS(), childInfo, program.staticChannelTable, program)
+        parent.establishSessionWithSpawnedChild(child1, ctorAct)
+        val ex = assertFailsWith<JulayException> {
+            parent.establishSessionWithSpawnedChild(child2, ctorAct)
+        }
+        assertTrue(ex.message!!.contains("cannot rebind"), ex.message)
+    }
+
+    @Test
+    fun sessionConstructorRebindAllowedAfterSessionScrub() = runBlocking {
+        val followOn = SymbolicAction("followOn", listOf(Variable("x", stringType)), isSession = true)
+        val ctorAct = SymbolicAction("makeChild", listOf(), isSession = true)
+        val parentInfo = TransitionSystemStaticInfo(
+            "ParentTS$",
+            setOf(followOn),
+            mapOf(ctorAct to { _, _ -> EmptyTS() }),
+        )
+        val childInfo = TransitionSystemStaticInfo(
+            "ChildTS$",
+            setOf(followOn),
+            emptyMap(),
+        )
+        val program = Program(setOf(parentInfo, childInfo))
+        val parent = Proc(EmptyTS(), parentInfo, program.staticChannelTable, program)
+        val child1 = Proc(EmptyTS(), childInfo, program.staticChannelTable, program)
+        val child2 = Proc(EmptyTS(), childInfo, program.staticChannelTable, program)
+        parent.establishSessionWithSpawnedChild(child1, ctorAct)
+        // Peer exit closes shared dedicated sessions; establish scrubs then allows rebind.
+        child1.run() // EmptyTS enables nothing → exits and closes sessions
+        parent.establishSessionWithSpawnedChild(child2, ctorAct)
     }
 
     @Test

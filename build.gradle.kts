@@ -1,10 +1,11 @@
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import java.net.URI
 
 plugins {
     kotlin("jvm") version "2.1.21"
     application
     id("com.github.johnrengelman.shadow") version "8.1.1"
 }
+
 
 
 repositories {
@@ -46,6 +47,27 @@ tasks.shadowJar {
     archiveClassifier.set("")
 }
 
+val tla2toolsVersion = "v1.8.0"
+val tla2toolsJar = layout.buildDirectory.file("tla2tools/tla2tools.jar")
+
+val downloadTla2tools by tasks.registering {
+    description = "Download pinned tla2tools.jar for TLC smoke tests"
+    val dest = tla2toolsJar
+    outputs.file(dest)
+    doLast {
+        val out = dest.get().asFile
+        out.parentFile.mkdirs()
+        val url = URI(
+            "https://github.com/tlaplus/tlaplus/releases/download/$tla2toolsVersion/tla2tools.jar",
+        ).toURL()
+        url.openStream().use { input ->
+            out.outputStream().use { output -> input.copyTo(output) }
+        }
+    }
+}
+
 tasks.test {
     dependsOn(tasks.shadowJar)
+    dependsOn(downloadTla2tools)
+    systemProperty("tla2tools.jar", tla2toolsJar.get().asFile.absolutePath)
 }

@@ -134,6 +134,10 @@ fun tlaCodegenPass(
         variables += pair.varName
         initParts += sessionVarInit(pair)
     }
+    if (sessionPairs.isNotEmpty()) {
+        variables += "sessionException"
+        initParts += "/\\ sessionException = FALSE"
+    }
 
     val built = buildTlaActions(
         leaves, pclassNodes, offers, sessionPairs, stateVarNames,
@@ -157,6 +161,8 @@ fun tlaCodegenPass(
     } else {
         emptyList()
     }
+    val sessionIntegrityDef =
+        if (sessionPairs.isNotEmpty()) "SessionIntegrity == ~sessionException" else null
 
     val constLine = if (constants.isEmpty()) "" else "CONSTANT ${constants.joinToString(", ")}\n\n"
     val varsLine = if (variables.isEmpty()) {
@@ -212,6 +218,10 @@ fun tlaCodegenPass(
         appendLine("Next ==$nextBody")
         appendLine()
         appendLine("Spec == Init /\\ [][Next]_vars")
+        if (sessionIntegrityDef != null) {
+            appendLine()
+            appendLine(sessionIntegrityDef)
+        }
         if (invDefs.isNotEmpty()) {
             appendLine()
             invDefs.forEach { appendLine(it) }
@@ -221,6 +231,9 @@ fun tlaCodegenPass(
 
     val cfg = buildString {
         appendLine("SPECIFICATION Spec")
+        if (sessionPairs.isNotEmpty()) {
+            appendLine("INVARIANT SessionIntegrity")
+        }
         if (invNode != null) {
             appendLine("INVARIANT ${invNode.name()}")
         }
@@ -583,7 +596,9 @@ private fun buildTlaActions(
     sessionPairs: List<SessionLeafPair>,
     stateVarNames: Map<Pair<String, String>, String>,
 ): TlaBuildResult {
-    val allVars = allTlaVars(leaves, pclasses, stateVarNames) + sessionPairs.map { it.varName }
+    val allVars = allTlaVars(leaves, pclasses, stateVarNames) +
+        sessionPairs.map { it.varName } +
+        if (sessionPairs.isNotEmpty()) listOf("sessionException") else emptyList()
     val stateVarsByLeaf = leaves.associate { leaf ->
         leaf.name to (
             pclasses[leaf.name]
@@ -809,6 +824,56 @@ private fun emitConjoined(
 
     fun selfOf(leaf: SpecLeaf): String? = selfBinders[leaf.name]
 
+    val deferCtorSpawn = sessionPair != null && offers.any { it.isConstructor }
+    val deferredSpawnParts = mutableListOf<String>()
+    val deferredSpawnChanged = mutableSetOf<String>()
+
+    fun emitTransitUpdates(offer: TlaActionOffer, targetParts: MutableList<String>, targetChanged: MutableSet<String>) {
+        val self = selfOf(offer.leaf)
+        val argNames = offer.decl.action.args.map { it.name }.toSet()
+        val leafCtx = mapOf(offer.leaf.name to offer.leaf)
+        offer.decl.transits.forEach { update ->
+            when (update) {
+                is TransitUpdate.Assign -> {
+                    val root = update.key.substringBefore('.')
+                    val v = stateTlaName(offer.leaf.name, root, stateVarNames)
+                    targetChanged += v
+                    val rhs = exprToTla(
+                        update.expr, leafCtx, argNames, self,
+                        bareStateVars = stateVarsByLeaf[offer.leaf.name].orEmpty(),
+                        stateVarNames = stateVarNames,
+                    )
+                    targetParts += if (self != null) {
+                        "/\\ $v' = [$v EXCEPT ![$self] = $rhs]"
+                    } else {
+                        "/\\ $v' = $rhs"
+                    }
+                }
+                is TransitUpdate.MapPut -> {
+                    val v = stateTlaName(offer.leaf.name, update.mapVar, stateVarNames)
+                    targetChanged += v
+                    val bare = stateVarsByLeaf[offer.leaf.name].orEmpty()
+                    val k = exprToTla(update.key, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames)
+                    val vv = exprToTla(update.value, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames)
+                    targetParts += if (self != null) {
+                        "/\\ $v' = [$v EXCEPT ![$self] = [@ EXCEPT ![$k] = $vv]]"
+                    } else {
+                        "/\\ $v' = [$v EXCEPT ![$k] = $vv]"
+                    }
+                }
+            }
+        }
+        if (offer.isConstructor) {
+            val c = stateTlaName(offer.leaf.name, "constructed", stateVarNames)
+            targetChanged += c
+            targetParts += if (self != null) {
+                "/\\ $c' = [$c EXCEPT ![$self] = TRUE]"
+            } else {
+                "/\\ $c' = TRUE"
+            }
+        }
+    }
+
     // Participant-only constructed enabling (no constraints on non-offering leaves).
     offers.forEach { offer ->
         val c = stateTlaName(offer.leaf.name, "constructed", stateVarNames)
@@ -848,46 +913,11 @@ private fun emitConjoined(
             )}"
         }
 
-        offer.decl.transits.forEach { update ->
-            when (update) {
-                is TransitUpdate.Assign -> {
-                    val root = update.key.substringBefore('.')
-                    val v = stateTlaName(offer.leaf.name, root, stateVarNames)
-                    changed += v
-                    val rhs = exprToTla(
-                        update.expr, leafCtx, argNames, self,
-                        bareStateVars = stateVarsByLeaf[offer.leaf.name].orEmpty(),
-                        stateVarNames = stateVarNames,
-                    )
-                    parts += if (self != null) {
-                        "/\\ $v' = [$v EXCEPT ![$self] = $rhs]"
-                    } else {
-                        "/\\ $v' = $rhs"
-                    }
-                }
-                is TransitUpdate.MapPut -> {
-                    val v = stateTlaName(offer.leaf.name, update.mapVar, stateVarNames)
-                    changed += v
-                    val bare = stateVarsByLeaf[offer.leaf.name].orEmpty()
-                    val k = exprToTla(update.key, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames)
-                    val vv = exprToTla(update.value, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames)
-                    parts += if (self != null) {
-                        "/\\ $v' = [$v EXCEPT ![$self] = [@ EXCEPT ![$k] = $vv]]"
-                    } else {
-                        "/\\ $v' = [$v EXCEPT ![$k] = $vv]"
-                    }
-                }
-            }
-        }
-
-        if (offer.isConstructor) {
-            val c = stateTlaName(offer.leaf.name, "constructed", stateVarNames)
-            changed += c
-            parts += if (self != null) {
-                "/\\ $c' = [$c EXCEPT ![$self] = TRUE]"
-            } else {
-                "/\\ $c' = TRUE"
-            }
+        // Defer constructor spawn updates into the CanStart THEN branch (throw-before-launch).
+        if (deferCtorSpawn && offer.isConstructor) {
+            emitTransitUpdates(offer, deferredSpawnParts, deferredSpawnChanged)
+        } else {
+            emitTransitUpdates(offer, parts, changed)
         }
     }
 
@@ -897,9 +927,29 @@ private fun emitConjoined(
         val lookup = sessionLookup(sessionPair, binderA, binderB)
         val canStart = canStartCall(sessionPair, binderA, binderB)
         parts += "\\* Session connection semantics"
-        parts += "/\\ ($lookup \\/ $canStart)"
-        parts += "/\\ ${sessionAssignTrueExpr(sessionPair, binderA, binderB)}"
-        changed += sessionPair.varName
+        if (deferCtorSpawn) {
+            // sessionException mirrors runtime JulayException on session-ctor rebind
+            val thenParts = mutableListOf<String>()
+            thenParts += sessionAssignTrueExpr(sessionPair, binderA, binderB)
+            thenParts.addAll(deferredSpawnParts.map { it.removePrefix("/\\ ") })
+            thenParts += "UNCHANGED sessionException"
+            val elseUnchanged = (listOf(sessionPair.varName) + deferredSpawnChanged.toList()).distinct()
+            val elseParts = mutableListOf<String>()
+            elseParts += "sessionException' = TRUE"
+            elseParts += "UNCHANGED <<${elseUnchanged.joinToString(", ")}>>"
+            val thenBody = thenParts.joinToString("\n          /\\ ")
+            val elseBody = elseParts.joinToString("\n          /\\ ")
+            parts += "/\\ IF $canStart"
+            parts += "   THEN /\\ $thenBody"
+            parts += "   ELSE /\\ $elseBody"
+            changed += sessionPair.varName
+            changed += deferredSpawnChanged
+            changed += "sessionException"
+        } else {
+            parts += "/\\ ($lookup \\/ $canStart)"
+            parts += "/\\ ${sessionAssignTrueExpr(sessionPair, binderA, binderB)}"
+            changed += sessionPair.varName
+        }
     }
 
     val unchanged = allVars.filter { it !in changed }

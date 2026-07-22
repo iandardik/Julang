@@ -129,6 +129,7 @@ class Program {
                 constructorAct = act,
             )
             if (parent != null && act.symAction.isSession) {
+                // Throws JulayException on live rebind before the child is launched.
                 parent.establishSessionWithSpawnedChild(child, act.symAction)
             }
             godScope.launch {

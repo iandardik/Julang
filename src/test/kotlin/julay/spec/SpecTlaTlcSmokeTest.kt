@@ -5,11 +5,21 @@ import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 import kotlin.test.Test
+import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
-private val TLC_JAR = File("/Users/idardik/bin/tla2tools.jar")
+private val TLC_JAR: File
+    get() {
+        val prop = System.getProperty("tla2tools.jar")
+        if (prop.isNullOrBlank()) {
+            fail("System property tla2tools.jar is not set (Gradle should download and pass it)")
+        }
+        return File(prop)
+    }
 private const val TLC_TIMEOUT_SECONDS = 30L
+private const val TLC_VIOLATION_TIMEOUT_SECONDS = 120L
 
 class SpecTlaTlcSmokeTest {
 
@@ -359,6 +369,19 @@ class SpecTlaTlcSmokeTest {
                 "expected session_Alice_Bob variable;\n$tlaText",
             )
             assertTrue(
+                tlaText.contains("sessionException"),
+                "expected sessionException variable;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("SessionIntegrity == ~sessionException"),
+                "expected SessionIntegrity helper;\n$tlaText",
+            )
+            val cfgText = cfg.readText()
+            assertTrue(
+                cfgText.contains("INVARIANT SessionIntegrity"),
+                "expected SessionIntegrity in cfg;\n$cfgText",
+            )
+            assertTrue(
                 tlaText.contains("CanStartSession_Alice_Bob =="),
                 "expected CanStartSession helper before Init;\n$tlaText",
             )
@@ -529,6 +552,70 @@ class SpecTlaTlcSmokeTest {
         }
     }
 
+    @Test
+    fun sessionSpawnRebindViolatesSessionIntegrity() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-session-spawn-rebind").toFile()
+        try {
+            val source = File("regression/input/spec/session-spawn-rebind.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(
+                source.toPath(),
+                keepBuild = false
+            )
+            val tla = File("SessionSpawnRebind.tla")
+            val cfg = File("SessionSpawnRebind.cfg")
+            assertTrue(tla.exists(), "expected SessionSpawnRebind.tla")
+            assertTrue(cfg.exists(), "expected SessionSpawnRebind.cfg")
+            val tlaText = tla.readText()
+            assertTrue(
+                tlaText.contains("sessionException"),
+                "expected sessionException;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("SessionIntegrity == ~sessionException"),
+                "expected SessionIntegrity;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("\\* Session connection semantics"),
+                "expected session connection comment;\n$tlaText",
+            )
+            val spawnDef = tlaText.substringAfter("spawnWorker(i, id) ==").substringBefore("\n\n")
+                .ifEmpty { tlaText.substringAfter("spawnWorker(").let { rest ->
+                    val sigEnd = rest.indexOf(" ==")
+                    if (sigEnd < 0) "" else rest.substring(sigEnd + 3).substringBefore("\n\n")
+                } }
+            assertTrue(
+                spawnDef.contains("IF CanStartSession_Server_Worker") ||
+                    spawnDef.contains("IF CanStartSession_"),
+                "expected spawnWorker to gate spawn on CanStartSession IF;\n$spawnDef",
+            )
+            assertTrue(
+                spawnDef.contains("sessionException' = TRUE"),
+                "expected sessionException' on rebind ELSE;\n$spawnDef",
+            )
+            assertFalse(
+                spawnDef.contains("session_Server_Worker \\/ CanStartSession") ||
+                    spawnDef.contains("(session_Server_Worker \\/ CanStartSession"),
+                "ctor-bearing action should not use sticky session \\/ CanStart;\n$spawnDef",
+            )
+            val cfgText = cfg.readText()
+            assertTrue(
+                cfgText.contains("INVARIANT SessionIntegrity"),
+                "expected SessionIntegrity in cfg;\n$cfgText",
+            )
+            tla.copyTo(File(work, "SessionSpawnRebind.tla"), overwrite = true)
+            cfg.copyTo(File(work, "SessionSpawnRebind.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcInvariantViolation(work, "SessionSpawnRebind", "SessionIntegrity")
+        } finally {
+            work.deleteRecursively()
+            File("SessionSpawnRebind.tla").delete()
+            File("SessionSpawnRebind.cfg").delete()
+        }
+    }
+
     private fun assumeTlcPresent() {
         if (!TLC_JAR.isFile) {
             fail("TLC jar not found at ${TLC_JAR.path}")
@@ -575,5 +662,45 @@ class SpecTlaTlcSmokeTest {
         assertTrue(started, "TLC did not parse module $module.\n$text")
         assertTrue(!parseFail, "TLC reported parse/config errors.\n$text")
         // Timeout after a healthy start is OK; deadlock / completed search also OK.
+    }
+
+    /**
+     * Runs TLC to completion and expects an invariant violation for [invariantName].
+     */
+    private fun assertTlcInvariantViolation(workDir: File, module: String, invariantName: String) {
+        val pb = ProcessBuilder(
+            "java", "-XX:+UseParallelGC",
+            "-cp", TLC_JAR.absolutePath,
+            "tlc2.TLC",
+            "-config", "$module.cfg",
+            "$module.tla",
+        ).directory(workDir).redirectErrorStream(true)
+        val proc = pb.start()
+        val output = StringBuilder()
+        val reader = Thread {
+            proc.inputStream.bufferedReader().useLines { lines ->
+                lines.forEach { line ->
+                    synchronized(output) { output.appendLine(line) }
+                }
+            }
+        }
+        reader.start()
+        val finished = proc.waitFor(TLC_VIOLATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        if (!finished) {
+            proc.destroyForcibly()
+            reader.join(2000)
+            fail("TLC timed out waiting for invariant violation of $invariantName.\n${synchronized(output) { output.toString() }}")
+        }
+        reader.join(2000)
+        val text = synchronized(output) { output.toString() }
+        val exit = proc.exitValue()
+        assertNotEquals(0, exit, "expected TLC non-zero exit on invariant violation.\n$text")
+        assertTrue(
+            text.contains("Invariant $invariantName is violated", ignoreCase = false) ||
+                (text.contains("Invariant", ignoreCase = true) &&
+                    text.contains(invariantName) &&
+                    text.contains("violated", ignoreCase = true)),
+            "expected TLC to report violation of $invariantName.\n$text",
+        )
     }
 }

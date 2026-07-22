@@ -1,0 +1,37 @@
+proc Server {
+    var ready : Boolean
+
+    constructor initially(args : List<String>) {
+        transit: ready := true
+    }
+
+    session transition spawnWorker(id : Int) {
+        guard: ready
+    }
+
+    session transition ping() {
+        guard: ready
+    }
+}
+
+proc Worker {
+    var id : Int
+
+    constructor initially(args : List<String>) {
+        transit: id := 0
+    }
+
+    session constructor spawnWorker(id : Int) {
+        transit: id := id
+    }
+
+    session transition ping() {
+        guard: id >= 0
+    }
+}
+
+invariant G := all i : Int, Worker[i].id >= 0
+
+spec SessionSpawnRebind := <true> Server || Worker[i : Int] <G>
+
+compile SessionSpawnRebind
