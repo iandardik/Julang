@@ -14,10 +14,14 @@ alwaysApply: false
 - Session constructor exclusivity: while affinity to a peer of that child class is live, a second session-ctor spawn throws `JulayException` (no implicit guards; action stays user-enabled). After peer exit closes sessions and scrub clears affinity, a later spawn may establish again.
 - Session key: `(peerProcId, sessionActionName)` → dedicated `SyncChannel` (sync size 2).
 - Peer exit closes shared dedicated channels; surviving Select exits on close, scrubs affinity, and may re-handshake on the global channel. Proc exits only when no actions are enabled.
+- Mid-life session teardown via effect builtins (transitions only): `exitSession()` closes dedicated channels with the target peer and clears affinity (both procs keep running); `killSessionPeer()` does the same then silently cancels the peer proc’s job (no user-visible exception). Target: sync peer for `exitSession`; for `killSessionPeer`, prefer a non-sync affinity peer when present (e.g. Timer killing TimerHelper while cancel syncs with the client).
 - Untagged default = ordinary non-sticky rendezvous; `service` = shared multiplexed API.
 
 ## TLA+ encoding
 
 - Two-sided session specs emit `session_*`, `CanStartSession_*`, `EndSession_*`, plus `sessionException` (init FALSE) and `SessionIntegrity == ~sessionException` (always checked in the `.cfg`).
+- Every SpecLeaf also has `*_killed` (init FALSE). Actions are gated with `~killed`. `*_dead` includes `killed`.
 - Transition-only session actions: sticky `(session \/ CanStart)` under `\* Session connection semantics`.
 - Session ctor-bearing (hybrid) actions: under the same comment, `IF CanStart THEN` session assign + spawn updates `ELSE sessionException' = TRUE` (no spawn) — mirrors runtime `JulayException` on rebind.
+- `exitSession()` effect on an action: clear `session_*` to FALSE (no `*_dead` required; `constructed`/`killed` unchanged).
+- `killSessionPeer()` effect: clear `session_*` and set peer `*_killed' = TRUE` (sticky; peer cannot take further steps or respawn). Natural `EndSession_*` remains for enablement death.

@@ -1,0 +1,47 @@
+import julay.proclib.Timer
+import julay.proclib.Println
+
+/*
+ * Start a long timer, cancel it, then start a short one that should fire.
+ */
+proc Driver {
+    var step : String
+
+    constructor initially(args : List<String>) {
+        transit: step := "create"
+    }
+
+    session transition createTimer() {
+        guard: step = "create"
+        transit: step := "startLong"
+    }
+
+    session transition startTimer(time : Int) {
+        guard:
+            (step = "startLong" & time = 10) | (step = "startShort" & time = 1)
+        transit:
+            step := when (step) {
+                "startLong" -> "cancel"
+                else -> "wait"
+            }
+    }
+
+    session transition cancelTimer() {
+        guard: step = "cancel"
+        transit: step := "startShort"
+    }
+
+    session transition timeout() {
+        guard: step = "wait"
+        transit: step := "print"
+    }
+
+    transition println(msg : String) {
+        guard: step = "print" & msg = "restarted"
+        transit: step := "idle"
+    }
+}
+
+proc TimerCancelRestart := Driver || Timer || Println
+
+compile TimerCancelRestart

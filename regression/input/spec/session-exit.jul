@@ -1,0 +1,45 @@
+/*
+ * exitSession clears affinity while both peers stay alive and can re-handshake.
+ */
+proc Alice {
+    var phase : String
+
+    constructor initially(args : List<String>) {
+        transit: phase := "meet"
+    }
+
+    session transition meet() {
+        guard: phase = "meet"
+        transit: phase := "exit"
+        effect: exitSession()
+    }
+
+    session transition meetAgain() {
+        guard: phase = "exit"
+        transit: phase := "done"
+    }
+}
+
+proc Bob {
+    var phase : String
+
+    constructor initially(args : List<String>) {
+        transit: phase := "meet"
+    }
+
+    session transition meet() {
+        guard: phase = "meet"
+        transit: phase := "again"
+    }
+
+    session transition meetAgain() {
+        guard: phase = "again"
+        transit: phase := "done"
+    }
+}
+
+invariant Inv := true
+
+spec SessionExit := <true> Alice || Bob <Inv>
+
+compile SessionExit

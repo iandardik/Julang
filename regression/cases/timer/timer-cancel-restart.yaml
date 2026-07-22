@@ -1,0 +1,8 @@
+source: regression/input/timer/timer-cancel-restart.jul
+programs:
+  - name: TimerCancelRestart
+    run:
+      background: true
+      durationMs: 8000
+      expectStdoutContains:
+        - "restarted"

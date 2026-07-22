@@ -107,6 +107,59 @@ class SessionAffinityTest {
     }
 
     @Test
+    fun exitSessionWithClearsAffinityWithoutKillingPeer() = runBlocking {
+        val followOn = SymbolicAction("followOn", listOf(Variable("x", stringType)), isSession = true)
+        val ctorAct = SymbolicAction("makeChild", listOf(), isSession = true)
+        val parentInfo = TransitionSystemStaticInfo(
+            "ParentTS$",
+            setOf(followOn),
+            mapOf(ctorAct to { _, _ -> EmptyTS() }),
+        )
+        val childInfo = TransitionSystemStaticInfo(
+            "ChildTS$",
+            setOf(followOn),
+            emptyMap(),
+        )
+        val program = Program(setOf(parentInfo, childInfo))
+        val parent = Proc(EmptyTS(), parentInfo, program.staticChannelTable, program)
+        val child = Proc(EmptyTS(), childInfo, program.staticChannelTable, program)
+        parent.establishSessionWithSpawnedChild(child, ctorAct)
+        assertEquals(listOf(child.procId), parent.affinityPeerIds())
+        parent.exitSessionWith(child.procId)
+        assertTrue(parent.affinityPeerIds().isEmpty())
+        // Child still registered / not silently killed — can establish again after scrub.
+        parent.establishSessionWithSpawnedChild(child, ctorAct)
+        assertEquals(listOf(child.procId), parent.affinityPeerIds())
+    }
+
+    @Test
+    fun killSessionPeerAllowsSessionCtorRebind() = runBlocking {
+        val followOn = SymbolicAction("followOn", listOf(Variable("x", stringType)), isSession = true)
+        val ctorAct = SymbolicAction("makeChild", listOf(), isSession = true)
+        val parentInfo = TransitionSystemStaticInfo(
+            "ParentTS$",
+            setOf(followOn),
+            mapOf(ctorAct to { _, _ -> EmptyTS() }),
+        )
+        val childInfo = TransitionSystemStaticInfo(
+            "ChildTS$",
+            setOf(followOn),
+            emptyMap(),
+        )
+        val program = Program(setOf(parentInfo, childInfo))
+        val parent = Proc(EmptyTS(), parentInfo, program.staticChannelTable, program)
+        val child1 = Proc(EmptyTS(), childInfo, program.staticChannelTable, program)
+        val child2 = Proc(EmptyTS(), childInfo, program.staticChannelTable, program)
+        parent.establishSessionWithSpawnedChild(child1, ctorAct)
+        parent.exitSessionWith(child1.procId)
+        child1.requestSilentKill()
+        // Child1 never entered run(); simulate peer exit cleanup by running empty TS.
+        child1.run()
+        parent.establishSessionWithSpawnedChild(child2, ctorAct)
+        assertEquals(listOf(child2.procId), parent.affinityPeerIds())
+    }
+
+    @Test
     fun sessionActionsAreMarkedOnHttpLibrary() {
         assertTrue(JulHttpServer.receiveRequestAct.isSession)
         assertTrue(JulHttpServer.sendResponseAct.isSession)

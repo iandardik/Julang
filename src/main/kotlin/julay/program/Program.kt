@@ -11,11 +11,13 @@ import julay.program.action.SyncPayload
 import julay.program.type.listType
 import julay.program.type.stringType
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
 import java.util.Optional
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -53,6 +55,9 @@ class Program {
      * Session actions in the program alphabet, keyed by name (for session install during sync).
      */
     private val sessionActionsByName: Map<String, SymbolicAction>
+
+    /** Live procs by id — lifecycle registry for killSessionPeer (not data IPC). */
+    private val liveProcs = ConcurrentHashMap<Long, Proc>()
 
     constructor(componentInfo: Set<TransitionSystemStaticInfo>, cliArgs: List<String> = emptyList()) {
         this.componentInfo = componentInfo
@@ -95,6 +100,16 @@ class Program {
 
     fun allocateProcId(): Long = nextProcId.getAndIncrement()
 
+    fun registerProc(proc: Proc) {
+        liveProcs[proc.procId] = proc
+    }
+
+    fun unregisterProc(procId: Long) {
+        liveProcs.remove(procId)
+    }
+
+    fun lookupProc(procId: Long): Proc? = liveProcs[procId]
+
     fun sessionActions(): Collection<SymbolicAction> = sessionActionsByName.values
 
     fun sessionAction(name: String): SymbolicAction? = sessionActionsByName[name]
@@ -104,9 +119,12 @@ class Program {
         makeSyncChannel(act, syncSize = 2, installSession = false)
 
     fun spawnProc(ts: TransitionSystem, tsInfo: TransitionSystemStaticInfo) {
-        godScope.launch {
-            Proc(ts, tsInfo, staticChannelTable, this@Program).run()
+        val proc = Proc(ts, tsInfo, staticChannelTable, this@Program)
+        val job = godScope.launch(start = CoroutineStart.LAZY) {
+            proc.run()
         }
+        proc.bindRunJob(job)
+        job.start()
     }
 
     /**
@@ -132,9 +150,11 @@ class Program {
                 // Throws JulayException on live rebind before the child is launched.
                 parent.establishSessionWithSpawnedChild(child, act.symAction)
             }
-            godScope.launch {
+            val job = godScope.launch(start = CoroutineStart.LAZY) {
                 child.run()
             }
+            child.bindRunJob(job)
+            job.start()
         }
     }
 

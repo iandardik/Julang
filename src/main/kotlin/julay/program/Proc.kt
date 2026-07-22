@@ -10,6 +10,9 @@ import julay.program.action.SymbolicAction
 import julay.program.action.SyncPayload
 import julay.program.action.TSAction
 import java.util.*
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 
 /**
  * Process wrapper around a [TransitionSystem]. Owns process-local session affinity and dedicated
@@ -23,12 +26,13 @@ import java.util.*
  * - The surviving peer lazily removes closed session entries and the corresponding affinity in
  *   [scrubClosedSessionsAndAffinity] at the start of its next transition step, then rebuilds
  *   Select so session actions fall back to the global first-contact channel.
+ * - [exitSessionWith] / [requestSilentKill] end a session mid-life without waiting for natural death.
  */
 class Proc(
     private val transitionSystem: TransitionSystem,
     private val tsInfo: TransitionSystemStaticInfo,
     private val staticChannelTable: Map<SymbolicAction, ProgramAction>,
-    private val program: Program,
+    val program: Program,
     /** When non-null, [TransitionSystem.finishConstruction] runs once before the select loop. */
     private val constructorAct: ConcreteAction? = null,
 ) {
@@ -41,29 +45,64 @@ class Proc(
     /** (peerProcId, actionName) → dedicated session SyncChannel. */
     private val sessionChannelTable = mutableMapOf<Pair<Long, String>, SyncChannel<SyncPayload, Constraint>>()
 
+    private val silentlyKilled = AtomicBoolean(false)
+    @Volatile
+    private var runJob: Job? = null
+
+    fun bindRunJob(job: Job) {
+        runJob = job
+    }
+
+    fun affinityPeerIds(): List<Long> = affinity.values.toList()
+
+    /**
+     * Close dedicated sessions with [peerProcId] and clear affinity to that peer.
+     * Does not kill either proc.
+     */
+    suspend fun exitSessionWith(peerProcId: Long) {
+        val toClose = sessionChannelTable.entries
+            .filter { it.key.first == peerProcId }
+            .map { it.key to it.value }
+        toClose.forEach { (key, _) -> sessionChannelTable.remove(key) }
+        affinity.entries.removeAll { (_, id) -> id == peerProcId }
+        toClose.forEach { (_, channel) -> channel.close() }
+    }
+
+    /** Mark this proc for silent death and cancel its run [Job] if bound. */
+    fun requestSilentKill() {
+        silentlyKilled.set(true)
+        runJob?.cancel()
+    }
+
     suspend fun run() {
+        program.registerProc(this)
         try {
-            constructorAct?.let { transitionSystem.finishConstruction(it) }
-            while (true) {
-                val cont = withEphemeralContextSuspend { ctx ->
-                    runOneStep(ctx)
+            try {
+                constructorAct?.let { act ->
+                    ProcEffectContext.withProc(this) {
+                        transitionSystem.finishConstruction(act)
+                    }
                 }
-                // The Proc exits when no actions are enabled.
-                if (!cont) return
+                while (true) {
+                    if (silentlyKilled.get()) return
+                    val cont = withEphemeralContextSuspend { ctx ->
+                        runOneStep(ctx)
+                    }
+                    // The Proc exits when no actions are enabled.
+                    if (!cont) return
+                }
+            } catch (e: CancellationException) {
+                if (silentlyKilled.get()) {
+                    return
+                }
+                throw e
             }
         } finally {
             clearAffinityAndCloseSessions()
+            program.unregisterProc(procId)
         }
     }
 
-    /**
-     * Called by [Program.spawn] when this proc's session constructor action spawned [child].
-     * Establishes mutual affinity and installs sessions for other shared session actions.
-     *
-     * Throws [JulayException] if this proc already has live affinity to another peer of
-     * [child]'s class (session-ctor rebind). After that peer exits and sessions are scrubbed,
-     * a later spawn may establish again.
-     */
     /**
      * Called by [Program.spawn] when this proc's session constructor action spawned [child].
      * Establishes mutual affinity and installs sessions for other shared session actions.
@@ -175,11 +214,14 @@ class Proc(
         val payload = nextPayload.get()
         applySessionPayload(payload)
         val act = payload.action
-        transitionSystem.transit(act)
+        val syncPeerId = payload.syncPeers.firstOrNull { it.procId != procId }?.procId
+        ProcEffectContext.withProc(this, syncPeerId) {
+            transitionSystem.transit(act)
+        }
         if (program.isConstructorAction(act.symAction)) {
             program.spawn(act, parent = this)
         }
-        return true
+        return !silentlyKilled.get()
     }
 
     /**

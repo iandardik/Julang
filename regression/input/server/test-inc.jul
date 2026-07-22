@@ -1,5 +1,4 @@
 import julay.proclib.Println
-import julay.proclib.Timer
 import julay.proclib.HttpServer
 import julay.proclib.ExitSystem
 
@@ -31,12 +30,6 @@ proc PeriodicPrint {
             step := "A"
     }
 
-    constructor timeout() {
-        transit:
-            localCounter := -1
-            step := "A"
-    }
-
     transition getCounter(counterVal : Int) {
         guard:
             step = "A"
@@ -50,9 +43,10 @@ proc PeriodicPrint {
         transit: step := "C"
     }
 
-    transition timer(time : Int) {
-        guard:   step = "C" & time = 5 // seconds
-        transit: step := "D"
+    internal transition wait() {
+        guard:   step = "C"
+        transit: step := "A"
+        effect:  delaySeconds(5)
     }
 }
 
@@ -116,7 +110,7 @@ proc IncReqHandler {
     }
 }
 
-proc Printer := PeriodicPrint || Println || Timer
+proc Printer := PeriodicPrint || Println
 proc ServerLogic := ServerStarter || IncReqHandler || HttpServer || ExitSystem
 proc CounterServerTest := Counter || Printer || ServerLogic
 

@@ -1,0 +1,224 @@
+import julay.proclib.Println
+
+/*
+ * Two independent timer stacks (cannot share one createTimer ctor across two clients).
+ * ClientA lets TimerA fire; ClientB cancels TimerB mid-delay via killSessionPeer.
+ */
+
+proc TimerA {
+    const LARGE_WRAP_AROUND : Int
+    var currentId : Int
+    var timing : Boolean
+    var start : Boolean
+    var timeDuration : Int
+    var ringTimeout : Boolean
+
+    session constructor createTimerA() {
+        transit:
+            LARGE_WRAP_AROUND := 999999
+            currentId := 0
+            timing := false
+            start := false
+            timeDuration := 0
+            ringTimeout := false
+    }
+
+    session transition startTimerA(time : Int) {
+        guard: ~timing
+        transit:
+            start := true
+            timeDuration := time
+    }
+
+    session transition timeoutA() {
+        guard: ringTimeout
+        transit:
+            timing := false
+            start := false
+            timeDuration := 0
+            ringTimeout := false
+    }
+
+    session transition cancelTimerA() {
+        guard: timing
+        transit:
+            currentId := (currentId + 1) % LARGE_WRAP_AROUND
+            timing := false
+            start := false
+            timeDuration := 0
+            ringTimeout := false
+        effect: killSessionPeer()
+    }
+
+    session transition helperStartA(id : Int, time : Int) {
+        guard: & ~timing & start & id = currentId & time = timeDuration
+        transit:
+            timing := true
+            start := false
+    }
+
+    session transition helperEndA(id : Int) {
+        guard: timing
+        transit: ringTimeout := (id = currentId)
+    }
+}
+
+proc HelperA {
+    var timerId : Int
+    var done : Boolean
+
+    session constructor helperStartA(id : Int, time : Int) {
+        transit:
+            timerId := id
+            done := false
+        effect: delaySeconds(time)
+    }
+
+    session transition helperEndA(id : Int) {
+        guard: & ~done & id = timerId
+        transit: done := true
+    }
+}
+
+proc TimerB {
+    const LARGE_WRAP_AROUND : Int
+    var currentId : Int
+    var timing : Boolean
+    var start : Boolean
+    var timeDuration : Int
+    var ringTimeout : Boolean
+
+    session constructor createTimerB() {
+        transit:
+            LARGE_WRAP_AROUND := 999999
+            currentId := 0
+            timing := false
+            start := false
+            timeDuration := 0
+            ringTimeout := false
+    }
+
+    session transition startTimerB(time : Int) {
+        guard: ~timing
+        transit:
+            start := true
+            timeDuration := time
+    }
+
+    session transition timeoutB() {
+        guard: ringTimeout
+        transit:
+            timing := false
+            start := false
+            timeDuration := 0
+            ringTimeout := false
+    }
+
+    session transition cancelTimerB() {
+        guard: timing
+        transit:
+            currentId := (currentId + 1) % LARGE_WRAP_AROUND
+            timing := false
+            start := false
+            timeDuration := 0
+            ringTimeout := false
+        effect: killSessionPeer()
+    }
+
+    session transition helperStartB(id : Int, time : Int) {
+        guard: & ~timing & start & id = currentId & time = timeDuration
+        transit:
+            timing := true
+            start := false
+    }
+
+    session transition helperEndB(id : Int) {
+        guard: timing
+        transit: ringTimeout := (id = currentId)
+    }
+}
+
+proc HelperB {
+    var timerId : Int
+    var done : Boolean
+
+    session constructor helperStartB(id : Int, time : Int) {
+        transit:
+            timerId := id
+            done := false
+        effect: delaySeconds(time)
+    }
+
+    session transition helperEndB(id : Int) {
+        guard: & ~done & id = timerId
+        transit: done := true
+    }
+}
+
+proc ClientA {
+    var step : String
+
+    constructor initially(args : List<String>) {
+        transit: step := "create"
+    }
+
+    session transition createTimerA() {
+        guard: step = "create"
+        transit: step := "start"
+    }
+
+    session transition startTimerA(time : Int) {
+        guard: step = "start" & time = 1
+        transit: step := "wait"
+    }
+
+    session transition timeoutA() {
+        guard: step = "wait"
+        transit: step := "done"
+    }
+
+    session transition cancelTimerA() {
+        guard: false
+    }
+
+    transition println(msg : String) {
+        guard: step = "done" & msg = "A-timeout"
+        transit: step := "idle"
+    }
+}
+
+proc ClientB {
+    var step : String
+
+    constructor initially(args : List<String>) {
+        transit: step := "create"
+    }
+
+    session transition createTimerB() {
+        guard: step = "create"
+        transit: step := "start"
+    }
+
+    session transition startTimerB(time : Int) {
+        guard: step = "start" & time = 5
+        transit: step := "cancel"
+    }
+
+    session transition cancelTimerB() {
+        guard: step = "cancel"
+        transit: step := "done"
+    }
+
+    session transition timeoutB() {
+        guard: false
+    }
+
+    transition println(msg : String) {
+        guard: step = "done" & msg = "B-cancelled"
+        transit: step := "idle"
+    }
+}
+
+proc TwoTimers := ClientA || ClientB || TimerA || HelperA || TimerB || HelperB || Println
+
+compile TwoTimers

@@ -1,0 +1,45 @@
+/*
+ * killSessionPeer clears the session and marks the peer killed (sticky).
+ */
+proc Keeper {
+    var phase : String
+
+    constructor initially(args : List<String>) {
+        transit: phase := "meet"
+    }
+
+    session transition meet() {
+        guard: phase = "meet"
+        transit: phase := "kill"
+    }
+
+    session transition killPeer() {
+        guard: phase = "kill"
+        transit: phase := "done"
+        effect: killSessionPeer()
+    }
+}
+
+proc Victim {
+    var phase : String
+
+    constructor initially(args : List<String>) {
+        transit: phase := "meet"
+    }
+
+    session transition meet() {
+        guard: phase = "meet"
+        transit: phase := "idle"
+    }
+
+    session transition killPeer() {
+        guard: phase = "idle"
+        transit: phase := "shouldNotMatter"
+    }
+}
+
+invariant Inv := true
+
+spec SessionKill := <true> Keeper || Victim <Inv>
+
+compile SessionKill

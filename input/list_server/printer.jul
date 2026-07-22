@@ -1,5 +1,4 @@
 import julay.proclib.Println
-import julay.proclib.Timer
 
 /* prints the current value of the counter every 5 seconds
 */
@@ -8,12 +7,6 @@ proc PeriodicPrint {
     var step : String
 
     constructor initially(args : List<String>) {
-        transit:
-            list := []
-            step := "A"
-    }
-
-    constructor timeout() {
         transit:
             list := []
             step := "A"
@@ -32,10 +25,11 @@ proc PeriodicPrint {
         transit: step := "C"
     }
 
-    transition timer(time : Int) {
-        guard:   step = "C" & time = 5 // seconds
-        transit: step := "D"
+    internal transition wait() {
+        guard:   step = "C"
+        transit: step := "A"
+        effect:  delaySeconds(5)
     }
 }
 
-proc Printer := PeriodicPrint || Println || Timer
+proc Printer := PeriodicPrint || Println

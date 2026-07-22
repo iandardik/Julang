@@ -396,9 +396,16 @@ class SpecTlaTlcSmokeTest {
                 "expected Alice_dead and Bob_dead;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains(
-                    "\\* True exactly when all of Alice's actions are no longer enabled, in which case Alice dies.",
-                ),
+                tlaText.contains("Alice_killed") && tlaText.contains("Bob_killed"),
+                "expected Alice_killed and Bob_killed;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("Alice_dead") &&
+                    (tlaText.contains("Alice_killed") || tlaText.contains("\\/ Alice_killed")),
+                "expected Alice_dead to reference killed;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("\\* True when Alice was explicitly killed or all of its actions are disabled."),
                 "expected Alice_dead comment;\n$tlaText",
             )
             assertTrue(
@@ -613,6 +620,75 @@ class SpecTlaTlcSmokeTest {
             work.deleteRecursively()
             File("SessionSpawnRebind.tla").delete()
             File("SessionSpawnRebind.cfg").delete()
+        }
+    }
+
+    @Test
+    fun sessionExitEffectClearsSessionInTla() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-session-exit").toFile()
+        try {
+            val source = File("regression/input/spec/session-exit.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("SessionExit.tla")
+            val cfg = File("SessionExit.cfg")
+            assertTrue(tla.exists(), "expected SessionExit.tla")
+            assertTrue(cfg.exists(), "expected SessionExit.cfg")
+            val tlaText = tla.readText()
+            assertTrue(tlaText.contains("Alice_killed") && tlaText.contains("Bob_killed"))
+            val meetDef = tlaText.substringAfter("meet ==").substringBefore("\n\n")
+            assertTrue(
+                meetDef.contains("session_Alice_Bob' = FALSE"),
+                "expected exitSession to clear session;\n$meetDef",
+            )
+            assertFalse(
+                meetDef.contains("Bob_killed' = TRUE") || meetDef.contains("Alice_killed' = TRUE"),
+                "exitSession must not set killed;\n$meetDef",
+            )
+            tla.copyTo(File(work, "SessionExit.tla"), overwrite = true)
+            cfg.copyTo(File(work, "SessionExit.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "SessionExit")
+        } finally {
+            work.deleteRecursively()
+            File("SessionExit.tla").delete()
+            File("SessionExit.cfg").delete()
+        }
+    }
+
+    @Test
+    fun sessionKillEffectSetsPeerKilledInTla() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-session-kill").toFile()
+        try {
+            val source = File("regression/input/spec/session-kill.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("SessionKill.tla")
+            val cfg = File("SessionKill.cfg")
+            assertTrue(tla.exists(), "expected SessionKill.tla")
+            assertTrue(cfg.exists(), "expected SessionKill.cfg")
+            val tlaText = tla.readText()
+            val killDef = tlaText.substringAfter("killPeer ==").substringBefore("\n\n")
+            assertTrue(
+                killDef.contains("session_Keeper_Victim' = FALSE"),
+                "expected kill to clear session;\n$killDef",
+            )
+            assertTrue(
+                killDef.contains("Victim_killed' = TRUE"),
+                "expected killSessionPeer to set Victim_killed;\n$killDef",
+            )
+            tla.copyTo(File(work, "SessionKill.tla"), overwrite = true)
+            cfg.copyTo(File(work, "SessionKill.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "SessionKill")
+        } finally {
+            work.deleteRecursively()
+            File("SessionKill.tla").delete()
+            File("SessionKill.cfg").delete()
         }
     }
 

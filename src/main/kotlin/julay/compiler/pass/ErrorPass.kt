@@ -443,7 +443,18 @@ private fun ConstructorNode.errorPassConstructor(procs: Set<String>, librariesIn
             ),
         )
     }
-    return children.flatMap { it.errorPass(procs, librariesInUse) } + assignmentErrors + initiallySignatureErrors
+    val transitionOnlyEffectErrors = body().flatMap { it.effects() }.flatMap { stmt ->
+        val name = stmt.callName()
+        assertOrCompileError(
+            name !in EffectBuiltinRegistry.transitionOnlyEffects,
+            OneLocCompileError(
+                stmt.programLocation(),
+                "Effect \"$name\" can only be used in a transition, not a constructor",
+            ),
+        )
+    }
+    return children.flatMap { it.errorPass(procs, librariesInUse) } + assignmentErrors +
+        initiallySignatureErrors + transitionOnlyEffectErrors
 }
 
 private fun TransitionNode.errorPassTransition(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
@@ -455,5 +466,16 @@ private fun TransitionNode.errorPassTransition(procs: Set<String>, librariesInUs
         ),
     )
     val assignmentErrors = actionBodyAssignmentErrors(body())
-    return children.flatMap { it.errorPass(procs, librariesInUse) } + initiallyActionErrors + assignmentErrors
+    val sessionEffectNames = body().flatMap { it.effects() }.map { it.callName() }.filter {
+        it in EffectBuiltinRegistry.transitionOnlyEffects
+    }
+    val bothSessionEffectsError = assertOrCompileError(
+        !(sessionEffectNames.contains("exitSession") && sessionEffectNames.contains("killSessionPeer")),
+        OneLocCompileError(
+            programLocation(),
+            "Expected at most one of exitSession() or killSessionPeer() in the same transition",
+        ),
+    )
+    return children.flatMap { it.errorPass(procs, librariesInUse) } + initiallyActionErrors +
+        assignmentErrors + bothSessionEffectsError
 }

@@ -1,13 +1,94 @@
-proc Timer {
-    var done : Boolean
+/*
+ * Cancellable timer: public API on TimerController; delay runs on TimerHelper so
+ * cancelTimer can killSessionPeer() without blocking the controller.
+ */
+proc TimerController {
+    const LARGE_WRAP_AROUND : Int
+    var currentId : Int
+    var timing : Boolean
+    var start : Boolean
+    var timeDuration : Int
+    var ringTimeout : Boolean
 
-    constructor timer(time : Int) {
-        transit: done := false
-        effect:  delaySeconds(time)
+    session constructor createTimer() {
+        transit:
+            LARGE_WRAP_AROUND := 999999
+            currentId := 0
+            timing := false
+            start := false
+            timeDuration := 0
+            ringTimeout := false
     }
 
-    transition timeout() {
-        guard:   ~done
-        transit: done := true
+    session transition startTimer(time : Int) {
+        guard:
+            ~timing
+        transit:
+            start := true
+            timeDuration := time
+    }
+
+    session transition timeout() {
+        guard:
+            ringTimeout
+        transit:
+            timing := false
+            start := false
+            timeDuration := 0
+            ringTimeout := false
+    }
+
+    session transition cancelTimer() {
+        guard:
+            timing
+        transit:
+            currentId := (currentId + 1) % LARGE_WRAP_AROUND
+            timing := false
+            start := false
+            timeDuration := 0
+            ringTimeout := false
+        effect:
+            killSessionPeer()
+    }
+
+    session transition timerHelperStart(id : Int, time : Int) {
+        guard:
+            & ~timing
+            & start
+            & id = currentId
+            & time = timeDuration
+        transit:
+            timing := true
+            start := false
+    }
+
+    session transition timerHelperEnd(id : Int) {
+        guard:
+            timing
+        transit:
+            ringTimeout := (id = currentId)
     }
 }
+
+proc TimerHelper {
+    var timerId : Int
+    var done : Boolean
+
+    session constructor timerHelperStart(id : Int, time : Int) {
+        transit:
+            timerId := id
+            done := false
+        effect:
+            delaySeconds(time)
+    }
+
+    session transition timerHelperEnd(id : Int) {
+        guard:
+            & ~done
+            & id = timerId
+        transit:
+            done := true
+    }
+}
+
+proc Timer := TimerController || TimerHelper

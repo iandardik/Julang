@@ -43,12 +43,33 @@ object EffectBuiltinRegistry {
         kotlinCodegen = { args -> "delay(${args[0]}.seconds)" },
     )
 
+    private val exitSessionBuiltin = EffectBuiltin(
+        name = "exitSession",
+        paramTypes = emptyList(),
+        returnType = null,
+        kotlinCodegen = { _ -> "julay.program.ProcEffectContext.exitSession()" },
+    )
+
+    private val killSessionPeerBuiltin = EffectBuiltin(
+        name = "killSessionPeer",
+        paramTypes = emptyList(),
+        returnType = null,
+        kotlinCodegen = { _ -> "julay.program.ProcEffectContext.killSessionPeer()" },
+    )
 
     private val builtins = mapOf(
         printlnBuiltin.name to printlnBuiltin,
         exitProcessBuiltin.name to exitProcessBuiltin,
         readlnBuiltin.name to readlnBuiltin,
         delaySecondsBuiltin.name to delaySecondsBuiltin,
+        exitSessionBuiltin.name to exitSessionBuiltin,
+        killSessionPeerBuiltin.name to killSessionPeerBuiltin,
+    )
+
+    /** Effects that may only appear on transitions (not constructors). */
+    val transitionOnlyEffects: Set<String> = setOf(
+        exitSessionBuiltin.name,
+        killSessionPeerBuiltin.name,
     )
 
     fun lookup(name: String): EffectBuiltin? = builtins[name]

@@ -1,0 +1,38 @@
+import julay.proclib.Timer
+import julay.proclib.Println
+
+proc Driver {
+    var step : String
+
+    constructor initially(args : List<String>) {
+        transit: step := "create"
+    }
+
+    session transition createTimer() {
+        guard: step = "create"
+        transit: step := "start"
+    }
+
+    session transition startTimer(time : Int) {
+        guard: step = "start" & time = 1
+        transit: step := "wait"
+    }
+
+    session transition timeout() {
+        guard: step = "wait"
+        transit: step := "print"
+    }
+
+    session transition cancelTimer() {
+        guard: false
+    }
+
+    transition println(msg : String) {
+        guard: step = "print" & msg = "ok"
+        transit: step := "idle"
+    }
+}
+
+proc TimerSmoke := Driver || Timer || Println
+
+compile TimerSmoke

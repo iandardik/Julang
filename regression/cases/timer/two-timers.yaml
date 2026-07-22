@@ -1,0 +1,9 @@
+source: regression/input/timer/two-timers.jul
+programs:
+  - name: TwoTimers
+    run:
+      background: true
+      durationMs: 8000
+      expectStdoutContains:
+        - "A-timeout"
+        - "B-cancelled"
