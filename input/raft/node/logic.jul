@@ -21,18 +21,21 @@ import node.leader_heartbeat.LeaderHeartbeatTarget
  */
 
 proc RpcTransport := HttpServer || HttpClient || RpcServer || RpcClient
-proc RequestVoteRPCs := IncomingRequestVoteRPC || OutgoingRequestVoteRPC
-proc AppendEntriesRPCs := IncomingAppendEntriesRPC || OutgoingAppendEntriesRPC
-proc ClientRPCs := IncomingClientRPC
+proc RequestVoteRPCs := IncomingRequestVoteRPC || OutgoingRequestVoteRPC || RpcTransport
+proc AppendEntriesRPCs := IncomingAppendEntriesRPC || OutgoingAppendEntriesRPC || RpcTransport
+proc ClientRPCs := IncomingClientRPC || RpcTransport
 
 proc RPCs := RpcTransport || RequestVoteRPCs || AppendEntriesRPCs || ClientRPCs
 
 /* Lifecycle invariant: at most one of {FollowerHeartbeat, CandidateElection, LeaderHeartbeat}
  * is actively driving elections or leadership handoff. RaftCore is the sole constructor of
  * these three drivers. */
-proc StateCommunication := FollowerHeartbeat || CandidateElection
+proc ClusterCommunicationProtocol := FollowerHeartbeat || CandidateElection
     || (LeaderHeartbeat || LeaderHeartbeatTarget)
+proc ClusterCommunication := ClusterCommunicationProtocol || RequestVoteRPCs || AppendEntriesRPCs
 
-proc Raft := RaftCore || ClusterInfo || StateCommunication || RPCs
+proc ClientCommunication := ClientRPCs
 
-proc NodeLogic := Raft || Initializers
+proc Raft := RaftCore || ClusterCommunication || ClientCommunication
+
+proc NodeLogic := Raft || Initializers || ClusterInfo

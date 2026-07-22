@@ -19,7 +19,7 @@ proc CandidateElection {
     var voteTerm : Int
     var voteGranted : Boolean
 
-    constructor startCandidateElection(
+    constructor startElection(
         me : Node,
         n : Int,
         term : Int,

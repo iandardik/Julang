@@ -111,7 +111,7 @@ proc RaftCore {
      * a leader within the allotted timeout, and is now notifying /this/
      * process.
      */
-    transition startElection(
+    transition becomeCandidate(
         epoch : Int,
         term : Int,
         candId : Int,
@@ -141,7 +141,7 @@ proc RaftCore {
      * process now starts a CandidateElection process in attempt to become
      * the new leader.
      */
-    transition startCandidateElection(
+    transition startElection(
         me : Node,
         n : Int,
         term : Int,

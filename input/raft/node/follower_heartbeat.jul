@@ -58,7 +58,7 @@ proc FollowerHeartbeat {
     }
 
     /* Pairwise with RaftCore: become candidate; this instance ends (Core spawns CandidateElection). */
-    transition startElection(
+    transition becomeCandidate(
         epoch : Int,
         term : Int,
         candId : Int,
