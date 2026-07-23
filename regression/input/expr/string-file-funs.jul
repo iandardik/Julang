@@ -4,6 +4,8 @@ import julay.funlib.trim
 import julay.funlib.portFromUrl
 import julay.funlib.startsWith
 import julay.funlib.length
+import julay.funlib.exitProcess
+import julay.funlib.println
 
 proc StringFileDemo {
     var phase : Int

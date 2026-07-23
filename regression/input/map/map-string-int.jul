@@ -1,6 +1,7 @@
 import julay.proclib.Println
 import julay.proclib.ExitSystem
 import julay.funlib.length
+import julay.funlib.println
 
 proc MapStringIntDemo {
     var mp : Map<String, Int>

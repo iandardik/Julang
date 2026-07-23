@@ -1,6 +1,7 @@
 import julay.proclib.Println
 import julay.proclib.HttpServer
 import julay.proclib.ExitSystem
+import julay.funlib.delaySeconds
 
 proc Counter {
     var counter : Int

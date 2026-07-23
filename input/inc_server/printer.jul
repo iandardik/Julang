@@ -1,3 +1,6 @@
+import julay.funlib.delaySeconds
+import julay.funlib.println
+
 /* prints the current value of the counter every 5 seconds
 */
 proc PeriodicPrint {

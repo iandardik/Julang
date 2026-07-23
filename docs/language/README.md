@@ -51,8 +51,8 @@ How-to: [Getting started](../getting-started.md). Specs: [Specifications](specif
 3. [Types and expressions](types-and-expressions.md)
 4. [Modules](modules.md) — `import` and search path
 5. [Sessions](sessions.md) — sticky pairwise protocols
-6. [Before/after and IO](effects.md) — `before` / `after` calls and IO in transit (incl. TLA+ havoc)
-7. [Standard library](standard-library.md)
+6. [Side effects](effects.md) — library procs vs funlib functions; `before` / `after` / transit IO
+7. [Standard library](standard-library.md) — proclib and funlib (including which have effects)
 8. [Specifications](specifications.md) — invariants, specs, TLC
 9. [Reference](reference.md) — keywords, operators, builtins
 

@@ -1,0 +1,7 @@
+source: regression/input/imports/effect-import.jul
+programs:
+  - name: P
+    run:
+      timeoutMs: 60000
+      expectStdoutContains:
+        - "ok"

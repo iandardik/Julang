@@ -1,0 +1,4 @@
+source: regression/input/imports/effect-bare-no-import.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Unknown function \"println\""

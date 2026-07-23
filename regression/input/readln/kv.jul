@@ -1,3 +1,7 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+import julay.funlib.readln
+
 proc FrontEnd {
     var state : String
     var keyReq : String

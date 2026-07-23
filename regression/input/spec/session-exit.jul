@@ -1,3 +1,5 @@
+import julay.funlib.exitSession
+
 /*
  * exitSession clears affinity while both peers stay alive and can re-handshake.
  */

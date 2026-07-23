@@ -2,6 +2,8 @@ import julay.proclib.HttpClient
 import julay.funlib.length
 import julay.funlib.split
 import julay.funlib.startsWith
+import julay.funlib.exitProcess
+import julay.funlib.println
 
 /*
  * Raft client — CLI:

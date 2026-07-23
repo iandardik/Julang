@@ -1,16 +1,14 @@
-import julay.funlib.println
-
 proc S {
-    var x : String
+    var x : Int
 
     constructor initially(args : List<String>) {
         transit:
-            x := ""
+            x := 0
     }
 
     internal transition go() {
-        transit:
-            x := println("hi")
+        after:
+            println("hi")
     }
 }
 

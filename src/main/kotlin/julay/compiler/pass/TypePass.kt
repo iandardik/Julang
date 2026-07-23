@@ -288,22 +288,22 @@ private fun CallStmtNode.typePassCallStmt(
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
 ): List<CompileError> {
-    EffectBuiltinRegistry.lookup(callName())?.let { builtin ->
-        resolveEffect(builtin)
+    funBuiltinEnv[callName()]?.let { builtin ->
+        resolveBuiltin(builtin)
         if (callTypeArgs().isNotEmpty()) {
             return listOf(
                 OneLocCompileError(
                     programLocation(),
-                    "Expected effect \"${callName()}\" not to take type arguments",
+                    "Expected function \"${callName()}\" not to take type arguments",
                 ),
             )
         }
-        if (callName() in EffectBuiltinRegistry.sessionPeerClassNameEffects) {
-            if (builtin.paramTypes.size != callArgs().size) {
+        if (builtin.sessionPeerClassArg) {
+            if (builtin.arity != callArgs().size) {
                 return listOf(
                     OneLocCompileError(
                         programLocation(),
-                        "Expected effect \"${callName()}\" to take ${builtin.paramTypes.size} argument(s) but got ${callArgs().size}",
+                        "Expected function \"${callName()}\" to take ${builtin.arity} argument(s) but got ${callArgs().size}",
                     ),
                 )
             }
@@ -320,31 +320,18 @@ private fun CallStmtNode.typePassCallStmt(
         if (childrenErrors.isNotEmpty()) {
             return childrenErrors
         }
-        if (builtin.paramTypes.size != callArgs().size) {
-            return listOf(
-                OneLocCompileError(
-                    programLocation(),
-                    "Expected effect \"${callName()}\" to take ${builtin.paramTypes.size} argument(s) but got ${callArgs().size}",
-                ),
-            )
+        val argTypes = callArgs().map { it.getType() }
+        builtin.checkArgs(argTypes)?.let { msg ->
+            return listOf(OneLocCompileError(programLocation(), msg))
         }
-        return callArgs().zip(builtin.paramTypes).flatMap { (arg, expectedType) ->
-            assertOrCompileError(
-                arg.getType() == expectedType,
-                OneLocCompileError(
-                    arg.programLocation(),
-                    "Expected argument to \"${callName()}\" to have type $expectedType but got ${arg.getType()}",
-                ),
-            )
-        }
+        return emptyList()
     }
-    // Funlib or user fun: reuse FunCallExprNode typing, then copy resolution onto this stmt.
+    // User fun: reuse FunCallExprNode typing, then copy resolution onto this stmt.
     val asExpr = FunCallExprNode(callName(), callArgs(), programLocation(), typeArgs = callTypeArgs())
     val errors = asExpr.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     if (errors.isNotEmpty()) {
         return errors
     }
-    asExpr.resolvedEffectOrNull()?.let { resolveEffect(it) }
     asExpr.resolvedBuiltinOrNull()?.let { resolveBuiltin(it) }
     asExpr.resolvedFunOrNull()?.let { resolveFun(it) }
     return emptyList()
@@ -881,10 +868,6 @@ private fun FunCallExprNode.typePassFunCall(
     }
     funBuiltinEnv[callName()]?.let { builtin ->
         resolveBuiltin(builtin)
-        val argTypes = callArgs().map { it.getType() }
-        builtin.checkArgs(argTypes)?.let { msg ->
-            return listOf(OneLocCompileError(programLocation(), msg))
-        }
         if (callTypeArgs().isNotEmpty()) {
             return listOf(
                 OneLocCompileError(
@@ -893,54 +876,24 @@ private fun FunCallExprNode.typePassFunCall(
                 ),
             )
         }
-        resolveInstantiatedReturnType(builtin.returnType)
-        inferExprType(symbolEnv)
-        return emptyList()
-    }
-    EffectBuiltinRegistry.lookup(callName())?.let { effect ->
-        resolveEffect(effect)
-        if (callTypeArgs().isNotEmpty()) {
-            return listOf(
-                OneLocCompileError(
-                    programLocation(),
-                    "Expected effect \"${callName()}\" not to take type arguments",
-                ),
-            )
-        }
-        val returnType = effect.returnType
+        val returnType = builtin.returnType
             ?: return listOf(
                 OneLocCompileError(
                     programLocation(),
-                    "Effect \"${callName()}\" cannot be used in an expression because it returns no value",
+                    "Function \"${callName()}\" cannot be used in an expression because it returns no value",
                 ),
             )
-        if (callName() in EffectBuiltinRegistry.sessionPeerClassNameEffects) {
+        if (builtin.sessionPeerClassArg) {
             return listOf(
                 OneLocCompileError(
                     programLocation(),
-                    "Effect \"${callName()}\" cannot be used in an expression",
+                    "Function \"${callName()}\" cannot be used in an expression",
                 ),
             )
         }
-        if (effect.paramTypes.size != callArgs().size) {
-            return listOf(
-                OneLocCompileError(
-                    programLocation(),
-                    "Expected effect \"${callName()}\" to take ${effect.paramTypes.size} argument(s) but got ${callArgs().size}",
-                ),
-            )
-        }
-        val argTypeErrors = callArgs().zip(effect.paramTypes).flatMap { (arg, expectedType) ->
-            assertOrCompileError(
-                arg.getType() == expectedType,
-                OneLocCompileError(
-                    arg.programLocation(),
-                    "Expected argument to \"${callName()}\" to have type $expectedType but got ${arg.getType()}",
-                ),
-            )
-        }
-        if (argTypeErrors.isNotEmpty()) {
-            return argTypeErrors
+        val argTypes = callArgs().map { it.getType() }
+        builtin.checkArgs(argTypes)?.let { msg ->
+            return listOf(OneLocCompileError(programLocation(), msg))
         }
         resolveInstantiatedReturnType(returnType)
         inferExprType(symbolEnv)

@@ -1,4 +1,5 @@
 import julay.proclib.Println
+import julay.funlib.delaySeconds
 
 /* prints the current value of the counter every 5 seconds
 */

@@ -10,7 +10,7 @@ import julay.funlib.parseInt
 
 - User modules: `import path.to.Name` resolves to a `.jul` file on the search path (e.g. `printer.Printer` → `printer.jul` exporting `Printer`).
 - Stdlib procs: `julay.proclib.*`
-- Expression builtins: `julay.funlib.*`
+- Funlib (pure helpers and effectful functions): `julay.funlib.*` — see [Standard library](standard-library.md)
 
 ## Search order
 
@@ -28,9 +28,8 @@ Details: [Getting started](../getting-started.md), [Tooling](../tooling.md).
 | Kind | Example | Notes |
 |------|---------|--------|
 | Your modules | `server.ServerLogic` | Next to the entry file or on `-L` / `JULAY_PATH` |
-| Julay proclib | `julay.proclib.Println`, `Timer`, … | Shipped as `.jul` inside the compiler jar |
-| Kotlin proclib | `julay.proclib.HttpServer`, `HttpClient` | Native libraries + request/response `obj` types |
-| Funlib | `julay.funlib.length` | Expression builtins |
+| Proclib | `julay.proclib.Println`, `Timer`, `HttpServer`, … | Process APIs; some are Kotlin-native under the hood |
+| Funlib | `julay.funlib.length`, `julay.funlib.println`, … | Functions; effectful ones require import like the rest |
 
 ## See also
 

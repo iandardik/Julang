@@ -45,15 +45,15 @@ compile Name1, Name2, ...
 
 `compile` targets: **proc** → JAR; **spec** → `.tla` / `.cfg`.
 
-## Effect builtins
+## Funlib (`import julay.funlib.<name>`)
 
-`println` · `readln` · `exitProcess` · `delaySeconds` · `exitSession(Peer)` · `killSessionPeer(Peer)`  
+Pure / expression helpers: `length` · `parseInt` · `startsWith` · `split` · `trim` · `portFromUrl`  
+(`split` / `trim` / `portFromUrl`: not for guards)
+
+Effectful: `println` · `readln` · `readFile` · `exitProcess` · `delaySeconds` · `exitSession(Peer)` · `killSessionPeer(Peer)`  
 (`exitSession` / `killSessionPeer`: transitions only; Peer is a leaf proc-class name; no-op if affinity absent)
 
-## Funlib builtins
-
-`length` · `parseInt` · `startsWith` · `readFile` · `split` · `trim` · `portFromUrl`  
-(Last four: not for guards)
+Full tables: [Standard library](standard-library.md). Calling conventions: [Side effects](effects.md).
 
 ## Common mistakes
 

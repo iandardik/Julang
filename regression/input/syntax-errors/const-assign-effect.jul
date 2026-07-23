@@ -1,3 +1,5 @@
+import julay.funlib.readln
+
 proc S {
     const msg : String
 

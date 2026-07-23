@@ -1,3 +1,5 @@
+import julay.funlib.exitProcess
+
 obj Point {
     x : Int
     y : Int

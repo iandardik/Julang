@@ -296,7 +296,6 @@ class FunCallExprNode(
 ) : ExprNode(args) {
     private var resolvedFun: FunNode? = resolved
     private var resolvedBuiltin: FunBuiltin? = null
-    private var resolvedEffect: EffectBuiltin? = null
     private var specializedBody: ExprNode? = null
 
     override fun programLocation() = loc
@@ -305,21 +304,13 @@ class FunCallExprNode(
     fun callTypeArgs(): List<TypeExpr> = typeArgs
     internal fun resolvedFunOrNull(): FunNode? = resolvedFun
     internal fun resolvedBuiltinOrNull(): FunBuiltin? = resolvedBuiltin
-    internal fun resolvedEffectOrNull(): EffectBuiltin? = resolvedEffect
     internal fun resolveFun(funNode: FunNode) {
         resolvedFun = funNode
         resolvedBuiltin = null
-        resolvedEffect = null
     }
     internal fun resolveBuiltin(builtin: FunBuiltin) {
         resolvedBuiltin = builtin
         resolvedFun = null
-        resolvedEffect = null
-    }
-    internal fun resolveEffect(effect: EffectBuiltin) {
-        resolvedEffect = effect
-        resolvedFun = null
-        resolvedBuiltin = null
     }
     internal fun resolveInstantiatedReturnType(type: Type) {
         instantiatedReturnType = type
@@ -344,10 +335,10 @@ class FunCallExprNode(
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
-        resolvedEffect?.let {
-            throw RuntimeException("Effect \"${it.name}\" cannot be used in guards")
-        }
         resolvedBuiltin?.let { builtin ->
+            if (builtin.returnType == null) {
+                throw RuntimeException("Function \"${builtin.name}\" cannot be used in guards")
+            }
             val argStrs = args.map { it.toZ3GuardString(symbolTypes, argSymbols, forceString) }
             if (builtin.name == "length" && args.isNotEmpty()) {
                 return when (val argType = args[0].getType()) {
@@ -369,10 +360,6 @@ class FunCallExprNode(
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
-        resolvedEffect?.let { effect ->
-            val argStrs = args.map { it.toTransitString(symbolTypes, argSymbols) }
-            return effect.kotlinCodegen(argStrs)
-        }
         resolvedBuiltin?.let { builtin ->
             val argStrs = args.map { it.toTransitString(symbolTypes, argSymbols) }
             return builtin.kotlinCodegen(argStrs)
@@ -382,11 +369,10 @@ class FunCallExprNode(
 
     override fun inferType(symbolEnv: Map<String, Type>): Type {
         instantiatedReturnType?.let { return it }
-        resolvedEffect?.let { effect ->
-            return effect.returnType
-                ?: throw RuntimeException("Effect \"${effect.name}\" returns no value at $loc")
+        resolvedBuiltin?.let { builtin ->
+            return builtin.returnType
+                ?: throw RuntimeException("Function \"${builtin.name}\" returns no value at $loc")
         }
-        resolvedBuiltin?.let { return it.returnType }
         val funNode = resolvedFun
             ?: throw RuntimeException("Function call \"$name\" not resolved at $loc")
         return funNode.returnType
@@ -619,7 +605,6 @@ class CallStmtNode(
     private val loc : ProgramLoc,
     private val typeArgs: List<TypeExpr> = emptyList(),
 ) : ASTNode(args) {
-    private var resolvedEffect: EffectBuiltin? = null
     private var resolvedBuiltin: FunBuiltin? = null
     private var resolvedFun: FunNode? = null
 
@@ -627,22 +612,14 @@ class CallStmtNode(
     fun callName() = name
     fun callArgs() = args
     fun callTypeArgs(): List<TypeExpr> = typeArgs
-    internal fun resolvedEffectOrNull() = resolvedEffect
     internal fun resolvedBuiltinOrNull() = resolvedBuiltin
     internal fun resolvedFunOrNull() = resolvedFun
-    internal fun resolveEffect(effect: EffectBuiltin) {
-        resolvedEffect = effect
-        resolvedBuiltin = null
-        resolvedFun = null
-    }
     internal fun resolveBuiltin(builtin: FunBuiltin) {
         resolvedBuiltin = builtin
-        resolvedEffect = null
         resolvedFun = null
     }
     internal fun resolveFun(funNode: FunNode) {
         resolvedFun = funNode
-        resolvedEffect = null
         resolvedBuiltin = null
     }
     override fun toString(): String {

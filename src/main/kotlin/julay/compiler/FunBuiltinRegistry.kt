@@ -4,6 +4,7 @@ import julay.program.type.ListType
 import julay.program.type.MapType
 import julay.program.type.SetType
 import julay.program.type.StringType
+import julay.program.type.IntType
 import julay.program.type.Type
 import julay.program.type.boolType
 import julay.program.type.intType
@@ -13,16 +14,22 @@ import julay.program.library.JULAY_FUNLIB
 import julay.program.library.JULAY_MODULE
 
 /**
- * Kotlin-backed expression function (julay.funlib.*), analogous to effect builtins
- * but usable in guards/transit via [julay.compiler.ast.FunCallExprNode].
+ * Kotlin-backed function from julay.funlib.* (pure helpers and effectful builtins).
+ * [returnType] is null for void effects usable only as bare `before`/`after` statements.
  */
 data class FunBuiltin(
     val name: String,
     val arity: Int,
-    val returnType: Type,
+    val returnType: Type?,
     val checkArgs: (List<Type>) -> String?,
     val kotlinCodegen: (List<String>) -> String,
     val z3Codegen: (List<String>) -> String,
+    /** Session teardown: argument is a bare leaf proc-class name, not a typed value. */
+    val sessionPeerClassArg: Boolean = false,
+    /** May only appear on transitions (not constructors). */
+    val transitionOnly: Boolean = false,
+    /** Transit RHS involving this call is havoc'd in TLA+. */
+    val ioHavoc: Boolean = false,
 )
 
 object FunBuiltinRegistry {
@@ -40,8 +47,6 @@ object FunBuiltinRegistry {
         },
         kotlinCodegen = { args -> "${args[0]}.size" },
         z3Codegen = { args ->
-            val argType = args[0] // placeholder - resolved at call site via type on FunCallExprNode
-            // Actual Z3 codegen is overridden in FunCallExprNode using argument type
             "ctx.mkSeqLengthAny(${args[0]})"
         },
     )
@@ -76,6 +81,7 @@ object FunBuiltinRegistry {
         z3Codegen = { _ ->
             throw RuntimeException("Function \"readFile\" cannot be used in guards")
         },
+        ioHavoc = true,
     )
 
     private val splitBuiltin = FunBuiltin(
@@ -150,7 +156,89 @@ object FunBuiltinRegistry {
         },
     )
 
+    private val printlnBuiltin = FunBuiltin(
+        name = "println",
+        arity = 1,
+        returnType = null,
+        checkArgs = { argTypes ->
+            when {
+                argTypes.size != 1 -> "Expected function \"println\" to take 1 argument(s) but got ${argTypes.size}"
+                argTypes[0] !is StringType -> "Expected argument of \"println\" to have a String type but got ${argTypes[0]}"
+                else -> null
+            }
+        },
+        kotlinCodegen = { args -> "println(${args[0]})" },
+        z3Codegen = { _ -> throw RuntimeException("Function \"println\" cannot be used in guards") },
+    )
 
+    private val exitProcessBuiltin = FunBuiltin(
+        name = "exitProcess",
+        arity = 0,
+        returnType = null,
+        checkArgs = { argTypes ->
+            if (argTypes.isEmpty()) null
+            else "Expected function \"exitProcess\" to take 0 argument(s) but got ${argTypes.size}"
+        },
+        kotlinCodegen = { _ -> "exitProcess(0)" },
+        z3Codegen = { _ -> throw RuntimeException("Function \"exitProcess\" cannot be used in guards") },
+    )
+
+    private val readlnBuiltin = FunBuiltin(
+        name = "readln",
+        arity = 0,
+        returnType = stringType,
+        checkArgs = { argTypes ->
+            if (argTypes.isEmpty()) null
+            else "Expected function \"readln\" to take 0 argument(s) but got ${argTypes.size}"
+        },
+        kotlinCodegen = { _ -> "readln()" },
+        z3Codegen = { _ -> throw RuntimeException("Function \"readln\" cannot be used in guards") },
+        ioHavoc = true,
+    )
+
+    private val delaySecondsBuiltin = FunBuiltin(
+        name = "delaySeconds",
+        arity = 1,
+        returnType = null,
+        checkArgs = { argTypes ->
+            when {
+                argTypes.size != 1 -> "Expected function \"delaySeconds\" to take 1 argument(s) but got ${argTypes.size}"
+                argTypes[0] !is IntType ->
+                    "Expected argument of \"delaySeconds\" to have an Int type but got ${argTypes[0]}"
+                else -> null
+            }
+        },
+        kotlinCodegen = { args -> "delay(${args[0]}.seconds)" },
+        z3Codegen = { _ -> throw RuntimeException("Function \"delaySeconds\" cannot be used in guards") },
+    )
+
+    private val exitSessionBuiltin = FunBuiltin(
+        name = "exitSession",
+        arity = 1,
+        returnType = null,
+        checkArgs = { argTypes ->
+            if (argTypes.size == 1) null
+            else "Expected function \"exitSession\" to take 1 argument(s) but got ${argTypes.size}"
+        },
+        kotlinCodegen = { args -> "hostProc.exitSession(${args[0]})" },
+        z3Codegen = { _ -> throw RuntimeException("Function \"exitSession\" cannot be used in guards") },
+        sessionPeerClassArg = true,
+        transitionOnly = true,
+    )
+
+    private val killSessionPeerBuiltin = FunBuiltin(
+        name = "killSessionPeer",
+        arity = 1,
+        returnType = null,
+        checkArgs = { argTypes ->
+            if (argTypes.size == 1) null
+            else "Expected function \"killSessionPeer\" to take 1 argument(s) but got ${argTypes.size}"
+        },
+        kotlinCodegen = { args -> "hostProc.killSessionPeer(${args[0]})" },
+        z3Codegen = { _ -> throw RuntimeException("Function \"killSessionPeer\" cannot be used in guards") },
+        sessionPeerClassArg = true,
+        transitionOnly = true,
+    )
 
     private val builtins = mapOf(
         lengthBuiltin.name to lengthBuiltin,
@@ -160,9 +248,24 @@ object FunBuiltinRegistry {
         trimBuiltin.name to trimBuiltin,
         portFromUrlBuiltin.name to portFromUrlBuiltin,
         startsWithBuiltin.name to startsWithBuiltin,
+        printlnBuiltin.name to printlnBuiltin,
+        exitProcessBuiltin.name to exitProcessBuiltin,
+        readlnBuiltin.name to readlnBuiltin,
+        delaySecondsBuiltin.name to delaySecondsBuiltin,
+        exitSessionBuiltin.name to exitSessionBuiltin,
+        killSessionPeerBuiltin.name to killSessionPeerBuiltin,
     )
 
     val all: Collection<FunBuiltin> get() = builtins.values
+
+    val transitionOnlyEffects: Set<String> =
+        builtins.values.filter { it.transitionOnly }.map { it.name }.toSet()
+
+    val sessionPeerClassNameEffects: Set<String> =
+        builtins.values.filter { it.sessionPeerClassArg }.map { it.name }.toSet()
+
+    val ioHavocEffects: Set<String> =
+        builtins.values.filter { it.ioHavoc }.map { it.name }.toSet()
 
     fun lookup(name: String): FunBuiltin? = builtins[name]
 
@@ -174,4 +277,10 @@ object FunBuiltinRegistry {
         if (parts[0] != JULAY_MODULE || parts[1] != JULAY_FUNLIB) return null
         return lookup(parts[2])
     }
+
+    fun kotlinCodegenImports(): Set<String> = setOf(
+        "kotlin.system.exitProcess",
+        "kotlin.time.Duration.Companion.seconds",
+        "kotlinx.coroutines.delay",
+    )
 }

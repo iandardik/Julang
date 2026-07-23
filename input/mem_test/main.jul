@@ -1,3 +1,6 @@
+import julay.funlib.delaySeconds
+import julay.funlib.println
+
 proc PeriodicPrint {
     var step : String
 

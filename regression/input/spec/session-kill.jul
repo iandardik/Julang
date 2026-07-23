@@ -1,3 +1,5 @@
+import julay.funlib.killSessionPeer
+
 /*
  * killSessionPeer clears the session and marks the peer killed (sticky).
  */

@@ -1,6 +1,7 @@
 package julay.compiler.pass
 
 import julay.compiler.CompilationUnit
+import julay.compiler.FunBuiltinRegistry
 import julay.compiler.TypeExpr
 import julay.compiler.ast.*
 import julay.compiler.decl.*
@@ -1434,8 +1435,7 @@ internal fun typeToTlaDomain(type: Type): String = when (type) {
 internal fun exprContainsIoHavoc(expr: ExprNode): Boolean =
     when (expr) {
         is FunCallExprNode ->
-            expr.callName() in julay.compiler.EffectBuiltinRegistry.ioHavocEffects ||
-                expr.callName() == "readFile" ||
+            expr.callName() in FunBuiltinRegistry.ioHavocEffects ||
                 expr.callArgs().any { exprContainsIoHavoc(it) }
         else -> expr.children.filterIsInstance<ExprNode>().any { exprContainsIoHavoc(it) }
     }
