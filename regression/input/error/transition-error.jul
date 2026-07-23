@@ -13,7 +13,7 @@ proc S {
             x = 0 -> "tick boom"
         transit:
             x := x + 1
-        effect:
+        after:
             exitProcess()
     }
 }

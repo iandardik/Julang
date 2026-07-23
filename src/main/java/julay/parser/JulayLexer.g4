@@ -58,7 +58,8 @@ SESSION : 'session' ;
 GUARD : 'guard' ;
 TRANSIT : 'transit' ;
 ERROR : 'error' ;
-EFFECT : 'effect' ;
+BEFORE : 'before' ;
+AFTER : 'after' ;
 FUN : 'fun' ;
 
 REAL : [-]?[0-9]+ '.' [0-9]+ ;

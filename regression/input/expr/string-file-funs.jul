@@ -65,7 +65,7 @@ proc StringFileDemo {
     internal transition done() {
         guard:
             phase = 5 & line = "hello-config"
-        effect:
+        after:
             println(line + ":" + port)
             exitProcess()
     }

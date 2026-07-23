@@ -358,35 +358,35 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitVar_transit(JulayParser.Var_transitContext ctx);
 	/**
-	 * Enter a parse tree produced by {@link JulayParser#effect}.
+	 * Enter a parse tree produced by {@link JulayParser#before}.
 	 * @param ctx the parse tree
 	 */
-	void enterEffect(JulayParser.EffectContext ctx);
+	void enterBefore(JulayParser.BeforeContext ctx);
 	/**
-	 * Exit a parse tree produced by {@link JulayParser#effect}.
+	 * Exit a parse tree produced by {@link JulayParser#before}.
 	 * @param ctx the parse tree
 	 */
-	void exitEffect(JulayParser.EffectContext ctx);
+	void exitBefore(JulayParser.BeforeContext ctx);
 	/**
-	 * Enter a parse tree produced by {@link JulayParser#effect_stmt}.
+	 * Enter a parse tree produced by {@link JulayParser#after}.
 	 * @param ctx the parse tree
 	 */
-	void enterEffect_stmt(JulayParser.Effect_stmtContext ctx);
+	void enterAfter(JulayParser.AfterContext ctx);
 	/**
-	 * Exit a parse tree produced by {@link JulayParser#effect_stmt}.
+	 * Exit a parse tree produced by {@link JulayParser#after}.
 	 * @param ctx the parse tree
 	 */
-	void exitEffect_stmt(JulayParser.Effect_stmtContext ctx);
+	void exitAfter(JulayParser.AfterContext ctx);
 	/**
-	 * Enter a parse tree produced by {@link JulayParser#effect_call}.
+	 * Enter a parse tree produced by {@link JulayParser#call_stmt}.
 	 * @param ctx the parse tree
 	 */
-	void enterEffect_call(JulayParser.Effect_callContext ctx);
+	void enterCall_stmt(JulayParser.Call_stmtContext ctx);
 	/**
-	 * Exit a parse tree produced by {@link JulayParser#effect_call}.
+	 * Exit a parse tree produced by {@link JulayParser#call_stmt}.
 	 * @param ctx the parse tree
 	 */
-	void exitEffect_call(JulayParser.Effect_callContext ctx);
+	void exitCall_stmt(JulayParser.Call_stmtContext ctx);
 	/**
 	 * Enter a parse tree produced by {@link JulayParser#expr}.
 	 * @param ctx the parse tree

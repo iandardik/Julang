@@ -28,7 +28,7 @@ proc PeriodicPrint {
     internal transition wait() {
         guard:   step = "C"
         transit: step := "A"
-        effect:  delaySeconds(5)
+        after:  delaySeconds(5)
     }
 }
 

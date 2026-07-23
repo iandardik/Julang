@@ -45,8 +45,8 @@ abstract class ActionBodyNode(
     open fun guards() : List<ExprNode> = body.flatMap { it.guards() }
     open fun transits() : List<TransitUpdate> = body.flatMap { it.transits() }
     open fun transitVars() : List<Pair<String, ProgramLoc>> = body.flatMap { it.transitVars() }
-    open fun effects() : List<EffectStmtNode> = body.flatMap { it.effects() }
-    open fun effectAssignVars() : List<Pair<String, ProgramLoc>> = body.flatMap { it.effectAssignVars() }
+    open fun befores() : List<CallStmtNode> = body.flatMap { it.befores() }
+    open fun afters() : List<CallStmtNode> = body.flatMap { it.afters() }
     open fun errors() : List<ErrorArmNode> = body.flatMap { it.errors() }
 }
 
@@ -296,6 +296,7 @@ class FunCallExprNode(
 ) : ExprNode(args) {
     private var resolvedFun: FunNode? = resolved
     private var resolvedBuiltin: FunBuiltin? = null
+    private var resolvedEffect: EffectBuiltin? = null
     private var specializedBody: ExprNode? = null
 
     override fun programLocation() = loc
@@ -304,13 +305,21 @@ class FunCallExprNode(
     fun callTypeArgs(): List<TypeExpr> = typeArgs
     internal fun resolvedFunOrNull(): FunNode? = resolvedFun
     internal fun resolvedBuiltinOrNull(): FunBuiltin? = resolvedBuiltin
+    internal fun resolvedEffectOrNull(): EffectBuiltin? = resolvedEffect
     internal fun resolveFun(funNode: FunNode) {
         resolvedFun = funNode
         resolvedBuiltin = null
+        resolvedEffect = null
     }
     internal fun resolveBuiltin(builtin: FunBuiltin) {
         resolvedBuiltin = builtin
         resolvedFun = null
+        resolvedEffect = null
+    }
+    internal fun resolveEffect(effect: EffectBuiltin) {
+        resolvedEffect = effect
+        resolvedFun = null
+        resolvedBuiltin = null
     }
     internal fun resolveInstantiatedReturnType(type: Type) {
         instantiatedReturnType = type
@@ -335,6 +344,9 @@ class FunCallExprNode(
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
+        resolvedEffect?.let {
+            throw RuntimeException("Effect \"${it.name}\" cannot be used in guards")
+        }
         resolvedBuiltin?.let { builtin ->
             val argStrs = args.map { it.toZ3GuardString(symbolTypes, argSymbols, forceString) }
             if (builtin.name == "length" && args.isNotEmpty()) {
@@ -357,6 +369,10 @@ class FunCallExprNode(
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        resolvedEffect?.let { effect ->
+            val argStrs = args.map { it.toTransitString(symbolTypes, argSymbols) }
+            return effect.kotlinCodegen(argStrs)
+        }
         resolvedBuiltin?.let { builtin ->
             val argStrs = args.map { it.toTransitString(symbolTypes, argSymbols) }
             return builtin.kotlinCodegen(argStrs)
@@ -366,6 +382,10 @@ class FunCallExprNode(
 
     override fun inferType(symbolEnv: Map<String, Type>): Type {
         instantiatedReturnType?.let { return it }
+        resolvedEffect?.let { effect ->
+            return effect.returnType
+                ?: throw RuntimeException("Effect \"${effect.name}\" returns no value at $loc")
+        }
         resolvedBuiltin?.let { return it.returnType }
         val funNode = resolvedFun
             ?: throw RuntimeException("Function call \"$name\" not resolved at $loc")
@@ -447,7 +467,8 @@ class ConstructorNode(
                 body.flatMap { it.transits() },
                 TSAction.SyncRole.Default,
                 loc,
-                body.flatMap { it.effects() },
+                body.flatMap { it.befores() },
+                body.flatMap { it.afters() },
                 body.flatMap { it.errors() },
             )
         )
@@ -489,7 +510,8 @@ class TransitionNode(
                 body.flatMap { it.transits() },
                 modifier,
                 loc,
-                body.flatMap { it.effects() },
+                body.flatMap { it.befores() },
+                body.flatMap { it.afters() },
                 body.flatMap { it.errors() },
             )
         )
@@ -591,22 +613,38 @@ class ErrorNode(
     }
 }
 
-sealed class EffectStmtNode(children : List<ASTNode>) : ASTNode(children) {
-    abstract fun callName(): String
-    abstract fun callArgs(): List<ExprNode>
-    open fun effectAssignVars(): List<Pair<String, ProgramLoc>> = emptyList()
-}
-
-class EffectCallNode(
+class CallStmtNode(
     private val name : String,
     private val args : List<ExprNode>,
     private val loc : ProgramLoc,
     private val typeArgs: List<TypeExpr> = emptyList(),
-) : EffectStmtNode(args) {
+) : ASTNode(args) {
+    private var resolvedEffect: EffectBuiltin? = null
+    private var resolvedBuiltin: FunBuiltin? = null
+    private var resolvedFun: FunNode? = null
+
     override fun programLocation() = loc
-    override fun callName() = name
-    override fun callArgs() = args
+    fun callName() = name
+    fun callArgs() = args
     fun callTypeArgs(): List<TypeExpr> = typeArgs
+    internal fun resolvedEffectOrNull() = resolvedEffect
+    internal fun resolvedBuiltinOrNull() = resolvedBuiltin
+    internal fun resolvedFunOrNull() = resolvedFun
+    internal fun resolveEffect(effect: EffectBuiltin) {
+        resolvedEffect = effect
+        resolvedBuiltin = null
+        resolvedFun = null
+    }
+    internal fun resolveBuiltin(builtin: FunBuiltin) {
+        resolvedBuiltin = builtin
+        resolvedEffect = null
+        resolvedFun = null
+    }
+    internal fun resolveFun(funNode: FunNode) {
+        resolvedFun = funNode
+        resolvedEffect = null
+        resolvedBuiltin = null
+    }
     override fun toString(): String {
         val typeStr = if (typeArgs.isEmpty()) "" else "<${typeArgs.joinToString(", ")}>"
         val argStr = args.joinToString(", ") { "$it" }
@@ -614,41 +652,25 @@ class EffectCallNode(
     }
 }
 
-class EffectAssignNode(
-    val varName : String,
-    val fieldPath : List<String> = emptyList(),
-    private val callName : String,
-    private val callArgs : List<ExprNode>,
-    private val loc : ProgramLoc,
-    private val typeArgs: List<TypeExpr> = emptyList(),
-) : EffectStmtNode(callArgs) {
-    override fun programLocation() = loc
-    override fun callName() = callName
-    override fun callArgs() = callArgs
-    fun callTypeArgs(): List<TypeExpr> = typeArgs
-
-    internal fun assignKey(): String =
-        if (fieldPath.isEmpty()) varName else "$varName.${fieldPath.joinToString(".")}"
-
-    override fun effectAssignVars() = listOf(Pair(assignKey(), programLocation()))
-
-    override fun toString(): String {
-        val typeStr = if (typeArgs.isEmpty()) "" else "<${typeArgs.joinToString(", ")}>"
-        val argStr = callArgs.joinToString(", ") { "$it" }
-        val callStr = if (callArgs.isEmpty()) "$callName$typeStr()" else "$callName$typeStr($argStr)"
-        return "${assignKey()} := $callStr"
-    }
-}
-
-class EffectNode(
-    private val stmts : List<EffectStmtNode>,
+class BeforeNode(
+    private val stmts : List<CallStmtNode>,
     private val loc : ProgramLoc
 ) : ActionBodyNode(emptyList(), listOf()) {
     override fun programLocation() = loc
-    override fun effects(): List<EffectStmtNode> = stmts
-    override fun effectAssignVars(): List<Pair<String, ProgramLoc>> = stmts.flatMap { it.effectAssignVars() }
+    override fun befores(): List<CallStmtNode> = stmts
     override fun toString(): String {
-        return "effect:\n${stmts.joinToString("\n") { "$it".prependIndent() }}"
+        return "before:\n${stmts.joinToString("\n") { "$it".prependIndent() }}"
+    }
+}
+
+class AfterNode(
+    private val stmts : List<CallStmtNode>,
+    private val loc : ProgramLoc
+) : ActionBodyNode(emptyList(), listOf()) {
+    override fun programLocation() = loc
+    override fun afters(): List<CallStmtNode> = stmts
+    override fun toString(): String {
+        return "after:\n${stmts.joinToString("\n") { "$it".prependIndent() }}"
     }
 }
 

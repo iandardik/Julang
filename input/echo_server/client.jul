@@ -36,7 +36,7 @@ proc ClientDispatcher {
     internal transition finish() {
         guard:
             numResps = targetNumReqs
-        effect:
+        after:
             exitProcess()
     }
 }

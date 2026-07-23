@@ -1,0 +1,31 @@
+proc S {
+    var x : Int
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            x := 0
+            done := false
+    }
+
+    internal transition go() {
+        guard: ~done
+        before:
+            println("before")
+        transit:
+            x := x + 1
+            done := true
+        after:
+            println("after")
+    }
+
+    internal transition exitSystem() {
+        guard: done
+        after:
+            exitProcess()
+    }
+}
+
+proc P := S
+
+compile P

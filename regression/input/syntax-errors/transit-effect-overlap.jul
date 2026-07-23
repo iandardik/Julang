@@ -7,10 +7,10 @@ proc S {
     }
 
     internal transition go() {
+        before:
+            msg := readln()
         transit:
             msg := "pending"
-        effect:
-            msg := readln()
     }
 }
 

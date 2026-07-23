@@ -17,14 +17,14 @@ proc S {
                 step = "B" -> "C"
                 else -> "oops!"
             }
-        effect:
+        after:
             println(step)
     }
 
     internal transition exitSystem() {
         guard:
             step = "C"
-        effect:
+        after:
             exitProcess()
     }
 }

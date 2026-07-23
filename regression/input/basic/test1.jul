@@ -21,13 +21,13 @@ proc S {
             print & (msg = x + "")
         transit:
             print := false
-        effect:
+        after:
             println(msg)
     }
 
     internal transition exitSystem() {
         guard: ~print & x > 10
-        effect:
+        after:
             exitProcess()
     }
 }

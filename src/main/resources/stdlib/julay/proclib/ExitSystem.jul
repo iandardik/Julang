@@ -2,7 +2,7 @@ proc ExitSystem {
     constructor initially(args : List<String>) {}
 
     service transition exitSystem() {
-        effect:
+        after:
             exitProcess()
     }
 }

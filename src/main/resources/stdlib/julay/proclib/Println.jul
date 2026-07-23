@@ -2,7 +2,7 @@ proc Println {
     constructor initially(args : List<String>) {}
 
     service transition println(msg : String) {
-        effect:
+        after:
             println(msg)
     }
 }

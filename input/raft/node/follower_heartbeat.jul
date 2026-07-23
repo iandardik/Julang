@@ -53,7 +53,7 @@ proc FollowerHeartbeat {
             step = "sleep"
         transit:
             step := "checkForHeartbeat"
-        effect:
+        after:
             delaySeconds(electTimeout)
     }
 

@@ -1,14 +1,14 @@
 proc S {
-    const msg : String
+    var x : String
 
     constructor initially(args : List<String>) {
         transit:
-            msg := ""
+            x := ""
     }
 
-    internal transition read() {
+    internal transition go() {
         transit:
-            msg := readln()
+            x := println("hi")
     }
 }
 

@@ -14,7 +14,7 @@ proc MapStringIntDemo {
             n := 0
             print := false
             gotCli := length(args) = 1
-        effect:
+        after:
             println(args[0])
     }
 

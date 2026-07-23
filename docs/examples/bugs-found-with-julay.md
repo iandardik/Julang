@@ -63,8 +63,8 @@ Cancel was already safe (`killSessionPeer` clears the helper session). The happy
 
 Eager teardown on the success path, with an explicit peer class name:
 
-- On `timerHelperEnd` (controller): `effect: exitSession(TimerHelper)`
-- On `cancelTimer`: `effect: killSessionPeer(TimerHelper)`
+- On `timerHelperEnd` (controller): `after: exitSession(TimerHelper)`
+- On `cancelTimer`: `after: killSessionPeer(TimerHelper)`
 
 Named peer arguments make teardown unambiguous when the controller also holds a session with a client.
 

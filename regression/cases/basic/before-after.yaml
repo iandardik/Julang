@@ -1,0 +1,8 @@
+source: regression/input/basic/before-after.jul
+programs:
+  - name: P
+    run:
+      timeoutMs: 60000
+      expectStdoutContains:
+        - "before"
+        - "after"

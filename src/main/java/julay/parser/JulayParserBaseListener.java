@@ -437,37 +437,37 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void enterEffect(JulayParser.EffectContext ctx) { }
+	@Override public void enterBefore(JulayParser.BeforeContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void exitEffect(JulayParser.EffectContext ctx) { }
+	@Override public void exitBefore(JulayParser.BeforeContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void enterEffect_stmt(JulayParser.Effect_stmtContext ctx) { }
+	@Override public void enterAfter(JulayParser.AfterContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void exitEffect_stmt(JulayParser.Effect_stmtContext ctx) { }
+	@Override public void exitAfter(JulayParser.AfterContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void enterEffect_call(JulayParser.Effect_callContext ctx) { }
+	@Override public void enterCall_stmt(JulayParser.Call_stmtContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void exitEffect_call(JulayParser.Effect_callContext ctx) { }
+	@Override public void exitCall_stmt(JulayParser.Call_stmtContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *

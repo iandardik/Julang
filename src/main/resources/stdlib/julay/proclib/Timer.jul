@@ -47,7 +47,7 @@ proc TimerController {
             start := false
             timeDuration := 0
             ringTimeout := false
-        effect:
+        after:
             killSessionPeer(TimerHelper)
     }
 
@@ -67,7 +67,7 @@ proc TimerController {
             timing
         transit:
             ringTimeout := (id = currentId)
-        effect:
+        after:
             exitSession(TimerHelper)
     }
 }
@@ -80,7 +80,7 @@ proc TimerHelper {
         transit:
             timerId := id
             done := false
-        effect:
+        after:
             delaySeconds(time)
     }
 

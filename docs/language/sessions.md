@@ -8,7 +8,8 @@ A **`session`** action marks an **exclusive pairwise** protocol between two proc
 
 1. **First contact** — peers synchronize on a session action; affinity is established.
 2. **Sticky follow-ons** — later offers of session actions with that peer stay paired.
-3. **End of session** — when a peer exits, or via effects:
+3. **End of session** — when a peer exits, or via `before:` / `after:` calls:
+
    - `exitSession(PeerClass)` — clear affinity with the named leaf proc class; **both** procs keep running (no-op if that affinity is absent)
    - `killSessionPeer(PeerClass)` — clear affinity with the named peer class and **cancel** that peer proc (no-op if absent)
 

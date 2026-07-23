@@ -10,7 +10,7 @@ proc S {
 
     internal transition done() {
         guard: true
-        effect: exitProcess()
+        after: exitProcess()
     }
 }
 

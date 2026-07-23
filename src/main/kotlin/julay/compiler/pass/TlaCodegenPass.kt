@@ -95,6 +95,7 @@ fun tlaCodegenPass(
         }
     }
     collectActionArgDomainModels(leaves, pclassNodes, cfgOverrides)
+    collectIoHavocDomainModels(leaves, pclassNodes, cfgOverrides)
     // String is not provided by EXTENDS; declare it CONSTANT when used as a domain.
     if ("String" in cfgOverrides) {
         constants += "String"
@@ -436,7 +437,7 @@ private fun collectKillTargets(
 }
 
 private fun sessionEffectNames(offer: TlaActionOffer): List<String> =
-    offer.decl.effects.map { it.callName() }.filter {
+    (offer.decl.befores + offer.decl.afters).map { it.callName() }.filter {
         it == "exitSession" || it == "killSessionPeer"
     }
 
@@ -492,7 +493,7 @@ private fun resolveSessionEffectPair(
 
 /** Peer proc-class name from exitSession(Peer) / killSessionPeer(Peer). */
 private fun sessionEffectPeerClassName(offer: TlaActionOffer, effectName: String): String? {
-    val stmt = offer.decl.effects.firstOrNull { it.callName() == effectName } ?: return null
+    val stmt = (offer.decl.befores + offer.decl.afters).firstOrNull { it.callName() == effectName } ?: return null
     val arg = stmt.callArgs().singleOrNull() as? SymbolValueExprNode ?: return null
     return arg.symbol
 }
@@ -1067,15 +1068,24 @@ private fun emitConjoined(
                     val root = update.key.substringBefore('.')
                     val v = stateTlaName(offer.leaf.name, root, stateVarNames)
                     targetChanged += v
-                    val rhs = exprToTla(
-                        update.expr, leafCtx, argNames, self,
-                        bareStateVars = stateVarsByLeaf[offer.leaf.name].orEmpty(),
-                        stateVarNames = stateVarNames,
-                    )
-                    targetParts += if (self != null) {
-                        "/\\ $v' = [$v EXCEPT ![$self] = $rhs]"
+                    if (exprContainsIoHavoc(update.expr)) {
+                        val domain = typeToTlaDomain(update.expr.getType())
+                        targetParts += if (self != null) {
+                            "/\\ \\E __io \\in $domain: $v' = [$v EXCEPT ![$self] = __io]"
+                        } else {
+                            "/\\ $v' \\in $domain"
+                        }
                     } else {
-                        "/\\ $v' = $rhs"
+                        val rhs = exprToTla(
+                            update.expr, leafCtx, argNames, self,
+                            bareStateVars = stateVarsByLeaf[offer.leaf.name].orEmpty(),
+                            stateVarNames = stateVarNames,
+                        )
+                        targetParts += if (self != null) {
+                            "/\\ $v' = [$v EXCEPT ![$self] = $rhs]"
+                        } else {
+                            "/\\ $v' = $rhs"
+                        }
                     }
                 }
                 is TransitUpdate.MapPut -> {
@@ -1083,11 +1093,20 @@ private fun emitConjoined(
                     targetChanged += v
                     val bare = stateVarsByLeaf[offer.leaf.name].orEmpty()
                     val k = exprToTla(update.key, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames)
-                    val vv = exprToTla(update.value, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames)
-                    targetParts += if (self != null) {
-                        "/\\ $v' = [$v EXCEPT ![$self] = [@ EXCEPT ![$k] = $vv]]"
+                    if (exprContainsIoHavoc(update.value)) {
+                        val domain = typeToTlaDomain(update.value.getType())
+                        targetParts += if (self != null) {
+                            "/\\ \\E __io \\in $domain: $v' = [$v EXCEPT ![$self] = [@ EXCEPT ![$k] = __io]]"
+                        } else {
+                            "/\\ \\E __io \\in $domain: $v' = [$v EXCEPT ![$k] = __io]"
+                        }
                     } else {
-                        "/\\ $v' = [$v EXCEPT ![$k] = $vv]"
+                        val vv = exprToTla(update.value, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames)
+                        targetParts += if (self != null) {
+                            "/\\ $v' = [$v EXCEPT ![$self] = [@ EXCEPT ![$k] = $vv]]"
+                        } else {
+                            "/\\ $v' = [$v EXCEPT ![$k] = $vv]"
+                        }
                     }
                 }
             }
@@ -1411,6 +1430,16 @@ internal fun typeToTlaDomain(type: Type): String = when (type) {
     else -> "Int"
 }
 
+/** True if [expr] contains IO (`readln` / `readFile`) that should havoc a transit target in TLA+. */
+internal fun exprContainsIoHavoc(expr: ExprNode): Boolean =
+    when (expr) {
+        is FunCallExprNode ->
+            expr.callName() in julay.compiler.EffectBuiltinRegistry.ioHavocEffects ||
+                expr.callName() == "readFile" ||
+                expr.callArgs().any { exprContainsIoHavoc(it) }
+        else -> expr.children.filterIsInstance<ExprNode>().any { exprContainsIoHavoc(it) }
+    }
+
 /** Collect finite TLC model names (Int, String, …) needed by action argument domains. */
 internal fun collectDomainModelNames(type: Type, into: MutableSet<String>) {
     when (type) {
@@ -1438,6 +1467,35 @@ private fun collectActionArgDomainModels(
             .forEach { action ->
                 action.action.args.forEach { arg ->
                     collectDomainModelNames(arg.type, into)
+                }
+            }
+    }
+}
+
+private fun collectIoHavocDomainModels(
+    leaves: List<SpecLeaf>,
+    pclasses: Map<String, ProcClassNode>,
+    into: MutableSet<String>,
+) {
+    leaves.forEach { leaf ->
+        val pc = pclasses[leaf.name] ?: return@forEach
+        (pc.localDecls().flatMap { it.constructors() } + pc.localDecls().flatMap { it.transitions() })
+            .forEach { action ->
+                action.transits.forEach { update ->
+                    when (update) {
+                        is TransitUpdate.Assign -> if (exprContainsIoHavoc(update.expr)) {
+                            try {
+                                collectDomainModelNames(update.expr.getType(), into)
+                            } catch (_: RuntimeException) {
+                            }
+                        }
+                        is TransitUpdate.MapPut -> if (exprContainsIoHavoc(update.value)) {
+                            try {
+                                collectDomainModelNames(update.value.getType(), into)
+                            } catch (_: RuntimeException) {
+                            }
+                        }
+                    }
                 }
             }
     }

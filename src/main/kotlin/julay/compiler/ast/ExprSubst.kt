@@ -107,6 +107,7 @@ fun substituteExpr(expr: ExprNode, name: String, replacement: ExprNode): ExprNod
             typeArgs = expr.callTypeArgs(),
         ).also { copy ->
             expr.resolvedBuiltinOrNull()?.let { copy.resolveBuiltin(it) }
+            expr.resolvedEffectOrNull()?.let { copy.resolveEffect(it) }
             expr.specializedBodyOrNull()?.let { body ->
                 copy.resolveSpecializedBody(substituteExpr(body, name, replacement))
             }

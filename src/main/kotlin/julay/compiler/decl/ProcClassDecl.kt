@@ -1,7 +1,7 @@
 package julay.compiler.decl
 
 import julay.compiler.ProgramLoc
-import julay.compiler.ast.EffectStmtNode
+import julay.compiler.ast.CallStmtNode
 import julay.compiler.ast.ErrorArmNode
 import julay.compiler.ast.ExprNode
 import julay.program.*
@@ -21,7 +21,8 @@ data class ActionDecl(
     val transits: List<TransitUpdate>,
     val modifier: TSAction.SyncRole,
     val loc: ProgramLoc,
-    val effects: List<EffectStmtNode> = emptyList(),
+    val befores: List<CallStmtNode> = emptyList(),
+    val afters: List<CallStmtNode> = emptyList(),
     val errors: List<ErrorArmNode> = emptyList(),
 ) {
     val isSession: Boolean get() = action.isSession

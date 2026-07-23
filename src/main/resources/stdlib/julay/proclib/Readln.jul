@@ -12,7 +12,6 @@ proc Readln {
         guard: prompt
         transit:
             prompt := false
-        effect:
             readMsg := readln()
     }
 

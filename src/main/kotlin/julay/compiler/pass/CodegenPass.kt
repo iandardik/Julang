@@ -287,7 +287,8 @@ private fun Type.toZ3ExprTypeString(): String = when (this) {
 }
 
 private fun ProcClassDecl.usesEffects(): Boolean =
-    constructors.any { it.effects.isNotEmpty() } || transitions.any { it.effects.isNotEmpty() }
+    constructors.any { it.befores.isNotEmpty() || it.afters.isNotEmpty() } ||
+        transitions.any { it.befores.isNotEmpty() || it.afters.isNotEmpty() }
 
 private fun actionArgEnv(actionArgs: List<Variable>): Map<String, Type> =
     actionArgs.associate { it.name to it.type }
@@ -295,18 +296,39 @@ private fun actionArgEnv(actionArgs: List<Variable>): Map<String, Type> =
 private fun actionArgSymbols(actionArgs: List<Variable>): Set<String> =
     actionArgs.map { it.name }.toSet()
 
-private fun ActionDecl.kotlinEffectString(
+private fun ActionDecl.kotlinCallStmtsString(
+    stmts: List<CallStmtNode>,
     stateVarTypes: Map<String, Type>,
-    assignPrefix: String = "",
-): String {
-    if (effects.isEmpty()) {
-        return ""
+    argPrefix: String,
+): Pair<List<String>, List<String>> {
+    if (stmts.isEmpty()) {
+        return emptyList<String>() to emptyList()
     }
     val symbolTypes = stateVarTypes + actionArgEnv(action.args)
     val argSymbols = actionArgSymbols(action.args)
-    return effects.joinToString("\n") {
-        EffectBuiltinRegistry.effectStmtKotlinString(it, symbolTypes, argSymbols, assignPrefix)
+    val argSnapshots = mutableListOf<String>()
+    val lines = stmts.mapIndexed { i, stmt ->
+        val argTemps = stmt.callArgs().mapIndexed { j, arg ->
+            if (stmt.callName() in EffectBuiltinRegistry.sessionPeerClassNameEffects) {
+                val peerName = (arg as? SymbolValueExprNode)?.symbol
+                    ?: throw RuntimeException(
+                        "Expected \"${stmt.callName()}\" argument to be a leaf proc class name",
+                    )
+                "\"${peerName.escapeKotlinStringLiteral()}\""
+            } else {
+                val temp = "${argPrefix}_${i}_$j"
+                argSnapshots += "val $temp = ${arg.toTransitString(symbolTypes, argSymbols)}"
+                temp
+            }
+        }
+        EffectBuiltinRegistry.callStmtKotlinString(
+            stmt,
+            symbolTypes,
+            argSymbols,
+            argStrings = argTemps,
+        )
     }
+    return argSnapshots to lines
 }
 
 private fun ActionDecl.kotlinErrorString(
@@ -448,9 +470,10 @@ private fun ActionDecl.kotlinActionString(
 private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): String {
     val symbolTypes = stateVarTypes + actionArgEnv(action.args)
     val argSymbols = actionArgSymbols(action.args)
-    // Error checks run before transits and effects so they see pre-state variables
-    // and no effect happens upon an error.
+    // Error checks run before before/transit/after so they see pre-state variables
+    // and no side effects happen upon an error.
     val errorStr = kotlinErrorString(stateVarTypes)
+    val (beforeArgSnapshots, beforeLines) = kotlinCallStmtsString(befores, stateVarTypes, "__beforeArg")
     // Simultaneous assignment: evaluate every RHS against the pre-transit state, then
     // apply updates. Later lines must not observe earlier assignments in the same block
     // (e.g. `peersLeft := peersLeft - 1` then `step := if (peersLeft - 1 = 0) ...`).
@@ -483,41 +506,15 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
             }
         }
     }
-    // Snapshot all effect args from the pre-transit state before any effect runs.
-    // e.g. println(step) prints the pre-transit value. Effects themselves still run
-    // after transit so blocking effects like readln() see updated state.
-    // Args do not see earlier assignments in the same effect block, so:
-    //   effect:
-    //     a := readln()
-    //     println(a)
-    // evaluates a in the pre-state on the second line.
-    val effectArgSnapshots = mutableListOf<String>()
-    val effectLines = effects.mapIndexed { i, stmt ->
-        val argTemps = stmt.callArgs().mapIndexed { j, arg ->
-            if (stmt.callName() in EffectBuiltinRegistry.sessionPeerClassNameEffects) {
-                val peerName = (arg as? SymbolValueExprNode)?.symbol
-                    ?: throw RuntimeException(
-                        "Expected \"${stmt.callName()}\" argument to be a leaf proc class name",
-                    )
-                "\"${peerName.escapeKotlinStringLiteral()}\""
-            } else {
-                val temp = "__effectArg_${i}_$j"
-                effectArgSnapshots += "val $temp = ${arg.toTransitString(symbolTypes, argSymbols)}"
-                temp
-            }
-        }
-        EffectBuiltinRegistry.effectStmtKotlinString(
-            stmt,
-            symbolTypes,
-            argSymbols,
-            argStrings = argTemps,
-        )
-    }
+    // Snapshot all after args from the pre-transit state (same as historical effect args).
+    val (afterArgSnapshots, afterLines) = kotlinCallStmtsString(afters, stateVarTypes, "__afterArg")
     return listOfNotNull(errorStr.takeIf { it.isNotEmpty() })
-        .plus(effectArgSnapshots)
+        .plus(beforeArgSnapshots)
+        .plus(beforeLines)
+        .plus(afterArgSnapshots)
         .plus(transitRhsSnapshots)
         .plus(transitLines)
-        .plus(effectLines)
+        .plus(afterLines)
         .joinToString("\n")
 }
 

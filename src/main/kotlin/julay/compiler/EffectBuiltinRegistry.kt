@@ -1,8 +1,7 @@
 package julay.compiler
 
-import julay.compiler.ast.EffectAssignNode
-import julay.compiler.ast.EffectCallNode
-import julay.compiler.ast.EffectStmtNode
+import julay.compiler.ast.CallStmtNode
+import julay.compiler.ast.substituteExpr
 import julay.program.*
 import julay.program.type.*
 import julay.program.action.*
@@ -79,6 +78,9 @@ object EffectBuiltinRegistry {
      */
     val sessionPeerClassNameEffects: Set<String> = transitionOnlyEffects
 
+    /** IO builtins whose transit RHS is havoc'd (nondet domain membership) in TLA+. */
+    val ioHavocEffects: Set<String> = setOf(readlnBuiltin.name)
+
     fun lookup(name: String): EffectBuiltin? = builtins[name]
 
     fun kotlinCodegenImports(): Set<String> = setOf(
@@ -87,32 +89,26 @@ object EffectBuiltinRegistry {
         "kotlinx.coroutines.delay",
     )
 
-    fun effectStmtKotlinString(
-        stmt: EffectStmtNode,
+    fun callStmtKotlinString(
+        stmt: CallStmtNode,
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
-        assignPrefix: String = "",
         argStrings: List<String>? = null,
     ): String {
         val resolvedArgs = argStrings
             ?: stmt.callArgs().map { it.toTransitString(symbolTypes, argSymbols) }
-        return when (stmt) {
-            is EffectCallNode -> callKotlinString(stmt.callName(), resolvedArgs)
-            is EffectAssignNode -> {
-                val rhs = callKotlinString(stmt.callName(), resolvedArgs)
-                "${assignPrefix}${stmt.assignKey().toKotlinIdent()} = $rhs"
-            }
+        stmt.resolvedEffectOrNull()?.let { builtin ->
+            return builtin.kotlinCodegen(resolvedArgs)
         }
-    }
-
-    private fun callKotlinString(name: String, argStrings: List<String>): String {
-        val builtin = lookup(name)
-            ?: throw RuntimeException("Unknown effect builtin \"$name\"")
-        if (builtin.paramTypes.size != argStrings.size) {
-            throw RuntimeException(
-                "Expected effect \"$name\" to take ${builtin.paramTypes.size} argument(s) but got ${argStrings.size}",
-            )
+        stmt.resolvedBuiltinOrNull()?.let { builtin ->
+            return builtin.kotlinCodegen(resolvedArgs)
         }
-        return builtin.kotlinCodegen(argStrings)
+        val funNode = stmt.resolvedFunOrNull()
+            ?: throw RuntimeException("Call \"${stmt.callName()}\" not resolved")
+        val params = funNode.funArgs().actionArgs()
+        val inlined = params.zip(stmt.callArgs()).fold(funNode.funBody()) { acc, (param, arg) ->
+            substituteExpr(acc, param.name, arg)
+        }
+        return inlined.toTransitString(symbolTypes, argSymbols)
     }
 }

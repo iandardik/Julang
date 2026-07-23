@@ -1,0 +1,4 @@
+source: regression/input/type-errors/transit-void-effect.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Effect \"println\" cannot be used in an expression because it returns no value"

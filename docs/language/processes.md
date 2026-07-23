@@ -56,9 +56,10 @@ A transition (or constructor body) may include:
 | Clause | Meaning |
 |--------|---------|
 | `guard:` | Boolean condition; must hold (with peers’ constraints) to take the step |
-| `transit:` | State updates for this proc |
+| `before:` | Calls before state updates (IO allowed; no assignments)—see [Before/after and IO](effects.md) |
+| `transit:` | State updates for this proc (may include IO in expressions)—see [Before/after and IO](effects.md) |
 | `error:` | Alternate updates when the step is taken in an error path (when used) |
-| `effect:` | Side effects after the step (I/O, delays, session teardown)—see [Effects](effects.md) |
+| `after:` | Calls after state updates (IO allowed; no assignments)—see [Before/after and IO](effects.md) |
 
 Example (from [`regression/input/basic/test1.jul`](../../regression/input/basic/test1.jul)):
 
@@ -68,12 +69,12 @@ internal transition println(msg : String) {
         print & (msg = x + "")
     transit:
         print := false
-    effect:
+    after:
         println(msg)
 }
 ```
 
-Omitted clauses default sensibly (`guard` true when absent, empty `transit` / `effect` when absent).
+Omitted clauses default sensibly (`guard` true when absent, empty `before` / `transit` / `after` when absent).
 
 ## Choosing actions
 

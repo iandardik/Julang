@@ -131,16 +131,18 @@ arg
     ;
 
 constructor_body
-    : transit
+    : before
+    | transit
     | error
-    | effect
+    | after
     ;
 
 action_body
     : guard
+    | before
     | transit
     | error
-    | effect
+    | after
     ;
 
 guard
@@ -164,16 +166,15 @@ var_transit
     | ID LBRACK expr RBRACK ASGN_EQ expr
     ;
 
-effect
-    : EFFECT COLON effect_stmt+
+before
+    : BEFORE COLON call_stmt+
     ;
 
-effect_stmt
-    : effect_call
-    | field_access ASGN_EQ effect_call
+after
+    : AFTER COLON call_stmt+
     ;
 
-effect_call
+call_stmt
     : ID typeArgs? LPAREN (expr (COMMA expr)*)? RPAREN
     ;
 

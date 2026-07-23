@@ -78,9 +78,9 @@ fun ASTNode.typePass(
     is VarTransitNode -> typePassVarTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is MapIndexTransitNode -> typePassMapIndexTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is ErrorNode -> typePassError(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is EffectNode -> typePassEffect(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is EffectCallNode -> typePassEffectCall(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is EffectAssignNode -> typePassEffectAssign(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    is BeforeNode -> typePassBefore(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    is AfterNode -> typePassAfter(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    is CallStmtNode -> typePassCallStmt(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is UnaryOpExprNode -> typePassUnaryOp(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is BinaryOpExprNode -> typePassBinaryOp(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is IfElseExprNode -> typePassIfElse(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
@@ -263,31 +263,63 @@ private fun VarTransitNode.typePassVarTransit(
     return childrenErrors + varErrors
 }
 
-private fun EffectNode.typePassEffect(symbolEnv: Map<String, Type>, registry: ObjClassRegistry, funEnv: Map<String, FunNode>, typeParamEnv: Map<String, Type>,
-    funBuiltinEnv: Map<String, FunBuiltin>): List<CompileError> =
-    children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+private fun BeforeNode.typePassBefore(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+): List<CompileError> =
+    befores().flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
 
-private fun EffectCallNode.typePassEffectCall(
+private fun AfterNode.typePassAfter(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+): List<CompileError> =
+    afters().flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+
+private fun CallStmtNode.typePassCallStmt(
     symbolEnv: Map<String, Type>,
     registry: ObjClassRegistry,
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
 ): List<CompileError> {
-    val builtin = EffectBuiltinRegistry.lookup(callName())
-    if (builtin == null) {
-        return listOf(OneLocCompileError(programLocation(), "Unknown effect builtin \"${callName()}\""))
-    }
-    if (callTypeArgs().isNotEmpty()) {
-        return listOf(
-            OneLocCompileError(
-                programLocation(),
-                "Expected effect \"${callName()}\" not to take type arguments",
-            ),
-        )
-    }
-    if (callName() in EffectBuiltinRegistry.sessionPeerClassNameEffects) {
-        // Peer class name is a bare identifier, not a typed value expression.
+    EffectBuiltinRegistry.lookup(callName())?.let { builtin ->
+        resolveEffect(builtin)
+        if (callTypeArgs().isNotEmpty()) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected effect \"${callName()}\" not to take type arguments",
+                ),
+            )
+        }
+        if (callName() in EffectBuiltinRegistry.sessionPeerClassNameEffects) {
+            if (builtin.paramTypes.size != callArgs().size) {
+                return listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "Expected effect \"${callName()}\" to take ${builtin.paramTypes.size} argument(s) but got ${callArgs().size}",
+                    ),
+                )
+            }
+            val arg = callArgs().single()
+            return assertOrCompileError(
+                arg is SymbolValueExprNode,
+                OneLocCompileError(
+                    arg.programLocation(),
+                    "Expected \"${callName()}\" argument to be a leaf proc class name",
+                ),
+            )
+        }
+        val childrenErrors = callArgs().flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+        if (childrenErrors.isNotEmpty()) {
+            return childrenErrors
+        }
         if (builtin.paramTypes.size != callArgs().size) {
             return listOf(
                 OneLocCompileError(
@@ -296,90 +328,26 @@ private fun EffectCallNode.typePassEffectCall(
                 ),
             )
         }
-        val arg = callArgs().single()
-        return assertOrCompileError(
-            arg is SymbolValueExprNode,
-            OneLocCompileError(
-                arg.programLocation(),
-                "Expected \"${callName()}\" argument to be a leaf proc class name",
-            ),
-        )
-    }
-    val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
-    if (childrenErrors.isNotEmpty()) {
-        return childrenErrors
-    }
-    if (builtin.paramTypes.size != callArgs().size) {
-        return listOf(
-            OneLocCompileError(
-                programLocation(),
-                "Expected effect \"${callName()}\" to take ${builtin.paramTypes.size} argument(s) but got ${callArgs().size}",
-            ),
-        )
-    }
-    return callArgs().zip(builtin.paramTypes).flatMap { (arg, expectedType) ->
-        assertOrCompileError(
-            arg.getType() == expectedType,
-            OneLocCompileError(
-                arg.programLocation(),
-                "Expected argument to \"${callName()}\" to have type $expectedType but got ${arg.getType()}",
-            ),
-        )
-    }
-}
-
-private fun EffectAssignNode.typePassEffectAssign(
-    symbolEnv: Map<String, Type>,
-    registry: ObjClassRegistry,
-    funEnv: Map<String, FunNode>,
-    typeParamEnv: Map<String, Type>,
-    funBuiltinEnv: Map<String, FunBuiltin>,
-): List<CompileError> {
-    val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
-    if (childrenErrors.isNotEmpty()) {
-        return childrenErrors
-    }
-    val callErrors = EffectCallNode(callName(), callArgs(), programLocation(), callTypeArgs()).typePassEffectCall(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    if (callErrors.isNotEmpty()) {
-        return callErrors
-    }
-    val builtin = EffectBuiltinRegistry.lookup(callName())!!
-    val returnType = builtin.returnType
-        ?: return listOf(
-            OneLocCompileError(
-                programLocation(),
-                "Effect \"${callName()}\" cannot be used in an assignment because it returns no value",
-            ),
-        )
-    val varType = symbolEnv[varName]
-    val varErrors = if (varType == null) {
-        assertOrCompileError(
-            false,
-            OneLocCompileError(programLocation(), "Unknown variable \"$varName\" in effect assignment"),
-        )
-    } else if (fieldPath.isEmpty()) {
-        assertOrCompileError(
-            returnType == varType,
-            OneLocCompileError(
-                programLocation(),
-                "Expected assignment to \"$varName\" ($varType) but got effect returning $returnType",
-            ),
-        )
-    } else {
-        when (val result = resolveFieldPath(varType, fieldPath)) {
-            is FieldPathResult.Error -> listOf(OneLocCompileError(programLocation(), result.message))
-            is FieldPathResult.Resolved -> {
-                assertOrCompileError(
-                    returnType == result.type,
-                    OneLocCompileError(
-                        programLocation(),
-                        "Expected assignment to \"${assignKey()}\" (${result.type}) but got effect returning $returnType",
-                    ),
-                )
-            }
+        return callArgs().zip(builtin.paramTypes).flatMap { (arg, expectedType) ->
+            assertOrCompileError(
+                arg.getType() == expectedType,
+                OneLocCompileError(
+                    arg.programLocation(),
+                    "Expected argument to \"${callName()}\" to have type $expectedType but got ${arg.getType()}",
+                ),
+            )
         }
     }
-    return childrenErrors + callErrors + varErrors
+    // Funlib or user fun: reuse FunCallExprNode typing, then copy resolution onto this stmt.
+    val asExpr = FunCallExprNode(callName(), callArgs(), programLocation(), typeArgs = callTypeArgs())
+    val errors = asExpr.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    if (errors.isNotEmpty()) {
+        return errors
+    }
+    asExpr.resolvedEffectOrNull()?.let { resolveEffect(it) }
+    asExpr.resolvedBuiltinOrNull()?.let { resolveBuiltin(it) }
+    asExpr.resolvedFunOrNull()?.let { resolveFun(it) }
+    return emptyList()
 }
 
 private fun UnaryOpExprNode.typePassUnaryOp(
@@ -926,6 +894,55 @@ private fun FunCallExprNode.typePassFunCall(
             )
         }
         resolveInstantiatedReturnType(builtin.returnType)
+        inferExprType(symbolEnv)
+        return emptyList()
+    }
+    EffectBuiltinRegistry.lookup(callName())?.let { effect ->
+        resolveEffect(effect)
+        if (callTypeArgs().isNotEmpty()) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected effect \"${callName()}\" not to take type arguments",
+                ),
+            )
+        }
+        val returnType = effect.returnType
+            ?: return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Effect \"${callName()}\" cannot be used in an expression because it returns no value",
+                ),
+            )
+        if (callName() in EffectBuiltinRegistry.sessionPeerClassNameEffects) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Effect \"${callName()}\" cannot be used in an expression",
+                ),
+            )
+        }
+        if (effect.paramTypes.size != callArgs().size) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected effect \"${callName()}\" to take ${effect.paramTypes.size} argument(s) but got ${callArgs().size}",
+                ),
+            )
+        }
+        val argTypeErrors = callArgs().zip(effect.paramTypes).flatMap { (arg, expectedType) ->
+            assertOrCompileError(
+                arg.getType() == expectedType,
+                OneLocCompileError(
+                    arg.programLocation(),
+                    "Expected argument to \"${callName()}\" to have type $expectedType but got ${arg.getType()}",
+                ),
+            )
+        }
+        if (argTypeErrors.isNotEmpty()) {
+            return argTypeErrors
+        }
+        resolveInstantiatedReturnType(returnType)
         inferExprType(symbolEnv)
         return emptyList()
     }

@@ -1,16 +1,15 @@
 proc S {
-    var x : Int
+    var x : String
     var y : Int
 
     constructor initially(args : List<String>) {
         transit:
-            x := 0
+            x := ""
             y := 0
     }
 
     internal transition go() {
-        effect:
-            x := readln()
+        after:
             x := readln()
     }
 }

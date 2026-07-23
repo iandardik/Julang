@@ -221,23 +221,23 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitVar_transit(JulayParser.Var_transitContext ctx);
 	/**
-	 * Visit a parse tree produced by {@link JulayParser#effect}.
+	 * Visit a parse tree produced by {@link JulayParser#before}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
-	T visitEffect(JulayParser.EffectContext ctx);
+	T visitBefore(JulayParser.BeforeContext ctx);
 	/**
-	 * Visit a parse tree produced by {@link JulayParser#effect_stmt}.
+	 * Visit a parse tree produced by {@link JulayParser#after}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
-	T visitEffect_stmt(JulayParser.Effect_stmtContext ctx);
+	T visitAfter(JulayParser.AfterContext ctx);
 	/**
-	 * Visit a parse tree produced by {@link JulayParser#effect_call}.
+	 * Visit a parse tree produced by {@link JulayParser#call_stmt}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
-	T visitEffect_call(JulayParser.Effect_callContext ctx);
+	T visitCall_stmt(JulayParser.Call_stmtContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link JulayParser#expr}.
 	 * @param ctx the parse tree

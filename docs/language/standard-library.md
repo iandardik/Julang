@@ -8,7 +8,7 @@ Embedded under `src/main/resources/stdlib/julay/proclib/`:
 
 | Module | Import | Role |
 |--------|--------|------|
-| **Println** | `julay.proclib.Println` | `service println(msg)` → effect `println` |
+| **Println** | `julay.proclib.Println` | `service println(msg)` → after `println` |
 | **ExitSystem** | `julay.proclib.ExitSystem` | `service exitSystem()` → `exitProcess` |
 | **Readln** | `julay.proclib.Readln` | Prompt / read line handshake |
 | **Timer** | `julay.proclib.Timer` | Cancellable timer: `createTimer`, `startTimer`, `timeout`, `cancelTimer` (`killSessionPeer(TimerHelper)`); helper end uses `exitSession(TimerHelper)` |

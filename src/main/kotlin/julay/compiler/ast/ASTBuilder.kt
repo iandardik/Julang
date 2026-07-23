@@ -340,7 +340,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     }
 
     override fun visitAction_body(ctx: JulayParser.Action_bodyContext?): ASTNode {
-        val body = oneChoice(ctx!!.guard(), ctx.transit(), ctx.error(), ctx.effect())
+        val body = oneChoice(ctx!!.guard(), ctx.before(), ctx.transit(), ctx.error(), ctx.after())
         return visit(body)
     }
 
@@ -393,61 +393,40 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         return ErrorArmNode(cond, msg, sourceLocation(ctx))
     }
 
-    override fun visitEffect(ctx: JulayParser.EffectContext?): ASTNode {
-        val stmts = ctx!!.effect_stmt()
+    override fun visitBefore(ctx: JulayParser.BeforeContext?): ASTNode {
+        val stmts = ctx!!.call_stmt()
             .map { visit(it) }
             .map {
-                if (it !is EffectStmtNode) {
-                    throw RuntimeException("Expected EffectStmtNode but got $it")
+                if (it !is CallStmtNode) {
+                    throw RuntimeException("Expected CallStmtNode but got $it")
                 }
                 it
             }
-        return EffectNode(stmts, sourceLocation(ctx))
+        return BeforeNode(stmts, sourceLocation(ctx))
     }
 
-    override fun visitEffect_stmt(ctx: JulayParser.Effect_stmtContext?): ASTNode {
-        if (ctx!!.effect_call() != null) {
-            val call = visit(ctx.effect_call())
-            if (call !is EffectCallNode) {
-                throw RuntimeException("Expected EffectCallNode but got $call")
-            }
-            if (ctx.field_access() != null) {
-                val lhs = visit(ctx.field_access())
-                return when (lhs) {
-                    is FieldAccessExprNode -> EffectAssignNode(
-                        lhs.baseSymbol,
-                        lhs.fieldPath,
-                        call.callName(),
-                        call.callArgs(),
-                        sourceLocation(ctx),
-                        call.callTypeArgs(),
-                    )
-                    is SymbolValueExprNode -> EffectAssignNode(
-                        lhs.symbol,
-                        emptyList(),
-                        call.callName(),
-                        call.callArgs(),
-                        sourceLocation(ctx),
-                        call.callTypeArgs(),
-                    )
-                    else -> throw RuntimeException("Expected field access on left-hand side of effect assignment")
+    override fun visitAfter(ctx: JulayParser.AfterContext?): ASTNode {
+        val stmts = ctx!!.call_stmt()
+            .map { visit(it) }
+            .map {
+                if (it !is CallStmtNode) {
+                    throw RuntimeException("Expected CallStmtNode but got $it")
                 }
+                it
             }
-            return call
-        }
-        throw RuntimeException("Invalid effect statement: ${ctx.text}")
+        return AfterNode(stmts, sourceLocation(ctx))
     }
 
-    override fun visitEffect_call(ctx: JulayParser.Effect_callContext?): ASTNode {
+    override fun visitCall_stmt(ctx: JulayParser.Call_stmtContext?): ASTNode {
         val name = ctx!!.ID().text
         val typeArgs = ctx.typeArgs()?.typeExpr()?.map { parseTypeExpr(it) } ?: emptyList()
         val args = ctx.expr().map { visit(it) }.map {
             if (it !is ExprNode) {
-                throw RuntimeException("Expected effect call arguments to be expressions")
+                throw RuntimeException("Expected call statement arguments to be expressions")
             }
             it
         }
-        return EffectCallNode(name, args, sourceLocation(ctx), typeArgs)
+        return CallStmtNode(name, args, sourceLocation(ctx), typeArgs)
     }
 
     override fun visitVar_transit(ctx: JulayParser.Var_transitContext?): ASTNode {

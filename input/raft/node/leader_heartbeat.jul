@@ -41,7 +41,7 @@ proc LeaderHeartbeat {
     internal transition sleep() {
         guard: step = "sleep"
         transit: step := "checkIsLeader"
-        effect: delaySeconds(1)
+        after: delaySeconds(1)
     }
 
     transition getIsLeader(isLeader : Boolean) {

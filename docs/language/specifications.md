@@ -88,7 +88,7 @@ When a spec includes **two-sided** session actions (both peer classes appear as 
 - `*_killed` — only for leaves that are a `killSessionPeer(Peer)` peer target somewhere in the module. Those leaves also get `~killed` enablement gates, and their `*_dead` includes a kill disjunct. Specs with no `killSessionPeer` omit all `*_killed` variables.
 - `sessionException` and `SessionIntegrity == ~sessionException` (checked in the `.cfg`) — only when a **session constructor** action exists (models rebind `JulayException`). Transition-only or exit-only session specs omit them. A stdlib Timer bug caught by `SessionIntegrity` is written up under [Bugs found with Julay](../examples/bugs-found-with-julay.md).
 
-**Effect mapping:**
+**Effect mapping** (`before:` / `after:` session teardown calls):
 
 | Effect | TLA+ |
 |--------|------|
@@ -97,12 +97,14 @@ When a spec includes **two-sided** session actions (both peer classes appear as 
 
 The peer leaf is taken from the effect argument (caller ↔ named peer among SpecLeaves).
 
+**IO in transit (havoc):** assignments whose RHS involves `readln()` or `readFile(...)` do not emit a concrete next-state expression. The target is **havoc’d**: `stateVar' \in String` (or an `\E` form for indexed leaves). See [Before/after and IO](effects.md#tla-translation-io-havoc).
+
 Examples under [`regression/input/spec/`](../../regression/input/spec/): `session-pair.jul` (affinity only), `session-exit.jul`, `session-kill.jul`, `session-spawn-rebind.jul` (session ctor + `SessionIntegrity`).
 
 ## What else to expect
 
 - Specs model the transition system and synchronization structure relevant to the written invariants.
-- Effects such as real-time `delaySeconds` are not a faithful continuous-time model in TLC; treat timing as approximate or structure specs around discrete control state.
+- `before:` / `after:` side effects such as real-time `delaySeconds` are not a faithful continuous-time model in TLC; treat timing as approximate or structure specs around discrete control state.
 
 ## See also
 

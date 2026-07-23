@@ -38,14 +38,14 @@ proc FrontEnd {
             (state = "D") & ((msg + "") = valReq) // (msg + "") to test string concatenation with action args
         transit:
             state := "A"
-        effect:
+        after:
             println(msg)
     }
 
     internal transition exitSystem() {
         guard:
             keyReq = "exit"
-        effect:
+        after:
             exitProcess()
     }
 }
@@ -91,7 +91,6 @@ proc Readln {
         guard: prompt
         transit:
             prompt := false
-        effect:
             readMsg := readln()
     }
 

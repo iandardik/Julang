@@ -287,10 +287,7 @@ private fun ProcClassNode.errorPassProcClass(procs: Set<String>, librariesInUse:
         .filterIsInstance<ConstructorNode>()
         .flatMap { ctorNode ->
             val stateVarSet = stateVars.toSet()
-            val assignedVarSet = (
-                ctorNode.transitVars().map { transitRootVar(it.first) } +
-                    ctorNode.body().flatMap { it.effectAssignVars() }.map { transitRootVar(it.first) }
-                ).toSet()
+            val assignedVarSet = ctorNode.transitVars().map { transitRootVar(it.first) }.toSet()
             val missingStateVars = stateVarSet.minus(assignedVarSet)
             assertOrCompileError(
                 missingStateVars.isEmpty(),
@@ -337,7 +334,7 @@ private fun sessionPeerClassNameErrors(
     selfName: String,
     leafProcNames: Set<String>,
 ): List<CompileError> =
-    transNode.body().flatMap { it.effects() }.flatMap { stmt ->
+    transNode.body().flatMap { it.befores() + it.afters() }.flatMap { stmt ->
         val effectName = stmt.callName()
         if (effectName !in EffectBuiltinRegistry.sessionPeerClassNameEffects) {
             return@flatMap emptyList()
@@ -376,7 +373,6 @@ private fun sessionPeerClassNameErrors(
 private fun constAssignmentErrors(transNode: TransitionNode, constVarNames: Set<String>): List<CompileError> {
     if (constVarNames.isEmpty()) return emptyList()
     val assignments = transNode.transitVars() +
-        transNode.body().flatMap { it.effectAssignVars() } +
         transitAssignmentNodes(transNode.body())
             .filterIsInstance<MapIndexTransitNode>()
             .map { it.mapVar to it.programLocation() }
@@ -426,23 +422,6 @@ private fun duplicateAssignmentErrors(
         }
     }
 
-private fun transitEffectOverlapErrors(
-    transitAssignments: List<Pair<String, ProgramLoc>>,
-    effectAssignments: List<Pair<String, ProgramLoc>>,
-): List<CompileError> =
-    transitAssignments.flatMap { (transitName, transitLoc) ->
-        effectAssignments.flatMap { (effectName, effectLoc) ->
-            assertOrCompileError(
-                transitName != effectName,
-                TwoLocsCompileError(
-                    transitLoc,
-                    effectLoc,
-                    "Expected a variable not to be assigned in both transit and effect, but found assignments for \"$transitName\"",
-                ),
-            )
-        }
-    }
-
 private fun transitAssignmentNodes(body: List<ActionBodyNode>): List<ActionBodyNode> =
     body.flatMap { node ->
         when (node) {
@@ -452,7 +431,6 @@ private fun transitAssignmentNodes(body: List<ActionBodyNode>): List<ActionBodyN
     }
 
 private fun actionBodyAssignmentErrors(body: List<ActionBodyNode>): List<CompileError> {
-    val effectAssignments = body.flatMap { it.effectAssignVars() }
     val transitNodes = transitAssignmentNodes(body)
     val varTransitAssignments = transitNodes.flatMap { it.transitVars() }
     val wholeMapAssigns = transitNodes.filterIsInstance<VarTransitNode>()
@@ -470,9 +448,7 @@ private fun actionBodyAssignmentErrors(body: List<ActionBodyNode>): List<Compile
     }
     return duplicateAssignmentErrors(varTransitAssignments) { name ->
         "Expected at most one assignment per variable, but found multiple assignments for \"$name\""
-    } + duplicateAssignmentErrors(effectAssignments) { name ->
-        "Expected at most one assignment per variable in effect, but found multiple assignments for \"$name\""
-    } + transitEffectOverlapErrors(varTransitAssignments, effectAssignments) + overlapErrors
+    } + overlapErrors
 }
 
 private fun ConstructorNode.errorPassConstructor(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
@@ -490,7 +466,7 @@ private fun ConstructorNode.errorPassConstructor(procs: Set<String>, librariesIn
             ),
         )
     }
-    val transitionOnlyEffectErrors = body().flatMap { it.effects() }.flatMap { stmt ->
+    val transitionOnlyEffectErrors = body().flatMap { it.befores() + it.afters() }.flatMap { stmt ->
         val name = stmt.callName()
         assertOrCompileError(
             name !in EffectBuiltinRegistry.transitionOnlyEffects,
@@ -513,7 +489,7 @@ private fun TransitionNode.errorPassTransition(procs: Set<String>, librariesInUs
         ),
     )
     val assignmentErrors = actionBodyAssignmentErrors(body())
-    val sessionEffectNames = body().flatMap { it.effects() }.map { it.callName() }.filter {
+    val sessionEffectNames = body().flatMap { it.befores() + it.afters() }.map { it.callName() }.filter {
         it in EffectBuiltinRegistry.transitionOnlyEffects
     }
     val bothSessionEffectsError = assertOrCompileError(

@@ -33,7 +33,7 @@ proc Worker {
     internal transition exitSystem() {
         guard:
             steps = 3
-        effect:
+        after:
             exitProcess()
     }
 }

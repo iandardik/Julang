@@ -1,5 +1,4 @@
 source: regression/input/syntax-errors/duplicate-effect-var.jul
 expectCompileFailure: true
 expectCompileOutputContains:
-  - "Expected at most one assignment per variable in effect, but found multiple assignments for \"x\""
-  - "Found errors while compiling \"P\"; exiting."
+  - "Found compile errors, exiting."

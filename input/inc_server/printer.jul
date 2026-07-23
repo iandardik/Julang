@@ -21,13 +21,13 @@ proc PeriodicPrint {
     internal transition println() {
         guard:   step = "B"
         transit: step := "C"
-        effect:  println(localCounter + "")
+        after:  println(localCounter + "")
     }
 
     internal transition wait() {
         guard:   step = "C"
         transit: step := "A"
-        effect:  delaySeconds(5)
+        after:  delaySeconds(5)
     }
 }
 
