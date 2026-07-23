@@ -38,6 +38,8 @@ The handler instance is constructed per request and talks to the HTTP library th
 
 [`julay.proclib.Timer`](../../src/main/resources/stdlib/julay/proclib/Timer.jul) exposes `createTimer`, `startTimer`, `timeout`, and `cancelTimer`. Helper completion uses `exitSession(TimerHelper)` on `timerHelperEnd`; cancel uses `killSessionPeer(TimerHelper)` so the delaying helper can be stopped without blocking the controller.
 
+A restart-after-timeout rebind bug in Timer was caught by `TimerSpec` + TLC; see [Bugs found with Julay](../examples/bugs-found-with-julay.md).
+
 ## See also
 
 - [Composition and actions](composition-and-actions.md)

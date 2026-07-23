@@ -8,6 +8,10 @@ Walkthroughs of the HTTP demos under [`input/`](../../input/). Suggested order:
 
 Each page points at the real `.jul` sources. Build `julayc` first ([Getting started](../getting-started.md)).
 
+## Case studies
+
+- [Bugs found with Julay](bugs-found-with-julay.md) — stdlib Timer session-ctor rebind caught by `TimerSpec` + TLC
+
 ## Larger system
 
 [`input/raft/`](../../input/raft/) is a larger multi-module example (Raft). It is not covered in detail here yet; use `julayc analyze` ([Tooling](../tooling.md)) to explore its composition.
