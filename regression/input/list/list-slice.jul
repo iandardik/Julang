@@ -1,6 +1,6 @@
-import julay.proclib.Println
-import julay.proclib.ExitSystem
 import julay.funlib.length
+import julay.funlib.exitProcess
+import julay.funlib.println
 
 proc ListSliceDemo {
     var xs : List<Int>
@@ -48,19 +48,23 @@ proc ListSliceDemo {
             phase := 3
     }
 
-    transition println(msg : String) {
+    internal transition println(msg : String) {
         guard:
             phase = 3 & clamped = [30, 40] & nested = 20 & (msg = mid + "")
         transit:
             phase := 4
+        after:
+            println(msg)
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
             phase = 4
+        after:
+            exitProcess()
     }
 }
 
-proc ListSliceTest := ListSliceDemo || Println || ExitSystem
+proc ListSliceTest := ListSliceDemo
 
 compile ListSliceTest

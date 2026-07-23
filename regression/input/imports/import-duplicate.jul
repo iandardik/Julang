@@ -1,18 +1,8 @@
-import julay.proclib.Println
-import julay.proclib.Println
+import julay.proclib.Timer
+import julay.proclib.Timer
 
-proc S {
-    var x : Int
-
-    constructor initially(args : List<String>) {
-        transit: x := 0
-    }
-
-    transition println(msg : String) {
-        guard: msg = x + ""
-    }
+proc ImportDuplicateTest {
+    constructor initially(args : List<String>) {}
 }
-
-proc ImportDuplicateTest := S || Println
 
 compile ImportDuplicateTest

@@ -1,4 +1,4 @@
-import julay.proclib.ExitSystem
+import julay.funlib.exitProcess
 
 proc BadList {
     var xs : List<Int>
@@ -8,11 +8,13 @@ proc BadList {
             xs := [1, true]
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard: true
+        after:
+            exitProcess()
     }
 }
 
-proc BadListTest := BadList || ExitSystem
+proc BadListTest := BadList
 
 compile BadListTest

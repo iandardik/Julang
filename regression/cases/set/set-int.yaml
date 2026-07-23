@@ -5,6 +5,4 @@ programs:
       timeoutMs: 60000
       args:
         - "cli"
-      expectStdoutContains:
-        - "cli"
-        - "2"
+      expectStdout: regression/expected/set-set-int.stdout

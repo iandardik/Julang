@@ -1,5 +1,5 @@
-import julay.proclib.Println
 import julay.funlib.delaySeconds
+import julay.funlib.println
 
 /* prints the current value of the counter every 5 seconds
 */
@@ -21,9 +21,11 @@ proc PeriodicPrint {
             step := "B"
     }
 
-    transition println(msg : String) {
+    internal transition println(msg : String) {
         guard:   step = "B" & (msg = list + "")
         transit: step := "C"
+        after:
+            println(msg)
     }
 
     internal transition wait() {
@@ -33,4 +35,4 @@ proc PeriodicPrint {
     }
 }
 
-proc Printer := PeriodicPrint || Println
+proc Printer := PeriodicPrint

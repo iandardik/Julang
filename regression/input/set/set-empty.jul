@@ -1,5 +1,5 @@
-import julay.proclib.ExitSystem
 import julay.funlib.length
+import julay.funlib.exitProcess
 
 proc SetEmptyDemo {
     var s : Set<Int>
@@ -18,12 +18,14 @@ proc SetEmptyDemo {
             done := length(s) = 0
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
             done
+        after:
+            exitProcess()
     }
 }
 
-proc SetEmptyTest := SetEmptyDemo || ExitSystem
+proc SetEmptyTest := SetEmptyDemo
 
 compile SetEmptyTest

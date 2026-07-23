@@ -82,7 +82,7 @@ All fields under `run` are optional except that each program should have a `run`
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `stdin` | `[]` | Lines fed to the process stdin. A newline is appended to each entry if it does not already end with `\n`. Used with `Readln` and similar. |
+| `stdin` | `[]` | Lines fed to the process stdin. A newline is appended to each entry if it does not already end with `\n`. Used with funlib `readln` and similar. |
 | `args` | `[]` | Command-line arguments passed after the JAR path (`java -jar Prog.jar …`). Bound to `initially(args : List<String>)`. |
 
 Example:
@@ -126,7 +126,7 @@ You can combine several matchers; **all** specified matchers must pass.
 |-------|-------------|
 | `expectStdout` | Path to a golden file (e.g. `regression/expected/basic-test1-termtest1.stdout`). **Exact** match after normalizing line endings and trimming trailing whitespace on the expected file. |
 | `expectStdoutContains` | List of substrings that must each appear somewhere in stdout. |
-| `expectStdoutLinesUnordered` | List of lines; each must appear as a **non-blank** line in stdout (order does not matter). Good when `Println` order is nondeterministic. |
+| `expectStdoutLinesUnordered` | List of lines; each must appear as a **non-blank** line in stdout (order does not matter). Useful when concurrent procs interleave prints. |
 | `expectStdoutMatches` | Single regex matched anywhere in stdout (e.g. `"[0-9]+"` for timer output). |
 
 At least one expectation field is recommended per `run` block (for positive tests).
@@ -181,7 +181,7 @@ programs:
 
 ### Terminal output only
 
-[`cases/basic/test1.yaml`](cases/basic/test1.yaml) — compile and run until the program exits; check printed numbers in any order:
+[`cases/basic/test1.yaml`](cases/basic/test1.yaml) — compile and run until the program exits; check exact ordered stdout via a golden file:
 
 ```yaml
 source: regression/input/basic/test1.jul
@@ -189,9 +189,7 @@ programs:
   - name: TermTest1
     run:
       timeoutMs: 60000
-      expectStdoutLinesUnordered:
-        - "0"
-        - "10"
+      expectStdout: regression/expected/basic-test1-termtest1.stdout
 ```
 
 ### Stdin + stdout
@@ -203,8 +201,8 @@ source: regression/input/readln/kv.jul
 programs:
   - name: KVOne
     run:
-      stdin: ["A"]
-      expectStdoutContains: ["apple"]
+      stdin: ["A", "B", "C", "exit"]
+      expectStdout: regression/expected/readln-kv-one.stdout
 ```
 
 ### HTTP server

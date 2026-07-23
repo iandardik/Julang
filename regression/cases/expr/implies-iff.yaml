@@ -3,5 +3,4 @@ programs:
   - name: P
     run:
       timeoutMs: 60000
-      expectStdoutLinesUnordered:
-        - "TTFTTFFTTFT"
+      expectStdout: regression/expected/expr-implies-iff.stdout

@@ -1,22 +1,46 @@
-proc S {
-    var x : Int
+import julay.funlib.exitProcess
+import julay.funlib.println
+
+proc Driver {
+    var step : String
 
     constructor initially(args : List<String>) {
-        transit: x := 0
+        transit: step := "create"
     }
 
-    transition println(msg : String) {
-        guard:
-            x < 2 & msg = x + ""
-        transit:
-            x := x + 1
+    session transition createTimer() {
+        guard: step = "create"
+        transit: step := "start"
     }
 
-    transition exitSystem() {
-        guard: x >= 2
+    session transition startTimer(time : Int) {
+        guard: step = "start" & time = 1
+        transit: step := "wait"
+    }
+
+    session transition timeout() {
+        guard: step = "wait"
+        transit: step := "print"
+    }
+
+    session transition cancelTimer() {
+        guard: false
+    }
+
+    internal transition println(msg : String) {
+        guard: step = "print" & msg = "ok"
+        transit: step := "done"
+        after:
+            println(msg)
+    }
+
+    internal transition exitSystem() {
+        guard: step = "done"
+        after:
+            exitProcess()
     }
 }
 
-proc QualifiedProcExprTest := S || julay.proclib.Println || julay.proclib.ExitSystem
+proc QualifiedProcExprTest := Driver || julay.proclib.Timer
 
 compile QualifiedProcExprTest

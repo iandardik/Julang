@@ -28,7 +28,7 @@ Details: [Getting started](../getting-started.md), [Tooling](../tooling.md).
 | Kind | Example | Notes |
 |------|---------|--------|
 | Your modules | `server.ServerLogic` | Next to the entry file or on `-L` / `JULAY_PATH` |
-| Proclib | `julay.proclib.Println`, `Timer`, `HttpServer`, … | Process APIs; some are Kotlin-native under the hood |
+| Proclib | `julay.proclib.Timer`, `HttpServer`, … | Process APIs; some are Kotlin-native under the hood |
 | Funlib | `julay.funlib.length`, `julay.funlib.println`, … | Functions; effectful ones require import like the rest |
 
 ## See also

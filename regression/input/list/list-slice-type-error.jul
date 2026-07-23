@@ -1,4 +1,4 @@
-import julay.proclib.ExitSystem
+import julay.funlib.exitProcess
 
 proc BadSlice {
     var xs : List<Int>
@@ -10,11 +10,13 @@ proc BadSlice {
             ys := xs[true:2]
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard: true
+        after:
+            exitProcess()
     }
 }
 
-proc BadSliceTest := BadSlice || ExitSystem
+proc BadSliceTest := BadSlice
 
 compile BadSliceTest

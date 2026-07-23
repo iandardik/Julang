@@ -1,4 +1,4 @@
-import julay.proclib.ExitSystem
+import julay.funlib.exitProcess
 
 obj Point {
     x : Int
@@ -36,14 +36,16 @@ proc Worker {
             steps := 2
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
             & steps = 2
             & current.x = 1
             & current.y = 2
+        after:
+            exitProcess()
     }
 }
 
-proc TwoPointVarsTest := Worker || ExitSystem
+proc TwoPointVarsTest := Worker
 
 compile TwoPointVarsTest

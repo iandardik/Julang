@@ -1,4 +1,4 @@
-import julay.proclib.ExitSystem
+import julay.funlib.exitProcess
 
 obj Box<T> {
     value : T
@@ -44,12 +44,14 @@ proc Worker {
             steps := 3
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
             steps = 3
+        after:
+            exitProcess()
     }
 }
 
-proc PolyBoxPairTest := Worker || ExitSystem
+proc PolyBoxPairTest := Worker
 
 compile PolyBoxPairTest

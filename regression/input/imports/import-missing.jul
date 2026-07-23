@@ -1,15 +1,3 @@
-proc S {
-    var x : Int
-
-    constructor initially(args : List<String>) {
-        transit: x := 0
-    }
-
-    transition println(msg : String) {
-        guard: msg = x + ""
-    }
-}
-
-proc ImportMissingTest := S || Println
+proc ImportMissingTest := Timer
 
 compile ImportMissingTest

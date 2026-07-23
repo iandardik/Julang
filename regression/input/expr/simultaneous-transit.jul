@@ -1,5 +1,5 @@
-import julay.proclib.Println
-import julay.proclib.ExitSystem
+import julay.funlib.exitProcess
+import julay.funlib.println
 
 /*
  * Transit assignments are simultaneous: every RHS is evaluated against the
@@ -32,19 +32,23 @@ proc SimultaneousTransitDemo {
             print := true
     }
 
-    transition println(msg : String) {
+    internal transition println(msg : String) {
         guard:
             print & msg = ("" + x + "," + y + "," + peersLeft + "," + step)
         transit:
             print := false
+        after:
+            println(msg)
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
             ~print & x = 6 & y = 5 & peersLeft = 0 & step = "doneRound"
+        after:
+            exitProcess()
     }
 }
 
-proc SimultaneousTransitTest := SimultaneousTransitDemo || Println || ExitSystem
+proc SimultaneousTransitTest := SimultaneousTransitDemo
 
 compile SimultaneousTransitTest

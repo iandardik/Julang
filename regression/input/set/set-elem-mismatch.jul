@@ -1,4 +1,4 @@
-import julay.proclib.ExitSystem
+import julay.funlib.exitProcess
 
 proc BadSet {
     var s : Set<Int>
@@ -8,11 +8,13 @@ proc BadSet {
             s := {1, true}
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard: true
+        after:
+            exitProcess()
     }
 }
 
-proc BadSetTest := BadSet || ExitSystem
+proc BadSetTest := BadSet
 
 compile BadSetTest

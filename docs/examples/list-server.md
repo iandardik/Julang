@@ -55,10 +55,10 @@ proc ListServer := RunningList || Printer || ServerLogic
 ### Printer (`printer.jul`)
 
 ```jul
-proc Printer := PeriodicPrint || Println
+proc Printer := PeriodicPrint
 ```
 
-Periodically `getList`s, prints the list via `println`, waits 5 seconds (`delaySeconds`).
+Periodically `getList`s, prints the list via funlib `println` in an `after:` block, waits 5 seconds (`delaySeconds`).
 
 ## How to run
 

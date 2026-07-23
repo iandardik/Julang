@@ -1,5 +1,5 @@
-import julay.proclib.Println
-import julay.proclib.ExitSystem
+import julay.funlib.exitProcess
+import julay.funlib.println
 
 fun double(n : Real) : Real = n + n
 
@@ -23,16 +23,20 @@ proc S {
             print := true
     }
 
-    transition println(msg : String) {
+    internal transition println(msg : String) {
         guard:
             print & (msg = x + "")
         transit:
             print := false
+        after:
+            println(msg)
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
             ~print & x > 0.0
+        after:
+            exitProcess()
     }
 }
 
@@ -52,6 +56,6 @@ proc T {
     }
 }
 
-proc FunBasicTest := S || T || Println || ExitSystem
+proc FunBasicTest := S || T
 
 compile FunBasicTest

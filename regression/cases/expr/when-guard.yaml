@@ -3,6 +3,4 @@ programs:
   - name: P
     run:
       timeoutMs: 60000
-      expectStdoutLinesUnordered:
-        - "A"
-        - "B"
+      expectStdout: regression/expected/expr-when-guard.stdout

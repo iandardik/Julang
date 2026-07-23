@@ -1,4 +1,4 @@
-import julay.proclib.ExitSystem
+import julay.funlib.exitProcess
 
 proc MapMissingKey {
     var mp : Map<String, Int>
@@ -17,12 +17,14 @@ proc MapMissingKey {
             n := mp["missing"]
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
             false
+        after:
+            exitProcess()
     }
 }
 
-proc MapMissingKeyTest := MapMissingKey || ExitSystem
+proc MapMissingKeyTest := MapMissingKey
 
 compile MapMissingKeyTest

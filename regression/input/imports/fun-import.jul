@@ -1,7 +1,7 @@
-import julay.proclib.Println
-import julay.proclib.ExitSystem
 import funmath.add
 import funmath.id
+import julay.funlib.exitProcess
+import julay.funlib.println
 
 fun double(n : Int) : Int = add(id(n), id(n))
 
@@ -23,16 +23,20 @@ proc S {
             print := true
     }
 
-    transition println(msg : String) {
+    internal transition println(msg : String) {
         guard:
             print & (msg = x + "")
         transit:
             print := false
+        after:
+            println(msg)
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
             ~print & x > 0
+        after:
+            exitProcess()
     }
 }
 
@@ -52,6 +56,6 @@ proc T {
     }
 }
 
-proc FunImportTest := S || T || Println || ExitSystem
+proc FunImportTest := S || T
 
 compile FunImportTest

@@ -1,5 +1,5 @@
-import julay.proclib.Println
-import julay.proclib.ExitSystem
+import julay.funlib.exitProcess
+import julay.funlib.println
 
 fun bstr(b : Boolean) : String = if (b) { "T" } else { "F" }
 
@@ -22,19 +22,23 @@ proc S {
     }
 
     // Exercise Z3 encoding of => and <=> in a guard
-    transition println(msg : String) {
+    internal transition println(msg : String) {
         guard:
             print & (true => print) & (print <=> true) & (msg = out)
         transit:
             print := false
+        after:
+            println(msg)
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
             ~print
+        after:
+            exitProcess()
     }
 }
 
-proc P := S || Println || ExitSystem
+proc P := S
 
 compile P

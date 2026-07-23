@@ -3,5 +3,4 @@ programs:
   - name: P
     run:
       timeoutMs: 60000
-      expectStdoutContains:
-        - "ok"
+      expectStdout: regression/expected/imports-effect-import.stdout

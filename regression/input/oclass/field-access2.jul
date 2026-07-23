@@ -1,4 +1,4 @@
-import julay.proclib.ExitSystem
+import julay.funlib.exitProcess
 
 obj Point {
     x : Int
@@ -41,11 +41,13 @@ proc Worker {
             count := count + 1
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard: count = 5
+        after:
+            exitProcess()
     }
 }
 
-proc FieldAccessTest2 := Worker || ExitSystem
+proc FieldAccessTest2 := Worker
 
 compile FieldAccessTest2

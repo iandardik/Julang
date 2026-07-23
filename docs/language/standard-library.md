@@ -6,13 +6,10 @@ Side effects in Julay come only from this catalog: **proclib processes** and **f
 
 ## Proclib
 
-Compose these like any other proc, e.g. `Server || Println || HttpServer`.
+Compose these like any other proc, e.g. `Server || HttpServer` or `Driver || Timer`.
 
 | Module | Import | Role | Effects? |
 |--------|--------|------|----------|
-| **Println** | `julay.proclib.Println` | `service println(msg)` → funlib `println` | Yes (I/O) |
-| **ExitSystem** | `julay.proclib.ExitSystem` | `service exitSystem()` → funlib `exitProcess` | Yes (halts process) |
-| **Readln** | `julay.proclib.Readln` | Prompt / read-line handshake via funlib `readln` | Yes (I/O) |
 | **Timer** | `julay.proclib.Timer` | Cancellable timer (`createTimer`, `startTimer`, `timeout`, `cancelTimer`); uses `delaySeconds`, `exitSession`, `killSessionPeer` | Yes (delay, session teardown) |
 | **HttpServer** | `julay.proclib.HttpServer` | `createHttpServer`, `receiveRequest`, `sendResponse`, `closeHttpServer` | Yes (network I/O; Kotlin-native implementation) |
 | **HttpClient** | `julay.proclib.HttpClient` | `createHttpClient`, `sendRequest`, `receiveResponse`, `closeHttpClient` | Yes (network I/O; Kotlin-native implementation) |

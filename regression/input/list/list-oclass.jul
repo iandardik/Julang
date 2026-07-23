@@ -1,4 +1,4 @@
-import julay.proclib.ExitSystem
+import julay.funlib.exitProcess
 
 obj Point {
     x : Int
@@ -22,12 +22,14 @@ proc ListOClassDemo {
             done := true
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
             done
+        after:
+            exitProcess()
     }
 }
 
-proc ListOClassTest := ListOClassDemo || ExitSystem
+proc ListOClassTest := ListOClassDemo
 
 compile ListOClassTest

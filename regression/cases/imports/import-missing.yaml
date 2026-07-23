@@ -1,4 +1,4 @@
 source: regression/input/imports/import-missing.jul
 expectCompileFailure: true
 expectCompileOutputContains:
-  - "did you mean to import julay.proclib.Println"
+  - "did you mean to import julay.proclib.Timer"

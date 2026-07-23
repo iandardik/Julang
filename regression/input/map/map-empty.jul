@@ -1,5 +1,5 @@
-import julay.proclib.ExitSystem
 import julay.funlib.length
+import julay.funlib.exitProcess
 
 proc MapEmptyDemo {
     var mp : Map<String, Int>
@@ -18,12 +18,14 @@ proc MapEmptyDemo {
             done := length(mp) = 0
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
             done
+        after:
+            exitProcess()
     }
 }
 
-proc MapEmptyTest := MapEmptyDemo || ExitSystem
+proc MapEmptyTest := MapEmptyDemo
 
 compile MapEmptyTest

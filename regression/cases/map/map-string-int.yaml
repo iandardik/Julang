@@ -5,6 +5,4 @@ programs:
       timeoutMs: 60000
       args:
         - "cli"
-      expectStdoutContains:
-        - "cli"
-        - "3"
+      expectStdout: regression/expected/map-map-string-int.stdout

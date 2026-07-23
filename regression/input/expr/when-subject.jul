@@ -1,5 +1,5 @@
-import julay.proclib.Println
-import julay.proclib.ExitSystem
+import julay.funlib.exitProcess
+import julay.funlib.println
 
 proc S {
     var key : String
@@ -17,7 +17,7 @@ proc S {
 
     internal transition assign() {
         guard:
-            print & numAssign < 10
+            print & numAssign = 0
         transit:
             x := when (key) {
                 "A" -> 1
@@ -28,19 +28,23 @@ proc S {
             numAssign := numAssign + 1
     }
 
-    transition println(msg : String) {
+    internal transition println(msg : String) {
         guard:
             ~print & (msg = x + "")
         transit:
             print := true
+        after:
+            println(msg)
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
-            print
+            print & numAssign > 0
+        after:
+            exitProcess()
     }
 }
 
-proc P := S || Println || ExitSystem
+proc P := S
 
 compile P

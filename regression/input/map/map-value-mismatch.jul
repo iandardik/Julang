@@ -1,4 +1,4 @@
-import julay.proclib.ExitSystem
+import julay.funlib.exitProcess
 
 proc BadMap {
     var mp : Map<String, Int>
@@ -8,11 +8,13 @@ proc BadMap {
             mp := ["a" -> 1, "b" -> true]
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard: true
+        after:
+            exitProcess()
     }
 }
 
-proc BadMapTest := BadMap || ExitSystem
+proc BadMapTest := BadMap
 
 compile BadMapTest

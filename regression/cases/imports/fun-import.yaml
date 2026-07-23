@@ -3,5 +3,4 @@ programs:
   - name: FunImportTest
     run:
       timeoutMs: 60000
-      expectStdoutLinesUnordered:
-        - "2"
+      expectStdout: regression/expected/imports-fun-import.stdout

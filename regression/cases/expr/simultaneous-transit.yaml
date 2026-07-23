@@ -3,5 +3,4 @@ programs:
   - name: SimultaneousTransitTest
     run:
       timeoutMs: 60000
-      expectStdoutContains:
-        - "6,5,0,doneRound"
+      expectStdout: regression/expected/expr-simultaneous-transit.stdout

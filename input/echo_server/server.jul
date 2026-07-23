@@ -1,5 +1,5 @@
-import julay.proclib.Println
 import julay.proclib.HttpServer
+import julay.funlib.println
 
 obj ReqInfo {
     req : String
@@ -52,14 +52,16 @@ proc EchoHandler {
             responded := true
     }
 
-    transition println(msg : String) {
+    internal transition println(msg : String) {
         guard:
             & responded
             & ~done
             & msg = "Req: '" + info.req + "', I responded: '" + info.resp + "'"
         transit:
             done := true
+        after:
+            println(msg)
     }
 }
 
-proc Server := ServerStarter || EchoHandler || Println || HttpServer
+proc Server := ServerStarter || EchoHandler || HttpServer

@@ -1,5 +1,5 @@
 import julay.proclib.Timer
-import julay.proclib.Println
+import julay.funlib.println
 
 proc Driver {
     var step : String
@@ -27,12 +27,14 @@ proc Driver {
         guard: false
     }
 
-    transition println(msg : String) {
+    internal transition println(msg : String) {
         guard: step = "print" & msg = "ok"
         transit: step := "idle"
+        after:
+            println(msg)
     }
 }
 
-proc TimerSmoke := Driver || Timer || Println
+proc TimerSmoke := Driver || Timer
 
 compile TimerSmoke

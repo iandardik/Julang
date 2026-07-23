@@ -1,6 +1,6 @@
-import julay.proclib.Println
 import julay.funlib.delaySeconds
 import julay.funlib.killSessionPeer
+import julay.funlib.println
 
 /*
  * Two independent timer stacks (cannot share one createTimer ctor across two clients).
@@ -183,9 +183,11 @@ proc ClientA {
         guard: false
     }
 
-    transition println(msg : String) {
-        guard: step = "done" & msg = "A-timeout"
+    internal transition printADone() {
+        guard: step = "done"
         transit: step := "idle"
+        after:
+            println("A-timeout")
     }
 }
 
@@ -215,12 +217,14 @@ proc ClientB {
         guard: false
     }
 
-    transition println(msg : String) {
-        guard: step = "done" & msg = "B-cancelled"
+    internal transition printBDone() {
+        guard: step = "done"
         transit: step := "idle"
+        after:
+            println("B-cancelled")
     }
 }
 
-proc TwoTimers := ClientA || ClientB || TimerA || HelperA || TimerB || HelperB || Println
+proc TwoTimers := ClientA || ClientB || TimerA || HelperA || TimerB || HelperB
 
 compile TwoTimers

@@ -1,7 +1,6 @@
-import julay.proclib.Println
-import julay.proclib.ExitSystem
 import julay.funlib.length
 import julay.funlib.println
+import julay.funlib.exitProcess
 
 proc MapStringIntDemo {
     var mp : Map<String, Int>
@@ -36,19 +35,23 @@ proc MapStringIntDemo {
             print := false
     }
 
-    transition println(msg : String) {
+    internal transition println(msg : String) {
         guard:
-            ~print & (msg = n + "")
+            ~print & n = 3 & (msg = n + "")
         transit:
             print := true
+        after:
+            println(msg)
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
             print & n = 3 & mp["c"] = 3
+        after:
+            exitProcess()
     }
 }
 
-proc MapStringIntTest := MapStringIntDemo || Println || ExitSystem
+proc MapStringIntTest := MapStringIntDemo
 
 compile MapStringIntTest

@@ -3,6 +3,4 @@ programs:
   - name: P
     run:
       timeoutMs: 60000
-      expectStdoutContains:
-        - "before"
-        - "after"
+      expectStdout: regression/expected/basic-before-after.stdout

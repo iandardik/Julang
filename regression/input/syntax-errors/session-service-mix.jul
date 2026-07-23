@@ -1,5 +1,3 @@
-import julay.proclib.Println
-
 proc A {
     constructor initially(args : List<String>) {
         transit:
@@ -20,6 +18,6 @@ proc B {
     }
 }
 
-proc P := A || B || Println
+proc P := A || B
 
 compile P

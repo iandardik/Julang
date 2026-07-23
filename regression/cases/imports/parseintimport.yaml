@@ -5,5 +5,4 @@ programs:
       timeoutMs: 60000
       args:
         - "7"
-      expectStdoutContains:
-        - "7"
+      expectStdout: regression/expected/imports-parseintimport.stdout

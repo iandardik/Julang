@@ -1,4 +1,4 @@
-import julay.proclib.ExitSystem
+import julay.funlib.exitProcess
 
 obj Point {
     x : Int
@@ -41,12 +41,14 @@ proc Worker {
             steps := 2
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
             steps = 2
+        after:
+            exitProcess()
     }
 }
 
-proc NestedPartialFieldTest := Worker || ExitSystem
+proc NestedPartialFieldTest := Worker
 
 compile NestedPartialFieldTest

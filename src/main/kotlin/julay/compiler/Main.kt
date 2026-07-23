@@ -29,8 +29,8 @@ class Julayc : CliktCommand(name = "julayc") {
           JULAY_PATH  Colon-separated list of directories searched for imported .jul modules
                       (after the entry file's directory, any -L paths, and the embedded stdlib).
 
-        Stdlib: julay.proclib.Println, ExitSystem, Readln, and Timer are Julay modules shipped in the
-        compiler jar. julay.proclib.HttpServer and julay.proclib.HttpClient remain Kotlin-native libraries
+        Stdlib: julay.proclib.Timer is a Julay module shipped in the compiler jar.
+        julay.proclib.HttpServer and julay.proclib.HttpClient remain Kotlin-native libraries
         (with builtin HttpServerRequest/Response and HttpClientRequest/Response obj types).
 
         Use `julayc analyze --help` to inspect program structure without codegen.

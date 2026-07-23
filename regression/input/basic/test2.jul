@@ -1,5 +1,5 @@
-import julay.proclib.Println
-import julay.proclib.ExitSystem
+import julay.funlib.exitProcess
+import julay.funlib.println
 
 proc S {
     var x : Int
@@ -19,15 +19,19 @@ proc S {
             print := true
     }
 
-    transition println(msg : String) {
+    internal transition println(msg : String) {
         guard:
             print & (msg = x + "")
         transit:
             print := false
+        after:
+            println(msg)
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard: ~print & x > 10
+        after:
+            exitProcess()
     }
 }
 
@@ -47,6 +51,6 @@ proc T {
     }
 }
 
-proc TermTest2 := S || T || Println || ExitSystem
+proc TermTest2 := S || T
 
 compile TermTest2

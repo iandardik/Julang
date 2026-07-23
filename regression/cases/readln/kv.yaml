@@ -8,17 +8,13 @@ programs:
         - "B"
         - "C"
         - "exit"
-      expectStdoutContains:
-        - "val:"
-        - "apple"
-        - "banana"
-        - "cherry"
+      expectStdout: regression/expected/readln-kv-one.stdout
   - name: KVTwo
     run:
       timeoutMs: 30000
       stdin:
+        - "A"
         - "B"
+        - "C"
         - "exit"
-      expectStdoutContains:
-        - "val:"
-        - "bats"
+      expectStdout: regression/expected/readln-kv-two.stdout

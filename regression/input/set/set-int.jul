@@ -1,7 +1,6 @@
-import julay.proclib.Println
-import julay.proclib.ExitSystem
 import julay.funlib.length
 import julay.funlib.println
+import julay.funlib.exitProcess
 
 proc SetIntDemo {
     var s : Set<Int>
@@ -37,19 +36,23 @@ proc SetIntDemo {
             print := false
     }
 
-    transition println(msg : String) {
+    internal transition println(msg : String) {
         guard:
-            ~print & (msg = n + "")
+            ~print & n = 2 & (msg = n + "")
         transit:
             print := true
+        after:
+            println(msg)
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
             print & n = 2 & s = {2, 3}
+        after:
+            exitProcess()
     }
 }
 
-proc SetIntTest := SetIntDemo || Println || ExitSystem
+proc SetIntTest := SetIntDemo
 
 compile SetIntTest

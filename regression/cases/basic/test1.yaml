@@ -3,8 +3,4 @@ programs:
   - name: TermTest1
     run:
       timeoutMs: 60000
-      expectStdoutLinesUnordered:
-        - "0"
-        - "4"
-        - "8"
-        - "12"
+      expectStdout: regression/expected/basic-test1-termtest1.stdout

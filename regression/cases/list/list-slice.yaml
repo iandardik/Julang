@@ -3,5 +3,4 @@ programs:
   - name: ListSliceTest
     run:
       timeoutMs: 60000
-      expectStdoutContains:
-        - "[20, 30]"
+      expectStdout: regression/expected/list-list-slice.stdout

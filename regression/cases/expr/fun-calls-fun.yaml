@@ -3,5 +3,4 @@ programs:
   - name: FunCallsFunTest
     run:
       timeoutMs: 60000
-      expectStdoutLinesUnordered:
-        - "2"
+      expectStdout: regression/expected/expr-fun-calls-fun.stdout

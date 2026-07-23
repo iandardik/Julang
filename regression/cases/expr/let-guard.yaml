@@ -3,5 +3,4 @@ programs:
   - name: P
     run:
       timeoutMs: 60000
-      expectStdoutLinesUnordered:
-        - "1"
+      expectStdout: regression/expected/expr-let-guard.stdout

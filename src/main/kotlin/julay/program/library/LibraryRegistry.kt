@@ -5,7 +5,7 @@ const val JULAY_PROCLIB = "proclib"
 const val JULAY_FUNLIB = "funlib"
 
 object LibraryRegistry {
-    val julayStdlibNames: Set<String> = setOf("Println", "ExitSystem", "Readln", "Timer")
+    val julayStdlibNames: Set<String> = setOf("Timer")
 
     val kotlinLibraries: List<JulLibrary> = listOf(
         JulHttpServer,
@@ -23,7 +23,7 @@ object LibraryRegistry {
 
     fun isJulayModule(module: String) = module == JULAY_MODULE
 
-    /** True for imports like julay.proclib.Println or julay.proclib.HttpServer. */
+    /** True for imports like julay.proclib.Timer or julay.proclib.HttpServer. */
     fun isProclibImport(parts: List<String>): Boolean =
         parts.size == 3 && parts[0] == JULAY_MODULE && parts[1] == JULAY_PROCLIB
 

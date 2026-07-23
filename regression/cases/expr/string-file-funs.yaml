@@ -5,5 +5,4 @@ programs:
       timeoutMs: 60000
       args:
         - "regression/input/expr/string-file-funs-fixture.txt"
-      expectStdoutContains:
-        - "hello-config:5001"
+      expectStdout: regression/expected/expr-string-file-funs.stdout

@@ -1,5 +1,5 @@
 import julay.proclib.Timer
-import julay.proclib.Println
+import julay.funlib.println
 
 /*
  * Start a long timer, cancel it, then start a short one that should fire.
@@ -36,12 +36,14 @@ proc Driver {
         transit: step := "print"
     }
 
-    transition println(msg : String) {
+    internal transition println(msg : String) {
         guard: step = "print" & msg = "restarted"
         transit: step := "idle"
+        after:
+            println(msg)
     }
 }
 
-proc TimerCancelRestart := Driver || Timer || Println
+proc TimerCancelRestart := Driver || Timer
 
 compile TimerCancelRestart

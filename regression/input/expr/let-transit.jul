@@ -1,5 +1,5 @@
-import julay.proclib.Println
-import julay.proclib.ExitSystem
+import julay.funlib.exitProcess
+import julay.funlib.println
 
 proc S {
     var x : Int
@@ -13,19 +13,23 @@ proc S {
             print := true
     }
 
-    transition println(msg : String) {
+    internal transition println(msg : String) {
         guard:
             print & (msg = x + "") & nested[1][0] = 2
         transit:
             print := false
+        after:
+            println(msg)
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
             ~print
+        after:
+            exitProcess()
     }
 }
 
-proc P := S || Println || ExitSystem
+proc P := S
 
 compile P

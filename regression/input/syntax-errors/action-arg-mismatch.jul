@@ -1,5 +1,3 @@
-import julay.proclib.Println
-
 proc Producer {
     var x : Int
 
@@ -32,6 +30,6 @@ proc Other {
     }
 }
 
-proc P := Producer || Other || Println
+proc P := Producer || Other
 
 compile P

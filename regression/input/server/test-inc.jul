@@ -1,7 +1,7 @@
-import julay.proclib.Println
 import julay.proclib.HttpServer
-import julay.proclib.ExitSystem
 import julay.funlib.delaySeconds
+import julay.funlib.exitProcess
+import julay.funlib.println
 
 proc Counter {
     var counter : Int
@@ -39,9 +39,11 @@ proc PeriodicPrint {
             step := "B"
     }
 
-    transition println(msg : String) {
+    internal transition println(msg : String) {
         guard:   step = "B" & (msg = localCounter + "")
         transit: step := "C"
+        after:
+            println(msg)
     }
 
     internal transition wait() {
@@ -106,13 +108,15 @@ proc IncReqHandler {
             step := "D"
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard: exit & (step = "D")
+        after:
+            exitProcess()
     }
 }
 
-proc Printer := PeriodicPrint || Println
-proc ServerLogic := ServerStarter || IncReqHandler || HttpServer || ExitSystem
+proc Printer := PeriodicPrint
+proc ServerLogic := ServerStarter || IncReqHandler || HttpServer
 proc CounterServerTest := Counter || Printer || ServerLogic
 
 compile CounterServerTest

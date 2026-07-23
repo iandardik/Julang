@@ -24,23 +24,23 @@ compile EchoServer, EchoClient
 ### Server (`server.jul`)
 
 ```jul
-proc Server := ServerStarter || EchoHandler || Println || HttpServer
+proc Server := ServerStarter || EchoHandler || HttpServer
 ```
 
 - **`ServerStarter`** — `initially` then session `createHttpServer(port)` with `port = 8000`.
-- **`EchoHandler`** — **session constructor** `receiveRequest`: one handler instance per incoming request; builds a `ReqInfo` object; session `sendResponse` with HTTP 200; then prints via `println`.
-- **`HttpServer` / `Println`** — stdlib ([Standard library](../language/standard-library.md)).
+- **`EchoHandler`** — **session constructor** `receiveRequest`: one handler instance per incoming request; builds a `ReqInfo` object; session `sendResponse` with HTTP 200; then prints via funlib `println` in an `after:` block.
+- **`HttpServer`** — stdlib ([Standard library](../language/standard-library.md)).
 
 This is a good illustration of [sessions](../language/sessions.md): sticky pairwise actions with the HTTP library, and constructing a handler upon `receiveRequest`.
 
 ### Client (`client.jul`)
 
 ```jul
-proc Client := ClientDispatcher || ClientLogic || HttpClient || Println
+proc Client := ClientDispatcher || ClientLogic || HttpClient
 ```
 
 - **`ClientDispatcher`** — `initially` reads an optional count from `args` (`parseInt` / `length` from funlib); offers `startReq` / `gotResp`; exits when all responses arrive.
-- **`ClientLogic`** — constructed on `startReq(num)`; drives `createHttpClient` → `sendRequest` → `receiveResponse` → print → `closeHttpClient` → `gotResp`.
+- **`ClientLogic`** — constructed on `startReq(num)`; drives `createHttpClient` → `sendRequest` → `receiveResponse` → print (funlib `println`) → `closeHttpClient` → `gotResp`.
 
 Spawning `ClientLogic` via a **named constructor** (`startReq`) after program `initially` shows the “construct upon an action” pattern from [Processes](../language/processes.md).
 
@@ -82,7 +82,7 @@ Request order can interleave differently across runs.
 - `session` actions with HttpServer / HttpClient
 - Session constructors for per-request handlers
 - `obj` literals (`ReqInfo`, HTTP request/response types)
-- Funlib (`length`, `parseInt`) and Println
+- Funlib (`length`, `parseInt`, `println`)
 - Multiple `compile` targets in one entry file
 
 ## See also

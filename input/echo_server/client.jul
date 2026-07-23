@@ -1,8 +1,8 @@
 import julay.proclib.HttpClient
-import julay.proclib.Println
 import julay.funlib.length
 import julay.funlib.parseInt
 import julay.funlib.exitProcess
+import julay.funlib.println
 
 proc ClientDispatcher {
     const targetNumReqs : Int
@@ -78,11 +78,13 @@ proc ClientLogic {
             state := "C"
     }
 
-    transition println(msg : String) {
+    internal transition println(msg : String) {
         guard:
             state = "C" & msg = "response: " + respText
         transit:
             state := "D"
+        after:
+            println(msg)
     }
 
     session transition closeHttpClient() {
@@ -98,4 +100,4 @@ proc ClientLogic {
     }
 }
 
-proc Client := ClientDispatcher || ClientLogic || HttpClient || Println
+proc Client := ClientDispatcher || ClientLogic || HttpClient

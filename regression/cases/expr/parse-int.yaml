@@ -5,5 +5,4 @@ programs:
       timeoutMs: 60000
       args:
         - "42"
-      expectStdoutContains:
-        - "42"
+      expectStdout: regression/expected/expr-parse-int.stdout

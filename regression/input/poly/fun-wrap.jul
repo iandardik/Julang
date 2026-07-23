@@ -1,4 +1,4 @@
-import julay.proclib.ExitSystem
+import julay.funlib.exitProcess
 
 obj Box<T> {
     value : T
@@ -31,9 +31,11 @@ proc Worker {
             steps := 2
     }
 
-    transition exitSystem() {
+    internal transition exitSystem() {
         guard:
             steps = 2
+        after:
+            exitProcess()
     }
 }
 
@@ -58,6 +60,6 @@ proc Driver {
     }
 }
 
-proc PolyFunWrapTest := Worker || Driver || ExitSystem
+proc PolyFunWrapTest := Worker || Driver
 
 compile PolyFunWrapTest
