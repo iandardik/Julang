@@ -9,10 +9,12 @@ Build:
 # → build/libs/julayc.jar
 ```
 
-Compile a Julay file (reads top-level `compile` targets):
+Compile a Julay file (reads top-level `compile` targets, unless overridden with `--compile`):
 
 ```bash
 java -jar build/libs/julayc.jar path/to/file.jul
+java -jar build/libs/julayc.jar --compile EchoServer --compile EchoClient path/to/file.jul
+java -jar build/libs/julayc.jar --compile-tla IncServer path/to/file.jul
 ```
 
 ### Useful flags
@@ -20,6 +22,8 @@ java -jar build/libs/julayc.jar path/to/file.jul
 | Flag | Meaning |
 |------|---------|
 | `-L <dir>` | Add a module search directory |
+| `--compile NAME` | Compile proc/spec `NAME` (repeatable; ignores source `compile` directives) |
+| `--compile-tla NAME` | Emit TLA+ for proc `NAME` as `<true> NAME <true>` (repeatable; no extra invariants) |
 | `--keep-build` | Keep generated `<name>-jul-build` dirs after success |
 | `--allow-unindexed-spec` | Warn instead of error when a multi-instance proc appears unindexed in a spec |
 

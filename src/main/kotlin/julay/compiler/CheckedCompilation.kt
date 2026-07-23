@@ -23,22 +23,34 @@ data class CheckedCompilation(
     val jarTargets: List<ProcDecl>,
     /** Specs named by `compile` directives. */
     val specTargets: List<ProcDecl>,
+    /**
+     * Procs named by `--compile-tla`: emit TLA+ as a plain system (equivalent to
+     * `<true> P <true>` — no assumption, no guarantee invariants).
+     */
+    val tlaProcTargets: List<ProcDecl>,
     val librariesInUse: Set<String>,
 )
 
 /**
- * Resolve the union of all `compile` directive names into JAR and TLA targets.
+ * Resolve compile target names into JAR and TLA targets.
+ * When [overrideNames] is non-empty, those names are used and source `compile`
+ * directives are ignored; otherwise names come from `compile` directives.
  * Returns null if any name is unknown (errors already printed).
  */
 fun resolveCompileTargets(
     ast: RootNode,
     unit: CompilationUnit,
     procDecls: List<ProcDecl>,
+    overrideNames: List<String> = emptyList(),
 ): Pair<List<ProcDecl>, List<ProcDecl>>? {
-    val names = ast.declNodes()
-        .filterIsInstance<CompileNode>()
-        .flatMap { it.compileNames() }
-        .distinct()
+    val names = if (overrideNames.isNotEmpty()) {
+        overrideNames.distinct()
+    } else {
+        ast.declNodes()
+            .filterIsInstance<CompileNode>()
+            .flatMap { it.compileNames() }
+            .distinct()
+    }
     val byName = procDecls.associateBy { it.name }
     val jars = mutableListOf<ProcDecl>()
     val specs = mutableListOf<ProcDecl>()
@@ -60,6 +72,40 @@ fun resolveCompileTargets(
 }
 
 /**
+ * Resolve `--compile-tla` names to procs (aliases or leaf proc classes).
+ * Specs are rejected. Returns null if any name is invalid (errors already printed).
+ */
+fun resolveCompileTlaTargets(
+    unit: CompilationUnit,
+    procDecls: List<ProcDecl>,
+    names: List<String>,
+): List<ProcDecl>? {
+    if (names.isEmpty()) return emptyList()
+    val byName = procDecls.associateBy { it.name }
+    val procs = mutableListOf<ProcDecl>()
+    val missing = mutableListOf<String>()
+    val notProcs = mutableListOf<String>()
+    for (name in names.distinct()) {
+        val decl = byName[name]
+        when {
+            decl?.type == ProcDeclType.Proc -> procs += decl
+            decl?.type == ProcDeclType.Spec -> notProcs += name
+            name in unit.allPClassNames -> procs += ProcDecl(name, emptyList(), ProcDeclType.Proc)
+            else -> missing += name
+        }
+    }
+    if (notProcs.isNotEmpty()) {
+        println("--compile-tla expects a proc, not a spec: ${notProcs.joinToString(", ")}")
+        return null
+    }
+    if (missing.isNotEmpty()) {
+        println("Unknown --compile-tla name(s): ${missing.joinToString(", ")}")
+        return null
+    }
+    return procs
+}
+
+/**
  * Load, resolve procs, and type-check. Returns null if load or type errors were printed.
  * Spec indexing warnings are printed to stderr even on success.
  */
@@ -67,6 +113,8 @@ fun prepareCheckedCompilation(
     source: Path,
     extraLibraryPaths: List<Path> = emptyList(),
     allowUnindexedSpec: Boolean = false,
+    compileNames: List<String> = emptyList(),
+    compileTlaNames: List<String> = emptyList(),
 ): CheckedCompilation? {
     val (unit, loadErrors) = loadCompilationUnit(source, extraLibraryPaths)
     if (loadErrors.isNotEmpty()) {
@@ -86,11 +134,15 @@ fun prepareCheckedCompilation(
         return null
     }
 
-    val targets = resolveCompileTargets(ast, unit, procDecls) ?: run {
+    val targets = resolveCompileTargets(ast, unit, procDecls, compileNames) ?: run {
         println("Found compile errors, exiting.")
         return null
     }
     val (jarTargets, specTargets) = targets
+    val tlaProcTargets = resolveCompileTlaTargets(unit, procDecls, compileTlaNames) ?: run {
+        println("Found compile errors, exiting.")
+        return null
+    }
 
     return CheckedCompilation(
         unit = unit,
@@ -98,6 +150,7 @@ fun prepareCheckedCompilation(
         procDecls = procDecls,
         jarTargets = jarTargets,
         specTargets = specTargets,
+        tlaProcTargets = tlaProcTargets,
         librariesInUse = unit.librariesInUse(jarTargets, procDecls),
     )
 }

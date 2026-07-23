@@ -51,6 +51,18 @@ class Julayc : CliktCommand(name = "julayc") {
         help = "Add a directory to the module search path",
     ).path(mustExist = true, canBeDir = true).multiple()
 
+    private val compileNames by option(
+        "--compile",
+        metavar = "NAME",
+        help = "Compile proc/spec NAME (repeatable; ignores source compile directives)",
+    ).multiple()
+
+    private val compileTlaNames by option(
+        "--compile-tla",
+        metavar = "NAME",
+        help = "Emit TLA+ for proc NAME as <true> NAME <true> (repeatable; no extra invariants)",
+    ).multiple()
+
     private val input by argument(
         help = "Jul source file to compile",
     ).path(mustExist = true, canBeFile = true).optional()
@@ -65,6 +77,8 @@ class Julayc : CliktCommand(name = "julayc") {
             keepBuild,
             libraryPaths,
             allowUnindexedSpec = allowUnindexedSpec,
+            compileNames = compileNames,
+            compileTlaNames = compileTlaNames,
         )
     }
 }

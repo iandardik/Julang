@@ -49,6 +49,12 @@ selects build targets:
 
 You can mix both in one file. See [Specifications](language/specifications.md) for the verification path, and [Tooling](tooling.md) for CLI flags.
 
+Override source targets from the command line with `--compile` (repeatable); when any `--compile` is given, source `compile` directives are ignored:
+
+```bash
+java -jar build/libs/julayc.jar --compile TermTest1 regression/input/basic/test1.jul
+```
+
 ## Module search path
 
 When resolving `import`, `julayc` searches, in order:
