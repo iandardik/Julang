@@ -70,9 +70,14 @@ fun tlaCodegenPass(
 
     val invariants = ast.declNodes().filterIsInstance<InvariantNode>().associateBy { it.name() }
     val ag = spec.specNodeValue() as? AgSpecExprNode
-    val invNode = ag?.let { invariants[it.invariantRef()] }
+    val invNode = ag?.let { resolveGuaranteeInvariant(it, spec.specNodeName(), invariants) }
     val invClosure = if (invNode != null) {
-        topologicalInvariantClosure(invNode.name(), invariants)
+        val invMap = if (invariants.containsKey(invNode.name())) {
+            invariants
+        } else {
+            invariants + (invNode.name() to invNode)
+        }
+        topologicalInvariantClosure(invNode.name(), invMap)
     } else {
         emptyList()
     }
@@ -1406,6 +1411,31 @@ internal fun topologicalInvariantClosure(
 
     visit(root.name())
     return order
+}
+
+/**
+ * Resolve an AG guarantee to a root [InvariantNode], or null when there is no guarantee.
+ * Named invariant symbols reuse the declared node; other formulas get a synthetic root.
+ */
+internal fun resolveGuaranteeInvariant(
+    ag: AgSpecExprNode,
+    specName: String,
+    invariants: Map<String, InvariantNode>,
+): InvariantNode? {
+    val guarantee = ag.guaranteeExpr() ?: return null
+    if (guarantee is SymbolValueExprNode && invariants.containsKey(guarantee.symbol)) {
+        return invariants.getValue(guarantee.symbol)
+    }
+    val syntheticName = when {
+        "Guarantee" !in invariants -> "Guarantee"
+        "${specName}_Inv" !in invariants -> "${specName}_Inv"
+        else -> {
+            var i = 2
+            while ("${specName}_Inv$i" in invariants) i++
+            "${specName}_Inv$i"
+        }
+    }
+    return InvariantNode(syntheticName, guarantee, ag.programLocation())
 }
 
 /** Names of invariants referenced (as bare symbols) in [expr]. */

@@ -14,6 +14,7 @@ PARALLEL : '||' ;
 TRUE : 'true' ;
 FALSE : 'false' ;
 AND : '&' ;
+MODELS : '|=' ;
 OR : '|' ;
 NOT : '~' ;
 TIMES : '*' ;

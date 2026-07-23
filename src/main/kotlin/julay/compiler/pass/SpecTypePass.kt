@@ -132,14 +132,8 @@ private fun typePassSpec(
             checkIndexing(assumeLeaves)
             checkIndexing(systemLeaves)
 
-            val invName = value.invariantRef()
-            val inv = invariants[invName]
-            if (inv == null) {
-                errors += OneLocCompileError(
-                    spec.programLocation(),
-                    "unknown invariant \"$invName\"",
-                )
-            } else {
+            val guarantee = value.guaranteeExpr()
+            if (guarantee != null) {
                 val expandedSystem = expandLeavesToPclasses(
                     systemLeaves,
                     pclassNodes,
@@ -149,13 +143,28 @@ private fun typePassSpec(
                 val systemPclasses = expandedSystem.mapNotNull { leaf ->
                     pclassNodes[leaf.name]?.let { leaf.name to it }
                 }.toMap()
-                errors += typePassInvariantNamed(
-                    invName,
-                    invariants,
-                    expandedSystem,
-                    systemPclasses,
-                    registry,
-                )
+                when {
+                    guarantee is SymbolValueExprNode && invariants.containsKey(guarantee.symbol) -> {
+                        errors += typePassInvariantNamed(
+                            guarantee.symbol,
+                            invariants,
+                            expandedSystem,
+                            systemPclasses,
+                            registry,
+                        )
+                    }
+                    else -> {
+                        errors += typePassInvariantFormula(
+                            guarantee,
+                            expandedSystem,
+                            systemPclasses,
+                            registry,
+                            invariants,
+                            checking = mutableSetOf(),
+                            checked = mutableSetOf(),
+                        )
+                    }
+                }
             }
         }
         else -> {

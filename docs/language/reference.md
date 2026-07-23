@@ -19,6 +19,7 @@ Compact cheat sheet. For explanations, use the other chapters.
 | Compare | `=` `~=` `<` `<=` `>` `>=` |
 | Arithmetic | `+` `-` `*` `/` `%` |
 | Assign | `:=` |
+| Models | `\|=` (system with guarantee) |
 | Parallel | `\|\|` |
 | Other | `.` `->` (map entries), list/map/set literals |
 
@@ -32,9 +33,12 @@ obj Name { ... }
 fun name(...) : Type { ... }
 invariant Name := Expr
 spec Name := <Assume> System <Guarantee>
+spec Name := System |= Guarantee
 spec Name := System
 compile Name1, Name2, ...
 ```
+
+`Guarantee` may be a named invariant, an inline Boolean formula (`true` / `false` included), or `true` meaning no guarantee. Plain `spec := System` equals `<true> System <true>` / `--compile-tla`.
 
 `compile` targets: **proc** → JAR; **spec** → `.tla` / `.cfg`.
 

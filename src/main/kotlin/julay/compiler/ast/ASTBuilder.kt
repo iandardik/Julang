@@ -19,6 +19,10 @@ fun oneChoice(vararg choices : ParserRuleContext?) : ParserRuleContext {
     return nonNullChoices[0]
 }
 
+/** Literal `true` in a guarantee means no guarantee (same as omitting it). */
+private fun normalizeGuarantee(expr: ExprNode): ExprNode? =
+    if (expr is LiteralValueExprNode && expr.isTrueLiteral()) null else expr
+
 private fun parseTypeExpr(ctx: JulayParser.TypeExprContext): TypeExpr {
     return when {
         ctx.LPAREN() != null -> parseTypeExpr(ctx.typeExpr())
@@ -159,6 +163,19 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         val name = ctx!!.ID().text
         val value = when {
             ctx.ag_spec() != null -> visit(ctx.ag_spec())
+            ctx.MODELS() != null -> {
+                val system = visit(ctx.system_expr())
+                val guaranteeRaw = visit(ctx.expr())
+                if (guaranteeRaw !is ExprNode) {
+                    throw RuntimeException("Expected guarantee to be an expression")
+                }
+                AgSpecExprNode(
+                    assume = null,
+                    system = system,
+                    guarantee = normalizeGuarantee(guaranteeRaw),
+                    loc = sourceLocation(ctx),
+                )
+            }
             ctx.system_expr() != null -> visit(ctx.system_expr())
             else -> throw RuntimeException("Invalid spec body")
         }
@@ -173,8 +190,11 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             visit(assumeCtx.system_expr())
         }
         val system = visit(ctx.system_expr())
-        val invName = ctx.ID().text
-        return AgSpecExprNode(assume, system, invName, sourceLocation(ctx))
+        val guaranteeRaw = visit(ctx.expr())
+        if (guaranteeRaw !is ExprNode) {
+            throw RuntimeException("Expected guarantee to be an expression")
+        }
+        return AgSpecExprNode(assume, system, normalizeGuarantee(guaranteeRaw), sourceLocation(ctx))
     }
 
     override fun visitSystem_expr(ctx: JulayParser.System_exprContext?): ASTNode {

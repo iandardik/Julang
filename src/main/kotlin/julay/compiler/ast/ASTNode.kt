@@ -180,16 +180,18 @@ class AgSpecExprNode(
     /** null means `<true>` (no assumption). */
     private val assume: ASTNode?,
     private val system: ASTNode,
-    private val invariantName: String,
+    /** null means `<true>` (no guarantee). */
+    private val guarantee: ExprNode?,
     private val loc: ProgramLoc,
-) : ASTNode(listOfNotNull(assume, system)) {
+) : ASTNode(listOfNotNull(assume, system, guarantee)) {
     override fun programLocation() = loc
     internal fun assumeExpr() = assume
     internal fun systemExpr() = system
-    internal fun invariantRef() = invariantName
+    internal fun guaranteeExpr() = guarantee
     override fun toString(): String {
         val a = assume?.toString() ?: "true"
-        return "<$a> $system <$invariantName>"
+        val g = guarantee?.toString() ?: "true"
+        return "<$a> $system <$g>"
     }
 }
 
@@ -1560,6 +1562,8 @@ class LiteralValueExprNode(
         setInferredType(TypePassType.Inferred(type))
     }
     override fun programLocation() = loc
+    internal fun literalText() = value
+    internal fun isTrueLiteral() = type is BoolType && value == "true"
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         if (forceString) {
             return "ctx.mkString(\"$value\")"

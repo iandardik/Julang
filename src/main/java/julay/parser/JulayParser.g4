@@ -58,11 +58,12 @@ compile_decl
 
 spec
     : SPEC ID ASGN_EQ ag_spec
+    | SPEC ID ASGN_EQ system_expr MODELS expr
     | SPEC ID ASGN_EQ system_expr
     ;
 
 ag_spec
-    : LT assume_expr GT system_expr LT ID GT
+    : LT assume_expr GT system_expr LT expr GT
     ;
 
 assume_expr

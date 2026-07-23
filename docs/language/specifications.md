@@ -13,17 +13,19 @@ Invariants are Boolean expressions over proc state. Quantifiers (`all`, `exists`
 
 ## Specs
 
-Assume-guarantee form:
+Three surface forms (same TLA pipeline):
 
 ```jul
-spec SafeInc := <Env> Counter <Bound>
+spec Plain := Counter                      // no assume, no guarantee  (== <true> Counter <true>)
+spec WithInv := Counter |= Bound           // no assume; guarantee Bound (== <true> Counter <Bound>)
+spec SafeInc := <Env> Counter <Bound>       // full assume-guarantee
 ```
 
-- Left of the system (`<Env>`): assumption / environment
+- Left of the system (`<Env>`): assumption / environment (`true` means none)
 - Middle: system expression (procs, indexing, `||`)
-- Right (`<Bound>`): guarantee invariant
+- Right / `|=` side: guarantee — a named invariant, an inline Boolean formula, or `true` (no guarantee)
 
-Plain system form (no assume/guarantee brackets) is also allowed when you only want to emit the system.
+Plain `spec Name := System` is also what `--compile-tla Name` synthesizes for a proc.
 
 ### Indexed procs
 
