@@ -18,10 +18,10 @@ internal transition println(msg : String) {
 | `readln` | `readln()` → `String` | Read a line (used via assign in effect position) |
 | `exitProcess` | `exitProcess()` | Halt the process / program |
 | `delaySeconds` | `delaySeconds(Int)` | Sleep for N seconds |
-| `exitSession` | `exitSession()` | End session affinity with the peer; both keep running |
-| `killSessionPeer` | `killSessionPeer()` | End session and cancel the peer proc |
+| `exitSession` | `exitSession(PeerClass)` | End session affinity with the named leaf proc class; both keep running. No-op if that affinity is absent. |
+| `killSessionPeer` | `killSessionPeer(PeerClass)` | End session with the named peer class and cancel that peer. No-op if that affinity is absent. |
 
-`exitSession` and `killSessionPeer` are **transition-only** (not allowed on constructors). See [Sessions](sessions.md).
+`exitSession` and `killSessionPeer` are **transition-only** (not allowed on constructors). The argument is a bare leaf proc-class name (e.g. `TimerHelper`), not a composition alias. See [Sessions](sessions.md).
 
 ## Effects vs funlib
 

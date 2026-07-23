@@ -85,15 +85,17 @@ When a spec includes **two-sided** session actions (both peer classes appear as 
 
 **Omitted when unused:**
 
-- `*_killed` — only for leaves that are a `killSessionPeer()` peer target somewhere in the module. Those leaves also get `~killed` enablement gates, and their `*_dead` includes a kill disjunct. Specs with no `killSessionPeer` omit all `*_killed` variables.
+- `*_killed` — only for leaves that are a `killSessionPeer(Peer)` peer target somewhere in the module. Those leaves also get `~killed` enablement gates, and their `*_dead` includes a kill disjunct. Specs with no `killSessionPeer` omit all `*_killed` variables.
 - `sessionException` and `SessionIntegrity == ~sessionException` (checked in the `.cfg`) — only when a **session constructor** action exists (models rebind `JulayException`). Transition-only or exit-only session specs omit them.
 
 **Effect mapping:**
 
 | Effect | TLA+ |
 |--------|------|
-| `exitSession()` | `session_*' = FALSE` (no `*_killed` update) |
-| `killSessionPeer()` | `session_*' = FALSE` and peer `*_killed' = TRUE` (sticky) |
+| `exitSession(Peer)` | `IF anyLive THEN session /\ session_*' = FALSE ELSE UNCHANGED` |
+| `killSessionPeer(Peer)` | `IF anyLive THEN session /\ clear and peer `*_killed' = TRUE ELSE UNCHANGED` |
+
+The peer leaf is taken from the effect argument (caller ↔ named peer among SpecLeaves).
 
 Examples under [`regression/input/spec/`](../../regression/input/spec/): `session-pair.jul` (affinity only), `session-exit.jul`, `session-kill.jul`, `session-spawn-rebind.jul` (session ctor + `SessionIntegrity`).
 

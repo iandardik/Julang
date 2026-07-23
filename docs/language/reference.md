@@ -47,8 +47,8 @@ compile Name1, Name2, ...
 
 ## Effect builtins
 
-`println` · `readln` · `exitProcess` · `delaySeconds` · `exitSession` · `killSessionPeer`  
-(`exitSession` / `killSessionPeer`: transitions only)
+`println` · `readln` · `exitProcess` · `delaySeconds` · `exitSession(Peer)` · `killSessionPeer(Peer)`  
+(`exitSession` / `killSessionPeer`: transitions only; Peer is a leaf proc-class name; no-op if affinity absent)
 
 ## Funlib builtins
 

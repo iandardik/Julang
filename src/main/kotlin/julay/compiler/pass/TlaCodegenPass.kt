@@ -441,15 +441,12 @@ private fun sessionEffectNames(offer: TlaActionOffer): List<String> =
     }
 
 /**
- * Resolve the session pair targeted by exitSession/killSessionPeer on [offers].
- * - exitSession: action session pair, else unique pair involving an offering leaf.
- * - killSessionPeer: prefer a session pair involving the caller that is *not* the
- *   action's sync pair (e.g. Timer→Helper while cancelTimer syncs with Client);
- *   else the action pair / unique pair involving the caller.
+ * Resolve the session pair targeted by exitSession(Peer) / killSessionPeer(Peer) on [offers].
+ * The peer leaf name is taken from the effect's proc-class argument.
  */
 private fun resolveSessionEffectPair(
     offers: List<TlaActionOffer>,
-    actionSessionPair: SessionLeafPair?,
+    @Suppress("UNUSED_PARAMETER") actionSessionPair: SessionLeafPair?,
     allPairs: List<SessionLeafPair>,
 ): SessionLeafPair? {
     val effectNames = offers.flatMap { sessionEffectNames(it) }.toSet()
@@ -462,45 +459,42 @@ private fun resolveSessionEffectPair(
                 "exitSession and killSessionPeer",
         )
     }
-    if (hasExit) {
-        if (actionSessionPair != null) return actionSessionPair
-        val leafNames = offers.map { it.leaf.name }.toSet()
-        val matching = allPairs.filter { pair ->
-            pair.leafA.name in leafNames || pair.leafB.name in leafNames
-        }
-        return when (matching.size) {
-            1 -> matching.single()
-            0 -> throw RuntimeException(
-                "TLA+: exitSession on \"${offers.first().decl.action.name}\" " +
-                    "has no two-sided session pair among SpecLeaves",
-            )
-            else -> throw RuntimeException(
-                "TLA+: exitSession on \"${offers.first().decl.action.name}\" " +
-                    "is ambiguous across ${matching.map { it.varName }}",
-            )
-        }
+    val effectName = if (hasKill) "killSessionPeer" else "exitSession"
+    val caller = sessionEffectCaller(offers, effectName)
+        ?: throw RuntimeException("TLA+: $effectName missing caller leaf")
+    val peerName = offers.mapNotNull { sessionEffectPeerClassName(it, effectName) }.firstOrNull()
+        ?: throw RuntimeException(
+            "TLA+: $effectName on \"${offers.first().decl.action.name}\" " +
+                "requires a leaf proc class name argument",
+        )
+    if (peerName == caller.name) {
+        throw RuntimeException(
+            "TLA+: $effectName on \"${offers.first().decl.action.name}\" " +
+                "cannot target the caller leaf \"$peerName\"",
+        )
     }
-    // killSessionPeer
-    val caller = sessionEffectCaller(offers, "killSessionPeer")
-        ?: throw RuntimeException("TLA+: killSessionPeer missing caller")
-    val involving = allPairs.filter {
-        it.leafA.name == caller.name || it.leafB.name == caller.name
+    val matching = allPairs.filter { pair ->
+        (pair.leafA.name == caller.name && pair.leafB.name == peerName) ||
+            (pair.leafB.name == caller.name && pair.leafA.name == peerName)
     }
-    val nonSync = involving.filter { it.varName != actionSessionPair?.varName }
-    return when {
-        nonSync.size == 1 -> nonSync.single()
-        involving.size == 1 -> involving.single()
-        actionSessionPair != null && involving.any { it.varName == actionSessionPair.varName } &&
-            nonSync.isEmpty() -> actionSessionPair
-        involving.isEmpty() -> throw RuntimeException(
-            "TLA+: killSessionPeer on \"${offers.first().decl.action.name}\" " +
-                "has no session pair involving ${caller.name}",
+    return when (matching.size) {
+        1 -> matching.single()
+        0 -> throw RuntimeException(
+            "TLA+: $effectName on \"${offers.first().decl.action.name}\" " +
+                "has no two-sided session pair between ${caller.name} and $peerName",
         )
         else -> throw RuntimeException(
-            "TLA+: killSessionPeer on \"${offers.first().decl.action.name}\" " +
-                "is ambiguous across ${involving.map { it.varName }}",
+            "TLA+: $effectName on \"${offers.first().decl.action.name}\" " +
+                "is ambiguous across ${matching.map { it.varName }}",
         )
     }
+}
+
+/** Peer proc-class name from exitSession(Peer) / killSessionPeer(Peer). */
+private fun sessionEffectPeerClassName(offer: TlaActionOffer, effectName: String): String? {
+    val stmt = offer.decl.effects.firstOrNull { it.callName() == effectName } ?: return null
+    val arg = stmt.callArgs().singleOrNull() as? SymbolValueExprNode ?: return null
+    return arg.symbol
 }
 
 /** Caller leaf for a kill/exit effect (first offer that declares it). */
@@ -598,6 +592,44 @@ private fun sessionLookup(
         binderA != null -> "$v[$binderA]"
         binderB != null -> "$v[$binderB]"
         else -> v
+    }
+}
+
+/**
+ * True when [caller] has any live session in [pair] (any peer index).
+ * Used so teardown no-op applies only when affinity is fully absent; if some peer
+ * session exists, [sessionLookup] must hold for the quantified indices.
+ */
+private fun anySessionWithCaller(
+    pair: SessionLeafPair,
+    caller: SpecLeaf,
+    binderA: String?,
+    binderB: String?,
+): String {
+    val v = pair.varName
+    val a = pair.leafA
+    val b = pair.leafB
+    return when {
+        a.isParameterized && b.isParameterized -> {
+            val da = typeDomainConstant(a.paramType!!) ?: a.paramType.toString()
+            val db = typeDomainConstant(b.paramType!!) ?: b.paramType.toString()
+            when (caller.name) {
+                a.name -> {
+                    val bb = binderB ?: indexBinderName(b, emptySet())
+                    val bb2 = "${bb}2"
+                    val ba = binderA ?: indexBinderName(a, setOf(bb))
+                    "\\E $bb2 \\in $db : $v[$ba][$bb2]"
+                }
+                b.name -> {
+                    val ba = binderA ?: indexBinderName(a, emptySet())
+                    val ba2 = "${ba}2"
+                    val bb = binderB ?: indexBinderName(b, setOf(ba))
+                    "\\E $ba2 \\in $da : $v[$ba2][$bb]"
+                }
+                else -> error("caller ${caller.name} not in pair ${pair.varName}")
+            }
+        }
+        else -> sessionLookup(pair, binderA, binderB)
     }
 }
 
@@ -990,6 +1022,10 @@ private fun emitConjoined(
     }
     // Session pair may need binders for both leaves even when indexing session after updates.
     val effectSessionPair = resolveSessionEffectPair(offers, sessionPair, allSessionPairs)
+    val tearsDownSameSessionPair =
+        effectSessionPair != null &&
+            sessionPair != null &&
+            effectSessionPair.varName == sessionPair.varName
     val pairsNeedingBinders = listOfNotNull(sessionPair, effectSessionPair).distinctBy { it.varName }
     pairsNeedingBinders.forEach { pair ->
         listOf(pair.leafA, pair.leafB).forEach { leaf ->
@@ -1142,6 +1178,9 @@ private fun emitConjoined(
             changed += sessionPair.varName
             changed += deferredSpawnChanged
             changed += "sessionException"
+        } else if (tearsDownSameSessionPair) {
+            // Rendezvous may start or continue the session; exit/kill effect sets session' below.
+            parts += "/\\ ($lookup \\/ $canStart)"
         } else {
             parts += "/\\ ($lookup \\/ $canStart)"
             parts += "/\\ ${sessionAssignTrueExpr(sessionPair, binderA, binderB)}"
@@ -1157,21 +1196,33 @@ private fun emitConjoined(
                 "TLA+: action \"$name\" cannot use both exitSession and killSessionPeer",
             )
         }
+        val effectName = if (hasKill) "killSessionPeer" else "exitSession"
+        val caller = sessionEffectCaller(offers, effectName)
+            ?: throw RuntimeException("TLA+: $effectName missing caller leaf")
         val binderA = selfBinders[effectSessionPair.leafA.name]
         val binderB = selfBinders[effectSessionPair.leafB.name]
         val lookup = sessionLookup(effectSessionPair, binderA, binderB)
+        // When a session exists, require the correct peer index (lookup); when none exists, no-op.
+        // Avoids cancelTimer(c, wrong_h) clearing transit while leaving the real helper session live.
+        val anyLive = anySessionWithCaller(effectSessionPair, caller, binderA, binderB)
         parts += "\\* Session connection semantics"
-        parts += "/\\ $lookup"
-        parts += "/\\ ${sessionAssignFalseExpr(effectSessionPair, binderA, binderB)}"
-        changed += effectSessionPair.varName
+        val thenParts = mutableListOf<String>()
+        thenParts += lookup
+        thenParts += sessionAssignFalseExpr(effectSessionPair, binderA, binderB)
+        val elseUnchanged = mutableListOf(effectSessionPair.varName)
         if (hasKill) {
-            val caller = sessionEffectCaller(offers, "killSessionPeer")
-                ?: throw RuntimeException("TLA+: killSessionPeer missing caller leaf")
             val peer = peerLeafOf(effectSessionPair, caller)
             val peerBinder = selfBinders[peer.name]
-            parts += "/\\ ${killedAssignTrueExpr(peer, peerBinder, stateVarNames)}"
-            changed += stateTlaName(peer.name, "killed", stateVarNames)
+            val killedVar = stateTlaName(peer.name, "killed", stateVarNames)
+            thenParts += killedAssignTrueExpr(peer, peerBinder, stateVarNames)
+            elseUnchanged += killedVar
+            changed += killedVar
         }
+        val thenBody = thenParts.joinToString("\n          /\\ ")
+        parts += "/\\ IF $anyLive"
+        parts += "   THEN /\\ $thenBody"
+        parts += "   ELSE /\\ UNCHANGED <<${elseUnchanged.joinToString(", ")}>>"
+        changed += effectSessionPair.varName
     }
 
     val unchanged = allVars.filter { it !in changed }

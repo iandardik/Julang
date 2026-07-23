@@ -47,7 +47,7 @@ proc TimerA {
             start := false
             timeDuration := 0
             ringTimeout := false
-        effect: killSessionPeer()
+        effect: killSessionPeer(HelperA)
     }
 
     session transition helperStartA(id : Int, time : Int) {
@@ -122,7 +122,7 @@ proc TimerB {
             start := false
             timeDuration := 0
             ringTimeout := false
-        effect: killSessionPeer()
+        effect: killSessionPeer(HelperB)
     }
 
     session transition helperStartB(id : Int, time : Int) {

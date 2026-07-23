@@ -11,7 +11,7 @@ proc Alice {
     session transition meet() {
         guard: phase = "meet"
         transit: phase := "exit"
-        effect: exitSession()
+        effect: exitSession(Bob)
     }
 
     session transition meetAgain() {

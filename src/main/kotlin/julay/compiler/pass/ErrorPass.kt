@@ -265,6 +265,10 @@ private fun RootNode.overlappingDeclNamesErrors(): List<CompileError> {
 
 private fun ProcClassNode.errorPassProcClass(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
     val localDecls = localDecls()
+    val selfName = procClassNodeName()
+    val sessionPeerNameErrors = localDecls
+        .filterIsInstance<TransitionNode>()
+        .flatMap { trans -> sessionPeerClassNameErrors(trans, selfName, procs) }
     val repeatStateVarNameErrors = localDecls
         .filterIsInstance<VarNode>()
         .groupBy { it.name }
@@ -322,9 +326,52 @@ private fun ProcClassNode.errorPassProcClass(procs: Set<String>, librariesInUse:
             )
         }
     }
-    return children.flatMap { it.errorPass(procs, librariesInUse) } + repeatStateVarNameErrors + ctorsCompleteAssgnErrors +
+    return children.flatMap { it.errorPass(procs, librariesInUse) } + sessionPeerNameErrors +
+        repeatStateVarNameErrors + ctorsCompleteAssgnErrors +
         constAssignInTransitionErrors + atLeastOneConstructorErrors + ctorTransActionNotMutexErrors
 }
+
+/** Validate exitSession(Peer) / killSessionPeer(Peer): leaf proc class, not self. */
+private fun sessionPeerClassNameErrors(
+    transNode: TransitionNode,
+    selfName: String,
+    leafProcNames: Set<String>,
+): List<CompileError> =
+    transNode.body().flatMap { it.effects() }.flatMap { stmt ->
+        val effectName = stmt.callName()
+        if (effectName !in EffectBuiltinRegistry.sessionPeerClassNameEffects) {
+            return@flatMap emptyList()
+        }
+        val arg = stmt.callArgs().singleOrNull()
+            ?: return@flatMap listOf(
+                OneLocCompileError(
+                    stmt.programLocation(),
+                    "Expected effect \"$effectName\" to take 1 argument",
+                ),
+            )
+        if (arg !is SymbolValueExprNode) {
+            return@flatMap listOf(
+                OneLocCompileError(
+                    arg.programLocation(),
+                    "Expected \"$effectName\" argument to be a leaf proc class name",
+                ),
+            )
+        }
+        val peerName = arg.symbol
+        assertOrCompileError(
+            peerName != selfName,
+            OneLocCompileError(
+                arg.programLocation(),
+                "Expected \"$effectName\" peer to be a different proc class, not \"$selfName\"",
+            ),
+        ) + assertOrCompileError(
+            peerName in leafProcNames,
+            OneLocCompileError(
+                arg.programLocation(),
+                "Expected \"$effectName\" argument \"$peerName\" to name a leaf proc class in this program",
+            ),
+        )
+    }
 
 private fun constAssignmentErrors(transNode: TransitionNode, constVarNames: Set<String>): List<CompileError> {
     if (constVarNames.isEmpty()) return emptyList()
@@ -473,7 +520,7 @@ private fun TransitionNode.errorPassTransition(procs: Set<String>, librariesInUs
         !(sessionEffectNames.contains("exitSession") && sessionEffectNames.contains("killSessionPeer")),
         OneLocCompileError(
             programLocation(),
-            "Expected at most one of exitSession() or killSessionPeer() in the same transition",
+            "Expected at most one of exitSession(Peer) or killSessionPeer(Peer) in the same transition",
         ),
     )
     return children.flatMap { it.errorPass(procs, librariesInUse) } + initiallyActionErrors +

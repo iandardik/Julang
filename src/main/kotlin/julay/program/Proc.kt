@@ -26,7 +26,8 @@ import kotlinx.coroutines.CancellationException
  * - The surviving peer lazily removes closed session entries and the corresponding affinity in
  *   [scrubClosedSessionsAndAffinity] at the start of its next transition step, then rebuilds
  *   Select so session actions fall back to the global first-contact channel.
- * - [exitSessionWith] / [requestSilentKill] end a session mid-life without waiting for natural death.
+ * - [exitSession] / [killSessionPeer] end a session mid-life without waiting for natural death;
+ *   both take a peer proc-class name and are no-ops when that affinity is absent.
  */
 class Proc(
     private val transitionSystem: TransitionSystem,
@@ -38,6 +39,9 @@ class Proc(
 ) {
     val procId: Long = program.allocateProcId()
     val classId: Int = tsInfo.classID()
+
+    /** Julay leaf proc-class name (matches [TransitionSystemStaticInfo.name]). */
+    val className: String = tsInfo.name
 
     /** peer classID → locked peer Proc (session affinity + kill handle). */
     private val affinity = mutableMapOf<Int, Proc>()
@@ -75,20 +79,20 @@ class Proc(
     }
 
     /**
-     * Prefer the sync peer of the current session action; else the unique affinity peer.
+     * End session affinity with the peer whose proc-class name is [peerClassName].
+     * No-op if there is no live affinity to that class. Both procs keep running.
      */
-    suspend fun exitSession(syncPeer: Proc?) {
-        val peer = resolveExitPeer(syncPeer)
+    suspend fun exitSession(peerClassName: String) {
+        val peer = affinityPeerByClassName(peerClassName) ?: return
         exitSessionWith(peer.procId)
     }
 
     /**
-     * Prefer an affinity peer that is not the current sync peer (e.g. Timer killing TimerHelper
-     * while cancelTimer syncs with the client). Else sync peer, else unique affinity peer.
-     * Clears the session then silently cancels the peer's run job.
+     * End session affinity with the named peer proc class and silently cancel that peer.
+     * No-op if there is no live affinity to that class.
      */
-    suspend fun killSessionPeer(syncPeer: Proc?) {
-        val peer = resolveKillPeer(syncPeer)
+    suspend fun killSessionPeer(peerClassName: String) {
+        val peer = affinityPeerByClassName(peerClassName) ?: return
         exitSessionWith(peer.procId)
         peer.requestSilentKill()
     }
@@ -156,6 +160,9 @@ class Proc(
             child.installSession(procId, name, session)
         }
     }
+
+    private fun affinityPeerByClassName(peerClassName: String): Proc? =
+        affinity.values.firstOrNull { it.className == peerClassName }
 
     private fun installSession(
         peerProcId: Long,
@@ -264,7 +271,7 @@ class Proc(
 
     /**
      * Remove closed dedicated sessions and clear affinity to peers that owned them.
-     * Called at step start and after a Select that finished without installing a payload.
+     * Called at step start and after a Select that finished without a payload.
      */
     private suspend fun scrubClosedSessionsAndAffinity() {
         val closedKeys = sessionChannelTable.entries.mapNotNull { (key, session) ->
@@ -317,39 +324,6 @@ class Proc(
             if (sessionEntry != null) {
                 installSession(peerMeta.procId, sessionEntry.key, sessionEntry.value)
             }
-        }
-    }
-
-    private fun resolveExitPeer(syncPeer: Proc?): Proc {
-        syncPeer?.let { return it }
-        return uniqueAffinityPeer("exitSession")
-    }
-
-    private fun resolveKillPeer(syncPeer: Proc?): Proc {
-        val affinityPeers = affinityPeers()
-        val nonSync = affinityPeers.filter { it !== syncPeer && it.procId != syncPeer?.procId }
-        when {
-            nonSync.size == 1 -> return nonSync.single()
-            syncPeer != null && affinityPeers.any { it.procId == syncPeer.procId } -> return syncPeer
-            syncPeer != null && affinityPeers.isEmpty() -> return syncPeer
-            affinityPeers.size == 1 -> return affinityPeers.single()
-            affinityPeers.isEmpty() && syncPeer != null -> return syncPeer
-            affinityPeers.isEmpty() -> throw JulayException("killSessionPeer: no session peer to kill")
-            else -> throw JulayException(
-                "killSessionPeer: ambiguous peers affinity=${affinityPeers.map { it.procId }} " +
-                    "syncPeer=${syncPeer?.procId}",
-            )
-        }
-    }
-
-    private fun uniqueAffinityPeer(effectName: String): Proc {
-        val peers = affinityPeers()
-        return when (peers.size) {
-            1 -> peers.single()
-            0 -> throw JulayException("$effectName: no session affinity peer to target")
-            else -> throw JulayException(
-                "$effectName: ambiguous session affinity peers ${peers.map { it.procId }}",
-            )
         }
     }
 }

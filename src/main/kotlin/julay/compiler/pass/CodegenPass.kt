@@ -494,9 +494,17 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
     val effectArgSnapshots = mutableListOf<String>()
     val effectLines = effects.mapIndexed { i, stmt ->
         val argTemps = stmt.callArgs().mapIndexed { j, arg ->
-            val temp = "__effectArg_${i}_$j"
-            effectArgSnapshots += "val $temp = ${arg.toTransitString(symbolTypes, argSymbols)}"
-            temp
+            if (stmt.callName() in EffectBuiltinRegistry.sessionPeerClassNameEffects) {
+                val peerName = (arg as? SymbolValueExprNode)?.symbol
+                    ?: throw RuntimeException(
+                        "Expected \"${stmt.callName()}\" argument to be a leaf proc class name",
+                    )
+                "\"${peerName.escapeKotlinStringLiteral()}\""
+            } else {
+                val temp = "__effectArg_${i}_$j"
+                effectArgSnapshots += "val $temp = ${arg.toTransitString(symbolTypes, argSymbols)}"
+                temp
+            }
         }
         EffectBuiltinRegistry.effectStmtKotlinString(
             stmt,

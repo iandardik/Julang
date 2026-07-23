@@ -125,11 +125,21 @@ class SessionAffinityTest {
         val child = Proc(EmptyTS(), childInfo, program.staticChannelTable, program)
         parent.establishSessionWithSpawnedChild(child, ctorAct)
         assertEquals(listOf(child.procId), parent.affinityPeerIds())
-        parent.exitSessionWith(child.procId)
+        parent.exitSession(child.className)
         assertTrue(parent.affinityPeerIds().isEmpty())
         // Child was not silently killed — can establish again after scrub.
         parent.establishSessionWithSpawnedChild(child, ctorAct)
         assertEquals(listOf(child.procId), parent.affinityPeerIds())
+    }
+
+    @Test
+    fun exitSessionNoopWhenNoAffinity() = runBlocking {
+        val followOn = SymbolicAction("followOn", listOf(Variable("x", stringType)), isSession = true)
+        val parentInfo = TransitionSystemStaticInfo("ParentTS$", setOf(followOn), emptyMap())
+        val program = Program(setOf(parentInfo))
+        val parent = Proc(EmptyTS(), parentInfo, program.staticChannelTable, program)
+        parent.exitSession("ChildTS$")
+        assertTrue(parent.affinityPeerIds().isEmpty())
     }
 
     @Test
@@ -151,12 +161,21 @@ class SessionAffinityTest {
         val child1 = Proc(EmptyTS(), childInfo, program.staticChannelTable, program)
         val child2 = Proc(EmptyTS(), childInfo, program.staticChannelTable, program)
         parent.establishSessionWithSpawnedChild(child1, ctorAct)
-        parent.exitSessionWith(child1.procId)
-        child1.requestSilentKill()
+        parent.killSessionPeer(child1.className)
         // Child1 never entered run(); simulate peer exit cleanup by running empty TS.
         child1.run()
         parent.establishSessionWithSpawnedChild(child2, ctorAct)
         assertEquals(listOf(child2.procId), parent.affinityPeerIds())
+    }
+
+    @Test
+    fun killSessionPeerNoopWhenNoAffinity() = runBlocking {
+        val followOn = SymbolicAction("followOn", listOf(Variable("x", stringType)), isSession = true)
+        val parentInfo = TransitionSystemStaticInfo("ParentTS$", setOf(followOn), emptyMap())
+        val program = Program(setOf(parentInfo))
+        val parent = Proc(EmptyTS(), parentInfo, program.staticChannelTable, program)
+        parent.killSessionPeer("ChildTS$")
+        assertTrue(parent.affinityPeerIds().isEmpty())
     }
 
     @Test

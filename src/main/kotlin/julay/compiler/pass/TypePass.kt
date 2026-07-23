@@ -274,10 +274,6 @@ private fun EffectCallNode.typePassEffectCall(
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
 ): List<CompileError> {
-    val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
-    if (childrenErrors.isNotEmpty()) {
-        return childrenErrors
-    }
     val builtin = EffectBuiltinRegistry.lookup(callName())
     if (builtin == null) {
         return listOf(OneLocCompileError(programLocation(), "Unknown effect builtin \"${callName()}\""))
@@ -289,6 +285,29 @@ private fun EffectCallNode.typePassEffectCall(
                 "Expected effect \"${callName()}\" not to take type arguments",
             ),
         )
+    }
+    if (callName() in EffectBuiltinRegistry.sessionPeerClassNameEffects) {
+        // Peer class name is a bare identifier, not a typed value expression.
+        if (builtin.paramTypes.size != callArgs().size) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected effect \"${callName()}\" to take ${builtin.paramTypes.size} argument(s) but got ${callArgs().size}",
+                ),
+            )
+        }
+        val arg = callArgs().single()
+        return assertOrCompileError(
+            arg is SymbolValueExprNode,
+            OneLocCompileError(
+                arg.programLocation(),
+                "Expected \"${callName()}\" argument to be a leaf proc class name",
+            ),
+        )
+    }
+    val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    if (childrenErrors.isNotEmpty()) {
+        return childrenErrors
     }
     if (builtin.paramTypes.size != callArgs().size) {
         return listOf(

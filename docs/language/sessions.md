@@ -9,10 +9,10 @@ A **`session`** action marks an **exclusive pairwise** protocol between two proc
 1. **First contact** — peers synchronize on a session action; affinity is established.
 2. **Sticky follow-ons** — later offers of session actions with that peer stay paired.
 3. **End of session** — when a peer exits, or via effects:
-   - `exitSession()` — clear affinity; **both** procs keep running
-   - `killSessionPeer()` — clear affinity and **cancel** the peer proc
+   - `exitSession(PeerClass)` — clear affinity with the named leaf proc class; **both** procs keep running (no-op if that affinity is absent)
+   - `killSessionPeer(PeerClass)` — clear affinity with the named peer class and **cancel** that peer proc (no-op if absent)
 
-`exitSession` and `killSessionPeer` may appear only on **transitions** (not constructors). See [Effects](effects.md).
+`exitSession` and `killSessionPeer` may appear only on **transitions** (not constructors). The argument must be a leaf proc-class name. See [Effects](effects.md).
 
 How affinity, teardown, and these effects appear in generated TLA+ (including what is omitted when unused) is documented under [Sessions in TLA+](specifications.md#sessions-in-tla).
 
@@ -36,7 +36,7 @@ The handler instance is constructed per request and talks to the HTTP library th
 
 ## Timer
 
-[`julay.proclib.Timer`](../../src/main/resources/stdlib/julay/proclib/Timer.jul) exposes `createTimer`, `startTimer`, `timeout`, and `cancelTimer`. Cancel uses `killSessionPeer()` so the delaying helper can be stopped without blocking the controller.
+[`julay.proclib.Timer`](../../src/main/resources/stdlib/julay/proclib/Timer.jul) exposes `createTimer`, `startTimer`, `timeout`, and `cancelTimer`. Helper completion uses `exitSession(TimerHelper)` on `timerHelperEnd`; cancel uses `killSessionPeer(TimerHelper)` so the delaying helper can be stopped without blocking the controller.
 
 ## See also
 

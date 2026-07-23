@@ -685,6 +685,10 @@ class SpecTlaTlcSmokeTest {
                 meetDef.contains("session_Alice_Bob' = FALSE"),
                 "expected exitSession to clear session;\n$meetDef",
             )
+            assertTrue(
+                meetDef.contains("IF session_Alice_Bob"),
+                "expected exitSession no-op when session absent;\n$meetDef",
+            )
             assertFalse(
                 meetDef.contains("Bob_killed' = TRUE") || meetDef.contains("Alice_killed' = TRUE"),
                 "exitSession must not set killed;\n$meetDef",
@@ -726,6 +730,10 @@ class SpecTlaTlcSmokeTest {
             assertTrue(
                 killDef.contains("session_Keeper_Victim' = FALSE"),
                 "expected kill to clear session;\n$killDef",
+            )
+            assertTrue(
+                killDef.contains("IF session_Keeper_Victim"),
+                "expected killSessionPeer no-op when session absent;\n$killDef",
             )
             assertTrue(
                 killDef.contains("Victim_killed' = TRUE"),

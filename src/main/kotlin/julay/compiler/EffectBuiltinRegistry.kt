@@ -45,16 +45,17 @@ object EffectBuiltinRegistry {
 
     private val exitSessionBuiltin = EffectBuiltin(
         name = "exitSession",
-        paramTypes = emptyList(),
+        // Peer proc-class name is validated specially (not an ordinary typed expr).
+        paramTypes = listOf(stringType),
         returnType = null,
-        kotlinCodegen = { _ -> "hostProc.exitSession(sessionPeer)" },
+        kotlinCodegen = { args -> "hostProc.exitSession(${args[0]})" },
     )
 
     private val killSessionPeerBuiltin = EffectBuiltin(
         name = "killSessionPeer",
-        paramTypes = emptyList(),
+        paramTypes = listOf(stringType),
         returnType = null,
-        kotlinCodegen = { _ -> "hostProc.killSessionPeer(sessionPeer)" },
+        kotlinCodegen = { args -> "hostProc.killSessionPeer(${args[0]})" },
     )
 
     private val builtins = mapOf(
@@ -71,6 +72,12 @@ object EffectBuiltinRegistry {
         exitSessionBuiltin.name,
         killSessionPeerBuiltin.name,
     )
+
+    /**
+     * Session teardown effects whose single argument is a bare leaf proc-class identifier
+     * (emitted as a string literal), not a value expression.
+     */
+    val sessionPeerClassNameEffects: Set<String> = transitionOnlyEffects
 
     fun lookup(name: String): EffectBuiltin? = builtins[name]
 

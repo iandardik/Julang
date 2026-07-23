@@ -16,7 +16,7 @@ proc Keeper {
     session transition killPeer() {
         guard: phase = "kill"
         transit: phase := "done"
-        effect: killSessionPeer()
+        effect: killSessionPeer(Victim)
     }
 }
 

@@ -11,7 +11,7 @@ Embedded under `src/main/resources/stdlib/julay/proclib/`:
 | **Println** | `julay.proclib.Println` | `service println(msg)` → effect `println` |
 | **ExitSystem** | `julay.proclib.ExitSystem` | `service exitSystem()` → `exitProcess` |
 | **Readln** | `julay.proclib.Readln` | Prompt / read line handshake |
-| **Timer** | `julay.proclib.Timer` | Cancellable timer: `createTimer`, `startTimer`, `timeout`, `cancelTimer` (cancel uses `killSessionPeer`) |
+| **Timer** | `julay.proclib.Timer` | Cancellable timer: `createTimer`, `startTimer`, `timeout`, `cancelTimer` (`killSessionPeer(TimerHelper)`); helper end uses `exitSession(TimerHelper)` |
 
 Compose them into your system like any other proc, e.g. `Server \|\| Println \|\| HttpServer`.
 

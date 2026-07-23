@@ -1,6 +1,6 @@
 /*
  * Cancellable timer: public API on TimerController; delay runs on TimerHelper so
- * cancelTimer can killSessionPeer() without blocking the controller.
+ * cancelTimer can killSessionPeer(TimerHelper) without blocking the controller.
  */
 proc TimerController {
     const LARGE_WRAP_AROUND : Int
@@ -48,7 +48,7 @@ proc TimerController {
             timeDuration := 0
             ringTimeout := false
         effect:
-            killSessionPeer()
+            killSessionPeer(TimerHelper)
     }
 
     session transition timerHelperStart(id : Int, time : Int) {
@@ -67,6 +67,8 @@ proc TimerController {
             timing
         transit:
             ringTimeout := (id = currentId)
+        effect:
+            exitSession(TimerHelper)
     }
 }
 
