@@ -57,10 +57,38 @@ java -cp /path/to/tla2tools.jar tlc2.TLC SpecName
 
 Exact classpath and options depend on your TLC install; project smoke tests live in `src/test/kotlin/julay/spec/`.
 
-## What to expect
+## Sessions in TLA+
+
+When a spec includes **two-sided** session actions (both peer classes appear as SpecLeaves), `julayc` encodes affinity and teardown in the generated module. One-sided specs (only one peer in the composition) omit the affinity helpers.
+
+**Always emitted for two-sided pairs:**
+
+- `session_A_B` — affinity flag (Init `FALSE`)
+- `CanStartSession_A_B` — whether a new session may start (exclusivity)
+- Sticky enablement on transition-only session actions: `(session \/ CanStart)` under `\* Session connection semantics`
+- `*_dead` / `EndSession_*` — clear affinity when a peer’s actions are naturally disabled (or the peer was killed, when applicable)
+
+**Per SpecLeaf (any spec):**
+
+- `*_constructed` — always emitted; constructors require `~constructed`, transitions require `constructed`
+
+**Omitted when unused:**
+
+- `*_killed` — only for leaves that are a `killSessionPeer()` peer target somewhere in the module. Those leaves also get `~killed` enablement gates, and their `*_dead` includes a kill disjunct. Specs with no `killSessionPeer` omit all `*_killed` variables.
+- `sessionException` and `SessionIntegrity == ~sessionException` (checked in the `.cfg`) — only when a **session constructor** action exists (models rebind `JulayException`). Transition-only or exit-only session specs omit them.
+
+**Effect mapping:**
+
+| Effect | TLA+ |
+|--------|------|
+| `exitSession()` | `session_*' = FALSE` (no `*_killed` update) |
+| `killSessionPeer()` | `session_*' = FALSE` and peer `*_killed' = TRUE` (sticky) |
+
+Examples under [`regression/input/spec/`](../../regression/input/spec/): `session-pair.jul` (affinity only), `session-exit.jul`, `session-kill.jul`, `session-spawn-rebind.jul` (session ctor + `SessionIntegrity`).
+
+## What else to expect
 
 - Specs model the transition system and synchronization structure relevant to the written invariants.
-- Session protocols are encoded with session-related predicates and integrity checks in the generated TLA+ (affinity / teardown behavior). Prefer learning sessions from [Sessions](sessions.md) and reading generated output for details.
 - Effects such as real-time `delaySeconds` are not a faithful continuous-time model in TLC; treat timing as approximate or structure specs around discrete control state.
 
 ## See also

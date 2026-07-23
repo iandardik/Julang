@@ -19,8 +19,9 @@ alwaysApply: false
 
 ## TLA+ encoding
 
-- Two-sided session specs emit `session_*`, `CanStartSession_*`, `EndSession_*`, plus `sessionException` (init FALSE) and `SessionIntegrity == ~sessionException` (always checked in the `.cfg`).
-- Every SpecLeaf also has `*_killed` (init FALSE). Actions are gated with `~killed`. `*_dead` includes `killed`.
+- Two-sided session specs emit `session_*`, `CanStartSession_*`, `EndSession_*`, and `*_dead`.
+- `sessionException` (init FALSE) and `SessionIntegrity == ~sessionException` (checked in the `.cfg`) are emitted **only** when a session-constructor (hybrid) action exists — models rebind `JulayException`. Transition-only session specs omit them.
+- SpecLeaves always have `*_constructed`. `*_killed` (init FALSE) is emitted **only** for leaves that are a `killSessionPeer` peer target somewhere in the module; those leaves gate actions with `~killed`, and their `*_dead` includes the kill disjunct. Specs with no `killSessionPeer` omit all `*_killed`.
 - Transition-only session actions: sticky `(session \/ CanStart)` under `\* Session connection semantics`.
 - Session ctor-bearing (hybrid) actions: under the same comment, `IF CanStart THEN` session assign + spawn updates `ELSE sessionException' = TRUE` (no spawn) — mirrors runtime `JulayException` on rebind.
 - `exitSession()` effect on an action: clear `session_*` to FALSE (no `*_dead` required; `constructed`/`killed` unchanged).

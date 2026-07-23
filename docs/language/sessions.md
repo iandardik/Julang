@@ -14,6 +14,8 @@ A **`session`** action marks an **exclusive pairwise** protocol between two proc
 
 `exitSession` and `killSessionPeer` may appear only on **transitions** (not constructors). See [Effects](effects.md).
 
+How affinity, teardown, and these effects appear in generated TLA+ (including what is omitted when unused) is documented under [Sessions in TLA+](specifications.md#sessions-in-tla).
+
 ## Session constructors
 
 A **session constructor** creates a new proc instance as part of establishing a session (for example, one HTTP handler per `receiveRequest`). While affinity to a peer of that child class is live, attempting to spawn another of the same kind fails; after the session ends, a later spawn may succeed.
@@ -40,5 +42,5 @@ The handler instance is constructed per request and talks to the HTTP library th
 
 - [Composition and actions](composition-and-actions.md)
 - [Standard library](standard-library.md)
-- [Specifications](specifications.md) — how sessions appear in generated TLA+
+- [Specifications](specifications.md) — especially [Sessions in TLA+](specifications.md#sessions-in-tla)
 - Echo / inc / list examples under [Examples](../examples/README.md)

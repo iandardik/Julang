@@ -369,17 +369,17 @@ class SpecTlaTlcSmokeTest {
                 "expected session_Alice_Bob variable;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("sessionException"),
-                "expected sessionException variable;\n$tlaText",
+                !tlaText.contains("sessionException"),
+                "transition-only session pair should omit sessionException;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("SessionIntegrity == ~sessionException"),
-                "expected SessionIntegrity helper;\n$tlaText",
+                !tlaText.contains("SessionIntegrity"),
+                "transition-only session pair should omit SessionIntegrity;\n$tlaText",
             )
             val cfgText = cfg.readText()
             assertTrue(
-                cfgText.contains("INVARIANT SessionIntegrity"),
-                "expected SessionIntegrity in cfg;\n$cfgText",
+                !cfgText.contains("INVARIANT SessionIntegrity"),
+                "transition-only session pair should omit SessionIntegrity from cfg;\n$cfgText",
             )
             assertTrue(
                 tlaText.contains("CanStartSession_Alice_Bob =="),
@@ -396,17 +396,12 @@ class SpecTlaTlcSmokeTest {
                 "expected Alice_dead and Bob_dead;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("Alice_killed") && tlaText.contains("Bob_killed"),
-                "expected Alice_killed and Bob_killed;\n$tlaText",
+                !tlaText.contains("Alice_killed") && !tlaText.contains("Bob_killed"),
+                "no killSessionPeer → omit *_killed;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("Alice_dead") &&
-                    (tlaText.contains("Alice_killed") || tlaText.contains("\\/ Alice_killed")),
-                "expected Alice_dead to reference killed;\n$tlaText",
-            )
-            assertTrue(
-                tlaText.contains("\\* True when Alice was explicitly killed or all of its actions are disabled."),
-                "expected Alice_dead comment;\n$tlaText",
+                tlaText.contains("\\* True when all of Alice's actions are disabled."),
+                "expected Alice_dead natural-death comment;\n$tlaText",
             )
             assertTrue(
                 tlaText.contains("\\* Session connection semantics"),
@@ -636,7 +631,14 @@ class SpecTlaTlcSmokeTest {
             assertTrue(tla.exists(), "expected SessionExit.tla")
             assertTrue(cfg.exists(), "expected SessionExit.cfg")
             val tlaText = tla.readText()
-            assertTrue(tlaText.contains("Alice_killed") && tlaText.contains("Bob_killed"))
+            assertTrue(
+                !tlaText.contains("Alice_killed") && !tlaText.contains("Bob_killed"),
+                "exitSession should not emit *_killed;\n$tlaText",
+            )
+            assertTrue(
+                !tlaText.contains("sessionException"),
+                "exit-only session should omit sessionException;\n$tlaText",
+            )
             val meetDef = tlaText.substringAfter("meet ==").substringBefore("\n\n")
             assertTrue(
                 meetDef.contains("session_Alice_Bob' = FALSE"),
@@ -671,6 +673,14 @@ class SpecTlaTlcSmokeTest {
             assertTrue(tla.exists(), "expected SessionKill.tla")
             assertTrue(cfg.exists(), "expected SessionKill.cfg")
             val tlaText = tla.readText()
+            assertTrue(
+                tlaText.contains("Victim_killed"),
+                "expected Victim_killed for kill target;\n$tlaText",
+            )
+            assertTrue(
+                !tlaText.contains("Keeper_killed"),
+                "caller that is not a kill target should omit Keeper_killed;\n$tlaText",
+            )
             val killDef = tlaText.substringAfter("killPeer ==").substringBefore("\n\n")
             assertTrue(
                 killDef.contains("session_Keeper_Victim' = FALSE"),
