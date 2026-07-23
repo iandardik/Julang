@@ -51,7 +51,30 @@ Spawning `ClientLogic` via a **named constructor** (`startReq`) after program `i
 java -jar build/libs/julayc.jar input/echo_server/main.jul
 ```
 
-Run the generated `EchoServer` JAR, then `EchoClient` (optionally with a request count argument). The server listens on port **8000**.
+This writes `EchoServer.jar` and `EchoClient.jar` in the current directory. Start the server, then the client (optional request-count argument; default is 25). The server listens on port **8000**.
+
+```bash
+java -jar EchoServer.jar          # terminal 1
+java -jar EchoClient.jar 3        # terminal 2
+```
+
+**Server** sample output:
+
+```text
+Req: 'ReqNum: 1', I responded: 'ReqNum: 1 is a good point!'
+Req: 'ReqNum: 2', I responded: 'ReqNum: 2 is a good point!'
+Req: 'ReqNum: 3', I responded: 'ReqNum: 3 is a good point!'
+```
+
+**Client** sample output:
+
+```text
+response: ReqNum: 1 is a good point!
+response: ReqNum: 2 is a good point!
+response: ReqNum: 3 is a good point!
+```
+
+Request order can interleave differently across runs.
 
 ## Language features showcased
 

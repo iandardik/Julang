@@ -90,7 +90,34 @@ Indexed `IncReqHandler[t : Int]` models many handler instances. See [Specificati
 java -jar build/libs/julayc.jar input/inc_server/main.jul
 ```
 
-Run the `IncServer` JAR (port **8000**). Spec artifacts appear as `HandlerSpec` / `IncSpec` TLA files in the working directory for TLC.
+This writes `IncServer.jar` (and `HandlerSpec` / `IncSpec` TLA files) in the current directory. Start the server on port **8000**, then POST with curl:
+
+```bash
+java -jar IncServer.jar           # terminal 1
+
+curl -s -X POST -d 'hello' http://localhost:8000/
+curl -s -X POST -d 'hello' http://localhost:8000/
+curl -s -X POST -d 'hi' http://localhost:8000/
+```
+
+**Client** (curl) sample — each response body is the new counter value (request body is ignored):
+
+```text
+1
+2
+3
+```
+
+**Server** sample — the printer reads the counter every 5 seconds (so quick POSTs may skip intermediate values):
+
+```text
+0
+0
+3
+3
+```
+
+Spec artifacts appear as `HandlerSpec` / `IncSpec` TLA files in the working directory for TLC.
 
 ## Language features showcased
 

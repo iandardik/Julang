@@ -67,7 +67,30 @@ Periodically `getList`s, prints the list via `println`, waits 5 seconds (`delayS
 java -jar build/libs/julayc.jar input/list_server/main.jul
 ```
 
-Run the `ListServer` JAR (port **8000**). POST bodies are appended to the running list.
+This writes `ListServer.jar` in the current directory. Start the server on port **8000**, then POST bodies to append:
+
+```bash
+java -jar ListServer.jar          # terminal 1
+
+curl -s -X POST -d 'hello' http://localhost:8000/
+curl -s -X POST -d 'world' http://localhost:8000/
+```
+
+**Client** (curl) sample — each response body is the updated list:
+
+```text
+[hello]
+[hello, world]
+```
+
+**Server** sample — the printer reads the list every 5 seconds (so quick POSTs may skip intermediate values):
+
+```text
+[]
+[]
+[hello, world]
+[hello, world]
+```
 
 ## Language features showcased
 
