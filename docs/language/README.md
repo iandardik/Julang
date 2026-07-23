@@ -23,10 +23,17 @@ flowchart LR
     A[Proc A]
     B[Proc B]
   end
-  A -->|"offer action foo"| Foo[action foo]
-  B -->|"offer action foo"| Foo
-  Foo -->|"synchronized step"| A
-  Foo -->|"synchronized step"| B
+  Foo[action foo]
+  A --- OfferA[ ]
+  OfferA -->|"offer action foo"| Foo
+  Foo -->|"synchronized step"| SyncA[ ]
+  SyncA --- A
+  B --- OfferB[ ]
+  OfferB -->|"offer action foo"| Foo
+  Foo -->|"synchronized step"| SyncB[ ]
+  SyncB --- B
+  classDef hidden fill:transparent,stroke:transparent,color:transparent,stroke-width:0
+  class OfferA,SyncA,OfferB,SyncB hidden
 ```
 
 ## Philosophy
