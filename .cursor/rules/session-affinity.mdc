@@ -8,13 +8,13 @@ alwaysApply: false
 
 - `session` transition/constructor modifier marks exclusive pairwise protocols.
 - `session` is incompatible with `service` and `internal`; all offers of an action must agree on the session tag.
-- Affinity and SyncChannel sessions are **per-Proc local** only — never a Program-global registry.
+- Affinity and SyncChannel sessions are **per-Proc local** only — never a Program-global registry. Session engage installs the peer `Proc` handle in local affinity (for `killSessionPeer`); no live-proc lookup on Program.
 - First contact: peers rendezvous on the static (global) action channel; Program creates exactly one dedicated SyncChannel in `SyncPayload.sessionToInstall`. Subsequent offers use that dedicated channel. Dedicated syncs install nothing.
 - Session constructor: sync size 1 on the global channel; spawn installs follow-on dedicated sessions before the child starts.
 - Session constructor exclusivity: while affinity to a peer of that child class is live, a second session-ctor spawn throws `JulayException` (no implicit guards; action stays user-enabled). After peer exit closes sessions and scrub clears affinity, a later spawn may establish again.
 - Session key: `(peerProcId, sessionActionName)` → dedicated `SyncChannel` (sync size 2).
 - Peer exit closes shared dedicated channels; surviving Select exits on close, scrubs affinity, and may re-handshake on the global channel. Proc exits only when no actions are enabled.
-- Mid-life session teardown via effect builtins (transitions only): `exitSession()` closes dedicated channels with the target peer and clears affinity (both procs keep running); `killSessionPeer()` does the same then silently cancels the peer proc’s job (no user-visible exception). Target: sync peer for `exitSession`; for `killSessionPeer`, prefer a non-sync affinity peer when present (e.g. Timer killing TimerHelper while cancel syncs with the client).
+- Mid-life session teardown via effect builtins (transitions only): `exitSession()` closes dedicated channels with the target peer and clears affinity (both procs keep running); `killSessionPeer()` does the same then silently cancels the peer proc’s job (no user-visible exception). Codegen calls `hostProc.exitSession(sessionPeer)` / `hostProc.killSessionPeer(sessionPeer)` after `Proc` binds the host TS via `bindHostProc` and sets the current sync peer via `setSessionPeer` around transit. Target: sync peer for `exitSession`; for `killSessionPeer`, prefer a non-sync affinity peer when present (e.g. Timer killing TimerHelper while cancel syncs with the client).
 - Untagged default = ordinary non-sticky rendezvous; `service` = shared multiplexed API.
 
 ## TLA+ encoding

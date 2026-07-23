@@ -7,6 +7,10 @@ import julay.program.action.TSAction
 /**
  * Transition systems do not worry about channels or any kind of communication--they simply deal with their own internal
  * workings. Procs, on the other hand, are what deal with communication and synchronization.
+ *
+ * [bindHostProc] / [setSessionPeer] exist so generated session-effect code can reach the host [Proc]
+ * and current sync peer without a ThreadLocal. Library TSs that never emit those effects may leave
+ * the defaults as no-ops.
  */
 interface TransitionSystem {
     /**
@@ -31,4 +35,10 @@ interface TransitionSystem {
      * the parent. Default is a no-op for TSs that need no deferred init (e.g. [Program.spawnProc]).
      */
     suspend fun finishConstruction(act: ConcreteAction) {}
+
+    /** Called once when a [Proc] wraps this TS; used by session-effect codegen. */
+    fun bindHostProc(host: Proc) {}
+
+    /** Current sync peer for this transit (or null); cleared by [Proc] after transit. */
+    fun setSessionPeer(peer: Proc?) {}
 }

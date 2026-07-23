@@ -17,7 +17,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
 import java.util.Optional
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -55,9 +54,6 @@ class Program {
      * Session actions in the program alphabet, keyed by name (for session install during sync).
      */
     private val sessionActionsByName: Map<String, SymbolicAction>
-
-    /** Live procs by id — lifecycle registry for killSessionPeer (not data IPC). */
-    private val liveProcs = ConcurrentHashMap<Long, Proc>()
 
     constructor(componentInfo: Set<TransitionSystemStaticInfo>, cliArgs: List<String> = emptyList()) {
         this.componentInfo = componentInfo
@@ -99,16 +95,6 @@ class Program {
     fun isConstructorAction(act: SymbolicAction): Boolean = act in constructorActions
 
     fun allocateProcId(): Long = nextProcId.getAndIncrement()
-
-    fun registerProc(proc: Proc) {
-        liveProcs[proc.procId] = proc
-    }
-
-    fun unregisterProc(procId: Long) {
-        liveProcs.remove(procId)
-    }
-
-    fun lookupProc(procId: Long): Proc? = liveProcs[procId]
 
     fun sessionActions(): Collection<SymbolicAction> = sessionActionsByName.values
 
@@ -188,7 +174,13 @@ class Program {
                 }
                 val syncPeers = constraints
                     .filter { it.procId >= 0 }
-                    .map { SessionPeerMeta(it.procId, it.classId) }
+                    .map { c ->
+                        val proc = c.proc
+                            ?: throw JulayException(
+                                "session sync constraint for proc ${c.procId} missing Proc handle",
+                            )
+                        SessionPeerMeta(c.procId, c.classId, proc)
+                    }
                 val sessionToInstall =
                     if (installSession) {
                         val actionName = act.name

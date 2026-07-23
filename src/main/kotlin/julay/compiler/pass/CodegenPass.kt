@@ -369,9 +369,15 @@ private fun ProcClassDecl.kotlinClassString(
         "\nelse -> {}".prependIndent().prependIndent() +
         "\n}".prependIndent() +
         "\n}"
+    val hostBindStr =
+        "private lateinit var hostProc: Proc\n" +
+            "private var sessionPeer: Proc? = null\n" +
+            "override fun bindHostProc(host: Proc) { hostProc = host }\n" +
+            "override fun setSessionPeer(peer: Proc?) { sessionPeer = peer }"
     return "class $name(" +
         "\nprivate val program: Program".prependIndent() +
         "\n) : TransitionSystem {" +
+        "\n${hostBindStr.prependIndent()}" +
         (if (stateFieldsStr.isEmpty()) "" else "\n${stateFieldsStr.prependIndent()}") +
         registerTypes +
         "\n$finishConstructionStr".prependIndent() +

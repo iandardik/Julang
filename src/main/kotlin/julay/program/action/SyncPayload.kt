@@ -2,6 +2,7 @@ package julay.program.action
 
 import julay.concurrency.SyncChannel
 import julay.program.Constraint
+import julay.program.Proc
 import java.util.Optional
 
 /**
@@ -24,4 +25,5 @@ data class SyncPayload(
 data class SessionPeerMeta(
     val procId: Long,
     val classId: Int,
+    val proc: Proc,
 )

@@ -47,14 +47,14 @@ object EffectBuiltinRegistry {
         name = "exitSession",
         paramTypes = emptyList(),
         returnType = null,
-        kotlinCodegen = { _ -> "julay.program.ProcEffectContext.exitSession()" },
+        kotlinCodegen = { _ -> "hostProc.exitSession(sessionPeer)" },
     )
 
     private val killSessionPeerBuiltin = EffectBuiltin(
         name = "killSessionPeer",
         paramTypes = emptyList(),
         returnType = null,
-        kotlinCodegen = { _ -> "julay.program.ProcEffectContext.killSessionPeer()" },
+        kotlinCodegen = { _ -> "hostProc.killSessionPeer(sessionPeer)" },
     )
 
     private val builtins = mapOf(

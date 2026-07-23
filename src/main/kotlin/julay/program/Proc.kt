@@ -39,8 +39,8 @@ class Proc(
     val procId: Long = program.allocateProcId()
     val classId: Int = tsInfo.classID()
 
-    /** peer classID → locked peer procId (session affinity). */
-    private val affinity = mutableMapOf<Int, Long>()
+    /** peer classID → locked peer Proc (session affinity + kill handle). */
+    private val affinity = mutableMapOf<Int, Proc>()
 
     /** (peerProcId, actionName) → dedicated session SyncChannel. */
     private val sessionChannelTable = mutableMapOf<Pair<Long, String>, SyncChannel<SyncPayload, Constraint>>()
@@ -49,11 +49,17 @@ class Proc(
     @Volatile
     private var runJob: Job? = null
 
+    init {
+        transitionSystem.bindHostProc(this)
+    }
+
     fun bindRunJob(job: Job) {
         runJob = job
     }
 
-    fun affinityPeerIds(): List<Long> = affinity.values.toList()
+    fun affinityPeerIds(): List<Long> = affinity.values.map { it.procId }
+
+    fun affinityPeers(): List<Proc> = affinity.values.toList()
 
     /**
      * Close dedicated sessions with [peerProcId] and clear affinity to that peer.
@@ -64,8 +70,27 @@ class Proc(
             .filter { it.key.first == peerProcId }
             .map { it.key to it.value }
         toClose.forEach { (key, _) -> sessionChannelTable.remove(key) }
-        affinity.entries.removeAll { (_, id) -> id == peerProcId }
+        affinity.entries.removeAll { (_, peer) -> peer.procId == peerProcId }
         toClose.forEach { (_, channel) -> channel.close() }
+    }
+
+    /**
+     * Prefer the sync peer of the current session action; else the unique affinity peer.
+     */
+    suspend fun exitSession(syncPeer: Proc?) {
+        val peer = resolveExitPeer(syncPeer)
+        exitSessionWith(peer.procId)
+    }
+
+    /**
+     * Prefer an affinity peer that is not the current sync peer (e.g. Timer killing TimerHelper
+     * while cancelTimer syncs with the client). Else sync peer, else unique affinity peer.
+     * Clears the session then silently cancels the peer's run job.
+     */
+    suspend fun killSessionPeer(syncPeer: Proc?) {
+        val peer = resolveKillPeer(syncPeer)
+        exitSessionWith(peer.procId)
+        peer.requestSilentKill()
     }
 
     /** Mark this proc for silent death and cancel its run [Job] if bound. */
@@ -75,11 +100,10 @@ class Proc(
     }
 
     suspend fun run() {
-        program.registerProc(this)
         try {
             try {
                 constructorAct?.let { act ->
-                    ProcEffectContext.withProc(this) {
+                    withSessionPeer(null) {
                         transitionSystem.finishConstruction(act)
                     }
                 }
@@ -99,7 +123,6 @@ class Proc(
             }
         } finally {
             clearAffinityAndCloseSessions()
-            program.unregisterProc(procId)
         }
     }
 
@@ -113,16 +136,16 @@ class Proc(
      */
     suspend fun establishSessionWithSpawnedChild(child: Proc, constructorAct: SymbolicAction) {
         scrubClosedSessionsAndAffinity()
-        val existingPeerId = affinity[child.classId]
-        if (existingPeerId != null && existingPeerId != child.procId) {
+        val existingPeer = affinity[child.classId]
+        if (existingPeer != null && existingPeer.procId != child.procId) {
             throw JulayException(
                 "Session constructor \"${constructorAct.name}\" cannot rebind: " +
-                    "proc $procId already has affinity to peer $existingPeerId " +
+                    "proc $procId already has affinity to peer ${existingPeer.procId} " +
                     "of class ${child.classId} (attempted peer ${child.procId})",
             )
         }
-        affinity[child.classId] = child.procId
-        child.affinity[classId] = procId
+        affinity[child.classId] = child
+        child.affinity[classId] = this
         val parentSession = tsInfo.alphabet.filter { it.isSession && it.name != constructorAct.name }
         val childSession = child.tsInfo.alphabet.filter { it.isSession && it.name != constructorAct.name }
         val sharedNames = parentSession.map { it.name }.toSet().intersect(childSession.map { it.name }.toSet())
@@ -180,6 +203,7 @@ class Proc(
                     act.guard,
                     procId = procId,
                     classId = classId,
+                    proc = this,
                 ).cloneInto(caseCtx)
                 val anticonstraintExpr = when (act.syncRole) {
                     TSAction.SyncRole.Default, TSAction.SyncRole.Internal ->
@@ -191,7 +215,12 @@ class Proc(
                 }
                 // Affinity exclusivity is enforced by routing onto the dedicated session SyncChannel
                 // once affinity exists (see resolveSyncChannel). First contact may use the static channel.
-                val anticonstraint = Constraint(anticonstraintExpr, procId, classId).cloneInto(caseCtx)
+                val anticonstraint = Constraint(
+                    anticonstraintExpr,
+                    procId = procId,
+                    classId = classId,
+                    proc = this,
+                ).cloneInto(caseCtx)
                 Select.SyncCase(syncChannel, constraint, anticonstraint) { payload: SyncPayload ->
                     nextPayload = Optional.of(payload)
                 }
@@ -214,14 +243,23 @@ class Proc(
         val payload = nextPayload.get()
         applySessionPayload(payload)
         val act = payload.action
-        val syncPeerId = payload.syncPeers.firstOrNull { it.procId != procId }?.procId
-        ProcEffectContext.withProc(this, syncPeerId) {
+        val syncPeer = payload.syncPeers.firstOrNull { it.procId != procId }?.proc
+        withSessionPeer(syncPeer) {
             transitionSystem.transit(act)
         }
         if (program.isConstructorAction(act.symAction)) {
             program.spawn(act, parent = this)
         }
         return !silentlyKilled.get()
+    }
+
+    private suspend fun withSessionPeer(syncPeer: Proc?, block: suspend () -> Unit) {
+        transitionSystem.setSessionPeer(syncPeer)
+        try {
+            block()
+        } finally {
+            transitionSystem.setSessionPeer(null)
+        }
     }
 
     /**
@@ -235,7 +273,7 @@ class Proc(
         closedKeys.forEach { sessionChannelTable.remove(it) }
         // Clear affinity for peers whose sessions were closed (peer exited).
         val peersWithClosedSessions = closedKeys.map { it.first }.toSet()
-        affinity.entries.removeAll { (_, peerId) -> peerId in peersWithClosedSessions }
+        affinity.entries.removeAll { (_, peer) -> peer.procId in peersWithClosedSessions }
     }
 
     /**
@@ -252,8 +290,8 @@ class Proc(
     private suspend fun resolveSyncChannel(act: TSAction): SyncChannel<SyncPayload, Constraint> {
         act.syncChannel?.let { return it }
         if (act.symAction.isSession) {
-            for ((_, peerId) in affinity) {
-                val session = sessionChannelTable[peerId to act.symAction.name]
+            for ((_, peer) in affinity) {
+                val session = sessionChannelTable[peer.procId to act.symAction.name]
                 if (session != null && !session.isClosed()) {
                     return session
                 }
@@ -268,17 +306,50 @@ class Proc(
         }
         val peers = payload.syncPeers.filter { it.procId != procId }
         val sessionEntry = payload.sessionToInstall.orElse(null)
-        for (peer in peers) {
-            val locked = affinity[peer.classId]
+        for (peerMeta in peers) {
+            val locked = affinity[peerMeta.classId]
             if (locked == null) {
-                affinity[peer.classId] = peer.procId
-            } else if (locked != peer.procId) {
+                affinity[peerMeta.classId] = peerMeta.proc
+            } else if (locked.procId != peerMeta.procId) {
                 // Should not match a different peer when session routing works; ignore/stale.
                 continue
             }
             if (sessionEntry != null) {
-                installSession(peer.procId, sessionEntry.key, sessionEntry.value)
+                installSession(peerMeta.procId, sessionEntry.key, sessionEntry.value)
             }
+        }
+    }
+
+    private fun resolveExitPeer(syncPeer: Proc?): Proc {
+        syncPeer?.let { return it }
+        return uniqueAffinityPeer("exitSession")
+    }
+
+    private fun resolveKillPeer(syncPeer: Proc?): Proc {
+        val affinityPeers = affinityPeers()
+        val nonSync = affinityPeers.filter { it !== syncPeer && it.procId != syncPeer?.procId }
+        when {
+            nonSync.size == 1 -> return nonSync.single()
+            syncPeer != null && affinityPeers.any { it.procId == syncPeer.procId } -> return syncPeer
+            syncPeer != null && affinityPeers.isEmpty() -> return syncPeer
+            affinityPeers.size == 1 -> return affinityPeers.single()
+            affinityPeers.isEmpty() && syncPeer != null -> return syncPeer
+            affinityPeers.isEmpty() -> throw JulayException("killSessionPeer: no session peer to kill")
+            else -> throw JulayException(
+                "killSessionPeer: ambiguous peers affinity=${affinityPeers.map { it.procId }} " +
+                    "syncPeer=${syncPeer?.procId}",
+            )
+        }
+    }
+
+    private fun uniqueAffinityPeer(effectName: String): Proc {
+        val peers = affinityPeers()
+        return when (peers.size) {
+            1 -> peers.single()
+            0 -> throw JulayException("$effectName: no session affinity peer to target")
+            else -> throw JulayException(
+                "$effectName: ambiguous session affinity peers ${peers.map { it.procId }}",
+            )
         }
     }
 }

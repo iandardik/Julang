@@ -127,7 +127,7 @@ class SessionAffinityTest {
         assertEquals(listOf(child.procId), parent.affinityPeerIds())
         parent.exitSessionWith(child.procId)
         assertTrue(parent.affinityPeerIds().isEmpty())
-        // Child still registered / not silently killed — can establish again after scrub.
+        // Child was not silently killed — can establish again after scrub.
         parent.establishSessionWithSpawnedChild(child, ctorAct)
         assertEquals(listOf(child.procId), parent.affinityPeerIds())
     }
@@ -180,6 +180,10 @@ class SessionAffinityTest {
             val infoB = TransitionSystemStaticInfo("BTS$", setOf(ping), emptyMap())
             val program = Program(setOf(infoA, infoB))
             val global = program.staticChannelTable[ping]!!.channel
+            val procA = Proc(EmptyTS(), infoA, program.staticChannelTable, program)
+            val procB = Proc(EmptyTS(), infoB, program.staticChannelTable, program)
+            val infoC = TransitionSystemStaticInfo("CTS$", setOf(ping), emptyMap())
+            val procC = Proc(EmptyTS(), infoC, program.staticChannelTable, program)
 
             val sessionBox = arrayOfNulls<SyncChannel<SyncPayload, Constraint>>(1)
             val installCount = AtomicInteger(0)
@@ -187,10 +191,10 @@ class SessionAffinityTest {
             val ctxA = Context()
             val ctxB = Context()
             try {
-                val cA = Constraint(ctxA.mkTrue(), 1L, infoA.classID())
-                val aA = Constraint(ctxA.mkFalse(), 1L, infoA.classID())
-                val cB = Constraint(ctxB.mkTrue(), 2L, infoB.classID())
-                val aB = Constraint(ctxB.mkFalse(), 2L, infoB.classID())
+                val cA = Constraint(ctxA.mkTrue(), procA.procId, infoA.classID(), procA)
+                val aA = Constraint(ctxA.mkFalse(), procA.procId, infoA.classID(), procA)
+                val cB = Constraint(ctxB.mkTrue(), procB.procId, infoB.classID(), procB)
+                val aB = Constraint(ctxB.mkFalse(), procB.procId, infoB.classID(), procB)
 
                 val jA = async {
                     Select(
@@ -235,10 +239,10 @@ class SessionAffinityTest {
                 // Global re-handshake with a new peer succeeds and installs a fresh session.
                 val ctxC = Context()
                 try {
-                    val cC = Constraint(ctxC.mkTrue(), 3L, 99)
-                    val aC = Constraint(ctxC.mkFalse(), 3L, 99)
-                    val cA2 = Constraint(ctxA.mkTrue(), 1L, infoA.classID())
-                    val aA2 = Constraint(ctxA.mkFalse(), 1L, infoA.classID())
+                    val cC = Constraint(ctxC.mkTrue(), procC.procId, infoC.classID(), procC)
+                    val aC = Constraint(ctxC.mkFalse(), procC.procId, infoC.classID(), procC)
+                    val cA2 = Constraint(ctxA.mkTrue(), procA.procId, infoA.classID(), procA)
+                    val aA2 = Constraint(ctxA.mkFalse(), procA.procId, infoA.classID(), procA)
                     val reinstall = AtomicInteger(0)
                     val rA = async {
                         Select(

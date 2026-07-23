@@ -11,10 +11,11 @@ data class Constraint(
     val expr: BoolExpr,
     val procId: Long = -1L,
     val classId: Int = -1,
+    val proc: Proc? = null,
 ) {
     /**
      * Clones [expr] into [ctx] via [com.microsoft.z3.Expr.translate], preserving process metadata.
      */
     fun cloneInto(ctx: Context): Constraint =
-        Constraint(expr.translate(ctx) as BoolExpr, procId, classId)
+        Constraint(expr.translate(ctx) as BoolExpr, procId, classId, proc)
 }
