@@ -118,6 +118,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitObj(JulayParser.ObjContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#sort_decl}.
+	 * @param ctx the parse tree
+	 */
+	void enterSort_decl(JulayParser.Sort_declContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#sort_decl}.
+	 * @param ctx the parse tree
+	 */
+	void exitSort_decl(JulayParser.Sort_declContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#compile_decl}.
 	 * @param ctx the parse tree
 	 */

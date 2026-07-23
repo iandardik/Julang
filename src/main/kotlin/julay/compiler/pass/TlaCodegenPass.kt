@@ -41,6 +41,9 @@ fun tlaCodegenPass(
     val specAliases = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<SpecNode>() }
         .associateBy { it.name() }
+    val sortModels = ast.cachedObjClassRegistry()?.sorts
+        ?.mapValues { (_, sort) -> "{${sort.cfgElements.joinToString(", ")}}" }
+        ?: emptyMap()
 
     val leaves = expandLeavesToPclasses(
         compositionLeavesOfSpec(spec),
@@ -259,9 +262,10 @@ fun tlaCodegenPass(
             appendLine("INVARIANT ${invNode.name()}")
         }
         appendLine("CHECK_DEADLOCK FALSE")
-        fun modelFor(name: String): String = when (name) {
-            "Int", "Nat", "Real" -> cfgIntModel(intModelValues)
-            "String" -> cfgStringModel(intModelValues)
+        fun modelFor(name: String): String = when {
+            name in sortModels -> sortModels.getValue(name)
+            name == "Int" || name == "Nat" || name == "Real" -> cfgIntModel(intModelValues)
+            name == "String" -> cfgStringModel(intModelValues)
             else -> cfgConstantModel(name)
         }
         constants.forEach { c ->

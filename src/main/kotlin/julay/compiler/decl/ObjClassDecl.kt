@@ -51,6 +51,7 @@ fun mangleTypeForName(type: Type): String = when (type) {
     is IntType -> "Int"
     is RealType -> "Real"
     is StringType -> "String"
+    is SortType -> type.name
     is ObjClassType -> type.name
     is ListType -> "List_${mangleTypeForName(type.elementType)}"
     is SetType -> "Set_${mangleTypeForName(type.elementType)}"
@@ -80,6 +81,7 @@ internal class ObjClassResolver(
     private val resolving: MutableSet<String>,
     private val declsByName: Map<String, RawObjClassDecl>,
     private val instantiationLocs: MutableMap<String, ProgramLoc>,
+    private val sorts: Map<String, SortType> = emptyMap(),
 ) {
     fun resolveTypeExpr(
         expr: TypeExpr,
@@ -104,6 +106,9 @@ internal class ObjClassResolver(
             "List" -> return FieldTypeResolveResult.Failed("Type \"List\" expects 1 type argument")
             "Set" -> return FieldTypeResolveResult.Failed("Type \"Set\" expects 1 type argument")
             "Map" -> return FieldTypeResolveResult.Failed("Type \"Map\" expects 2 type arguments")
+        }
+        sorts[name]?.let {
+            return FieldTypeResolveResult.Success(it)
         }
         ObjClassBuiltinRegistry.lookup(name)?.let {
             return FieldTypeResolveResult.Success(it)
@@ -235,6 +240,7 @@ internal class ObjClassResolver(
         is IntType -> TypeExpr.Simple("Int")
         is RealType -> TypeExpr.Simple("Real")
         is StringType -> TypeExpr.Simple("String")
+        is SortType -> TypeExpr.Simple(type.name)
         is TypeVar -> TypeExpr.Simple(type.name)
         is ObjClassType -> TypeExpr.Simple(type.name)
         is ListType -> TypeExpr.Parametric("List", listOf(typeToTypeExpr(type.elementType)))
@@ -294,6 +300,7 @@ class ObjClassRegistry private constructor(
     private val resolver: ObjClassResolver?,
     private val declsByName: Map<String, RawObjClassDecl>,
     private val instantiationLocs: MutableMap<String, ProgramLoc>,
+    val sorts: Map<String, SortType> = emptyMap(),
 ) {
     val types: Map<String, ObjClassType>
         get() = resolvedTypes.toMap()
@@ -317,6 +324,7 @@ class ObjClassRegistry private constructor(
                     "Int" -> TypeResolveResult.Found(intType)
                     "String" -> TypeResolveResult.Found(stringType)
                     else -> typeParamEnv[expr.name]?.let { TypeResolveResult.Found(it) }
+                        ?: sorts[expr.name]?.let { TypeResolveResult.Found(it) }
                         ?: ObjClassBuiltinRegistry.lookup(expr.name)?.let { TypeResolveResult.Found(it) }
                         ?: resolvedTypes[expr.name]?.let { TypeResolveResult.Found(it) }
                         ?: TypeResolveResult.Error("Unknown type \"${expr.name}\"")
@@ -390,9 +398,13 @@ class ObjClassRegistry private constructor(
             null,
             emptyMap(),
             mutableMapOf(),
+            emptyMap(),
         )
 
-        fun build(rawDecls: List<RawObjClassDecl>): ObjClassRegistry {
+        fun build(
+            rawDecls: List<RawObjClassDecl>,
+            sorts: Map<String, SortType> = emptyMap(),
+        ): ObjClassRegistry {
             val errors = mutableListOf<CompileError>()
             for (raw in rawDecls) {
                 if (ObjClassBuiltinRegistry.isBuiltin(raw.name)) {
@@ -400,6 +412,14 @@ class ObjClassRegistry private constructor(
                         OneLocCompileError(
                             raw.loc,
                             "obj \"${raw.name}\" conflicts with a builtin obj type",
+                        ),
+                    )
+                }
+                if (raw.name in sorts) {
+                    errors.add(
+                        OneLocCompileError(
+                            raw.loc,
+                            "obj \"${raw.name}\" conflicts with a sort of the same name",
                         ),
                     )
                 }
@@ -415,16 +435,26 @@ class ObjClassRegistry private constructor(
             val declsByName = rawDecls.associateBy { it.name }
             val instantiationLocs = mutableMapOf<String, ProgramLoc>()
 
-            val resolver = ObjClassResolver(resolved, resolving, declsByName, instantiationLocs)
+            val resolver = ObjClassResolver(resolved, resolving, declsByName, instantiationLocs, sorts)
             rawDecls.filter { it.typeParams.isEmpty() }.forEach { raw ->
                 when (val result = resolver.resolveNullaryObjClass(raw.name)) {
-                    is ObjClassResolveResult.Success -> {}
+                    is ObjClassResolveResult.Success -> {
+                        if (result.type.containsSortType()) {
+                            errors.add(
+                                OneLocCompileError(
+                                    raw.loc,
+                                    "obj \"${raw.name}\" fields must not use sort types " +
+                                        "(sorts are only for spec/quantifier domains)",
+                                ),
+                            )
+                        }
+                    }
                     is ObjClassResolveResult.Failed ->
                         errors.add(OneLocCompileError(raw.loc, result.message))
                 }
             }
 
-            return ObjClassRegistry(resolved, errors, resolver, declsByName, instantiationLocs)
+            return ObjClassRegistry(resolved, errors, resolver, declsByName, instantiationLocs, sorts)
         }
     }
 }

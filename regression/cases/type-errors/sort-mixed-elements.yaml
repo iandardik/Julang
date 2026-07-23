@@ -1,0 +1,5 @@
+source: regression/input/type-errors/sort-mixed-elements.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "elements must be homogeneous"
+  - "Found type errors; exiting."

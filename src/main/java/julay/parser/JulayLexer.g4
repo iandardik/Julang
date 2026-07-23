@@ -41,6 +41,7 @@ IMPORT : 'import' ;
 
 
 OBJ : 'obj' ;
+SORT : 'sort' ;
 PROC : 'proc' ;
 COMPILE : 'compile' ;
 SPEC : 'spec' ;

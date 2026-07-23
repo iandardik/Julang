@@ -149,6 +149,18 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
+	@Override public void enterSort_decl(JulayParser.Sort_declContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitSort_decl(JulayParser.Sort_declContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
 	@Override public void enterCompile_decl(JulayParser.Compile_declContext ctx) { }
 	/**
 	 * {@inheritDoc}

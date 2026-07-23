@@ -1,0 +1,12 @@
+sort Node := {"n1", "n2", "n3"}
+
+proc P {
+    var x : Node
+
+    constructor initially(args : List<String>) {
+        transit: x := "n1"
+    }
+}
+
+proc Q := P
+compile Q

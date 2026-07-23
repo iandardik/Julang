@@ -21,10 +21,14 @@ fun RootNode.typePass(
     unit: CompilationUnit,
     allowUnindexedSpec: Boolean = false,
 ): TypePassResult {
+    val sortResult = unit.collectSorts()
+    if (sortResult.errors.isNotEmpty()) {
+        return TypePassResult(sortResult.errors)
+    }
     val allRawObjClasses = unit.modules.flatMap { module ->
         module.root.declNodes().flatMap { it.objClassPass() }
     }
-    val built = ObjClassRegistry.build(allRawObjClasses)
+    val built = ObjClassRegistry.build(allRawObjClasses, sortResult.sorts)
     cacheObjClassRegistry(built)
     unit.modules.forEach { it.root.cacheObjClassRegistry(built) }
     if (built.errors.isNotEmpty()) {
@@ -124,7 +128,7 @@ private fun VarNode.typePassVarNode(symbolEnv: Map<String, Type>, registry: ObjC
     when (val result = registry.resolveTypeExpr(typeExpr, typeParamEnv, programLocation())) {
         is TypeResolveResult.Found -> {
             resolveType(result.type)
-            emptyList()
+            listOfNotNull(sortDomainOnlyError(result.type, programLocation()))
         }
         is TypeResolveResult.Error ->
             listOf(OneLocCompileError(programLocation(), "${result.message} for state variable \"$name\""))
@@ -159,7 +163,7 @@ private fun ArgNode.typePassArgNode(symbolEnv: Map<String, Type>, registry: ObjC
     when (val result = registry.resolveTypeExpr(argTypeExpr(), typeParamEnv, programLocation())) {
         is TypeResolveResult.Found -> {
             resolveArgType(result.type)
-            emptyList()
+            listOfNotNull(sortDomainOnlyError(result.type, programLocation()))
         }
         is TypeResolveResult.Error ->
             listOf(OneLocCompileError(programLocation(), "Unknown type \"${argTypeName()}\" for action argument \"${argName()}\""))
@@ -523,7 +527,7 @@ private fun LetExprNode.typePassLet(symbolEnv: Map<String, Type>, registry: ObjC
     val typeErrors = when (val result = registry.resolveTypeExpr(letTypeExpr(), typeParamEnv, programLocation())) {
         is TypeResolveResult.Found -> {
             resolveLetType(result.type)
-            emptyList()
+            listOfNotNull(sortDomainOnlyError(result.type, programLocation()))
         }
         is TypeResolveResult.Error ->
             listOf(
@@ -1035,7 +1039,7 @@ private fun FunNode.typePassFunSignature(registry: ObjClassRegistry): List<Compi
         when (val result = registry.resolveTypeExpr(arg.argTypeExpr(), typeParamEnv, arg.programLocation())) {
             is TypeResolveResult.Found -> {
                 arg.resolveArgType(result.type)
-                emptyList()
+                listOfNotNull(sortDomainOnlyError(result.type, arg.programLocation()))
             }
             is TypeResolveResult.Error ->
                 listOf(
@@ -1049,7 +1053,7 @@ private fun FunNode.typePassFunSignature(registry: ObjClassRegistry): List<Compi
     val returnErrors = when (val result = registry.resolveTypeExpr(funReturnTypeExpr(), typeParamEnv, programLocation())) {
         is TypeResolveResult.Found -> {
             resolveReturnType(result.type)
-            emptyList()
+            listOfNotNull(sortDomainOnlyError(result.type, programLocation()))
         }
         is TypeResolveResult.Error ->
             listOf(

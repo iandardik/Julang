@@ -80,12 +80,25 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         val decl = oneChoice(
             ctx!!.proc(),
             ctx.obj(),
+            ctx.sort_decl(),
             ctx.compile_decl(),
             ctx.spec(),
             ctx.invariant_decl(),
             ctx.fun_decl(),
         )
         return visit(decl)
+    }
+
+    override fun visitSort_decl(ctx: JulayParser.Sort_declContext?): ASTNode {
+        val name = ctx!!.ID().text
+        val elements = ctx.literal().map { litCtx ->
+            val node = visit(litCtx)
+            if (node !is LiteralValueExprNode) {
+                throw RuntimeException("Expected LiteralValueExprNode but got $node")
+            }
+            node
+        }
+        return SortDeclNode(name, elements, sourceLocation(ctx))
     }
 
     override fun visitFun_decl(ctx: JulayParser.Fun_declContext?): ASTNode {

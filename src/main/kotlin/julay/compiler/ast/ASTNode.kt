@@ -226,6 +226,18 @@ class ObjClassNode(
     }
 }
 
+/** Top-level `sort Name := { lit, ... }` finite domain for TLA+ CONSTANTs. */
+class SortDeclNode(
+    private val name: String,
+    val elements: List<LiteralValueExprNode>,
+    private val loc: ProgramLoc,
+) : DeclNode(elements) {
+    override fun programLocation() = loc
+    override fun name() = name
+    override fun toString(): String =
+        "sort $name := {${elements.joinToString(", ")}}"
+}
+
 class FieldNode(
     val fieldName: String,
     val typeExpr: TypeExpr,

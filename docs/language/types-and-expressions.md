@@ -30,6 +30,14 @@ info := ReqInfo {
 
 Field access uses `.` (e.g. `info.req`). Polymorphic objects and functions are supported (`obj Box<T>`, `fun f<T>(...)`).
 
+## Finite sorts (`sort`)
+
+```jul
+sort Node := {"n1", "n2", "n3"}
+```
+
+Declares a finite homogeneous domain for **spec index and quantifier binders only** (not proc state, action args, or `obj` fields). Allowed element types: `String`, non-negative `Int`, and `Boolean`. Compiling a spec that uses the sort emits `CONSTANT Node` in TLA+ and assigns the exact set in the `.cfg`.
+
 ## Expressions
 
 - Arithmetic and comparisons: `+`, `-`, `*`, `/`, `%`, `<`, `<=`, `>`, `>=`, `=`, `~=`

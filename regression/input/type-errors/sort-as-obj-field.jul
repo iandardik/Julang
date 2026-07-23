@@ -1,0 +1,16 @@
+sort Node := {"n1", "n2", "n3"}
+
+obj Peer {
+    id : Node
+}
+
+proc P {
+    var p : Peer
+
+    constructor initially(args : List<String>) {
+        transit: p := Peer { id := "n1" }
+    }
+}
+
+proc Q := P
+compile Q

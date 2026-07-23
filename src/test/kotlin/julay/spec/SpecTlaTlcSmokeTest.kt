@@ -113,6 +113,47 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun sortIndexCompilesWithExactCfgConstant() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-sort").toFile()
+        try {
+            val source = File("regression/input/spec/sort-index.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(
+                source.toPath(),
+                keepBuild = false,
+            )
+            val tla = File("SortIndex.tla")
+            val cfg = File("SortIndex.cfg")
+            assertTrue(tla.exists(), "expected SortIndex.tla")
+            assertTrue(cfg.exists(), "expected SortIndex.cfg")
+            val tlaText = tla.readText()
+            val cfgText = cfg.readText()
+            assertTrue(
+                tlaText.contains("CONSTANT Node"),
+                "expected Node domain as CONSTANT;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("[i \\in Node |->"),
+                "expected Init to index Counter over Node;\n$tlaText",
+            )
+            assertTrue(
+                cfgText.contains("CONSTANT Node = {\"n1\", \"n2\", \"n3\"}"),
+                "expected exact Node assignment in cfg;\n$cfgText",
+            )
+            tla.copyTo(File(work, "SortIndex.tla"), overwrite = true)
+            cfg.copyTo(File(work, "SortIndex.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "SortIndex")
+        } finally {
+            work.deleteRecursively()
+            File("SortIndex.tla").delete()
+            File("SortIndex.cfg").delete()
+        }
+    }
+
+    @Test
     fun spawnWorkerCtorSyncCompilesAndTlcStarts() {
         assumeTlcPresent()
         val work = Files.createTempDirectory("julay-spec-spawn").toFile()

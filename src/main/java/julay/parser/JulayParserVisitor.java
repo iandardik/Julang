@@ -77,6 +77,12 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitObj(JulayParser.ObjContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#sort_decl}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitSort_decl(JulayParser.Sort_declContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#compile_decl}.
 	 * @param ctx the parse tree
 	 * @return the visitor result

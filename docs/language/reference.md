@@ -4,7 +4,7 @@ Compact cheat sheet. For explanations, use the other chapters.
 
 ## Keywords
 
-`proc` `obj` `fun` `import` `compile` `spec` `invariant`  
+`proc` `obj` `sort` `fun` `import` `compile` `spec` `invariant`  
 `var` `const` `constructor` `transition`  
 `internal` `service` `session`  
 `guard` `transit` `error` `effect`  
@@ -30,6 +30,7 @@ import Module.Path
 proc Name { ... }
 proc Name := Expr
 obj Name { ... }
+sort Name := { lit, ... }
 fun name(...) : Type { ... }
 invariant Name := Expr
 spec Name := <Assume> System <Guarantee>
@@ -37,6 +38,8 @@ spec Name := System |= Guarantee
 spec Name := System
 compile Name1, Name2, ...
 ```
+
+`sort` declares a finite homogeneous domain (String, non-negative Int, or Boolean literals) for **spec index / quantifier domains only**. It becomes a TLA+ `CONSTANT` with the exact set in the `.cfg`. Do not use sorts as proc state, action args, or `obj` fields.
 
 `Guarantee` may be a named invariant, an inline Boolean formula (`true` / `false` included), or `true` meaning no guarantee. Plain `spec := System` equals `<true> System <true>` / `--compile-tla`.
 

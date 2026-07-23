@@ -1,0 +1,17 @@
+sort Node := {"n1", "n2", "n3"}
+
+proc P {
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit: n := 0
+    }
+
+    transition bump(id : Node) {
+        guard: n < 3
+        transit: n := n + 1
+    }
+}
+
+proc Q := P
+compile Q

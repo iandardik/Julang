@@ -1,0 +1,5 @@
+source: regression/input/type-errors/sort-as-var.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "sort \"Node\" can only be used as a spec or quantifier domain"
+  - "Found type errors; exiting."

@@ -36,6 +36,15 @@ spec HandlerSpec := IncReqHandler[t : Int]
 spec IncSpec := <true> Counter || HandlerSpec <AllInvs>
 ```
 
+Finite domains can be declared with `sort` and used as the index type (and in quantifiers). TLC gets an exact `CONSTANT` assignment in the `.cfg`:
+
+```jul
+sort Node := {"n1", "n2", "n3"}
+spec S := Counter[n : Node]
+```
+
+Elements must be homogeneous String, non-negative Int, or Boolean literals. Sorts are not allowed in proc bodies (state / args / `obj` fields).
+
 See [`input/inc_server/main.jul`](../../input/inc_server/main.jul) and [`regression/input/spec/`](../../regression/input/spec/).
 
 ## Compiling specs

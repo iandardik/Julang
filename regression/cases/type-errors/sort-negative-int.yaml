@@ -1,0 +1,5 @@
+source: regression/input/type-errors/sort-negative-int.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Int elements must be non-negative"
+  - "Found type errors; exiting."

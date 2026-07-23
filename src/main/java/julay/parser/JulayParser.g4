@@ -20,6 +20,7 @@ qual_segment
 decl
     : proc
     | obj
+    | sort_decl
     | compile_decl
     | spec
     | invariant_decl
@@ -50,6 +51,10 @@ proc
 
 obj
     : OBJ ID typeParams? LCURLY field* RCURLY
+    ;
+
+sort_decl
+    : SORT ID ASGN_EQ LCURLY literal (COMMA literal)* RCURLY
     ;
 
 compile_decl

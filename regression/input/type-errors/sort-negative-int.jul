@@ -1,0 +1,11 @@
+sort Bad := {-1, 0, 1}
+
+proc P {
+    var n : Int
+    constructor initially(args : List<String>) {
+        transit: n := 0
+    }
+}
+
+proc Q := P
+compile Q
