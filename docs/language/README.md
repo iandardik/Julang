@@ -18,22 +18,13 @@ A Julay **program is a sequence of actions**.
 - Peers coordinate by **synchronizing on a shared action** (not shared memory). When they sync, arguments are exchanged **by copy**, never by reference.
 
 ```mermaid
-flowchart LR
-  subgraph peers [Parallel composition]
-    A[Proc A]
-    B[Proc B]
-  end
-  Foo[action foo]
-  A --- OfferA[ ]
-  OfferA -->|"offer action foo"| Foo
-  Foo -->|"synchronized step"| SyncA[ ]
-  SyncA --- A
-  B --- OfferB[ ]
-  OfferB -->|"offer action foo"| Foo
-  Foo -->|"synchronized step"| SyncB[ ]
-  SyncB --- B
-  classDef hidden fill:transparent,stroke:transparent,color:transparent,stroke-width:0
-  class OfferA,SyncA,OfferB,SyncB hidden
+sequenceDiagram
+  participant A as Proc A
+  participant Foo as action foo
+  participant B as Proc B
+  A->>Foo: offer
+  B->>Foo: offer
+  A<<->>B: synchronized step
 ```
 
 ## Philosophy
