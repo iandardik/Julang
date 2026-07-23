@@ -1,6 +1,13 @@
 # Modules
 
-## Imports
+## Imports and exports
+
+Top-level declarations are **file-private by default**. Mark names that other files may import with `export`:
+
+```jul
+export proc Server { ... }
+export fun add(x : Int, y : Int) : Int = x + y
+```
 
 ```jul
 import printer.Printer
@@ -11,6 +18,8 @@ import julay.funlib.parseInt
 - User modules: `import path.to.Name` resolves to a `.jul` file on the search path (e.g. `printer.Printer` → `printer.jul` exporting `Printer`).
 - Stdlib procs: `julay.proclib.*`
 - Funlib (pure helpers and effectful functions): `julay.funlib.*` — see [Standard library](standard-library.md)
+
+Same-file references never need `export`. Cross-file use without `export` on the defining declaration is a compile error.
 
 ## Search order
 

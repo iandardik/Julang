@@ -1,0 +1,5 @@
+# File-private decls cannot be imported; only `export`ed names can.
+source: regression/input/imports/import-private.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "has no export named \"Helper\""

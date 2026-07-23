@@ -32,6 +32,10 @@ fun codegenPass(
         procClass
     }
 
+    val leafMap = leafActionMap(ast, program.allProcNames(procDecls), librariesInUse)
+    val alphabet = computeCompositionAlphabet(program, procDecls, leafMap)
+    val channelKeys = alphabet.channelKeys
+
     val servicedActionNames = (
         procClasses.flatMap { it.transitions } +
             librariesInUse.flatMap { LibraryRegistry.actionDecls(it) }
@@ -42,7 +46,7 @@ fun codegenPass(
 
     val libProcs = kotlinLibProcs
     val staticInfoLib = libProcs.map { LibraryRegistry.staticInfoCodegenExpr(it) }
-    val staticInfoCompiledProcs = procClasses.map { it.kotlinStaticInfoString(servicedActionNames) }
+    val staticInfoCompiledProcs = procClasses.map { it.kotlinStaticInfoString(servicedActionNames, channelKeys) }
     val staticInfoBody = (staticInfoCompiledProcs + staticInfoLib).joinToString(",\n") { it }
     val staticInfo = "val tsInfo = setOf(\n" + staticInfoBody.prependIndent() + "\n)"
     val objClassDecls = ast.resolvedObjClassDecls()
@@ -102,7 +106,7 @@ fun codegenPass(
         dataClassSection +
         objClassSection +
         parametricTypeSection +
-        procClasses.joinToString("\n\n") { it.kotlinClassString(objClassDecls, servicedActionNames) } +
+        procClasses.joinToString("\n\n") { it.kotlinClassString(objClassDecls, servicedActionNames, channelKeys) } +
         "\n\n" +
         mainFunction
 
@@ -351,6 +355,7 @@ private fun ActionDecl.kotlinErrorString(
 private fun ProcClassDecl.kotlinClassString(
     objClassDecls: List<ObjClassDecl>,
     servicedActionNames: Set<String>,
+    channelKeys: Map<LeafActionId, String>,
 ): String {
     val stateVarTypes = stateVars.associate { Pair(it.name, it.type) }
     // Nullable backing fields start as null; property accessors throw until finishConstruction.
@@ -365,7 +370,7 @@ private fun ProcClassDecl.kotlinClassString(
     val registerTypes = ""
     val actionsStr = "override suspend fun actions(ctx: Context): Set<TSAction> = setOf(\n" +
         transitions.joinToString(",\n") {
-            it.kotlinActionString(stateVarTypes, servicedActionNames).prependIndent()
+            it.kotlinActionString(stateVarTypes, servicedActionNames, name, channelKeys).prependIndent()
         } +
         "\n)"
     val transitStr = "override suspend fun transit(act: ConcreteAction) {" +
@@ -408,15 +413,18 @@ private fun ProcClassDecl.kotlinClassString(
         "\n}"
 }
 
-private fun ProcClassDecl.kotlinStaticInfoString(servicedActionNames: Set<String>): String {
+private fun ProcClassDecl.kotlinStaticInfoString(
+    servicedActionNames: Set<String>,
+    channelKeys: Map<LeafActionId, String>,
+): String {
     val transitionInfo = transitions.joinToString(",\n") {
-        it.kotlinStaticInfoString(servicedActionNames).prependIndent()
+        it.kotlinStaticInfoString(servicedActionNames, name, channelKeys, isConstructor = false).prependIndent()
     }
     // Factory only allocates an uninitialized instance (null state). Constructor transit and
     // effects run later on the child proc via TransitionSystem.finishConstruction.
     val constructorPairs = constructors
         .joinToString(",\n") { ctor ->
-            val actSigStr = ctor.kotlinStaticInfoString(servicedActionNames)
+            val actSigStr = ctor.kotlinStaticInfoString(servicedActionNames, name, channelKeys, isConstructor = true)
             val constructStr = "{ program, _ -> $name(program) }"
             "Pair($actSigStr, $constructStr)".prependIndent()
         }
@@ -441,11 +449,13 @@ private fun ActionDecl.resolvedSyncRole(servicedActionNames: Set<String>): TSAct
 private fun ActionDecl.kotlinActionString(
     stateVarTypes: Map<String, Type>,
     servicedActionNames: Set<String>,
+    pclassName: String,
+    channelKeys: Map<LeafActionId, String>,
 ): String {
     val symbolTypes = stateVarTypes + actionArgEnv(action.args)
     val argSymbols = actionArgSymbols(action.args)
 
-    val actionSigStr = kotlinStaticInfoString(servicedActionNames)
+    val actionSigStr = kotlinStaticInfoString(servicedActionNames, pclassName, channelKeys, isConstructor = false)
     val guardStr = if (guards.isEmpty()) {
         "ctx.mkTrue()"
     } else if (guards.size == 1) {
@@ -518,13 +528,21 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
         .joinToString("\n")
 }
 
-private fun ActionDecl.kotlinStaticInfoString(servicedActionNames: Set<String> = emptySet()): String {
+private fun ActionDecl.kotlinStaticInfoString(
+    servicedActionNames: Set<String> = emptySet(),
+    pclassName: String = "",
+    channelKeys: Map<LeafActionId, String> = emptyMap(),
+    isConstructor: Boolean = false,
+): String {
     val actionArgsStr = action.args.joinToString(", ") {
         "Variable(\"${it.name}\", ${it.type.toCodegenTypeVal()})"
     }
+    val resolvedKey = channelKeys[LeafActionId(pclassName, action.name, isConstructor)]
+        ?: action.channelKey
     val flags = buildList {
         if (action.isInternal || modifier == TSAction.SyncRole.Internal) add("isInternal = true")
         if (action.isSession) add("isSession = true")
+        if (resolvedKey != action.name) add("channelKey = \"${resolvedKey.escapeKotlinStringLiteral()}\"")
     }
     val flagStr = if (flags.isEmpty()) "" else ", " + flags.joinToString(", ")
     return "SymbolicAction(\"${action.name}\", listOf($actionArgsStr)$flagStr)"

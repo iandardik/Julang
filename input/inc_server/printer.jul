@@ -34,4 +34,4 @@ proc PeriodicPrint {
     }
 }
 
-proc Printer := PeriodicPrint
+export proc Printer := PeriodicPrint

@@ -12,6 +12,8 @@ data class SymbolicAction(
     val args: List<Variable>,
     val isInternal: Boolean = false,
     val isSession: Boolean = false,
+    /** Channel identity; defaults to [name]. Composition-hidden and per-proc internals use distinct keys. */
+    val channelKey: String = name,
 ) {
     override fun toString(): String {
         return "$name(" + args.joinToString(", ") + ")"

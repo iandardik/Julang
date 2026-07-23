@@ -120,4 +120,4 @@ proc ClientInitializer {
     }
 }
 
-proc Initializers := RaftInitializer || ServerInitializer || ClientInitializer
+export proc Initializers := RaftInitializer || ServerInitializer || ClientInitializer

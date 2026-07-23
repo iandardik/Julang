@@ -11,7 +11,7 @@ import node.lib.parseBool
  * AppendEntries RPCs (incoming and outgoing).
  */
 
-proc IncomingAppendEntriesRPC {
+export proc IncomingAppendEntriesRPC {
     const httpReq : HttpServerRequest
     const reqBody : String
     var step : String
@@ -80,7 +80,7 @@ proc IncomingAppendEntriesRPC {
     }
 }
 
-proc OutgoingAppendEntriesRPC {
+export proc OutgoingAppendEntriesRPC {
     const cPeer : Node
     const cData : AppendEntriesData
     const cReqBody : String

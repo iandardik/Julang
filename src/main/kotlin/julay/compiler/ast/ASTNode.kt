@@ -15,8 +15,16 @@ abstract class ASTNode(
     abstract fun programLocation() : ProgramLoc
 }
 
+/** Top-level declaration visibility: file-private by default, or [Export] for `import`. */
+enum class DeclVisibility {
+    File,
+    Export,
+}
+
 abstract class DeclNode(children : List<ASTNode>) : ASTNode(children) {
     abstract fun name() : String
+    var visibility: DeclVisibility = DeclVisibility.File
+    val isExported: Boolean get() = visibility == DeclVisibility.Export
 }
 
 abstract class ProcClassDeclNode(children : List<ASTNode>) : ASTNode(children) {
@@ -119,10 +127,11 @@ class ProcClassNode(
     internal fun procClassNodeName() = name
     internal fun localDecls(): List<ProcClassDeclNode> = localDecls
     internal fun withLocalDecls(decls: List<ProcClassDeclNode>): ProcClassNode =
-        ProcClassNode(name, decls, programLocation())
+        ProcClassNode(name, decls, programLocation()).also { it.visibility = this.visibility }
     override fun toString(): String {
         val body = localDecls.joinToString("\n") { "$it".prependIndent() }
-        return "proc $name {\n$body\n}"
+        val export = if (isExported) "export " else ""
+        return "${export}proc $name {\n$body\n}"
     }
 }
 
@@ -136,7 +145,8 @@ class ProcNode(
     internal fun procNodeName() = name
     internal fun procNodeValue() = value
     override fun toString(): String {
-        return "proc $name := $value"
+        val export = if (isExported) "export " else ""
+        return "${export}proc $name := $value"
     }
 }
 

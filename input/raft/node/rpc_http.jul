@@ -10,7 +10,7 @@
  * just happens to be the case — it is not required for correctness).
  */
 
-proc RpcServer {
+export proc RpcServer {
     const httpReq : HttpServerRequest
     const path : String
     const reqBody : String
@@ -100,7 +100,7 @@ proc RpcServer {
     }
 }
 
-proc RpcClient {
+export proc RpcClient {
     var step : String
     var url : String
     var body : String

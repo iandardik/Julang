@@ -154,7 +154,7 @@ class Proc(
         val childSession = child.tsInfo.alphabet.filter { it.isSession && it.name != constructorAct.name }
         val sharedNames = parentSession.map { it.name }.toSet().intersect(childSession.map { it.name }.toSet())
         for (name in sharedNames) {
-            val act = program.sessionAction(name) ?: continue
+            val act = parentSession.firstOrNull { it.name == name } ?: continue
             val session = program.makeSessionChannel(act)
             installSession(child.procId, name, session)
             child.installSession(procId, name, session)

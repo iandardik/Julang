@@ -100,4 +100,4 @@ proc ClientLogic {
     }
 }
 
-proc Client := ClientDispatcher || ClientLogic || HttpClient
+export proc Client := ClientDispatcher || ClientLogic || HttpClient

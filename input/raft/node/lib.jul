@@ -6,17 +6,17 @@ import julay.funlib.startsWith
  * Shared Raft types and helpers (RPC encoding, config parsing, log access).
  */
 
-obj Entry {
+export obj Entry {
     term : Int
     value : String
 }
 
-obj Node {
+export obj Node {
     id : Int
     url : String
 }
 
-obj AppendEntriesData {
+export obj AppendEntriesData {
     term : Int
     leaderId : Int
     prevLogIndex : Int
@@ -27,22 +27,22 @@ obj AppendEntriesData {
     leaderCommit : Int
 }
 
-fun entryValueAt(log : List<Entry>, idx : Int) : String =
+export fun entryValueAt(log : List<Entry>, idx : Int) : String =
     let (e : Entry := log[idx]) { e.value }
 
 fun isQuorum(n : Int, granted : Set<Int>) : Boolean =
     length(granted) * 2 > n
 
-fun fieldValue(line : String) : String =
+export fun fieldValue(line : String) : String =
     split(line, "=")[1]
 
-fun encodeRequestVote(term : Int, candidateId : Int, lastLogIndex : Int, lastLogTerm : Int) : String =
+export fun encodeRequestVote(term : Int, candidateId : Int, lastLogIndex : Int, lastLogTerm : Int) : String =
     "term=" + term + "|candidateId=" + candidateId + "|lastLogIndex=" + lastLogIndex + "|lastLogTerm=" + lastLogTerm
 
-fun encodeRequestVoteResp(term : Int, voteGranted : Boolean) : String =
+export fun encodeRequestVoteResp(term : Int, voteGranted : Boolean) : String =
     "term=" + term + "|voteGranted=" + if (voteGranted) { "true" } else { "false" }
 
-fun encodeAppendEntries(data : AppendEntriesData) : String =
+export fun encodeAppendEntries(data : AppendEntriesData) : String =
     "term=" + data.term
         + "|leaderId=" + data.leaderId
         + "|prevLogIndex=" + data.prevLogIndex
@@ -52,13 +52,13 @@ fun encodeAppendEntries(data : AppendEntriesData) : String =
         + "|entryValue=" + data.entryValue
         + "|leaderCommit=" + data.leaderCommit
 
-fun encodeAppendEntriesResp(term : Int, success : Boolean, matchIndex : Int) : String =
+export fun encodeAppendEntriesResp(term : Int, success : Boolean, matchIndex : Int) : String =
     "term=" + term
         + "|success=" + if (success) { "true" } else { "false" }
         + "|matchIndex=" + matchIndex
 
-fun isBlankOrComment(line : String) : Boolean =
+export fun isBlankOrComment(line : String) : Boolean =
     line = "" | startsWith(line, "#")
 
-fun parseBool(s : String) : Boolean =
+export fun parseBool(s : String) : Boolean =
     s = "true"

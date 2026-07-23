@@ -8,22 +8,34 @@ import julay.program.type.*
 import julay.program.action.*
 import julay.program.library.LibraryRegistry
 
-fun ASTNode.errorPass(procs: Set<String>, librariesInUse: Set<String> = emptySet()): List<CompileError> = when (this) {
-    is RootNode -> errorPassRoot(procs, librariesInUse)
+fun ASTNode.errorPass(
+    procs: Set<String>,
+    librariesInUse: Set<String> = emptySet(),
+    program: ProcDecl? = null,
+    procDecls: List<ProcDecl> = emptyList(),
+    jarUnsyncedCheck: Boolean = false,
+): List<CompileError> = when (this) {
+    is RootNode -> errorPassRoot(procs, librariesInUse, program, procDecls, jarUnsyncedCheck)
     is ProcClassNode -> errorPassProcClass(procs, librariesInUse)
     is ObjClassNode -> errorPassObjClass(procs, librariesInUse)
     is ConstructorNode -> errorPassConstructor(procs, librariesInUse)
     is TransitionNode -> errorPassTransition(procs, librariesInUse)
-    else -> children.flatMap { it.errorPass(procs, librariesInUse) }
+    else -> children.flatMap { it.errorPass(procs, librariesInUse, program, procDecls, jarUnsyncedCheck) }
 }
 
-fun ASTNode.warningPass(procs: Set<String>, librariesInUse: Set<String> = emptySet()): List<CompileWarning> =
+fun ASTNode.warningPass(
+    procs: Set<String>,
+    librariesInUse: Set<String> = emptySet(),
+): List<CompileWarning> =
     if (this is RootNode) actionConsistencyWarnings(procs, librariesInUse) else emptyList()
 
 private data class ActionOffer(
     val pclassKey: String,
     val decl: ActionDecl,
     val isConstructor: Boolean,
+    val channelKey: String = decl.action.channelKey,
+    val compositionHidden: Boolean = false,
+    val sourceInternal: Boolean = decl.modifier == TSAction.SyncRole.Internal,
 )
 
 private fun RootNode.collectActionOffers(procs: Set<String>, librariesInUse: Set<String>): List<ActionOffer> {
@@ -51,16 +63,79 @@ private fun RootNode.collectActionOffers(procs: Set<String>, librariesInUse: Set
     return progOffers + libOffers
 }
 
-private fun RootNode.errorPassRoot(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> =
+private fun RootNode.errorPassRoot(
+    procs: Set<String>,
+    librariesInUse: Set<String>,
+    program: ProcDecl? = null,
+    procDecls: List<ProcDecl> = emptyList(),
+    jarUnsyncedCheck: Boolean = false,
+): List<CompileError> =
     children.flatMap { it.errorPass(procs, librariesInUse) } +
-        actionConsistencyErrors(procs, librariesInUse) +
+        actionConsistencyErrors(procs, librariesInUse, program, procDecls, jarUnsyncedCheck) +
         overlappingDeclNamesErrors()
 
-private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
-    val offers = collectActionOffers(procs, librariesInUse)
-    return offers.groupBy { it.decl.action.name }.entries.flatMap { (name, namedOffers) ->
+private fun RootNode.actionConsistencyErrors(
+    procs: Set<String>,
+    librariesInUse: Set<String>,
+    program: ProcDecl?,
+    procDecls: List<ProcDecl>,
+    jarUnsyncedCheck: Boolean,
+): List<CompileError> {
+    val leafMap = leafActionMap(this, procs, librariesInUse)
+    val alphabetResult = if (program != null) {
+        computeCompositionAlphabet(program, procDecls, leafMap)
+    } else {
+        // No composition root (e.g. analyze whole CU): unique keys for internals only.
+        val all = leafMap.values.flatten()
+        CompositionAlphabetResult(
+            external = all.filter { !it.sourceInternal },
+            allOffers = all,
+            channelKeys = all.associate { it.leafId to it.channelKey },
+            errors = emptyList(),
+        )
+    }
+
+    val offers = alphabetResult.allOffers.map { offer ->
+        ActionOffer(
+            pclassKey = offer.pclassKey,
+            decl = ActionDecl(
+                action = offer.toSymbolicAction(),
+                guards = emptyList(),
+                transits = emptyList(),
+                modifier = offer.modifier,
+                loc = offer.loc,
+            ),
+            isConstructor = offer.isConstructor,
+            channelKey = offer.channelKey,
+            compositionHidden = offer.compositionHidden,
+            sourceInternal = offer.sourceInternal,
+        )
+    }
+
+    // Source-internal names must not also appear as ordinary/service/session offers in the same program.
+    val internalMixErrors = alphabetResult.allOffers.groupBy { it.name }.entries.flatMap { (name, named) ->
+        val internals = named.filter { it.sourceInternal }
+        val others = named.filter { !it.sourceInternal }
+        if (internals.isEmpty() || others.isEmpty()) {
+            emptyList()
+        } else {
+            listOf(
+                OneLocCompileError(
+                    internals[0].loc,
+                    "Expected action \"$name\" not to mix internal with other transition tags",
+                ),
+            )
+        }
+    }
+
+    val consistencyErrors = offers.groupBy { it.channelKey }.entries.flatMap { (channelKey, namedOffers) ->
+        val name = namedOffers[0].decl.action.name
         if (name == "initially") {
             return@flatMap initiallyConsistencyErrors(namedOffers)
+        }
+        // Source-internal: each proc has its own channel; no cross-proc uniqueness check.
+        if (namedOffers.all { it.sourceInternal }) {
+            return@flatMap emptyList()
         }
         val decls = namedOffers.map { it.decl }
         val refAction = decls[0]
@@ -182,35 +257,40 @@ private fun RootNode.actionConsistencyErrors(procs: Set<String>, librariesInUse:
         }
 
         val peerErrors = when {
-            internals.isNotEmpty() -> {
-                val t = transitions.map { it.pclassKey }.toSet().size
-                assertOrCompileError(
-                    t == 1 && constructors.isEmpty(),
-                    OneLocCompileError(
-                        internals[0].decl.loc,
-                        "Expected internal action \"$name\" to be transitioned by exactly one proc",
-                    ),
-                )
-            }
+            // Source-internal already handled above; composition-hidden pairs are sized below.
+            internals.isNotEmpty() -> emptyList()
             services.isNotEmpty() -> emptyList() // any number of default consumers OK
             else -> {
                 val t = transitions.map { it.pclassKey }.toSet().size
                 val c = if (constructors.isNotEmpty()) 1 else 0
-                assertOrCompileError(
-                    t + c == 2,
-                    OneLocCompileError(
-                        refAction.loc,
-                        "Expected default/session action \"$name\" to have exactly two sync peers " +
-                            "(two transitioning procs, or one transition and one constructor), but found " +
-                            "$t transitioning proc(s) and $c constructor offer(s)",
-                    ),
-                )
+                when {
+                    t + c == 2 -> emptyList()
+                    // JAR compile uses unsyncedNonServiceErrors for a clearer message.
+                    jarUnsyncedCheck && t + c < 2 -> emptyList()
+                    else -> assertOrCompileError(
+                        false,
+                        OneLocCompileError(
+                            refAction.loc,
+                            "Expected default/session action \"$name\" to have exactly two sync peers " +
+                                "(two transitioning procs, or one transition and one constructor), but found " +
+                                "$t transitioning proc(s) and $c constructor offer(s)",
+                        ),
+                    )
+                }
             }
         }
 
         argMismatches + sessionMixErrors + sessionTagErrors + tagMixErrors +
             constructorErrors + peerErrors
     }
+
+    val unsynced = if (jarUnsyncedCheck && program != null) {
+        unsyncedNonServiceErrors(alphabetResult.external)
+    } else {
+        emptyList()
+    }
+
+    return alphabetResult.errors + internalMixErrors + consistencyErrors + unsynced
 }
 
 private fun initiallyConsistencyErrors(offers: List<ActionOffer>): List<CompileError> {

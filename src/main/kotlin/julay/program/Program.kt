@@ -73,7 +73,7 @@ class Program {
         constructorActions = constructorsByAction.keys
 
         val allActions = componentInfo.flatMap { it.alphabet }.toSet()
-        sessionActionsByName = allActions.filter { it.isSession }.associateBy { it.name }
+        sessionActionsByName = allActions.filter { it.isSession }.associateBy { it.channelKey }
 
         val actionCounts = allActions.associateWith { setAct ->
             when {
@@ -98,7 +98,9 @@ class Program {
 
     fun sessionActions(): Collection<SymbolicAction> = sessionActionsByName.values
 
-    fun sessionAction(name: String): SymbolicAction? = sessionActionsByName[name]
+    fun sessionAction(name: String): SymbolicAction? =
+        sessionActionsByName.values.firstOrNull { it.name == name }
+            ?: sessionActionsByName[name]
 
     /** Dedicated session SyncChannel: payload never includes a session to install. */
     fun makeSessionChannel(act: SymbolicAction): SyncChannel<SyncPayload, Constraint> =

@@ -10,6 +10,18 @@ proc IncServer := Counter || Printer || ServerLogic
 
 Each component keeps its own state. They interact only by **synchronizing on shared actions**.
 
+When both sides of `||` offer the same **non-service** action (ordinary or `session`) with a matching signature, they sync and that action becomes **internal to the composition** — it is not part of the outer alphabet. Unilateral actions and `service` actions remain visible on the assembly. Source-tagged `internal` actions never leave their declaring proc and may reuse names freely.
+
+```jul
+proc X := A || B    // A,B sync on y → y internal to X (private channel)
+proc Z := C || D    // C,D sync on y → y internal to Z (different private channel)
+proc W := X || Z
+```
+
+In `W`, **A does not sync with C or D on `y`**, and **B does not sync with C or D on `y`**. Same surface name, distinct hidden events. Documented for tooling: `julayc analyze` omits composition-hidden syncs unless `--include-internal`.
+
+JAR `compile` targets may not leave unsynced non-service actions in their external alphabet (tag them `internal` if a solo step is intentional). `service` actions are exempt.
+
 ## Synchronization (language level)
 
 When two (or more, for some roles) procs offer the **same action** with compatible arguments and guards, they take a **synchronized step** together.

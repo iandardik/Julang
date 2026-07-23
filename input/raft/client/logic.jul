@@ -95,4 +95,4 @@ proc RaftClientLogic {
     }
 }
 
-proc Client := RaftClientLogic || HttpClient
+export proc Client := RaftClientLogic || HttpClient

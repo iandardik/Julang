@@ -86,7 +86,11 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             ctx.invariant_decl(),
             ctx.fun_decl(),
         )
-        return visit(decl)
+        val node = visit(decl)
+        if (node is DeclNode && ctx.EXPORT() != null) {
+            node.visibility = DeclVisibility.Export
+        }
+        return node
     }
 
     override fun visitSort_decl(ctx: JulayParser.Sort_declContext?): ASTNode {

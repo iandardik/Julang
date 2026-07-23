@@ -125,12 +125,12 @@ class AnalyzeCommand : CliktCommand(name = "analyze") {
 
     private val showActions by option(
         "--actions",
-        help = "List action names in the scope (internal actions omitted unless --include-internal)",
+        help = "List action names in the scope (internal and composition-hidden syncs omitted unless --include-internal)",
     ).flag()
 
     private val actionsDetail by option(
         "--actions-detail",
-        help = "Per action: offering procs and modifiers (internal omitted unless --include-internal)",
+        help = "Per action: offering procs and modifiers (internal and composition-hidden omitted unless --include-internal)",
     ).flag()
 
     private val showProcs by option(
@@ -140,7 +140,7 @@ class AnalyzeCommand : CliktCommand(name = "analyze") {
 
     private val procsDetail by option(
         "--procs-detail",
-        help = "Per proc class: its actions and modifiers (internal omitted unless --include-internal)",
+        help = "Per proc class: its actions and modifiers (internal and composition-hidden omitted unless --include-internal)",
     ).flag()
 
     private val actionNames by option(
@@ -155,7 +155,7 @@ class AnalyzeCommand : CliktCommand(name = "analyze") {
 
     private val includeInternal by option(
         "--include-internal",
-        help = "Include internal actions in action listings (hidden by default)",
+        help = "Include internal and composition-hidden synced actions in listings (hidden by default)",
     ).flag()
 
     private val input by argument(

@@ -52,7 +52,7 @@ Common options (see `--help` for the full list):
 | `--actions` / `--actions-detail` | List actions (optionally with modifiers) |
 | `--procs` / `--procs-detail` | List procs |
 | `--intersect` / `--mutual` | How multiple scopes combine for action views |
-| `--include-internal` | Include `internal` actions in listings |
+| `--include-internal` | Include `internal` and composition-hidden synced actions in listings |
 | `-L` | Module search path (same as compile) |
 
 ## Testing

@@ -4,6 +4,9 @@ import julay.compiler.ast.ASTNode
 import julay.compiler.ast.RootNode
 import julay.compiler.decl.ActionDecl
 import julay.compiler.decl.ProcDecl
+import julay.compiler.decl.ProcDeclType
+import julay.compiler.pass.computeCompositionAlphabet
+import julay.compiler.pass.leafActionMap
 import julay.compiler.pass.procClassPass
 import julay.program.action.TSAction
 import julay.program.library.LibraryRegistry
@@ -17,7 +20,10 @@ private data class ListedActionOffer(
     val modifier: TSAction.SyncRole,
     val modifierLabel: String,
     val isInternal: Boolean,
-)
+    val isCompositionHidden: Boolean = false,
+) {
+    val hideByDefault: Boolean get() = isInternal || isCompositionHidden
+}
 
 fun printAnalyzeViews(
     ast: ASTNode,
@@ -38,10 +44,10 @@ fun printAnalyzeViews(
         )
     }
     if (options.showActionView) {
-        printActionView(ast, scope, librariesInUse, allPClassNames, options)
+        printActionView(ast, scope, librariesInUse, allPClassNames, procDecls, options)
     }
     if (options.showProcView) {
-        printPclassView(ast, scope.leafComponents, librariesInUse, options)
+        printPclassView(ast, scope.leafComponents, librariesInUse, procDecls, scope, options)
     }
 }
 
@@ -50,17 +56,19 @@ fun printActionView(
     scope: ResolvedAnalyzeScope,
     librariesInUse: Set<String>,
     allPClassNames: Set<String>,
+    procDecls: List<ProcDecl>,
     options: AnalyzeOptions,
 ) {
     val unionLeaves = scope.leafComponents
-    var offers = collectListedActionOffers(ast, unionLeaves, librariesInUse)
+    var offers = collectListedActionOffers(ast, unionLeaves, librariesInUse, procDecls, scope)
     val useAlphabetIntersect =
         (options.scopeIntersect || options.scopeMutual) &&
             options.scopeNames.size > 1 &&
             scope.leafSets.size > 1
     if (useAlphabetIntersect) {
-        val alphabets = scope.leafSets.map { leaves ->
-            collectListedActionOffers(ast, leaves, librariesInUse).map { it.actionName }.toSet()
+        val root = ast as RootNode
+        val alphabets = scope.rootNames.mapIndexed { i, rootName ->
+            externalActionNames(root, rootName, scope.leafSets[i], librariesInUse, procDecls)
         }
         val shared = alphabets.reduce { a, b -> a intersect b }
         offers = offers.filter { it.actionName in shared }
@@ -71,6 +79,8 @@ fun printActionView(
             ast,
             allPClassNames + librariesInUse,
             librariesInUse,
+            procDecls,
+            scope,
         )
             .filter { it.modifier == TSAction.SyncRole.Service }
             .map { it.actionName }
@@ -82,6 +92,19 @@ fun printActionView(
         offers = offers.filter { it.actionName in mutualNames }
     }
     printActions(filterOffers(offers, options), detail = options.actionsDetail)
+}
+
+private fun externalActionNames(
+    ast: RootNode,
+    rootName: String,
+    leaves: Set<String>,
+    librariesInUse: Set<String>,
+    procDecls: List<ProcDecl>,
+): Set<String> {
+    val pd = procDecls.firstOrNull { it.name == rootName }
+        ?: ProcDecl(rootName, emptyList(), ProcDeclType.Proc)
+    val leafMap = leafActionMap(ast, leaves, librariesInUse)
+    return computeCompositionAlphabet(pd, procDecls, leafMap).external.map { it.name }.toSet()
 }
 
 /**
@@ -138,10 +161,15 @@ fun printPclassView(
     ast: ASTNode,
     procs: Set<String>,
     librariesInUse: Set<String>,
+    procDecls: List<ProcDecl>,
+    scope: ResolvedAnalyzeScope,
     options: AnalyzeOptions,
 ) {
     require(ast is RootNode)
-    val offers = filterOffers(collectListedActionOffers(ast, procs, librariesInUse), options)
+    val offers = filterOffers(
+        collectListedActionOffers(ast, procs, librariesInUse, procDecls, scope),
+        options,
+    )
     val pclassNames = collectPclassNames(ast, procs, librariesInUse)
     if (options.procsDetail) {
         printPclassDetail(offers, pclassNames)
@@ -164,29 +192,50 @@ private fun collectPclassNames(
     return (julayNames + libNames).toSortedSet().toList()
 }
 
+private fun compositionHiddenIds(
+    ast: RootNode,
+    procDecls: List<ProcDecl>,
+    scope: ResolvedAnalyzeScope,
+    librariesInUse: Set<String>,
+): Set<Pair<String, String>> {
+    val hidden = mutableSetOf<Pair<String, String>>()
+    scope.rootNames.forEachIndexed { i, rootName ->
+        val leaves = scope.leafSets.getOrElse(i) { scope.leafComponents }
+        val pd = procDecls.firstOrNull { it.name == rootName }
+            ?: ProcDecl(rootName, emptyList(), ProcDeclType.Proc)
+        val leafMap = leafActionMap(ast, leaves, librariesInUse)
+        computeCompositionAlphabet(pd, procDecls, leafMap).allOffers
+            .filter { it.compositionHidden }
+            .forEach { hidden.add(it.pclassKey to it.name) }
+    }
+    return hidden
+}
+
 private fun collectListedActionOffers(
     ast: ASTNode,
     procs: Set<String>,
     librariesInUse: Set<String>,
+    procDecls: List<ProcDecl>,
+    scope: ResolvedAnalyzeScope,
 ): List<ListedActionOffer> {
     require(ast is RootNode)
+    val hidden = compositionHiddenIds(ast, procDecls, scope, librariesInUse)
     val progOffers = ast.declNodes()
         .flatMap { it.procClassPass(procs) }
         .flatMap { pc ->
-            pc.transitions.map { it.toListedOffer(pc.name, OfferKind.Transition) } +
-                pc.constructors.map { it.toListedOffer(pc.name, OfferKind.Constructor) }
+            pc.transitions.map { it.toListedOffer(pc.name, OfferKind.Transition, hidden) } +
+                pc.constructors.map { it.toListedOffer(pc.name, OfferKind.Constructor, hidden) }
         }
     val libOffers = librariesInUse
         .filter { it in procs && LibraryRegistry.isKotlinLibrary(it) }
         .flatMap { libName ->
             val info = LibraryRegistry.staticInfo(libName)
-            val key = info.name
             val ctorActs = info.constructors.keys
             val alphabet = info.alphabet
             LibraryRegistry.actionDecls(libName).mapNotNull { decl ->
                 when {
-                    decl.action in ctorActs -> decl.toListedOffer(key, OfferKind.Constructor)
-                    decl.action in alphabet -> decl.toListedOffer(key, OfferKind.Transition)
+                    decl.action in ctorActs -> decl.toListedOffer(libName, OfferKind.Constructor, hidden)
+                    decl.action in alphabet -> decl.toListedOffer(libName, OfferKind.Transition, hidden)
                     else -> null
                 }
             }
@@ -194,7 +243,11 @@ private fun collectListedActionOffers(
     return progOffers + libOffers
 }
 
-private fun ActionDecl.toListedOffer(pclassName: String, kind: OfferKind): ListedActionOffer =
+private fun ActionDecl.toListedOffer(
+    pclassName: String,
+    kind: OfferKind,
+    hidden: Set<Pair<String, String>>,
+): ListedActionOffer =
     ListedActionOffer(
         actionName = action.name,
         pclassName = pclassName,
@@ -202,6 +255,7 @@ private fun ActionDecl.toListedOffer(pclassName: String, kind: OfferKind): Liste
         modifier = modifier,
         modifierLabel = modifierLabel(kind),
         isInternal = modifier == TSAction.SyncRole.Internal,
+        isCompositionHidden = (pclassName to action.name) in hidden,
     )
 
 private fun ActionDecl.modifierLabel(kind: OfferKind): String {
@@ -221,17 +275,17 @@ private fun filterOffers(
     offers: List<ListedActionOffer>,
     options: AnalyzeOptions,
 ): List<ListedActionOffer> {
-    val withoutInternal = if (options.includeInternal) {
+    val withoutHidden = if (options.includeInternal) {
         offers
     } else {
-        offers.filterNot { it.isInternal }
+        offers.filterNot { it.hideByDefault }
     }
     val exactNames = options.actionNames.toSet()
     val regex = options.actionRegex?.let { Regex(it) }
     if (exactNames.isEmpty() && regex == null) {
-        return withoutInternal
+        return withoutHidden
     }
-    return withoutInternal.filter { offer ->
+    return withoutHidden.filter { offer ->
         offer.actionName in exactNames || (regex != null && regex.containsMatchIn(offer.actionName))
     }
 }
@@ -252,17 +306,14 @@ private fun printActions(offers: List<ListedActionOffer>, detail: Boolean) {
     }
 }
 
-private fun printPclassDetail(
-    offers: List<ListedActionOffer>,
-    pclassNames: List<String>,
-) {
+private fun printPclassDetail(offers: List<ListedActionOffer>, pclassNames: List<String>) {
     val byPclass = offers.groupBy { it.pclassName }
-    pclassNames.forEach { pclassName ->
-        println(pclassName)
-        val pclassOffers = byPclass[pclassName].orEmpty()
+    pclassNames.forEach { pclass ->
+        println(pclass)
+        byPclass[pclass].orEmpty()
             .sortedWith(compareBy({ it.actionName }, { it.kind.name }, { it.modifierLabel }))
-        pclassOffers.forEach { offer ->
-            println("  ${offer.actionName}: ${offer.modifierLabel}")
-        }
+            .forEach { offer ->
+                println("  ${offer.actionName}: ${offer.modifierLabel}")
+            }
     }
 }

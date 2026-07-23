@@ -38,4 +38,4 @@ proc ClientCommunication := ClientRPCs
 
 proc Raft := RaftCore || ClusterCommunication || ClientCommunication
 
-proc NodeLogic := Raft || Initializers || ClusterInfo
+export proc NodeLogic := Raft || Initializers || ClusterInfo

@@ -64,4 +64,4 @@ proc EchoHandler {
     }
 }
 
-proc Server := ServerStarter || EchoHandler || HttpServer
+export proc Server := ServerStarter || EchoHandler || HttpServer

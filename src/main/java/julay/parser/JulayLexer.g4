@@ -38,6 +38,7 @@ WHEN : 'when' ;
 IN : 'in' ;
 ARROW : '->' ;
 IMPORT : 'import' ;
+EXPORT : 'export' ;
 
 
 OBJ : 'obj' ;

@@ -4,7 +4,7 @@ Compact cheat sheet. For explanations, use the other chapters.
 
 ## Keywords
 
-`proc` `obj` `sort` `fun` `import` `compile` `spec` `invariant`  
+`proc` `obj` `sort` `fun` `import` `export` `compile` `spec` `invariant`  
 `var` `const` `constructor` `transition`  
 `internal` `service` `session`  
 `guard` `before` `transit` `error` `after`  

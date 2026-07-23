@@ -18,13 +18,13 @@ qual_segment
     ;
 
 decl
-    : proc
-    | obj
-    | sort_decl
+    : EXPORT? proc
+    | EXPORT? obj
+    | EXPORT? sort_decl
     | compile_decl
-    | spec
-    | invariant_decl
-    | fun_decl
+    | EXPORT? spec
+    | EXPORT? invariant_decl
+    | EXPORT? fun_decl
     ;
 
 typeExpr

@@ -109,8 +109,8 @@ data class ResolvedProcRef(
 fun resolveProcLeaf(
     node: ValueProcExprNode,
     entryDeclNames: Set<String>,
-    allPClassNames: Set<String>,
-    allProcNames: Set<String>,
+    @Suppress("UNUSED_PARAMETER") allPClassNames: Set<String>,
+    @Suppress("UNUSED_PARAMETER") allProcNames: Set<String>,
     importTable: ImportTable,
     moduleSymbols: Map<String, ResolvedSymbol>,
 ): Pair<ResolvedProcRef?, CompileError?> {
@@ -128,7 +128,9 @@ fun resolveProcLeaf(
     }
 
     val name = node.valueProcName()
-    if (name in entryDeclNames || name in allPClassNames || name in allProcNames) {
+    // Same-module names only (caller passes this module's decl names as entryDeclNames).
+    // Cross-file names must come from the import table — never the merged CU bare-name pool.
+    if (name in entryDeclNames) {
         return ResolvedProcRef(name, null, false) to null
     }
     importTable.shortNames[name]?.let { resolved ->

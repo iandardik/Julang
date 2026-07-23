@@ -9,7 +9,7 @@ import julay.funlib.delaySeconds
  * lostLeadership to RaftCore, which then spawns FollowerHeartbeat.
  */
 
-proc LeaderHeartbeat {
+export proc LeaderHeartbeat {
     const me : Node
     const clusterSize : Int
     var step : String
@@ -104,7 +104,7 @@ proc LeaderHeartbeat {
  * Starts idle so it cannot lookupNodeById before LeaderHeartbeat begins a round (avoids deadlock
  * while the driver is in sleep). While ready, target.id is the next peer (never self).
  */
-proc LeaderHeartbeatTarget {
+export proc LeaderHeartbeatTarget {
     const me : Node
     const clusterSize : Int
     var target : Node

@@ -160,8 +160,17 @@ fun runErrorAndWarningPasses(
     components: Set<String>,
     librariesInUse: Set<String>,
     programName: String? = null,
+    program: ProcDecl? = null,
+    procDecls: List<ProcDecl> = emptyList(),
+    jarUnsyncedCheck: Boolean = false,
 ): Boolean {
-    val errors = ast.errorPass(components, librariesInUse)
+    val errors = ast.errorPass(
+        components,
+        librariesInUse,
+        program = program,
+        procDecls = procDecls,
+        jarUnsyncedCheck = jarUnsyncedCheck,
+    )
     if (errors.isNotEmpty()) {
         errors.forEach { println(it) }
         if (programName != null) {

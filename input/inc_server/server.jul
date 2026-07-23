@@ -18,7 +18,7 @@ proc ServerStarter {
     }
 }
 
-proc IncReqHandler {
+export proc IncReqHandler {
     const httpReq : HttpServerRequest
     var localCounter : Int
     var step : String
@@ -54,4 +54,4 @@ proc IncReqHandler {
     }
 }
 
-proc ServerLogic := ServerStarter || IncReqHandler || HttpServer
+export proc ServerLogic := ServerStarter || IncReqHandler || HttpServer

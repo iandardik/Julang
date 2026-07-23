@@ -97,7 +97,7 @@ proc TimerHelper {
     }
 }
 
-proc Timer := TimerController || TimerHelper
+export proc Timer := TimerController || TimerHelper
 
 sort Ctrl := {"c1", "c2", "c3"}
 sort Help := {"h1", "h2", "h3"}

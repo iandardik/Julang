@@ -42,6 +42,8 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
         if (module.isStub) return
         module.root.declNodes().forEach { decl ->
             if (decl is CompileNode) return@forEach
+            // Non-entry modules only expose `export`ed decls to importers.
+            if (!module.isEntry && !decl.isExported) return@forEach
             val key = if (module.modulePath.startsWith("$JULAY_MODULE.")) {
                 module.modulePath
             } else {

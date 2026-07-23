@@ -21,7 +21,16 @@ fun analyzeJulFile(
     } else {
         for (program in jarTargets) {
             val components = program.allProcNames(procDecls)
-            if (!runErrorAndWarningPasses(ast, components, librariesInUse, program.name)) {
+            if (!runErrorAndWarningPasses(
+                    ast,
+                    components,
+                    librariesInUse,
+                    program.name,
+                    program = program,
+                    procDecls = procDecls,
+                    jarUnsyncedCheck = false,
+                )
+            ) {
                 return
             }
         }

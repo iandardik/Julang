@@ -33,4 +33,4 @@ proc ParseIntDep {
     }
 }
 
-proc ParseIntDepProc := ParseIntDep
+export proc ParseIntDepProc := ParseIntDep
