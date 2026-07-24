@@ -9,11 +9,11 @@ proc Counter {
         transit: counter := 0
     }
 
-    service transition increment() {
+    provider transition increment() {
         transit: counter := counter + 1
     }
 
-    service transition getCounter(counterVal : Int) {
+    provider transition getCounter(counterVal : Int) {
         guard: counterVal = counter
     }
 }

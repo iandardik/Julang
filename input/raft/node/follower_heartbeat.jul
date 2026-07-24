@@ -22,7 +22,7 @@ export proc FollowerHeartbeat {
             currentEpoch := 0
     }
 
-    transition getElectionSnapshot(
+    client transition getElectionSnapshot(
         epoch : Int,
         term : Int,
         candId : Int,

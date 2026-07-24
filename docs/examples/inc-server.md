@@ -10,7 +10,7 @@
 
 ## Intent
 
-A counter exposed as a **service interface**: HTTP handlers and a printer never hold shared mutable state with `Counter`. They synchronize on `increment` / `getCounter`, and values move **by copy**. The same file also declares **specs** so you can emit JARs and TLA+ together—Julay’s verification-aware story in one demo.
+A counter exposed as a **provider interface**: HTTP handlers and a printer never hold shared mutable state with `Counter`. They synchronize on `increment` / `getCounter` (`provider` on Counter, `client` on handlers), and values move **by copy**. The same file also declares **specs** so you can emit JARs and TLA+ together—Julay’s verification-aware story in one demo.
 
 ## The counter as an interface
 
@@ -22,11 +22,11 @@ proc Counter {
         transit: counter := 0
     }
 
-    service transition increment() {
+    provider transition increment() {
         transit: counter := counter + 1
     }
 
-    service transition getCounter(counterVal : Int) {
+    provider transition getCounter(counterVal : Int) {
         guard: counterVal = counter
     }
 }
@@ -51,7 +51,7 @@ proc ServerLogic := ServerStarter || IncReqHandler || HttpServer
 
 `IncReqHandler` is constructed per `receiveRequest`. It then:
 
-1. Syncs on `increment` (with Counter’s service)
+1. Syncs on `increment` (with Counter’s provider)
 2. Syncs on `getCounter` to learn `localCounter`
 3. `sendResponse` with that value as the HTTP body
 
@@ -121,7 +121,7 @@ Spec artifacts appear as `HandlerSpec` / `IncSpec` TLA files in the working dire
 
 ## Language features showcased
 
-- `service` actions as a resource API
+- `provider` actions as a resource API
 - Session HTTP + ordinary sync with Counter
 - Modules (`printer`, `server`)
 - Assume-guarantee `spec`, indexed procs, `compile` mixing JAR and TLA targets

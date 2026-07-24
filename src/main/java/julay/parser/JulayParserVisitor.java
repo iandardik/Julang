@@ -29,11 +29,11 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitQualified_name(JulayParser.Qualified_nameContext ctx);
 	/**
-	 * Visit a parse tree produced by {@link JulayParser#qual_segment}.
+	 * Visit a parse tree produced by {@link JulayParser#name_id}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
-	T visitQual_segment(JulayParser.Qual_segmentContext ctx);
+	T visitName_id(JulayParser.Name_idContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link JulayParser#decl}.
 	 * @param ctx the parse tree

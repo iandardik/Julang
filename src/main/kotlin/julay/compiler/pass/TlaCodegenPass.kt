@@ -56,7 +56,7 @@ fun tlaCodegenPass(
     val servicedActions = leaves.flatMap { leaf ->
         val pc = pclassNodes[leaf.name] ?: return@flatMap emptyList()
         pc.localDecls().flatMap { it.transitions() }
-            .filter { it.modifier == TSAction.SyncRole.Service }
+            .filter { it.modifier == TSAction.SyncRole.Provider }
             .map { it.action.name }
     }.toSet()
 
@@ -338,12 +338,7 @@ private fun collectTlaActionOffers(
             offers += TlaActionOffer(leaf, ctor, TSAction.SyncRole.Internal, isConstructor = true)
         }
         pc.localDecls().flatMap { it.transitions() }.forEach { tr ->
-            val role = when {
-                tr.modifier == TSAction.SyncRole.Default && tr.action.name in servicedActions ->
-                    TSAction.SyncRole.Consumer
-                else -> tr.modifier
-            }
-            offers += TlaActionOffer(leaf, tr, role, isConstructor = false)
+            offers += TlaActionOffer(leaf, tr, tr.modifier, isConstructor = false)
         }
     }
     return offers
@@ -387,8 +382,8 @@ private fun sessionPairForOffers(
 private fun collectEmittedOfferLists(offers: List<TlaActionOffer>): List<List<TlaActionOffer>> {
     val result = mutableListOf<List<TlaActionOffer>>()
     offers.groupBy { it.decl.action.name }.forEach { (_, group) ->
-        val services = group.filter { it.role == TSAction.SyncRole.Service }
-        val consumers = group.filter { it.role == TSAction.SyncRole.Consumer }
+        val services = group.filter { it.role == TSAction.SyncRole.Provider }
+        val consumers = group.filter { it.role == TSAction.SyncRole.Client }
         val constructors = group.filter { it.isConstructor }
         val internals = group.filter { it.role == TSAction.SyncRole.Internal && !it.isConstructor }
         val defaults = group.filter { it.role == TSAction.SyncRole.Default && !it.isConstructor }
@@ -837,8 +832,8 @@ private fun buildTlaActions(
     )
 
     byName.forEach { (actionName, group) ->
-        val services = group.filter { it.role == TSAction.SyncRole.Service }
-        val consumers = group.filter { it.role == TSAction.SyncRole.Consumer }
+        val services = group.filter { it.role == TSAction.SyncRole.Provider }
+        val consumers = group.filter { it.role == TSAction.SyncRole.Client }
         val constructors = group.filter { it.isConstructor }
         val internals = group.filter { it.role == TSAction.SyncRole.Internal && !it.isConstructor }
         val defaults = group.filter { it.role == TSAction.SyncRole.Default && !it.isConstructor }

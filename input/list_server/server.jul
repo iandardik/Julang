@@ -32,7 +32,7 @@ proc IncReqHandler {
             list := []
     }
 
-    transition getAndAppend(e : String, lst : List<String>) {
+    client transition getAndAppend(e : String, lst : List<String>) {
         guard:
             step = "A" & e = reqBody
         transit:

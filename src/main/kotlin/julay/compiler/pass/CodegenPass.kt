@@ -43,7 +43,7 @@ fun codegenPass(
         procClasses.flatMap { it.transitions } +
             librariesInUse.flatMap { LibraryRegistry.actionDecls(it) }
         )
-        .filter { it.modifier == TSAction.SyncRole.Service }
+        .filter { it.modifier == TSAction.SyncRole.Provider }
         .map { it.action.name }
         .toSet()
 
@@ -496,12 +496,7 @@ private fun ProcClassDecl.kotlinStaticInfoString(
         "\n)"
 }
 
-private fun ActionDecl.resolvedSyncRole(servicedActionNames: Set<String>): TSAction.SyncRole =
-    when {
-        modifier == TSAction.SyncRole.Default && action.name in servicedActionNames ->
-            TSAction.SyncRole.Consumer
-        else -> modifier
-    }
+private fun ActionDecl.resolvedSyncRole(): TSAction.SyncRole = modifier
 
 private fun ActionDecl.kotlinActionString(
     stateVarTypes: Map<String, Type>,
@@ -527,11 +522,11 @@ private fun ActionDecl.kotlinActionString(
         val body = guards.joinToString(", ") { it.toZ3GuardString(symbolTypes, argSymbols) }
         "ctx.mkAnd($body)"
     }
-    val syncRoleStr = when (resolvedSyncRole(servicedActionNames)) {
+    val syncRoleStr = when (resolvedSyncRole()) {
         TSAction.SyncRole.Default -> "TSAction.SyncRole.Default"
         TSAction.SyncRole.Internal -> "TSAction.SyncRole.Internal"
-        TSAction.SyncRole.Service -> "TSAction.SyncRole.Service"
-        TSAction.SyncRole.Consumer -> "TSAction.SyncRole.Consumer"
+        TSAction.SyncRole.Provider -> "TSAction.SyncRole.Provider"
+        TSAction.SyncRole.Client -> "TSAction.SyncRole.Client"
     }
     return "TSAction(" +
         "\n$actionSigStr,".prependIndent() +

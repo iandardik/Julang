@@ -14,12 +14,14 @@ class CompositionOccurrenceTest {
     private fun offer(
         pclass: String,
         action: String,
-        service: Boolean = false,
+        provider: Boolean = false,
+        client: Boolean = false,
         internal: Boolean = false,
     ): AlphabetOffer {
         val mod = when {
             internal -> TSAction.SyncRole.Internal
-            service -> TSAction.SyncRole.Service
+            provider -> TSAction.SyncRole.Provider
+            client -> TSAction.SyncRole.Client
             else -> TSAction.SyncRole.Default
         }
         return AlphabetOffer(
@@ -76,26 +78,28 @@ class CompositionOccurrenceTest {
     }
 
     @Test
-    fun serviceResolvesDuplicateExternalW() {
+    fun providerWithClientOccurrencesOk() {
+        // Two client offers of w (same class) must not hide; provider resolves the hub.
         val leafMap = mapOf(
             "A" to listOf(offer("A", "other")),
             "B" to listOf(offer("B", "other")),
-            "X" to listOf(offer("X", "w")),
-            "S" to listOf(offer("S", "w", service = true)),
+            "X" to listOf(offer("X", "w", client = true)),
+            "S" to listOf(offer("S", "w", provider = true)),
         )
         val ax = ProcDecl("AX", listOf(ProcDecl("A", emptyList(), ProcDeclType.Proc), ProcDecl("X", emptyList(), ProcDeclType.Proc)), ProcDeclType.Proc)
         val bx = ProcDecl("BX", listOf(ProcDecl("B", emptyList(), ProcDeclType.Proc), ProcDecl("X", emptyList(), ProcDeclType.Proc)), ProcDeclType.Proc)
         val p = ProcDecl("P", listOf(ax, bx), ProcDeclType.Proc)
         val q = ProcDecl("Q", listOf(p, ProcDecl("S", emptyList(), ProcDeclType.Proc)), ProcDeclType.Proc)
         val result = computeCompositionAlphabet(q, listOf(q, p, ax, bx), leafMap)
+        assertTrue(result.errors.isEmpty(), result.errors.toString())
         assertTrue(alphabetIntegrityErrors(result).isEmpty())
     }
 
     @Test
-    fun twoServiceProvidersError() {
+    fun twoProvidersError() {
         val leafMap = mapOf(
-            "X" to listOf(offer("X", "w", service = true)),
-            "Y" to listOf(offer("Y", "w", service = true)),
+            "X" to listOf(offer("X", "w", provider = true)),
+            "Y" to listOf(offer("Y", "w", provider = true)),
         )
         val root = ProcDecl(
             "P",
@@ -103,7 +107,70 @@ class CompositionOccurrenceTest {
             ProcDeclType.Proc,
         )
         val result = computeCompositionAlphabet(root, listOf(root), leafMap)
-        assertTrue(alphabetIntegrityErrors(result).any { it.toString().contains("more than one service provider") })
+        assertTrue(alphabetIntegrityErrors(result).any { it.toString().contains("more than one provider") })
+    }
+
+    @Test
+    fun clientsDoNotHideWithEachOther() {
+        val left = listOf(offer("A", "w", client = true).copy(occurrenceId = "a1"))
+        val right = listOf(offer("B", "w", client = true).copy(occurrenceId = "b1"))
+        val (composed, errs) = composeAlphabets(left, right, "scope")
+        assertTrue(errs.isEmpty())
+        assertEquals(2, composed.size)
+        assertTrue(composed.none { it.compositionHidden })
+    }
+
+    @Test
+    fun ordinaryWithProviderIsError() {
+        val left = listOf(offer("A", "w").copy(occurrenceId = "a1"))
+        val right = listOf(offer("S", "w", provider = true).copy(occurrenceId = "s1"))
+        val (_, errs) = composeAlphabets(left, right, "scope")
+        assertTrue(errs.any { it.toString().contains("untagged") })
+    }
+
+    @Test
+    fun ordinaryWithClientIsError() {
+        val left = listOf(offer("A", "w").copy(occurrenceId = "a1"))
+        val right = listOf(offer("C", "w", client = true).copy(occurrenceId = "c1"))
+        val (_, errs) = composeAlphabets(left, right, "scope")
+        assertTrue(errs.any { it.toString().contains("untagged") })
+    }
+
+    @Test
+    fun danglingClientIsIntegrityError() {
+        val leafMap = mapOf(
+            "C" to listOf(offer("C", "w", client = true)),
+        )
+        val root = ProcDecl("P", listOf(ProcDecl("C", emptyList(), ProcDeclType.Proc)), ProcDeclType.Proc)
+        val result = computeCompositionAlphabet(root, listOf(root), leafMap)
+        assertTrue(alphabetIntegrityErrors(result).any { it.toString().contains("no `provider`") })
+    }
+
+    @Test
+    fun ordinaryHideThenProviderClientCompiles() {
+        val leafMap = mapOf(
+            "A" to listOf(offer("A", "w")),
+            "B" to listOf(offer("B", "w")),
+            "Prov" to listOf(offer("Prov", "w", provider = true)),
+            "Cli" to listOf(offer("Cli", "w", client = true)),
+        )
+        val ab = ProcDecl(
+            "AB",
+            listOf(ProcDecl("A", emptyList(), ProcDeclType.Proc), ProcDecl("B", emptyList(), ProcDeclType.Proc)),
+            ProcDeclType.Proc,
+        )
+        val root = ProcDecl(
+            "Root",
+            listOf(
+                ab,
+                ProcDecl("Prov", emptyList(), ProcDeclType.Proc),
+                ProcDecl("Cli", emptyList(), ProcDeclType.Proc),
+            ),
+            ProcDeclType.Proc,
+        )
+        val result = computeCompositionAlphabet(root, listOf(root, ab), leafMap)
+        assertTrue(result.errors.isEmpty(), result.errors.toString())
+        assertTrue(alphabetIntegrityErrors(result).isEmpty(), alphabetIntegrityErrors(result).toString())
     }
 
     @Test

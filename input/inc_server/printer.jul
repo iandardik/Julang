@@ -13,7 +13,7 @@ proc PeriodicPrint {
             step := "A"
     }
 
-    transition getCounter(counterVal : Int) {
+    client transition getCounter(counterVal : Int) {
         guard:
             step = "A"
         transit:

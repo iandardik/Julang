@@ -10,11 +10,16 @@ import_stmt
     ;
 
 qualified_name
-    : ID (DOT qual_segment)+
+    : name_id (DOT name_id)+
     ;
 
-qual_segment
+/* Keywords allowed as module-path segments (e.g. import client.logic.Client). */
+name_id
     : ID
+    | CLIENT
+    | PROVIDER
+    | INTERNAL
+    | SESSION
     ;
 
 decl
@@ -119,7 +124,7 @@ constructor
     ;
 
 transition
-    : (INTERNAL | SERVICE | SESSION)? TRANSITION ID args LCURLY action_body* RCURLY
+    : (INTERNAL | PROVIDER | CLIENT | SESSION)? TRANSITION ID args LCURLY action_body* RCURLY
     ;
 
 args

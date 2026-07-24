@@ -6,7 +6,7 @@ Compact cheat sheet. For explanations, use the other chapters.
 
 `proc` `obj` `sort` `fun` `import` `export` `compile` `spec` `invariant`  
 `var` `const` `constructor` `transition`  
-`internal` `service` `session`  
+`internal` `provider` `session`  
 `guard` `before` `transit` `error` `after`  
 `all` `exists` `if` `else` `let` `when` `in`  
 `true` `false`

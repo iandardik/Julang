@@ -10,7 +10,7 @@
 
 ## Intent
 
-Same architectural pattern as the [inc server](inc-server.md), but the resource is a **`List<String>`**. Clients append via HTTP; the list lives only inside `RunningList`, exposed through service actions.
+Same architectural pattern as the [inc server](inc-server.md), but the resource is a **`List<String>`**. Clients append via HTTP; the list lives only inside `RunningList`, exposed through `provider` / `client` actions.
 
 ## The list as an interface
 
@@ -22,11 +22,11 @@ proc RunningList {
         transit: list := []
     }
 
-    service transition getList(lst : List<String>) {
+    provider transition getList(lst : List<String>) {
         guard: lst = list
     }
 
-    service transition getAndAppend(e : String, lst : List<String>) {
+    provider transition getAndAppend(e : String, lst : List<String>) {
         guard: lst = list
         transit: list := list + [e]
     }

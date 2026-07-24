@@ -30,12 +30,12 @@ export proc IncReqHandler {
             localCounter := -1
     }
 
-    transition increment() {
+    client transition increment() {
         guard:   step = "A"
         transit: step := "B"
     }
 
-    transition getCounter(counterVal : Int) {
+    client transition getCounter(counterVal : Int) {
         guard: step = "B"
         transit:
             localCounter := counterVal

@@ -12,7 +12,7 @@ Each component keeps its own state. They interact only by **synchronizing on sha
 
 `||` is **occurrence-based** and **left-associative**: each mention of a proc class is a separate occurrence (`A || A` is two occurrences of `A`, not one). Do not confuse this with exchanging action arguments **by copy** (no shared references).
 
-When both sides of a binary `||` offer the same **non-service** action (ordinary or `session`) with a matching signature, they sync and that action becomes **internal to the composition** — it is not part of the outer alphabet. Unilateral actions and `service` actions remain visible on the assembly. Source-tagged `internal` actions never leave their declaring proc and may reuse names freely.
+When both sides of a binary `||` offer the same **ordinary** (untagged) or `session` action with a matching signature, they sync and that action becomes **internal to the composition** — it is not part of the outer alphabet. Unilateral actions, `provider` actions, and `client` actions remain visible on the assembly until a provider and its clients meet. Source-tagged `internal` actions never leave their declaring proc and may reuse names freely.
 
 ```jul
 proc X := A || B    // A,B sync on y → y internal to X (private channel)
@@ -30,14 +30,27 @@ proc P := (A || X) || (B || X)   // or: Left := A||X; Right := B||X; P := Left |
 
 Here the two occurrences of `X` sync with `A` and `B` respectively on a shared action `w`; those events stay private to each pair. Tooling: `julayc analyze --tree` lists each occurrence; `--actions-detail --include-internal` shows composition-hidden offers with distinct `scope=…` channel keys (not collapsed by class name).
 
+### Provider / client (local compose rules)
+
+| Offers on `w` | Behavior |
+|---------------|----------|
+| ordinary / ordinary | sync → composition-hide |
+| `client` / `client` | do **not** hide; both stay external |
+| `client` / `provider` | no hide; shared public channel |
+| ordinary / `provider` or ordinary / `client` | **compile error** |
+| `provider` / `provider` | **compile error** (at most one provider) |
+
+`client` is an explicit opt-in: two clients never pairwise-hide with each other, so they can wait for a `provider` that appears later in the composition tree. Ordinary peers that already hid `w` inside a library stay sealed — `(A || B) || P || C` still compiles when `A`/`B` are ordinary and `P`/`C` are provider/client.
+
 ### Alphabet integrity (JAR and TLA+)
 
 These checks apply to the **compile/spec target** (same rules for JAR and TLA+):
 
-- If two or more occurrences of the same class still expose the same ordinary/session action `w` in the **external** alphabet, that is an error — unless the target also includes a single `service` provider for `w` (duplicate consumers are allowed). So `compile P` for a dangling `w` on two `X`s fails, but `compile Q` for `Q := P || S` with `service` `w` on `S` can succeed.
-- At most one `service` provider per action name (`X || Y` where both declare `service` `w` is an error).
+- External `client` of `w` with no `provider` `w` → error.
+- At most one `provider` per action name.
+- If two or more occurrences of the same class still expose the same **ordinary** action `w` externally, that is an error. Tag those callers `client` and supply one `provider` instead of leaving them untagged.
 
-JAR `compile` targets may not leave unsynced non-service actions in their external alphabet (tag them `internal` if a solo step is intentional). `service` actions are exempt. Specs may still use unilateral assume/system actions.
+JAR `compile` targets may not leave unsynced ordinary actions in their external alphabet (tag them `internal` if a solo step is intentional). Specs may still use unilateral assume/system actions.
 
 ### TLA+ occurrence names
 
@@ -68,7 +81,7 @@ Important consequences of Julay’s philosophy:
 
 **Two different occurrences of the same proc class never synchronize with each other** on ordinary (default) or `internal` actions. Only **distinct proc classes** can pair on a shared action.
 
-`service` actions pair a **provider** with **consumers** (clients)—not two equal peers of the same class collaborating as duplicates of each other.
+`provider` / `client` actions pair one hub with many clients—not two equal peers of the same class collaborating as duplicates of each other.
 
 ## Action modifiers
 
@@ -76,26 +89,27 @@ Important consequences of Julay’s philosophy:
 |----------|------|
 | *(none)* | Ordinary rendezvous between complementary peers |
 | `internal` | Local / solo-style step (no cross-class pairing of the ordinary kind) |
-| `service` | Multiplexed API: one provider, many potential clients |
+| `provider` | One hub for an action name; syncs with `client`s |
+| `client` | Only syncs with a `provider` of the same name (never with other clients) |
 | `session` | Sticky pairwise protocol—see [Sessions](sessions.md) |
 
-`session` is incompatible with `service` and `internal`. All offers of an action must agree on the modifier.
+`session` is incompatible with `provider`, `client`, and `internal`.
 
 Examples:
 
 ```jul
-service transition increment() { ... }   // API on Counter
+provider transition increment() { ... }   // API on Counter
+client transition increment() { ... }     // handler uses Counter
 internal transition println(msg : String) { ... }
 session transition createHttpServer(port : Int) { ... }
 ```
 
 ## Offering the same action
 
-For ordinary sync, different classes declare the same action name. For example, `IncReqHandler` transitions on `increment` while `Counter` offers `service transition increment()`—they synchronize so the handler bumps the counter through Counter’s interface ([inc server](../examples/inc-server.md)).
+For ordinary sync, different classes declare the same action name. For a shared API, the hub uses `provider` and callers use `client`. For example, `IncReqHandler` offers `client transition increment()` while `Counter` offers `provider transition increment()` ([inc server](../examples/inc-server.md)).
 
 ## See also
 
 - [Processes](processes.md)
 - [Sessions](sessions.md)
 - [Creating libraries](creating-libraries.md)
-- [Philosophy in the language overview](README.md)

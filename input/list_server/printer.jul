@@ -13,7 +13,7 @@ proc PeriodicPrint {
             step := "A"
     }
 
-    transition getList(lst : List<String>) {
+    client transition getList(lst : List<String>) {
         guard:
             step = "A"
         transit:

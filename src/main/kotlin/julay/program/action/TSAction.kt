@@ -23,12 +23,11 @@ data class TSAction(
 ) {
     /**
      * [Default] / [Internal] come from source tags (untagged / `internal`).
-     * [Service] comes from the `service` tag.
-     * [Consumer] is assigned by the compiler to untagged transitions on a serviced action
-     * (there is no consumer source tag).
+     * [Provider] comes from the `provider` tag (one hub per action name).
+     * [Client] comes from the `client` tag (only syncs with a provider, not other clients).
      * Session is tracked on [SymbolicAction.isSession], not as a sync role.
      */
-    enum class SyncRole { Default, Internal, Service, Consumer }
+    enum class SyncRole { Default, Internal, Provider, Client }
 
     init {
         assert(
@@ -40,8 +39,12 @@ data class TSAction(
             "Expected non-Internal role => !SymbolicAction.isInternal",
         )
         assert(
-            !(symAction.isSession && syncRole == SyncRole.Service),
-            "Session actions cannot use Service sync role",
+            !(symAction.isSession && syncRole == SyncRole.Provider),
+            "Session actions cannot use Provider sync role",
+        )
+        assert(
+            !(symAction.isSession && syncRole == SyncRole.Client),
+            "Session actions cannot use Client sync role",
         )
         assert(
             !(symAction.isSession && syncRole == SyncRole.Internal),

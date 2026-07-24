@@ -86,7 +86,7 @@ fun printActionView(
             procDecls,
             scope,
         )
-            .filter { it.modifier == TSAction.SyncRole.Service }
+            .filter { it.modifier == TSAction.SyncRole.Provider }
             .map { it.actionName }
             .toSet()
         val offersByAction = offers.groupBy { it.actionName }
@@ -139,8 +139,8 @@ private fun scopesMutuallySyncOn(
 
 private fun ListedActionOffer.resolvedRole(servicedNames: Set<String>): TSAction.SyncRole =
     when {
-        modifier == TSAction.SyncRole.Default && actionName in servicedNames ->
-            TSAction.SyncRole.Consumer
+        modifier == TSAction.SyncRole.Client -> TSAction.SyncRole.Client
+        modifier == TSAction.SyncRole.Provider -> TSAction.SyncRole.Provider
         else -> modifier
     }
 
@@ -151,11 +151,11 @@ private fun scopesSyncOn(
     serviced: Boolean,
 ): Boolean {
     if (serviced) {
-        val aService = TSAction.SyncRole.Service in rolesA
-        val bService = TSAction.SyncRole.Service in rolesB
-        val aConsumer = TSAction.SyncRole.Consumer in rolesA
-        val bConsumer = TSAction.SyncRole.Consumer in rolesB
-        return (aService && bConsumer) || (bService && aConsumer)
+        val aProvider = TSAction.SyncRole.Provider in rolesA
+        val bProvider = TSAction.SyncRole.Provider in rolesB
+        val aClient = TSAction.SyncRole.Client in rolesA
+        val bClient = TSAction.SyncRole.Client in rolesB
+        return (aProvider && bClient) || (bProvider && aClient)
     }
     // Non-serviced pairwise rendezvous: Default (or session, still Default role) peers.
     return TSAction.SyncRole.Default in rolesA && TSAction.SyncRole.Default in rolesB
@@ -245,7 +245,8 @@ private fun julay.compiler.pass.AlphabetOffer.modifierLabel(kind: OfferKind): St
     }
     return when {
         isSession -> "session $kindStr"
-        modifier == TSAction.SyncRole.Service -> "service $kindStr"
+        modifier == TSAction.SyncRole.Provider -> "provider $kindStr"
+        modifier == TSAction.SyncRole.Client -> "client $kindStr"
         modifier == TSAction.SyncRole.Internal || sourceInternal -> "internal $kindStr"
         else -> kindStr
     }

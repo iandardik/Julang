@@ -53,13 +53,13 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void enterQual_segment(JulayParser.Qual_segmentContext ctx) { }
+	@Override public void enterName_id(JulayParser.Name_idContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void exitQual_segment(JulayParser.Qual_segmentContext ctx) { }
+	@Override public void exitName_id(JulayParser.Name_idContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *

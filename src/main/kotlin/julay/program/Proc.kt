@@ -223,9 +223,9 @@ class Proc(
                 val anticonstraintExpr = when (act.syncRole) {
                     TSAction.SyncRole.Default, TSAction.SyncRole.Internal ->
                         ctx.mkEq(ctx.mkIntConst("classID"), ctx.mkInt(tsInfo.classID()))
-                    TSAction.SyncRole.Service ->
+                    TSAction.SyncRole.Provider ->
                         ctx.mkEq(ctx.mkBoolConst("serviceTransition"), ctx.mkTrue())
-                    TSAction.SyncRole.Consumer ->
+                    TSAction.SyncRole.Client ->
                         ctx.mkEq(ctx.mkBoolConst("serviceTransition"), ctx.mkFalse())
                 }
                 // Affinity exclusivity is enforced by routing onto the dedicated session SyncChannel

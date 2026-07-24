@@ -9,15 +9,15 @@ proc RunningList {
     }
 
     /*
-    service transition append(e : String) {
+    provider transition append(e : String) {
         transit: list := list + [e]
     }*/
 
-    service transition getList(lst : List<String>) {
+    provider transition getList(lst : List<String>) {
         guard: lst = list
     }
 
-    service transition getAndAppend(e : String, lst : List<String>) {
+    provider transition getAndAppend(e : String, lst : List<String>) {
         guard: lst = list
         transit: list := list + [e]
     }

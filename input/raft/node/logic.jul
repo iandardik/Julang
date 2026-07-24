@@ -1,15 +1,10 @@
-import julay.proclib.HttpServer
-import julay.proclib.HttpClient
 import node.core.RaftCore
 import node.cluster_info.ClusterInfo
 import node.initializers.Initializers
-import node.rpc_http.RpcServer
-import node.rpc_http.RpcClient
-import node.rpc_vote.IncomingRequestVoteRPC
-import node.rpc_vote.OutgoingRequestVoteRPC
-import node.rpc_append_entries.IncomingAppendEntriesRPC
-import node.rpc_append_entries.OutgoingAppendEntriesRPC
-import node.rpc_client.IncomingClientRPC
+import node.rpc_http.RpcTransport
+import node.rpc_vote.RequestVoteRPCs
+import node.rpc_append_entries.AppendEntriesRPCs
+import node.rpc_client.ClientRPCs
 import node.follower_heartbeat.FollowerHeartbeat
 import node.candidate_election.CandidateElection
 import node.leader_heartbeat.LeaderHeartbeat
@@ -18,24 +13,21 @@ import node.leader_heartbeat.LeaderHeartbeatTarget
 /*
  * Single Raft node composition.
  * CLI: <configPath> <selfIndex>
+ *
+ * RpcTransport appears once here (occurrence-based ||). Vote / append / client
+ * handler assemblies do not embed transport.
  */
 
-proc RpcTransport := HttpServer || HttpClient || RpcServer || RpcClient
-proc RequestVoteRPCs := IncomingRequestVoteRPC || OutgoingRequestVoteRPC || RpcTransport
-proc AppendEntriesRPCs := IncomingAppendEntriesRPC || OutgoingAppendEntriesRPC || RpcTransport
-proc ClientRPCs := IncomingClientRPC || RpcTransport
+proc ClusterRPCs := RequestVoteRPCs || AppendEntriesRPCs
 
-proc RPCs := RpcTransport || RequestVoteRPCs || AppendEntriesRPCs || ClientRPCs
+proc ExternalCommunication := ClusterRPCs || ClientRPCs || RpcTransport
 
 /* Lifecycle invariant: at most one of {FollowerHeartbeat, CandidateElection, LeaderHeartbeat}
  * is actively driving elections or leadership handoff. RaftCore is the sole constructor of
  * these three drivers. */
 proc ClusterCommunicationProtocol := FollowerHeartbeat || CandidateElection
     || (LeaderHeartbeat || LeaderHeartbeatTarget)
-proc ClusterCommunication := ClusterCommunicationProtocol || RequestVoteRPCs || AppendEntriesRPCs
 
-proc ClientCommunication := ClientRPCs
-
-proc Raft := RaftCore || ClusterCommunication || ClientCommunication
+proc Raft := RaftCore || ClusterCommunicationProtocol || ExternalCommunication 
 
 export proc NodeLogic := Raft || Initializers || ClusterInfo

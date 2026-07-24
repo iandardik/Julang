@@ -1,3 +1,6 @@
+import julay.proclib.HttpServer
+import julay.proclib.HttpClient
+
 /*
  * HTTP endpoints for Raft node RPCs: inbound listener (RpcServer) and
  * outbound client bridge (RpcClient). Typed RPC pclasses live in
@@ -8,6 +11,9 @@
  * are serialized through RpcClient (at most one outbound send/recv in
  * flight). An inbound and an outbound RPC may run at the same time (this
  * just happens to be the case — it is not required for correctness).
+ *
+ * RpcTransport is the single shared HTTP stack for the node (occurrence-based
+ * || must not embed this assembly more than once under NodeLogic).
  */
 
 export proc RpcServer {
@@ -159,3 +165,5 @@ export proc RpcClient {
             step := if (step = "recvRequestVote") { "endRequestVote" } else { "endAppendEntries" }
     }
 }
+
+export proc RpcTransport := HttpServer || HttpClient || RpcServer || RpcClient

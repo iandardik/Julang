@@ -126,3 +126,6 @@ export proc OutgoingRequestVoteRPC {
             step := "done"
     }
 }
+
+/* Handlers only — compose with RpcTransport once under NodeLogic, not here. */
+export proc RequestVoteRPCs := IncomingRequestVoteRPC || OutgoingRequestVoteRPC

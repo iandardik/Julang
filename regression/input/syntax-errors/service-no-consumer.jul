@@ -6,7 +6,7 @@ proc S {
             x := 0
     }
 
-    service transition println(msg : String) {
+    provider transition println(msg : String) {
         guard:
             true
         transit:

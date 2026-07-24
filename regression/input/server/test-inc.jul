@@ -10,11 +10,11 @@ proc Counter {
         transit: counter := 0
     }
 
-    service transition increment() {
+    provider transition increment() {
         transit: counter := counter + 1
     }
 
-    service transition getCounter(counterVal : Int) {
+    provider transition getCounter(counterVal : Int) {
         guard: counterVal = counter
     }
 }
@@ -31,7 +31,7 @@ proc PeriodicPrint {
             step := "A"
     }
 
-    transition getCounter(counterVal : Int) {
+    client transition getCounter(counterVal : Int) {
         guard:
             step = "A"
         transit:
@@ -85,12 +85,12 @@ proc IncReqHandler {
             exit := (req.body = "exit")
     }
 
-    transition increment() {
+    client transition increment() {
         guard:   step = "A"
         transit: step := "B"
     }
 
-    transition getCounter(counterVal : Int) {
+    client transition getCounter(counterVal : Int) {
         guard: step = "B"
         transit:
             localCounter := counterVal

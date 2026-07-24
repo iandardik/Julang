@@ -14,14 +14,14 @@ proc FrontEnd {
             valReq := ""
     }
 
-    transition prompt() {
+    client transition prompt() {
         guard:
             state = "A"
         transit:
             state := "B"
     }
     
-    transition readln(msg : String) {
+    client transition readln(msg : String) {
         guard:
             state = "B"
         transit:
@@ -91,14 +91,14 @@ proc Readln {
             readMsg := ""
     }
 
-    service transition prompt() {
+    provider transition prompt() {
         guard: prompt
         transit:
             prompt := false
             readMsg := readln()
     }
 
-    service transition readln(msg : String) {
+    provider transition readln(msg : String) {
         guard: ~prompt & (readMsg = msg)
         transit:
             prompt := true

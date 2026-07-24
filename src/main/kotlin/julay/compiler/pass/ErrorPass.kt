@@ -152,10 +152,10 @@ private fun RootNode.actionConsistencyErrors(
         }
         val transitions = namedOffers.filter { !it.isConstructor }
         val constructors = namedOffers.filter { it.isConstructor }
-        val services = transitions.filter { it.decl.modifier == TSAction.SyncRole.Service }
+        val services = transitions.filter { it.decl.modifier == TSAction.SyncRole.Provider }
         val internals = transitions.filter { it.decl.modifier == TSAction.SyncRole.Internal }
         val defaults = transitions.filter {
-            it.decl.modifier == TSAction.SyncRole.Default || it.decl.modifier == TSAction.SyncRole.Consumer
+            it.decl.modifier == TSAction.SyncRole.Default || it.decl.modifier == TSAction.SyncRole.Client
         }
 
         val sessionFlags = namedOffers.map { it.decl.isSession }
@@ -179,7 +179,7 @@ private fun RootNode.actionConsistencyErrors(
                     add(
                         OneLocCompileError(
                             services[0].decl.loc,
-                            "Expected session action \"$name\" not to use the service tag",
+                            "Expected session action \"$name\" not to use the provider tag",
                         ),
                     )
                 }
@@ -210,7 +210,7 @@ private fun RootNode.actionConsistencyErrors(
                     TwoLocsCompileError(
                         services[0].decl.loc,
                         services[1].decl.loc,
-                        "Expected at most one proc to declare service for action \"$name\"",
+                        "Expected at most one proc to declare provider for action \"$name\"",
                     ),
                 )
             }
@@ -220,7 +220,7 @@ private fun RootNode.actionConsistencyErrors(
                         TwoLocsCompileError(
                             services[0].decl.loc,
                             offer.decl.loc,
-                            "Expected action \"$name\" not to mix service with internal",
+                            "Expected action \"$name\" not to mix provider with internal",
                         ),
                     )
                 }
@@ -242,7 +242,7 @@ private fun RootNode.actionConsistencyErrors(
                     TwoLocsCompileError(
                         constructors[0].decl.loc,
                         services[0].decl.loc,
-                        "Expected constructors not to use an action serviced by another proc (\"$name\")",
+                        "Expected constructors not to use an action provided by another proc (\"$name\")",
                     ),
                 )
             }
@@ -320,13 +320,13 @@ private fun RootNode.actionConsistencyWarnings(
     return offers.groupBy { it.decl.action.name }.entries.flatMap { (name, namedOffers) ->
         if (name == "initially") return@flatMap emptyList()
         val transitions = namedOffers.filter { !it.isConstructor }
-        val services = transitions.filter { it.decl.modifier == TSAction.SyncRole.Service }
-        val consumers = transitions.filter { it.decl.modifier != TSAction.SyncRole.Service }
-        if (services.size == 1 && consumers.isEmpty()) {
+        val services = transitions.filter { it.decl.modifier == TSAction.SyncRole.Provider }
+        val clients = transitions.filter { it.decl.modifier == TSAction.SyncRole.Client }
+        if (services.size == 1 && clients.isEmpty()) {
             listOf(
                 OneLocCompileWarning(
                     services[0].decl.loc,
-                    "action \"$name\" is a service with no consumers and will never synchronize (intentional deadlock)",
+                    "action \"$name\" is a provider with no clients and will never synchronize (intentional deadlock)",
                 ),
             )
         } else {

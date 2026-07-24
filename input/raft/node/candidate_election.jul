@@ -60,7 +60,7 @@ export proc CandidateElection {
 
     }
 
-    transition lookupNodeById(id : Int, node : Node) {
+    client transition lookupNodeById(id : Int, node : Node) {
         guard:
             & step = "lookUpTarget"
             & id = targetId
@@ -112,7 +112,7 @@ export proc CandidateElection {
             step := "lookUpTarget"
     }
 
-    transition hasQuorum(flag : Boolean) {
+    client transition hasQuorum(flag : Boolean) {
         guard:
             step = "checkIfWon"
         transit:

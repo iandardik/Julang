@@ -21,11 +21,11 @@ export proc ClusterInfo {
             selfPort := portFromUrl(peerUrls[id])
     }
 
-    service transition getListenPort(port : Int) {
+    provider transition getListenPort(port : Int) {
         guard: port = selfPort
     }
 
-    service transition lookupNodeById(id : Int, node : Node) {
+    provider transition lookupNodeById(id : Int, node : Node) {
         guard:
             id >= 0 & id < clusterSize & id ~= selfNode.id
             & node = Node { id := id, url := urls[id] }

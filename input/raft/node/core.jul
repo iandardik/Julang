@@ -320,17 +320,17 @@ export proc RaftCore {
      * Essentially, the transitions below are getters.
      */
 
-    service transition getIsLeader(isLeader : Boolean) {
+    provider transition getIsLeader(isLeader : Boolean) {
         guard: isLeader <=> (state = "Leader")
     }
 
-    service transition hasQuorum(flag : Boolean) {
+    provider transition hasQuorum(flag : Boolean) {
         guard:
             & state = "Candidate"
             & ((flag & voteCount * 2 > clusterSize) | (~flag & voteCount * 2 <= clusterSize))
     }
 
-    service transition getElectionSnapshot(
+    provider transition getElectionSnapshot(
         epoch : Int,
         term : Int,
         candId : Int,
@@ -347,14 +347,14 @@ export proc RaftCore {
             & role = state
     }
 
-    service transition getSerializedStateMachine(serializedSM : String, isLeader : Boolean) {
+    provider transition getSerializedStateMachine(serializedSM : String, isLeader : Boolean) {
         guard:
             | (state = "Leader" & isLeader & serializedSM = stateMachine + "")
             | (state ~= "Leader" & ~isLeader & serializedSM = "")
     }
 
     /* Follower redirect: known leader id, or hasLeader false when unknown. */
-    service transition getRedirectLeader(leaderIdOut : Int, hasLeader : Boolean) {
+    provider transition getRedirectLeader(leaderIdOut : Int, hasLeader : Boolean) {
         guard:
             & state ~= "Leader"
             & (
@@ -363,7 +363,7 @@ export proc RaftCore {
             )
     }
 
-    service transition getLogMetadata(data : AppendEntriesData) {
+    provider transition getLogMetadata(data : AppendEntriesData) {
         guard:
             & state = "Leader"
             & data = AppendEntriesData {

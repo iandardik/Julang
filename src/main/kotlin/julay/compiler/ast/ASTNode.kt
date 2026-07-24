@@ -521,7 +521,8 @@ class TransitionNode(
     override fun toString(): String {
         val modifierStr = when {
             isSession -> "session "
-            modifier == TSAction.SyncRole.Service -> "service "
+            modifier == TSAction.SyncRole.Provider -> "provider "
+            modifier == TSAction.SyncRole.Client -> "client "
             modifier == TSAction.SyncRole.Internal -> "internal "
             else -> ""
         }

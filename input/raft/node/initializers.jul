@@ -73,7 +73,7 @@ proc ServerInitializer {
             myPort := 0
     }
 
-    transition getListenPort(port : Int) {
+    client transition getListenPort(port : Int) {
         guard:
             & ~started
             & myPort = 0

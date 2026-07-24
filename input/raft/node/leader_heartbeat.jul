@@ -45,7 +45,7 @@ export proc LeaderHeartbeat {
         after: delaySeconds(1)
     }
 
-    transition getIsLeader(isLeader : Boolean) {
+    client transition getIsLeader(isLeader : Boolean) {
         guard: step = "checkIsLeader"
         transit: step := if (isLeader) { "beginRound" } else { "stopTarget" }
     }
@@ -67,7 +67,7 @@ export proc LeaderHeartbeat {
             step := "needMeta"
     }
 
-    transition getLogMetadata(data : AppendEntriesData) {
+    client transition getLogMetadata(data : AppendEntriesData) {
         guard: step = "needMeta"
         transit:
             ae := data
@@ -128,7 +128,7 @@ export proc LeaderHeartbeatTarget {
             step := if (clusterSize <= 1) { "doneRound" } else { "ready" }
     }
 
-    transition lookupNodeById(id : Int, node : Node) {
+    client transition lookupNodeById(id : Int, node : Node) {
         guard: step = "ready" & id = target.id
         transit:
             target := node

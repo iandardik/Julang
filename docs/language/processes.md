@@ -12,7 +12,7 @@ proc Counter {
         transit: counter := 0
     }
 
-    service transition increment() {
+    provider transition increment() {
         transit: counter := counter + 1
     }
 }
@@ -84,4 +84,4 @@ At each step a proc offers the actions it can currently take (enabled by guards)
 
 - [Language overview](README.md)
 - [Effects](effects.md)
-- [Inc server example](../examples/inc-server.md) — `Counter` as a service interface
+- [Inc server example](../examples/inc-server.md) — `Counter` as a provider interface

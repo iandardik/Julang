@@ -10,7 +10,7 @@ proc Env {
         transit: ready := true
     }
 
-    service transition inc() {
+    provider transition inc() {
         guard: ready
         transit: ready := false
     }
@@ -23,7 +23,7 @@ proc Counter {
         transit: n := 0
     }
 
-    transition inc() {
+    client transition inc() {
         guard: n < 3
         transit: n := n + 1
     }

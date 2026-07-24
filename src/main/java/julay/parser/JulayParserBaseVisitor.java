@@ -39,7 +39,7 @@ public class JulayParserBaseVisitor<T> extends AbstractParseTreeVisitor<T> imple
 	 * <p>The default implementation returns the result of calling
 	 * {@link #visitChildren} on {@code ctx}.</p>
 	 */
-	@Override public T visitQual_segment(JulayParser.Qual_segmentContext ctx) { return visitChildren(ctx); }
+	@Override public T visitName_id(JulayParser.Name_idContext ctx) { return visitChildren(ctx); }
 	/**
 	 * {@inheritDoc}
 	 *

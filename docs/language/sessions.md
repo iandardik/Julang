@@ -2,7 +2,7 @@
 
 A **`session`** action marks an **exclusive pairwise** protocol between two procs of different classes. After first contact, follow-on session actions stick to that peer pair (**affinity**) until the session ends.
 
-`session` cannot be combined with `service` or `internal`. Every offer of an action must agree on the `session` tag.
+`session` cannot be combined with `provider` or `internal`. Every offer of an action must agree on the `session` tag.
 
 ## Lifecycle (user-facing)
 

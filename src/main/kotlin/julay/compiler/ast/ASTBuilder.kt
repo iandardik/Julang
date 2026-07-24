@@ -69,10 +69,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     }
 
     override fun visitQualified_name(ctx: JulayParser.Qualified_nameContext?): ASTNode {
-        val parts = mutableListOf(ctx!!.ID().text)
-        ctx.qual_segment().forEach { seg ->
-            parts.add(seg.ID().text)
-        }
+        val parts = ctx!!.name_id().map { it.text }
         return QualifiedNameNode(parts, sourceLocation(ctx))
     }
 
@@ -296,14 +293,19 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     }
 
     override fun visitTransition(ctx: JulayParser.TransitionContext?): ASTNode {
-        val isService = ctx!!.SERVICE() != null
+        val isProvider = ctx!!.PROVIDER() != null
+        val isClient = ctx.CLIENT() != null
         val isInternal = ctx.INTERNAL() != null
         val isSession = ctx.SESSION() != null
-        assert(!isService || !isInternal, "A transition cannot be both service and internal")
-        assert(!isSession || !isService, "A transition cannot be both session and service")
+        assert(!isProvider || !isInternal, "A transition cannot be both provider and internal")
+        assert(!isClient || !isInternal, "A transition cannot be both client and internal")
+        assert(!isProvider || !isClient, "A transition cannot be both provider and client")
+        assert(!isSession || !isProvider, "A transition cannot be both session and provider")
+        assert(!isSession || !isClient, "A transition cannot be both session and client")
         assert(!isSession || !isInternal, "A transition cannot be both session and internal")
         val modifier = when {
-            isService -> TSAction.SyncRole.Service
+            isProvider -> TSAction.SyncRole.Provider
+            isClient -> TSAction.SyncRole.Client
             isInternal -> TSAction.SyncRole.Internal
             else -> TSAction.SyncRole.Default
         }

@@ -38,15 +38,15 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitQualified_name(JulayParser.Qualified_nameContext ctx);
 	/**
-	 * Enter a parse tree produced by {@link JulayParser#qual_segment}.
+	 * Enter a parse tree produced by {@link JulayParser#name_id}.
 	 * @param ctx the parse tree
 	 */
-	void enterQual_segment(JulayParser.Qual_segmentContext ctx);
+	void enterName_id(JulayParser.Name_idContext ctx);
 	/**
-	 * Exit a parse tree produced by {@link JulayParser#qual_segment}.
+	 * Exit a parse tree produced by {@link JulayParser#name_id}.
 	 * @param ctx the parse tree
 	 */
-	void exitQual_segment(JulayParser.Qual_segmentContext ctx);
+	void exitName_id(JulayParser.Name_idContext ctx);
 	/**
 	 * Enter a parse tree produced by {@link JulayParser#decl}.
 	 * @param ctx the parse tree
