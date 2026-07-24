@@ -316,6 +316,8 @@ private fun RootNode.actionConsistencyErrors(
             constructorErrors + peerErrors
     }
 
+    val sessionOrdinaryPairErrors = sessionOrdinaryPairMixErrors(offers)
+
     val unsynced = if (jarUnsyncedCheck && program != null) {
         unsyncedOrdinaryErrors(alphabetResult.external)
     } else {
@@ -328,7 +330,56 @@ private fun RootNode.actionConsistencyErrors(
         emptyList()
     }
 
-    return alphabetResult.errors + internalMixErrors + consistencyErrors + unsynced + integrity
+    return alphabetResult.errors + internalMixErrors + consistencyErrors +
+        sessionOrdinaryPairErrors + unsynced + integrity
+}
+
+/**
+ * If two proc classes share any session action, they must not also share an ordinary
+ * (untagged) action. Provider/client APIs and ordinary sync with a *different* peer class
+ * remain allowed.
+ */
+private fun sessionOrdinaryPairMixErrors(offers: List<ActionOffer>): List<CompileError> {
+    val byChannel = offers.groupBy { it.channelKey }
+
+    val sessionPairs = linkedSetOf<Pair<String, String>>()
+    byChannel.values.forEach { named ->
+        if (named.any { it.sourceInternal }) return@forEach
+        if (named.any { it.decl.action.name == "initially" }) return@forEach
+        if (!named.all { it.decl.isSession }) return@forEach
+        val classes = named.map { it.pclassKey }.toSet()
+        if (classes.size != 2) return@forEach
+        val sorted = classes.sorted()
+        sessionPairs += sorted[0] to sorted[1]
+    }
+    if (sessionPairs.isEmpty()) return emptyList()
+
+    return byChannel.entries.flatMap { (_, named) ->
+        if (named.any { it.sourceInternal }) return@flatMap emptyList()
+        if (named.any { it.decl.action.name == "initially" }) return@flatMap emptyList()
+        if (named.any { it.decl.isSession }) return@flatMap emptyList()
+        // Ordinary rendezvous only (not provider/client).
+        if (!named.all { it.decl.modifier == TSAction.SyncRole.Default }) {
+            return@flatMap emptyList()
+        }
+        val classes = named.map { it.pclassKey }.toSet()
+        if (classes.size != 2) return@flatMap emptyList()
+        val sorted = classes.sorted()
+        val pair = sorted[0] to sorted[1]
+        if (pair !in sessionPairs) return@flatMap emptyList()
+        val name = named[0].decl.action.name
+        val offerA = named.first { it.pclassKey == sorted[0] }
+        val offerB = named.first { it.pclassKey == sorted[1] }
+        listOf(
+            TwoLocsCompileError(
+                offerA.decl.loc,
+                offerB.decl.loc,
+                "Procs \"${sorted[0]}\" and \"${sorted[1]}\" share a session protocol but also share " +
+                    "ordinary action \"$name\"; tag \"$name\" as `session` or communicate with a " +
+                    "different peer class",
+            ),
+        )
+    }
 }
 
 private fun initiallyConsistencyErrors(offers: List<ActionOffer>): List<CompileError> {

@@ -94,7 +94,7 @@ Important consequences of Julay’s philosophy:
 | `client` | Only syncs with a `provider` of the same name (never with other clients) |
 | `session` | Sticky pairwise protocol—see [Sessions](sessions.md) |
 
-`session` is incompatible with `provider`, `client`, and `internal`.
+`session` is incompatible with `provider`, `client`, and `internal`. If two classes share any session action, they must not also share an ordinary (untagged) action; ordinary sync or `provider`/`client` with a *different* peer class is fine (examples in [Sessions](sessions.md)).
 
 Examples:
 

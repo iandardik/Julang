@@ -1,0 +1,5 @@
+source: regression/input/session/session-ordinary-other-peer.jul
+programs:
+  - name: P
+    run:
+      timeoutMs: 60000

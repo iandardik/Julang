@@ -1,0 +1,31 @@
+proc A {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    session transition x() {
+        guard: false
+    }
+
+    transition y() {
+        guard: false
+    }
+}
+
+proc B {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    session transition x() {
+        guard: false
+    }
+
+    transition y() {
+        guard: false
+    }
+}
+
+proc P := A || B
+
+compile P

@@ -1,0 +1,5 @@
+source: regression/input/session/session-provider-with-peer-client.jul
+programs:
+  - name: P
+    run:
+      timeoutMs: 60000

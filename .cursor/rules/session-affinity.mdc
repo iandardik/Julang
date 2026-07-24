@@ -7,7 +7,8 @@ alwaysApply: false
 # Session affinity (replaces Julay Channel values)
 
 - `session` transition/constructor modifier marks exclusive pairwise protocols.
-- `session` is incompatible with `service` and `internal`; all offers of an action must agree on the session tag.
+- `session` is incompatible with `provider`/`client`/`internal`; all offers of an action must agree on the session tag.
+- If two proc classes share any session action, they must not also share an ordinary (untagged) action. Ordinary sync with a different peer class, and `provider`/`client` APIs (even when a session peer is also a client), remain allowed.
 - Affinity and SyncChannel sessions are **per-Proc local** only — never a Program-global registry. Session engage installs the peer `Proc` handle in local affinity (for `killSessionPeer`); no live-proc lookup on Program.
 - First contact: peers rendezvous on the static (global) action channel; Program creates exactly one dedicated SyncChannel in `SyncPayload.sessionToInstall`. Subsequent offers use that dedicated channel. Dedicated syncs install nothing.
 - Session constructor: sync size 1 on the global channel; spawn installs follow-on dedicated sessions before the child starts.

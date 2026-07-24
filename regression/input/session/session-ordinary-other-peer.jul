@@ -1,0 +1,41 @@
+import julay.funlib.exitProcess
+
+proc A {
+    constructor initially(args : List<String>) {
+        after:
+            exitProcess()
+        transit:
+    }
+
+    session transition x() {
+        guard: false
+    }
+
+    transition y() {
+        guard: false
+    }
+}
+
+proc B {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    session transition x() {
+        guard: false
+    }
+}
+
+proc C {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    transition y() {
+        guard: false
+    }
+}
+
+proc P := A || B || C
+
+compile P
