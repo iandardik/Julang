@@ -126,7 +126,7 @@ function formatExternalMarkdown(scope) {
   for (const offer of scope.external) {
     const role = offer.isConstructor ? "constructor" : offer.modifier;
     lines.push(
-      `- \`${formatOfferSignature(offer)}\` — ${role} (${offer.pclassKey})`,
+      `- \`${formatOfferSignature(offer)}\` — ${role}`,
     );
   }
   return lines.join("\n");

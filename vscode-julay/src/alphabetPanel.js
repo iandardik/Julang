@@ -12,6 +12,7 @@ let panel;
 let lastScope;
 let lastDocument;
 let showInternal = false;
+let showLeafProcs = false;
 
 async function showExternalAlphabet(args) {
   const editor = vscode.window.activeTextEditor;
@@ -65,6 +66,11 @@ async function renderPanel(document, scope) {
         if (lastDocument && lastScope) {
           await renderPanel(lastDocument, lastScope);
         }
+      } else if (msg?.type === "toggleLeafProcs") {
+        showLeafProcs = !!msg.value;
+        if (lastDocument && lastScope) {
+          await renderPanel(lastDocument, lastScope);
+        }
       } else if (msg?.type === "refresh") {
         if (lastDocument && lastScope) {
           clearAlphabetCache();
@@ -94,7 +100,12 @@ async function renderPanel(document, scope) {
     return;
   }
 
-  panel.webview.html = alphabetHtml(alphabetScope, result.entryFile, showInternal);
+  panel.webview.html = alphabetHtml(
+    alphabetScope,
+    result.entryFile,
+    showInternal,
+    showLeafProcs,
+  );
 }
 
 function loadingHtml(scope) {
@@ -111,18 +122,24 @@ function errorHtml(scope, message, entryFile) {
   `);
 }
 
-function alphabetHtml(scope, entryFile, internal) {
-  const graphSection = renderCompositionGraph(scope.compositionGraph);
-  const externalSection = renderOffers(scope.external || [], "No external actions.");
+function alphabetHtml(scope, entryFile, internal, leafProcs) {
+  const externalSection = renderOffers(
+    scope.external || [],
+    "No external actions.",
+    leafProcs,
+  );
   const sourceInternalSection = renderOffers(
     scope.sourceInternal || [],
     "No source-internal actions.",
+    leafProcs,
   );
   const syncSection = renderSyncGroups(scope.compositionHidden || []);
+  const graphSection = renderCompositionGraph(scope.compositionGraph);
 
   return wrapHtml(`
     <div class="toolbar">
       <label><input type="checkbox" id="internal" ${internal ? "checked" : ""}/> Show internal</label>
+      <label><input type="checkbox" id="leafProcs" ${leafProcs ? "checked" : ""}/> Show leaf procs</label>
       <button id="refresh">Refresh</button>
     </div>
     <h1>Alphabet of <code>${esc(scope.name)}</code></h1>
@@ -350,14 +367,17 @@ function wrapActionLines(actions, maxWidthPx) {
   return kept;
 }
 
-function renderOffers(offers, empty) {
+function renderOffers(offers, empty, showLeaf) {
   if (!offers.length) {
     return `<p class="empty">${esc(empty)}</p>`;
   }
   const items = offers
     .map((o) => {
       const role = o.isConstructor ? "constructor" : o.modifier;
-      return `<li><code>${esc(formatOfferSignature(o))}</code> — ${esc(role)} (<code>${esc(o.pclassKey)}</code>)</li>`;
+      const leaf = showLeaf
+        ? ` (<code>${esc(o.pclassKey)}</code>)`
+        : "";
+      return `<li><code>${esc(formatOfferSignature(o))}</code> — ${esc(role)}${leaf}</li>`;
     })
     .join("\n");
   return `<ul>${items}</ul>`;
@@ -426,6 +446,8 @@ ${body}
   const vscode = acquireVsCodeApi();
   const box = document.getElementById('internal');
   if (box) box.addEventListener('change', () => vscode.postMessage({ type: 'toggleInternal', value: box.checked }));
+  const leaf = document.getElementById('leafProcs');
+  if (leaf) leaf.addEventListener('change', () => vscode.postMessage({ type: 'toggleLeafProcs', value: leaf.checked }));
   const refresh = document.getElementById('refresh');
   if (refresh) refresh.addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
 </script>
