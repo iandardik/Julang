@@ -47,7 +47,8 @@ code --install-extension julay-0.1.0.vsix
 
 ### Alphabet panel
 
-- Default: **external** alphabet only.
+- **Composition sync** diagram (when the proc has `||` children): immediate top-level components as nodes, with one edge per syncing pair labeled by the actions composition-hidden between them (e.g. `Z := X || Y` shows `X`—`Y`, not leaves under `X`/`Y`).
+- Default list view: **external** alphabet only.
 - Toggle **Show internal** to reveal two separate sections:
   1. **Source-internal** — tagged `internal` in the proc definition
   2. **Synchronized (composition-hidden)** — internalized by `||`, listing the synced peers (e.g. `S ‖ T`)
@@ -57,6 +58,8 @@ Backed by:
 ```bash
 java -jar build/libs/julayc.jar analyze -s Name --json path/to/entry.jul
 ```
+
+The JSON includes `compositionGraph` (`nodes` + `edges` with `actions`) plus `external` / `sourceInternal` / `compositionHidden`.
 
 ## Settings
 

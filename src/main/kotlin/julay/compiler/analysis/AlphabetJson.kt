@@ -26,7 +26,8 @@ fun buildAlphabetJsonDocument(
             ?: ProcDecl(rootName, emptyList(), ProcDeclType.Proc)
         val leafMap = leafActionMap(ast, leaves, librariesInUse)
         val alphabet = computeCompositionAlphabet(pd, procDecls, leafMap)
-        scopeAlphabetJson(rootName, alphabet)
+        val graph = computeTopLevelSyncGraph(pd, procDecls, leafMap)
+        scopeAlphabetJson(rootName, alphabet, graph)
     }
     return buildString {
         append("{\n  \"scopes\": [\n")
@@ -47,7 +48,11 @@ fun printAlphabetJson(
     print(buildAlphabetJsonDocument(ast, scope, librariesInUse, procDecls))
 }
 
-private fun scopeAlphabetJson(name: String, alphabet: CompositionAlphabetResult): String {
+private fun scopeAlphabetJson(
+    name: String,
+    alphabet: CompositionAlphabetResult,
+    graph: TopLevelSyncGraph,
+): String {
     val external = alphabet.external
     val sourceInternal = alphabet.allOffers.filter { it.sourceInternal }
     val hidden = alphabet.allOffers.filter { it.compositionHidden && !it.sourceInternal }
@@ -56,6 +61,7 @@ private fun scopeAlphabetJson(name: String, alphabet: CompositionAlphabetResult)
     return buildString {
         append("{\n")
         append("  \"name\": ").append(jsonString(name)).append(",\n")
+        append("  \"compositionGraph\": ").append(compositionGraphJson(graph)).append(",\n")
         append("  \"external\": ").append(offerArrayJson(external)).append(",\n")
         append("  \"sourceInternal\": ").append(offerArrayJson(sourceInternal)).append(",\n")
         append("  \"compositionHidden\": [\n")
@@ -64,6 +70,32 @@ private fun scopeAlphabetJson(name: String, alphabet: CompositionAlphabetResult)
             append(indent(syncGroupJson(channelKey, offers), 4))
         }
         if (syncGroups.isNotEmpty()) append("\n")
+        append("  ]\n")
+        append("}")
+    }
+}
+
+private fun compositionGraphJson(graph: TopLevelSyncGraph): String {
+    if (graph.nodes.isEmpty()) {
+        return """{"nodes": [], "edges": []}"""
+    }
+    return buildString {
+        append("{\n")
+        append("  \"nodes\": [")
+        append(graph.nodes.joinToString(", ") { jsonString(it) })
+        append("],\n")
+        append("  \"edges\": [\n")
+        graph.edges.forEachIndexed { index, edge ->
+            if (index > 0) append(",\n")
+            append("    {\n")
+            append("      \"a\": ").append(jsonString(edge.a)).append(",\n")
+            append("      \"b\": ").append(jsonString(edge.b)).append(",\n")
+            append("      \"actions\": [")
+            append(edge.actions.joinToString(", ") { jsonString(it) })
+            append("]\n")
+            append("    }")
+        }
+        if (graph.edges.isNotEmpty()) append("\n")
         append("  ]\n")
         append("}")
     }

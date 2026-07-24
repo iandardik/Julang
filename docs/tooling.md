@@ -54,12 +54,12 @@ Common options (see `--help` for the full list):
 | `--procs` / `--procs-detail` | List procs |
 | `--intersect` / `--mutual` | How multiple scopes combine for action views |
 | `--include-internal` | Include `internal` and composition-hidden synced actions; with `--actions-detail`, each occurrence and hidden `scope=` channel key is listed separately |
-| `--json` | Emit machine-readable alphabet JSON for the scope: `external`, `sourceInternal`, and `compositionHidden` sync groups (with peer procs). Used by the VS Code extension; suppresses human-readable views |
+| `--json` | Emit machine-readable alphabet JSON for the scope: `compositionGraph` (top-level `||` children and sync edges), `external`, `sourceInternal`, and `compositionHidden` sync groups. Used by the VS Code extension; suppresses human-readable views |
 | `-L` | Module search path (same as compile) |
 
 ## VS Code / Cursor extension
 
-The [`vscode-julay/`](../vscode-julay/) extension adds `.jul` highlighting, snippets, compile tasks, go-to-definition, hover alphabets, and a panel for external vs source-internal vs composition-hidden actions. See [vscode-julay/README.md](../vscode-julay/README.md) for install and settings.
+The [`vscode-julay/`](../vscode-julay/) extension adds `.jul` highlighting, snippets, compile tasks, go-to-definition, hover alphabets, and a panel with a top-level composition sync diagram plus external / source-internal / composition-hidden actions. See [vscode-julay/README.md](../vscode-julay/README.md) for install and settings.
 
 ## Testing
 

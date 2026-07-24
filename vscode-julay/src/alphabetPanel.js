@@ -112,6 +112,7 @@ function errorHtml(scope, message, entryFile) {
 }
 
 function alphabetHtml(scope, entryFile, internal) {
+  const graphSection = renderCompositionGraph(scope.compositionGraph);
   const externalSection = renderOffers(scope.external || [], "No external actions.");
   const sourceInternalSection = renderOffers(
     scope.sourceInternal || [],
@@ -127,6 +128,8 @@ function alphabetHtml(scope, entryFile, internal) {
     <h1>Alphabet of <code>${esc(scope.name)}</code></h1>
     <p class="meta">Entry: <code>${esc(entryFile)}</code></p>
 
+    ${graphSection}
+
     <h2>External</h2>
     ${externalSection}
 
@@ -140,6 +143,211 @@ function alphabetHtml(scope, entryFile, internal) {
       ${syncSection}
     </div>
   `);
+}
+
+/**
+ * Horizontal node boxes with one labeled connector per sync edge.
+ * Attachment points are offset toward each neighbor so adjacent edges
+ * (A—B and B—C) do not share a vertical stem at B.
+ */
+function renderCompositionGraph(graph) {
+  if (!graph || !Array.isArray(graph.nodes) || graph.nodes.length < 2) {
+    return "";
+  }
+  const nodes = graph.nodes;
+  const edges = Array.isArray(graph.edges) ? graph.edges : [];
+  const n = nodes.length;
+  const minBoxW = 72;
+  const maxBoxW = 148;
+  const boxPad = 16;
+  // Uniform box width: wide enough for the longest name, but capped so neighbors stay separated.
+  const boxW = Math.min(
+    maxBoxW,
+    Math.max(minBoxW, ...nodes.map((name) => estimateTextWidth(name) + boxPad)),
+  );
+  const displayNames = nodes.map((name) => ellipsizeToWidth(name, boxW - boxPad));
+  const boxH = 36;
+  const gap = 40;
+  const padX = 20;
+  const padTop = 24;
+  const width = padX * 2 + n * boxW + (n - 1) * gap;
+
+  const nodeX = (i) => padX + i * (boxW + gap);
+  const nodeCenter = (i) => nodeX(i) + boxW / 2;
+  const indexOf = (name) => nodes.indexOf(name);
+
+  const normalized = edges
+    .map((edge) => {
+      const ia = indexOf(edge.a);
+      const ib = indexOf(edge.b);
+      if (ia < 0 || ib < 0) {
+        return null;
+      }
+      const left = Math.min(ia, ib);
+      const right = Math.max(ia, ib);
+      return {
+        left,
+        right,
+        aName: nodes[left],
+        bName: nodes[right],
+        actions: edge.actions || [],
+        span: right - left,
+      };
+    })
+    .filter(Boolean)
+    .sort((e1, e2) => e1.span - e2.span || e1.left - e2.left || e1.right - e2.right);
+
+  const portsLeft = nodes.map(() => []);
+  const portsRight = nodes.map(() => []);
+  normalized.forEach((edge, ei) => {
+    portsRight[edge.left].push(ei);
+    portsLeft[edge.right].push(ei);
+  });
+
+  function attachX(nodeIndex, edgeIndex, side) {
+    const slots = side === "right" ? portsRight[nodeIndex] : portsLeft[nodeIndex];
+    const slot = Math.max(0, slots.indexOf(edgeIndex));
+    const count = Math.max(1, slots.length);
+    const fan = (slot - (count - 1) / 2) * 10;
+    const toward = side === "right" ? 1 : -1;
+    return nodeCenter(nodeIndex) + toward * (boxW * 0.28) + fan;
+  }
+
+  const nodeRects = nodes
+    .map((name, i) => {
+      const x = nodeX(i);
+      const y = padTop;
+      const label = displayNames[i];
+      return `
+        <g>
+          <title>${esc(name)}</title>
+          <rect x="${x}" y="${y}" width="${boxW}" height="${boxH}" rx="6" class="node-box"/>
+          <text x="${nodeCenter(i)}" y="${y + boxH / 2 + 4}" text-anchor="middle" class="node-label">${esc(label)}</text>
+        </g>`;
+    })
+    .join("\n");
+
+  const yBox = padTop + boxH;
+  const lineH = 14;
+  const boxPadX = 8;
+  const boxPadY = 6;
+  const laneGap = 10;
+  let cursorY = yBox + 14;
+  const edgeParts = [];
+
+  normalized.forEach((edge, ei) => {
+    const x1 = attachX(edge.left, ei, "right");
+    const x2 = attachX(edge.right, ei, "left");
+    const mid = (x1 + x2) / 2;
+    const spanW = Math.abs(x2 - x1);
+    const maxLabelW = Math.min(Math.max(spanW - 8, 150), width - 32);
+    const lines = wrapActionLines(edge.actions, maxLabelW - 2 * boxPadX);
+    const textBlockH = Math.max(1, lines.length) * lineH;
+    const labelH = textBlockH + 2 * boxPadY;
+    const labelW = Math.min(
+      maxLabelW,
+      Math.max(56, ...lines.map((ln) => estimateTextWidth(ln) + 2 * boxPadX)),
+    );
+    const railY = cursorY + labelH / 2;
+    const labelX = mid - labelW / 2;
+    const labelY = cursorY;
+
+    const textEls = lines
+      .map((ln, li) => {
+        const ty = labelY + boxPadY + lineH * (li + 0.72);
+        return `<text x="${mid}" y="${ty}" text-anchor="middle" class="edge-label">${esc(ln)}</text>`;
+      })
+      .join("\n");
+
+    edgeParts.push(`
+      <path d="M ${x1} ${yBox} V ${railY} H ${labelX}" class="edge-line" fill="none"/>
+      <path d="M ${labelX + labelW} ${railY} H ${x2} V ${yBox}" class="edge-line" fill="none"/>
+      <rect x="${labelX}" y="${labelY}" width="${labelW}" height="${labelH}" rx="4" class="edge-action-box"/>
+      ${textEls}`);
+
+    cursorY += labelH + laneGap;
+  });
+
+  const height = Math.max(padTop + boxH + 40, cursorY + 8);
+
+  const edgeList =
+    normalized.length === 0
+      ? `<p class="empty">No composition-hidden syncs among top-level children.</p>`
+      : `<ul class="edge-list">${normalized
+          .map((e) => {
+            const acts = e.actions.join(", ");
+            return `<li><code>${esc(e.aName)}</code> ― <code>${esc(e.bName)}</code>: ${esc(acts)}</li>`;
+          })
+          .join("")}</ul>`;
+
+  return `
+    <h2>Composition sync</h2>
+    <p class="hint">Immediate children and actions internalized by <code>||</code> between them. Hover a node for its full name.</p>
+    <div class="diagram-wrap">
+      <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Composition sync diagram">
+        ${edgeParts.join("\n")}
+        ${nodeRects}
+      </svg>
+    </div>
+    ${edgeList}
+  `;
+}
+
+function estimateTextWidth(text) {
+  return Math.ceil(String(text).length * 6.4);
+}
+
+/** Truncate with ellipsis so the label fits inside maxPx. */
+function ellipsizeToWidth(text, maxPx) {
+  const s = String(text);
+  if (estimateTextWidth(s) <= maxPx) {
+    return s;
+  }
+  const maxChars = Math.max(1, Math.floor(maxPx / 6.4) - 1);
+  return `${s.slice(0, maxChars)}…`;
+}
+
+/**
+ * Wrap action names onto lines that fit maxWidthPx.
+ * Prefers breaks after commas; ellipsizes if still too long (max 4 lines).
+ */
+function wrapActionLines(actions, maxWidthPx) {
+  const maxChars = Math.max(10, Math.floor(maxWidthPx / 6.4));
+  const maxLines = 4;
+  if (!actions.length) {
+    return ["—"];
+  }
+
+  const lines = [];
+  let current = "";
+  for (const action of actions) {
+    const piece = String(action);
+    const next = current ? `${current}, ${piece}` : piece;
+    if (next.length <= maxChars) {
+      current = next;
+      continue;
+    }
+    if (current) {
+      lines.push(current);
+      current = "";
+    }
+    if (piece.length <= maxChars) {
+      current = piece;
+    } else {
+      lines.push(`${piece.slice(0, Math.max(1, maxChars - 1))}…`);
+    }
+  }
+  if (current) {
+    lines.push(current);
+  }
+
+  if (lines.length <= maxLines) {
+    return lines;
+  }
+  const kept = lines.slice(0, maxLines - 1);
+  const rest = lines.slice(maxLines - 1).join(", ");
+  kept.push(rest.length <= maxChars ? rest : `${rest.slice(0, Math.max(1, maxChars - 1))}…`);
+  return kept;
 }
 
 function renderOffers(offers, empty) {
@@ -199,6 +407,17 @@ function wrapHtml(body) {
   button { cursor: pointer; }
   ul { padding-left: 1.25rem; }
   li { margin: 0.35rem 0; }
+  .diagram-wrap { overflow-x: auto; margin: 0.75rem 0; }
+  .node-box { fill: var(--vscode-editor-background, #1e1e1e); stroke: var(--vscode-focusBorder, #007acc); stroke-width: 1.5; }
+  .node-label { fill: var(--vscode-foreground); font-family: var(--vscode-editor-font-family); font-size: 12px; }
+  .edge-line { stroke: var(--vscode-descriptionForeground, #888); stroke-width: 1.25; }
+  .edge-action-box {
+    fill: var(--vscode-editorWidget-background, var(--vscode-editor-background, #1e1e1e));
+    stroke: var(--vscode-panel-border, var(--vscode-descriptionForeground, #888));
+    stroke-width: 1.25;
+  }
+  .edge-label { fill: var(--vscode-foreground); font-family: var(--vscode-editor-font-family); font-size: 11px; }
+  .edge-list { margin-top: 0.25rem; }
 </style>
 </head>
 <body>
