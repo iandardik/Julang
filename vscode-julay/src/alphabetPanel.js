@@ -249,10 +249,10 @@ function renderCompositionGraph(graph) {
   const boxPadX = 8;
   const boxPadY = 6;
   const laneGap = 10;
-  let cursorY = yBox + 14;
-  const edgeParts = [];
+  const intervalPad = 6;
 
-  normalized.forEach((edge, ei) => {
+  // Pass 1: geometry for every edge (no Y yet).
+  const layouts = normalized.map((edge, ei) => {
     const x1 = attachX(edge.left, ei, "right");
     const x2 = attachX(edge.right, ei, "left");
     const mid = (x1 + x2) / 2;
@@ -265,27 +265,69 @@ function renderCompositionGraph(graph) {
       maxLabelW,
       Math.max(56, ...lines.map((ln) => estimateTextWidth(ln) + 2 * boxPadX)),
     );
-    const railY = cursorY + labelH / 2;
     const labelX = mid - labelW / 2;
-    const labelY = cursorY;
-
-    const textEls = lines
-      .map((ln, li) => {
-        const ty = labelY + boxPadY + lineH * (li + 0.72);
-        return `<text x="${mid}" y="${ty}" text-anchor="middle" class="edge-label">${esc(ln)}</text>`;
-      })
-      .join("\n");
-
-    edgeParts.push(`
-      <path d="M ${x1} ${yBox} V ${railY} H ${labelX}" class="edge-line" fill="none"/>
-      <path d="M ${labelX + labelW} ${railY} H ${x2} V ${yBox}" class="edge-line" fill="none"/>
-      <rect x="${labelX}" y="${labelY}" width="${labelW}" height="${labelH}" rx="4" class="edge-action-box"/>
-      ${textEls}`);
-
-    cursorY += labelH + laneGap;
+    return {
+      x1,
+      x2,
+      mid,
+      lines,
+      labelH,
+      labelW,
+      labelX,
+      xMin: labelX - intervalPad,
+      xMax: labelX + labelW + intervalPad,
+    };
   });
 
-  const height = Math.max(padTop + boxH + 40, cursorY + 8);
+  // Pass 2: first-fit pack onto shared horizontal lanes when intervals don't overlap.
+  const lanes = []; // { members: number[], maxH: number }
+  layouts.forEach((layout, i) => {
+    let placed = false;
+    for (let li = 0; li < lanes.length; li++) {
+      const lane = lanes[li];
+      const overlaps = lane.members.some((j) => {
+        const other = layouts[j];
+        return layout.xMin < other.xMax && layout.xMax > other.xMin;
+      });
+      if (!overlaps) {
+        lane.members.push(i);
+        lane.maxH = Math.max(lane.maxH, layout.labelH);
+        layout.lane = li;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      layout.lane = lanes.length;
+      lanes.push({ members: [i], maxH: layout.labelH });
+    }
+  });
+
+  // Pass 3: assign Y from packed lane heights, then draw.
+  let laneY = yBox + 14;
+  const laneTops = lanes.map((lane) => {
+    const y = laneY;
+    laneY += lane.maxH + laneGap;
+    return y;
+  });
+
+  const edgeParts = layouts.map((layout) => {
+    const labelY = laneTops[layout.lane];
+    const railY = labelY + layout.labelH / 2;
+    const textEls = layout.lines
+      .map((ln, li) => {
+        const ty = labelY + boxPadY + lineH * (li + 0.72);
+        return `<text x="${layout.mid}" y="${ty}" text-anchor="middle" class="edge-label">${esc(ln)}</text>`;
+      })
+      .join("\n");
+    return `
+      <path d="M ${layout.x1} ${yBox} V ${railY} H ${layout.labelX}" class="edge-line" fill="none"/>
+      <path d="M ${layout.labelX + layout.labelW} ${railY} H ${layout.x2} V ${yBox}" class="edge-line" fill="none"/>
+      <rect x="${layout.labelX}" y="${labelY}" width="${layout.labelW}" height="${layout.labelH}" rx="4" class="edge-action-box"/>
+      ${textEls}`;
+  });
+
+  const height = Math.max(padTop + boxH + 40, laneY + 8);
 
   const edgeList =
     normalized.length === 0
@@ -428,15 +470,23 @@ function wrapHtml(body) {
   ul { padding-left: 1.25rem; }
   li { margin: 0.35rem 0; }
   .diagram-wrap { overflow-x: auto; margin: 0.75rem 0; }
-  .node-box { fill: var(--vscode-editor-background, #1e1e1e); stroke: var(--vscode-focusBorder, #007acc); stroke-width: 1.5; }
+  .node-box {
+    fill: var(--vscode-editor-background, #1e1e1e);
+    stroke: var(--vscode-focusBorder, #007acc);
+    stroke-width: 1.5;
+  }
   .node-label { fill: var(--vscode-foreground); font-family: var(--vscode-editor-font-family); font-size: 12px; }
   .edge-line { stroke: var(--vscode-descriptionForeground, #888); stroke-width: 1.25; }
   .edge-action-box {
-    fill: var(--vscode-editorWidget-background, var(--vscode-editor-background, #1e1e1e));
-    stroke: var(--vscode-panel-border, var(--vscode-descriptionForeground, #888));
-    stroke-width: 1.25;
+    fill: var(--vscode-badge-background, #4d4d4d);
+    stroke: var(--vscode-badge-background, #4d4d4d);
+    stroke-width: 1;
   }
-  .edge-label { fill: var(--vscode-foreground); font-family: var(--vscode-editor-font-family); font-size: 11px; }
+  .edge-label {
+    fill: var(--vscode-badge-foreground, #ffffff);
+    font-family: var(--vscode-editor-font-family);
+    font-size: 11px;
+  }
   .edge-list { margin-top: 0.25rem; }
 </style>
 </head>
