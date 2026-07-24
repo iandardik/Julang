@@ -2,7 +2,6 @@ package julay.compiler.analysis
 
 import julay.compiler.ast.ASTNode
 import julay.compiler.ast.RootNode
-import julay.compiler.decl.ActionDecl
 import julay.compiler.decl.ProcDecl
 import julay.compiler.decl.ProcDeclType
 import julay.compiler.pass.computeCompositionAlphabet
@@ -21,6 +20,11 @@ private data class ListedActionOffer(
     val modifierLabel: String,
     val isInternal: Boolean,
     val isCompositionHidden: Boolean = false,
+    /** Occurrence id when listed from the composition alphabet (empty if class-collapsed). */
+    val occurrenceId: String = "",
+    /** Composition channel key (shows distinct hidden scopes in --actions-detail). */
+    val channelKey: String = "",
+    val introducingAssembly: String = "",
 ) {
     val hideByDefault: Boolean get() = isInternal || isCompositionHidden
 }
@@ -192,25 +196,10 @@ private fun collectPclassNames(
     return (julayNames + libNames).toSortedSet().toList()
 }
 
-private fun compositionHiddenIds(
-    ast: RootNode,
-    procDecls: List<ProcDecl>,
-    scope: ResolvedAnalyzeScope,
-    librariesInUse: Set<String>,
-): Set<Pair<String, String>> {
-    val hidden = mutableSetOf<Pair<String, String>>()
-    scope.rootNames.forEachIndexed { i, rootName ->
-        val leaves = scope.leafSets.getOrElse(i) { scope.leafComponents }
-        val pd = procDecls.firstOrNull { it.name == rootName }
-            ?: ProcDecl(rootName, emptyList(), ProcDeclType.Proc)
-        val leafMap = leafActionMap(ast, leaves, librariesInUse)
-        computeCompositionAlphabet(pd, procDecls, leafMap).allOffers
-            .filter { it.compositionHidden }
-            .forEach { hidden.add(it.pclassKey to it.name) }
-    }
-    return hidden
-}
-
+/**
+ * List action offers from the composition alphabet so each leaf occurrence appears separately
+ * (with distinct composition-hidden channel keys when scopes differ).
+ */
 private fun collectListedActionOffers(
     ast: ASTNode,
     procs: Set<String>,
@@ -219,46 +208,37 @@ private fun collectListedActionOffers(
     scope: ResolvedAnalyzeScope,
 ): List<ListedActionOffer> {
     require(ast is RootNode)
-    val hidden = compositionHiddenIds(ast, procDecls, scope, librariesInUse)
-    val progOffers = ast.declNodes()
-        .flatMap { it.procClassPass(procs) }
-        .flatMap { pc ->
-            pc.transitions.map { it.toListedOffer(pc.name, OfferKind.Transition, hidden) } +
-                pc.constructors.map { it.toListedOffer(pc.name, OfferKind.Constructor, hidden) }
+    val offers = mutableListOf<ListedActionOffer>()
+    val seen = mutableSetOf<String>() // occurrenceId + action + ctor bit
+    scope.rootNames.forEachIndexed { i, rootName ->
+        val leaves = scope.leafSets.getOrElse(i) { scope.leafComponents }
+        val pd = procDecls.firstOrNull { it.name == rootName }
+            ?: ProcDecl(rootName, emptyList(), ProcDeclType.Proc)
+        val leafMap = leafActionMap(ast, leaves, librariesInUse)
+        val alphabet = computeCompositionAlphabet(pd, procDecls, leafMap)
+        for (o in alphabet.allOffers) {
+            if (o.pclassKey !in procs && o.pclassKey !in librariesInUse) continue
+            val key = "${o.occurrenceId}\u0000${o.name}\u0000${o.isConstructor}"
+            if (!seen.add(key)) continue
+            val kind = if (o.isConstructor) OfferKind.Constructor else OfferKind.Transition
+            offers += ListedActionOffer(
+                actionName = o.name,
+                pclassName = o.pclassKey,
+                kind = kind,
+                modifier = o.modifier,
+                modifierLabel = o.modifierLabel(kind),
+                isInternal = o.sourceInternal,
+                isCompositionHidden = o.compositionHidden,
+                occurrenceId = o.occurrenceId,
+                channelKey = o.channelKey,
+                introducingAssembly = o.introducingAssembly,
+            )
         }
-    val libOffers = librariesInUse
-        .filter { it in procs && LibraryRegistry.isKotlinLibrary(it) }
-        .flatMap { libName ->
-            val info = LibraryRegistry.staticInfo(libName)
-            val ctorActs = info.constructors.keys
-            val alphabet = info.alphabet
-            LibraryRegistry.actionDecls(libName).mapNotNull { decl ->
-                when {
-                    decl.action in ctorActs -> decl.toListedOffer(libName, OfferKind.Constructor, hidden)
-                    decl.action in alphabet -> decl.toListedOffer(libName, OfferKind.Transition, hidden)
-                    else -> null
-                }
-            }
-        }
-    return progOffers + libOffers
+    }
+    return offers
 }
 
-private fun ActionDecl.toListedOffer(
-    pclassName: String,
-    kind: OfferKind,
-    hidden: Set<Pair<String, String>>,
-): ListedActionOffer =
-    ListedActionOffer(
-        actionName = action.name,
-        pclassName = pclassName,
-        kind = kind,
-        modifier = modifier,
-        modifierLabel = modifierLabel(kind),
-        isInternal = modifier == TSAction.SyncRole.Internal,
-        isCompositionHidden = (pclassName to action.name) in hidden,
-    )
-
-private fun ActionDecl.modifierLabel(kind: OfferKind): String {
+private fun julay.compiler.pass.AlphabetOffer.modifierLabel(kind: OfferKind): String {
     val kindStr = when (kind) {
         OfferKind.Constructor -> "constructor"
         OfferKind.Transition -> "transition"
@@ -266,7 +246,7 @@ private fun ActionDecl.modifierLabel(kind: OfferKind): String {
     return when {
         isSession -> "session $kindStr"
         modifier == TSAction.SyncRole.Service -> "service $kindStr"
-        modifier == TSAction.SyncRole.Internal -> "internal $kindStr"
+        modifier == TSAction.SyncRole.Internal || sourceInternal -> "internal $kindStr"
         else -> kindStr
     }
 }
@@ -299,9 +279,34 @@ private fun printActions(offers: List<ListedActionOffer>, detail: Boolean) {
     byAction.forEach { (actionName, actionOffers) ->
         println(actionName)
         actionOffers
-            .sortedWith(compareBy({ it.pclassName }, { it.kind.name }, { it.modifierLabel }))
+            .sortedWith(
+                compareBy(
+                    { it.pclassName },
+                    { it.introducingAssembly },
+                    { it.occurrenceId },
+                    { it.kind.name },
+                    { it.modifierLabel },
+                    { it.channelKey },
+                ),
+            )
             .forEach { offer ->
-                println("  ${offer.pclassName}: ${offer.modifierLabel}")
+                val occ =
+                    if (offer.introducingAssembly.isNotEmpty() &&
+                        offer.introducingAssembly != offer.pclassName
+                    ) {
+                        " (from ${offer.introducingAssembly})"
+                    } else {
+                        ""
+                    }
+                val scope = when {
+                    offer.isCompositionHidden &&
+                        offer.channelKey.isNotEmpty() &&
+                        offer.channelKey != offer.actionName ->
+                        " [composition-hidden scope=${offer.channelKey}]"
+                    offer.isCompositionHidden -> " [composition-hidden]"
+                    else -> ""
+                }
+                println("  ${offer.pclassName}$occ: ${offer.modifierLabel}$scope")
             }
     }
 }

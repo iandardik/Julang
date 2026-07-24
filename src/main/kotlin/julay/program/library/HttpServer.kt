@@ -69,6 +69,11 @@ class JulHttpServer(
     private var port: Int? = null
     private var jdkServer: HttpServer? = null
     private var closed = false
+    private lateinit var hostProc: Proc
+
+    override fun bindHostProc(host: Proc) {
+        hostProc = host
+    }
 
     override suspend fun finishConstruction(act: ConcreteAction) {
         val listenPort = act.lookup(portArg).value as Int
@@ -89,7 +94,7 @@ class JulHttpServer(
     }
 
     override suspend fun transit(act: ConcreteAction) {
-        if (act.symAction == closeHttpServerAct) {
+        if (act.symAction.name == closeHttpServerAct.name) {
             closed = true
             jdkServer?.stop(0)
         }
@@ -97,7 +102,9 @@ class JulHttpServer(
 
     override fun handle(exchange: HttpExchange?) {
         val resource = HttpResource(exchange!!, program)
-        program.spawnProc(resource, staticInfo())
+        // Use this server occurrence's StaticInfo so request/response actions share the
+        // composition-assigned channelKeys already registered on Program.
+        program.spawnProc(resource, hostProc.occurrenceStaticInfo())
     }
 
     class HttpResource(
@@ -138,7 +145,7 @@ class JulHttpServer(
             }
         }
         override suspend fun transit(act: ConcreteAction) {
-            if (act.symAction == sendResponseAct) {
+            if (act.symAction.name == sendResponseAct.name) {
                 val resp = act.lookup(respArg).value as HttpServerResponse
                 exchange.sendResponseHeaders(resp.code, resp.body.length.toLong())
                 exchange.responseBody.writer().use { writer ->

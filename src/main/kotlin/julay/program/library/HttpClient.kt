@@ -105,17 +105,17 @@ class JulHttpClient(
     }
 
     override suspend fun transit(act: ConcreteAction) {
-        when (act.symAction) {
-            sendRequestAct -> {
+        when (act.symAction.name) {
+            sendRequestAct.name -> {
                 val request = act.lookup(reqArg).value as HttpClientRequest
                 response = send(request)
                 phase = Phase.HaveResponse
             }
-            receiveResponseAct -> {
+            receiveResponseAct.name -> {
                 response = null
                 phase = Phase.Idle
             }
-            closeHttpClientAct -> {
+            closeHttpClientAct.name -> {
                 phase = Phase.Closed
                 response = null
             }

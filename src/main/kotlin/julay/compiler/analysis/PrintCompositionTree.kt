@@ -50,6 +50,7 @@ private fun printTreeNode(
     println("$prefix$connector$label")
 
     val decl = byName[name]
+    // Preserve duplicate component occurrences (occurrence-based ||).
     val childNames = decl?.components?.map { cmpt ->
         byName[cmpt.name]?.name ?: cmpt.name
     }.orEmpty()

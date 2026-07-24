@@ -91,6 +91,7 @@ private fun RootNode.actionConsistencyErrors(
             external = all.filter { !it.sourceInternal },
             allOffers = all,
             channelKeys = all.associate { it.leafId to it.channelKey },
+            leafOccurrences = emptyList(),
             errors = emptyList(),
         )
     }
@@ -290,7 +291,13 @@ private fun RootNode.actionConsistencyErrors(
         emptyList()
     }
 
-    return alphabetResult.errors + internalMixErrors + consistencyErrors + unsynced
+    val integrity = if (program != null) {
+        alphabetIntegrityErrors(alphabetResult)
+    } else {
+        emptyList()
+    }
+
+    return alphabetResult.errors + internalMixErrors + consistencyErrors + unsynced + integrity
 }
 
 private fun initiallyConsistencyErrors(offers: List<ActionOffer>): List<CompileError> {

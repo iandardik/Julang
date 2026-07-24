@@ -65,6 +65,14 @@ class Proc(
 
     fun affinityPeers(): List<Proc> = affinity.values.toList()
 
+    /** This occurrence's StaticInfo (shared with nested library resources when needed). */
+    fun occurrenceStaticInfo(): TransitionSystemStaticInfo = tsInfo
+
+    /**
+     * Map a TS-offered [SymbolicAction] onto this occurrence's StaticInfo alphabet / constructors.
+     */
+    fun resolveSymbolicAction(act: SymbolicAction): SymbolicAction = tsInfo.resolveAction(act)
+
     /**
      * Close dedicated sessions with [peerProcId] and clear affinity to that peer.
      * Does not kill either proc.
@@ -296,15 +304,27 @@ class Proc(
      */
     private suspend fun resolveSyncChannel(act: TSAction): SyncChannel<SyncPayload, Constraint> {
         act.syncChannel?.let { return it }
-        if (act.symAction.isSession) {
+        val resolvedSym = resolveSymbolicAction(act.symAction)
+        if (resolvedSym.isSession) {
             for ((_, peer) in affinity) {
-                val session = sessionChannelTable[peer.procId to act.symAction.name]
+                val session = sessionChannelTable[peer.procId to resolvedSym.name]
                 if (session != null && !session.isClosed()) {
                     return session
                 }
             }
         }
-        return staticChannelTable[act.symAction]!!.channel
+        val entry = staticChannelTable[resolvedSym]
+            ?: staticChannelTable.entries.firstOrNull { (k, _) ->
+                k.name == resolvedSym.name &&
+                    k.isSession == resolvedSym.isSession &&
+                    k.isInternal == resolvedSym.isInternal &&
+                    k.args == resolvedSym.args
+            }?.value
+        return entry?.channel
+            ?: error(
+                "No SyncChannel for ${resolvedSym.name} (channelKey=${resolvedSym.channelKey}) " +
+                    "on $className/$procId",
+            )
     }
 
     private fun applySessionPayload(payload: SyncPayload) {

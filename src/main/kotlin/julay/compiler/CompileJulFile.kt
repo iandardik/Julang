@@ -55,15 +55,38 @@ fun compileJulFile(
             println("Internal error: missing SpecNode for \"${specDecl.name}\"")
             return
         }
-        // Specs intentionally allow unshared actions (assumption/system roles);
-        // skip JAR-oriented sync errorPass. Typechecking already ran in prepareCheckedCompilation.
+        // Specs allow unilateral assume/system actions; only shared alphabet-integrity
+        // checks (duplicate external / dual service) must match JAR.
+        if (!runSpecAlphabetIntegrityPass(ast, specDecl, procDecls, librariesInUse)) {
+            return
+        }
         compileSpecToTla(specNode, ast, unit)
     }
 
     for (proc in tlaProcTargets) {
+        if (!runSpecAlphabetIntegrityPass(ast, proc, procDecls, librariesInUse)) {
+            return
+        }
         // Synthetic plain-system spec: equivalent to <true> P <true> (no assume, no guarantee).
         compileSpecToTla(syntheticProcSpec(proc.name), ast, unit)
     }
+}
+
+/** Alphabet integrity shared by JAR and TLA+ (not full JAR peer-count / unsynced checks). */
+private fun runSpecAlphabetIntegrityPass(
+    ast: julay.compiler.ast.RootNode,
+    program: julay.compiler.decl.ProcDecl,
+    procDecls: List<julay.compiler.decl.ProcDecl>,
+    librariesInUse: Set<String>,
+): Boolean {
+    val components = program.allProcNames(procDecls)
+    val leafMap = julay.compiler.pass.leafActionMap(ast, components, librariesInUse)
+    val alphabet = julay.compiler.pass.computeCompositionAlphabet(program, procDecls, leafMap)
+    val errors = alphabet.errors + julay.compiler.pass.alphabetIntegrityErrors(alphabet)
+    if (errors.isEmpty()) return true
+    errors.forEach { System.err.println(it) }
+    System.err.println("Found errors while compiling \"${program.name}\"; exiting.")
+    return false
 }
 
 /** Plain `spec Name := Name` — TLA with no assumption and no guarantee invariants. */

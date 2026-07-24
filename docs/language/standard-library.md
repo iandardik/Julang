@@ -44,6 +44,7 @@ Guard-unsafe functions throw at compile/check time if used where Z3 encoding is 
 
 ## See also
 
+- [Creating libraries](creating-libraries.md) — how to add `.jul` or Kotlin-native procs/funs
 - [Side effects](effects.md)
 - [Modules](modules.md)
 - [Sessions](sessions.md) — Timer cancel / session teardown

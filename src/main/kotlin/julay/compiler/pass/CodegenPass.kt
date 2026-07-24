@@ -24,17 +24,20 @@ fun codegenPass(
     librariesInUse: Set<String> = emptySet(),
 ): CodegenResult {
     val libPClassNames = librariesInUse
-    val kotlinLibProcs = program.allProcNames(procDecls).filter { it in libPClassNames }
-    val procsToCompile = program.allProcNames(procDecls).filter { it !in kotlinLibProcs }
+    val leafMap = leafActionMap(ast, program.allProcNames(procDecls), librariesInUse)
+    val alphabet = computeCompositionAlphabet(program, procDecls, leafMap)
+    val channelKeys = alphabet.channelKeys
+    val occurrences = alphabet.leafOccurrences
+
+    val distinctPclasses = occurrences.map { it.pclassName }.toSet()
+    val kotlinLibProcs = distinctPclasses.filter { it in libPClassNames && LibraryRegistry.isKotlinLibrary(it) }
+    val procsToCompile = distinctPclasses.filter { it !in kotlinLibProcs }
     val procClasses = procsToCompile.flatMap { proc ->
         val procClass = ast.procClassPass(setOf(proc))
         julay.tools.assert(procClass.size == 1, "Expected exactly one proc class for \"$proc\" but found: ${procClass.size}")
         procClass
     }
-
-    val leafMap = leafActionMap(ast, program.allProcNames(procDecls), librariesInUse)
-    val alphabet = computeCompositionAlphabet(program, procDecls, leafMap)
-    val channelKeys = alphabet.channelKeys
+    val procClassByName = procClasses.associateBy { it.name }
 
     val servicedActionNames = (
         procClasses.flatMap { it.transitions } +
@@ -44,10 +47,11 @@ fun codegenPass(
         .map { it.action.name }
         .toSet()
 
-    val libProcs = kotlinLibProcs
-    val staticInfoLib = libProcs.map { LibraryRegistry.staticInfoCodegenExpr(it) }
-    val staticInfoCompiledProcs = procClasses.map { it.kotlinStaticInfoString(servicedActionNames, channelKeys) }
-    val staticInfoBody = (staticInfoCompiledProcs + staticInfoLib).joinToString(",\n") { it }
+    // One StaticInfo per leaf occurrence (Julay and Kotlin libraries), with occurrence channel keys.
+    val staticInfoExprs = occurrences.map { occ ->
+        occurrenceStaticInfoExpr(occ, channelKeys, servicedActionNames, procClassByName, libPClassNames)
+    }
+    val staticInfoBody = staticInfoExprs.joinToString(",\n") { it }
     val staticInfo = "val tsInfo = setOf(\n" + staticInfoBody.prependIndent() + "\n)"
     val objClassDecls = ast.resolvedObjClassDecls()
         .filterNot { ObjClassBuiltinRegistry.isBuiltin(it.name) }
@@ -102,15 +106,55 @@ fun codegenPass(
     } else {
         ""
     }
+    // Class bodies use channel keys from the first occurrence of each class (remap still
+    // handles further occurrences via StaticInfo.resolveAction).
+    val classBodyKeys = LinkedHashMap<LeafActionId, String>()
+    val seenClass = mutableSetOf<String>()
+    for (occ in occurrences) {
+        if (!seenClass.add(occ.pclassName)) continue
+        channelKeys.forEach { (id, key) ->
+            if (id.occurrenceId == occ.occurrenceId && id.pclassKey == occ.pclassName) {
+                // Class body lookup uses empty occurrenceId sentinel.
+                classBodyKeys[LeafActionId(id.pclassKey, "", id.actionName, id.isConstructor)] = key
+            }
+        }
+    }
     val sourceText = "$imports$effectImports\n" +
         dataClassSection +
         objClassSection +
         parametricTypeSection +
-        procClasses.joinToString("\n\n") { it.kotlinClassString(objClassDecls, servicedActionNames, channelKeys) } +
+        procClasses.joinToString("\n\n") { it.kotlinClassString(objClassDecls, servicedActionNames, classBodyKeys) } +
         "\n\n" +
         mainFunction
 
     return CodegenResult(sourceText, mainClassName)
+}
+
+private fun occurrenceStaticInfoExpr(
+    occ: LeafOccurrence,
+    channelKeys: Map<LeafActionId, String>,
+    servicedActionNames: Set<String>,
+    procClassByName: Map<String, ProcClassDecl>,
+    libPClassNames: Set<String>,
+): String {
+    val overrides = channelKeys.entries
+        .filter { it.key.occurrenceId == occ.occurrenceId && it.key.pclassKey == occ.pclassName }
+        .filter { it.value != it.key.actionName }
+        .associate { it.key.actionName to it.value }
+    return if (occ.pclassName in libPClassNames && LibraryRegistry.isKotlinLibrary(occ.pclassName)) {
+        val base = LibraryRegistry.staticInfoCodegenExpr(occ.pclassName)
+        if (overrides.isEmpty()) {
+            base
+        } else {
+            val mapEntries = overrides.entries.joinToString(", ") { (k, v) ->
+                "\"${k.escapeKotlinStringLiteral()}\" to \"${v.escapeKotlinStringLiteral()}\""
+            }
+            "$base.withChannelKeys(mapOf($mapEntries))"
+        }
+    } else {
+        val pc = procClassByName.getValue(occ.pclassName)
+        pc.kotlinStaticInfoString(servicedActionNames, occ.occurrenceId, channelKeys)
+    }
 }
 
 /**
@@ -415,16 +459,29 @@ private fun ProcClassDecl.kotlinClassString(
 
 private fun ProcClassDecl.kotlinStaticInfoString(
     servicedActionNames: Set<String>,
+    occurrenceId: String,
     channelKeys: Map<LeafActionId, String>,
 ): String {
     val transitionInfo = transitions.joinToString(",\n") {
-        it.kotlinStaticInfoString(servicedActionNames, name, channelKeys, isConstructor = false).prependIndent()
+        it.kotlinStaticInfoString(
+            servicedActionNames,
+            name,
+            occurrenceId,
+            channelKeys,
+            isConstructor = false,
+        ).prependIndent()
     }
     // Factory only allocates an uninitialized instance (null state). Constructor transit and
     // effects run later on the child proc via TransitionSystem.finishConstruction.
     val constructorPairs = constructors
         .joinToString(",\n") { ctor ->
-            val actSigStr = ctor.kotlinStaticInfoString(servicedActionNames, name, channelKeys, isConstructor = true)
+            val actSigStr = ctor.kotlinStaticInfoString(
+                servicedActionNames,
+                name,
+                occurrenceId,
+                channelKeys,
+                isConstructor = true,
+            )
             val constructStr = "{ program, _ -> $name(program) }"
             "Pair($actSigStr, $constructStr)".prependIndent()
         }
@@ -455,7 +512,13 @@ private fun ActionDecl.kotlinActionString(
     val symbolTypes = stateVarTypes + actionArgEnv(action.args)
     val argSymbols = actionArgSymbols(action.args)
 
-    val actionSigStr = kotlinStaticInfoString(servicedActionNames, pclassName, channelKeys, isConstructor = false)
+    val actionSigStr = kotlinStaticInfoString(
+        servicedActionNames,
+        pclassName,
+        occurrenceId = "",
+        channelKeys,
+        isConstructor = false,
+    )
     val guardStr = if (guards.isEmpty()) {
         "ctx.mkTrue()"
     } else if (guards.size == 1) {
@@ -531,14 +594,20 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
 private fun ActionDecl.kotlinStaticInfoString(
     servicedActionNames: Set<String> = emptySet(),
     pclassName: String = "",
+    occurrenceId: String = "",
     channelKeys: Map<LeafActionId, String> = emptyMap(),
     isConstructor: Boolean = false,
 ): String {
     val actionArgsStr = action.args.joinToString(", ") {
         "Variable(\"${it.name}\", ${it.type.toCodegenTypeVal()})"
     }
-    val resolvedKey = channelKeys[LeafActionId(pclassName, action.name, isConstructor)]
-        ?: action.channelKey
+    val resolvedKey = if (occurrenceId.isNotEmpty()) {
+        channelKeys[LeafActionId(pclassName, occurrenceId, action.name, isConstructor)]
+            ?: action.channelKey
+    } else {
+        channelKeys[LeafActionId(pclassName, "", action.name, isConstructor)]
+            ?: action.channelKey
+    }
     val flags = buildList {
         if (action.isInternal || modifier == TSAction.SyncRole.Internal) add("isInternal = true")
         if (action.isSession) add("isSession = true")

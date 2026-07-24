@@ -13,9 +13,10 @@ import julay.program.action.SymbolicAction
 import julay.program.action.TSAction
 import julay.program.library.LibraryRegistry
 
-/** Identity of a leaf action offer for channel-key assignment. */
+/** Identity of a leaf action offer for channel-key assignment (occurrence-scoped). */
 data class LeafActionId(
     val pclassKey: String,
+    val occurrenceId: String,
     val actionName: String,
     val isConstructor: Boolean,
 )
@@ -23,9 +24,13 @@ data class LeafActionId(
 /**
  * One action offer in a (possibly derived) alphabet.
  * [compositionHidden] means the offer was internalized by `||` matching (not source `internal`).
+ * [occurrenceId] distinguishes multiple occurrences of the same proc class.
+ * [introducingAssembly] is the named proc/assembly that introduced this leaf (for TLA naming).
  */
 data class AlphabetOffer(
     val pclassKey: String,
+    val occurrenceId: String,
+    val introducingAssembly: String,
     val name: String,
     val args: List<Variable>,
     val modifier: TSAction.SyncRole,
@@ -37,7 +42,7 @@ data class AlphabetOffer(
     val sourceInternal: Boolean = false,
 ) {
     val isService: Boolean get() = modifier == TSAction.SyncRole.Service
-    val leafId: LeafActionId get() = LeafActionId(pclassKey, name, isConstructor)
+    val leafId: LeafActionId get() = LeafActionId(pclassKey, occurrenceId, name, isConstructor)
 
     fun signatureCompatible(other: AlphabetOffer): Boolean =
         args == other.args && isSession == other.isSession &&
@@ -61,10 +66,21 @@ data class CompositionAlphabetResult(
     /** All offers including hidden and source-internal (for channel binding / analyze --include-internal). */
     val allOffers: List<AlphabetOffer>,
     val channelKeys: Map<LeafActionId, String>,
+    /** Distinct leaf occurrences in left-to-right composition order. */
+    val leafOccurrences: List<LeafOccurrence>,
     val errors: List<CompileError>,
 )
 
+/** One leaf proc-class occurrence in a composition (JAR / analyze / TLA). */
+data class LeafOccurrence(
+    val pclassName: String,
+    val occurrenceId: String,
+    /** Named assembly that introduced this occurrence (for TLA `{Class}_{Assembly}` renaming). */
+    val introducingAssembly: String,
+)
+
 private var scopeCounter = 0
+private var occurrenceCounter = 0
 
 private fun freshScopeId(hint: String): String {
     scopeCounter += 1
@@ -72,9 +88,16 @@ private fun freshScopeId(hint: String): String {
     return "${safe}_$scopeCounter"
 }
 
+private fun freshOccurrenceId(pclass: String): String {
+    occurrenceCounter += 1
+    val safe = pclass.replace(Regex("[^A-Za-z0-9_]"), "_")
+    return "${safe}_occ$occurrenceCounter"
+}
+
 /** Reset between compilations so codegen strings stay stable within a run when desired. */
 fun resetCompositionScopeCounter() {
     scopeCounter = 0
+    occurrenceCounter = 0
 }
 
 fun leafActionMap(ast: RootNode, procs: Set<String>, librariesInUse: Set<String>): Map<String, List<AlphabetOffer>> {
@@ -104,6 +127,7 @@ private fun ProcClassDecl.toAlphabetOffers(): List<AlphabetOffer> =
     transitions.map { it.toAlphabetOffer(name, isConstructor = false) } +
         constructors.map { it.toAlphabetOffer(name, isConstructor = true) }
 
+/** Template offers (no occurrence id yet) for a leaf pclass. */
 private fun ActionDecl.toAlphabetOffer(pclassKey: String, isConstructor: Boolean): AlphabetOffer {
     val sourceInternal = modifier == TSAction.SyncRole.Internal
     val channelKey = if (sourceInternal) {
@@ -113,6 +137,8 @@ private fun ActionDecl.toAlphabetOffer(pclassKey: String, isConstructor: Boolean
     }
     return AlphabetOffer(
         pclassKey = pclassKey,
+        occurrenceId = "",
+        introducingAssembly = pclassKey,
         name = action.name,
         args = action.args,
         modifier = modifier,
@@ -126,8 +152,51 @@ private fun ActionDecl.toAlphabetOffer(pclassKey: String, isConstructor: Boolean
 }
 
 /**
- * Compute the inductive alphabet of [root] (a JAR/analyze target), assigning private channel keys
- * to composition-hidden syncs so nested assemblies do not cross-sync on the same surface name.
+ * Collect leaf occurrences under [root] by expanding named assemblies independently
+ * (`M || M` yields two expansions). Left-to-right, occurrence-preserving.
+ */
+fun collectLeafOccurrences(
+    root: ProcDecl,
+    procDecls: List<ProcDecl>,
+): List<LeafOccurrence> {
+    resetCompositionScopeCounter()
+    val procDeclMap = procDecls.associateBy { it.name }
+    val out = mutableListOf<LeafOccurrence>()
+
+    fun resolve(pd: ProcDecl): ProcDecl = procDeclMap[pd.name] ?: pd
+
+    fun walk(pd: ProcDecl, introducingAssembly: String) {
+        val resolved = resolve(pd)
+        if (resolved.components.isEmpty()) {
+            val pclass = resolved.name
+            out += LeafOccurrence(
+                pclassName = pclass,
+                occurrenceId = freshOccurrenceId(pclass),
+                introducingAssembly = introducingAssembly,
+            )
+            return
+        }
+        // Each child component is an independent expansion; the assembly name for nested
+        // named procs is that child's name when it has its own declaration.
+        for (child in resolved.components) {
+            val childResolved = resolve(child)
+            val childIntro = if (childResolved.components.isNotEmpty() || child.name in procDeclMap) {
+                child.name
+            } else {
+                introducingAssembly
+            }
+            walk(child, childIntro)
+        }
+    }
+
+    walk(root, root.name)
+    return out
+}
+
+/**
+ * Compute the inductive alphabet of [root] (a JAR/analyze/TLA target), assigning private channel
+ * keys to composition-hidden syncs so nested assemblies do not cross-sync on the same surface name.
+ * Expands named assemblies by occurrence (`M || M` → two independent expansions).
  */
 fun computeCompositionAlphabet(
     root: ProcDecl,
@@ -138,29 +207,52 @@ fun computeCompositionAlphabet(
     val procDeclMap = procDecls.associateBy { it.name }
     val channelKeys = mutableMapOf<LeafActionId, String>()
     val errors = mutableListOf<CompileError>()
+    val leafOccurrences = mutableListOf<LeafOccurrence>()
 
     fun recordKeys(offers: List<AlphabetOffer>) {
         offers.forEach { offer ->
-            if (!offer.sourceInternal || offer.compositionHidden) {
-                // Always record; source-internal already has a unique key.
-            }
             channelKeys[offer.leafId] = offer.channelKey
         }
     }
 
     fun resolve(pd: ProcDecl): ProcDecl = procDeclMap[pd.name] ?: pd
 
-    fun alphabetOf(pd: ProcDecl, scopeHint: String): List<AlphabetOffer> {
+    fun stampLeafOffers(
+        pclass: String,
+        introducingAssembly: String,
+    ): List<AlphabetOffer> {
+        val occurrenceId = freshOccurrenceId(pclass)
+        leafOccurrences += LeafOccurrence(pclass, occurrenceId, introducingAssembly)
+        val templates = leafOffersByPclass[pclass] ?: emptyList()
+        val offers = templates.map { template ->
+            val channelKey = if (template.sourceInternal) {
+                "$occurrenceId#internal#${template.name}"
+            } else {
+                template.channelKey
+            }
+            template.copy(
+                occurrenceId = occurrenceId,
+                introducingAssembly = introducingAssembly,
+                channelKey = channelKey,
+            )
+        }
+        recordKeys(offers)
+        return offers
+    }
+
+    fun alphabetOf(pd: ProcDecl, introducingAssembly: String, scopeHint: String): List<AlphabetOffer> {
         val resolved = resolve(pd)
         if (resolved.components.isEmpty()) {
-            val offers = leafOffersByPclass[resolved.name]
-                ?: leafOffersByPclass[pd.name]
-                ?: emptyList()
-            recordKeys(offers)
-            return offers
+            return stampLeafOffers(resolved.name, introducingAssembly)
         }
         val childAlphabets = resolved.components.map { child ->
-            alphabetOf(child, child.name)
+            val childResolved = resolve(child)
+            val childIntro = if (childResolved.components.isNotEmpty() || child.name in procDeclMap) {
+                child.name
+            } else {
+                introducingAssembly
+            }
+            alphabetOf(child, childIntro, child.name)
         }
         if (childAlphabets.isEmpty()) return emptyList()
         var acc = childAlphabets[0]
@@ -174,30 +266,38 @@ fun computeCompositionAlphabet(
         return acc
     }
 
-    val allOffers = alphabetOf(root, root.name)
+    val allOffers = alphabetOf(root, root.name, root.name)
     val external = allOffers.filter { !it.sourceInternal && !it.compositionHidden }
-    return CompositionAlphabetResult(external, allOffers, channelKeys.toMap(), errors)
+    return CompositionAlphabetResult(
+        external = external,
+        allOffers = allOffers,
+        channelKeys = channelKeys.toMap(),
+        leafOccurrences = leafOccurrences.toList(),
+        errors = errors,
+    )
 }
 
 /**
  * Compose two alphabets under [scopeId]. Matching non-service (incl. session) pairs become
  * composition-hidden with a private [scopeId]-scoped channel key. Services always escape.
+ * Same proc-class on both sides never syncs (same-class rule).
  */
 fun composeAlphabets(
     left: List<AlphabetOffer>,
     right: List<AlphabetOffer>,
     scopeId: String,
 ): Pair<List<AlphabetOffer>, List<CompileError>> {
-    // Source-internal never participates in cross-proc sync; always keep as-is (unique channels).
-    val leftInternal = left.filter { it.sourceInternal }
-    val rightInternal = right.filter { it.sourceInternal }
-    val leftExt = left.filter { !it.sourceInternal }
-    val rightExt = right.filter { !it.sourceInternal }
+    // Source-internal and already composition-hidden offers never re-sync at an outer step;
+    // they pass through with their channel keys (binary sync scoping).
+    val leftSettled = left.filter { it.sourceInternal || it.compositionHidden }
+    val rightSettled = right.filter { it.sourceInternal || it.compositionHidden }
+    val leftExt = left.filter { !it.sourceInternal && !it.compositionHidden }
+    val rightExt = right.filter { !it.sourceInternal && !it.compositionHidden }
 
     val errors = mutableListOf<CompileError>()
     val result = mutableListOf<AlphabetOffer>()
-    result.addAll(leftInternal)
-    result.addAll(rightInternal)
+    result.addAll(leftSettled)
+    result.addAll(rightSettled)
 
     val leftByName = leftExt.groupBy { it.name }
     val rightByName = rightExt.groupBy { it.name }
@@ -222,6 +322,13 @@ fun composeAlphabets(
                     result.addAll(r)
                     continue
                 }
+                // Same class never syncs: if every offer on both sides shares one pclass, leave as-is.
+                val classes = (l + r).map { it.pclassKey }.toSet()
+                if (classes.size == 1) {
+                    result.addAll(l)
+                    result.addAll(r)
+                    continue
+                }
                 // Non-service (ordinary or session): require matching signatures, then hide.
                 val mismatch = findSignatureMismatch(l, r)
                 if (mismatch != null) {
@@ -236,11 +343,10 @@ fun composeAlphabets(
                     result.addAll(r)
                     continue
                 }
-                // Kotlin libraries ship fixed SymbolicAction channel keys (= name). Keep the
-                // public name when either peer is a Kotlin lib so channels still match.
-                val touchesKotlinLib =
-                    (l + r).any { LibraryRegistry.isKotlinLibrary(it.pclassKey) }
-                val hiddenKey = if (touchesKotlinLib) name else "$scopeId#$name"
+                // Assign the same composition-scoped channel key to both sides, including
+                // Kotlin-native library occurrences. Nested library TSs must offer actions via
+                // the bound StaticInfo (Proc.resolveSymbolicAction / occurrenceStaticInfo).
+                val hiddenKey = "$scopeId#$name"
                 result.addAll(l.map { it.copy(channelKey = hiddenKey, compositionHidden = true) })
                 result.addAll(r.map { it.copy(channelKey = hiddenKey, compositionHidden = true) })
             }
@@ -281,4 +387,55 @@ fun unsyncedNonServiceErrors(external: List<AlphabetOffer>): List<CompileError> 
                     "tag it `internal` if a solo step is intentional",
             )
         }
+}
+
+/**
+ * Alphabet integrity for JAR and TLA+ targets (same checks):
+ * - same-class duplicate external ordinary/session actions unless a service provider resolves them
+ * - at most one service provider per action name
+ */
+fun alphabetIntegrityErrors(
+    alphabet: CompositionAlphabetResult,
+): List<CompileError> {
+    val external = alphabet.external
+    val errors = mutableListOf<CompileError>()
+
+    val serviceCountByName = external.filter { it.isService }.groupBy { it.name }
+    for ((name, offers) in serviceCountByName) {
+        val providers = offers.distinctBy { it.occurrenceId }
+        if (providers.size >= 2) {
+            val locs = providers.map { it.loc }
+            errors += if (locs.size >= 2) {
+                TwoLocsCompileError(
+                    locs[0],
+                    locs[1],
+                    "Action \"$name\" has more than one service provider in the composition",
+                )
+            } else {
+                OneLocCompileError(
+                    locs[0],
+                    "Action \"$name\" has more than one service provider in the composition",
+                )
+            }
+        }
+    }
+
+    val serviceNames = serviceCountByName.keys
+    val nonService = external.filter { !it.isService && it.name != "initially" }
+    for ((name, named) in nonService.groupBy { it.name }) {
+        if (name in serviceNames) continue // resolved by a service provider
+        for ((pclass, offers) in named.groupBy { it.pclassKey }) {
+            val occs = offers.map { it.occurrenceId }.toSet()
+            if (occs.size >= 2) {
+                val sample = offers[0]
+                errors += OneLocCompileError(
+                    sample.loc,
+                    "Multiple occurrences of \"$pclass\" expose unsynced action \"$name\" in the composition; " +
+                        "sync each occurrence with a different-class peer, tag the action `internal`, " +
+                        "or provide a single `service` for \"$name\"",
+                )
+            }
+        }
+    }
+    return errors
 }

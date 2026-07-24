@@ -15,7 +15,7 @@ A Julay **program is a sequence of actions**.
 
 - A **proc** is a transition system with local state (`var` / `const`).
 - Parallel composition (`||`) runs procs together.
-- Peers coordinate by **synchronizing on a shared action** (not shared memory). When they sync, arguments are exchanged **by copy**, never by reference.
+- Peers coordinate by **synchronizing on a shared action** (not shared memory). When they sync, arguments are exchanged **by copy**, never by reference. Parallel composition itself is **occurrence-based** (`A || A` is two occurrences); see [Composition and actions](composition-and-actions.md).
 
 ```mermaid
 sequenceDiagram
@@ -53,8 +53,9 @@ How-to: [Getting started](../getting-started.md). Specs: [Specifications](specif
 5. [Sessions](sessions.md) — sticky pairwise protocols
 6. [Side effects](effects.md) — library procs vs funlib functions; `before` / `after` / transit IO
 7. [Standard library](standard-library.md) — proclib and funlib (including which have effects)
-8. [Specifications](specifications.md) — invariants, specs, TLC
-9. [Reference](reference.md) — keywords, operators, builtins
+8. [Creating libraries](creating-libraries.md) — authoring `.jul` and Kotlin-native libs
+9. [Specifications](specifications.md) — invariants, specs, TLC
+10. [Reference](reference.md) — keywords, operators, builtins
 
 ## Examples
 
