@@ -390,6 +390,29 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun stringCoerceElidesEmptyConcat() {
+        val source = File("regression/input/spec/string-coerce.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        try {
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("StringCoerce.tla")
+            assertTrue(tla.exists(), "expected StringCoerce.tla")
+            val tlaText = tla.readText()
+            assertFalse(
+                tlaText.contains("\\o \"\""),
+                "expected empty-string concat identity to be elided;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("ToString("),
+                "expected ToString for int-to-string coerce;\n$tlaText",
+            )
+        } finally {
+            File("StringCoerce.tla").delete()
+            File("StringCoerce.cfg").delete()
+        }
+    }
+
+    @Test
     fun sessionPairBothSidesEmitsAffinityAndEndSession() {
         assumeTlcPresent()
         val work = Files.createTempDirectory("julay-spec-session-pair").toFile()

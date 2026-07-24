@@ -1725,6 +1725,11 @@ private fun exprIsStringTyped(expr: ExprNode): Boolean = try {
 private fun tlaStringCoerce(expr: ExprNode, rendered: String): String =
     if (exprIsStringTyped(expr)) rendered else "ToString($rendered)"
 
+private fun isEmptyStringLiteral(expr: ExprNode): Boolean =
+    expr is LiteralValueExprNode &&
+        expr.getType() is StringType &&
+        expr.literalText().isEmpty()
+
 /**
  * @param leafCtx map of leaf name → SpecLeaf (for FieldAccess context; optional)
  * @param argNames action argument symbols (emitted bare)
@@ -1832,7 +1837,14 @@ internal fun exprToTla(
                         exprIsStringTyped(expr.lhsOperand()) ||
                         exprIsStringTyped(expr.rhsOperand())
                     if (stringy) {
-                        "(${tlaStringCoerce(expr.lhsOperand(), l)} \\o ${tlaStringCoerce(expr.rhsOperand(), r)})"
+                        val lhs = expr.lhsOperand()
+                        val rhs = expr.rhsOperand()
+                        when {
+                            isEmptyStringLiteral(lhs) && isEmptyStringLiteral(rhs) -> "\"\""
+                            isEmptyStringLiteral(lhs) -> tlaStringCoerce(rhs, r)
+                            isEmptyStringLiteral(rhs) -> tlaStringCoerce(lhs, l)
+                            else -> "(${tlaStringCoerce(lhs, l)} \\o ${tlaStringCoerce(rhs, r)})"
+                        }
                     } else {
                         "($l + $r)"
                     }

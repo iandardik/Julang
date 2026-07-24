@@ -1,0 +1,23 @@
+proc Printer {
+    var n : Int
+    var msg : String
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            n := 0
+            msg := "ok"
+            done := false
+    }
+
+    internal transition println(s : String) {
+        guard: ~done & ((s = msg + "") | (s = n + ""))
+        transit: done := true
+    }
+}
+
+invariant DoneOk := all i : Int, Printer[i].done | ~Printer[i].done
+
+spec StringCoerce := <true> Printer[i : Int] <DoneOk>
+
+compile StringCoerce
