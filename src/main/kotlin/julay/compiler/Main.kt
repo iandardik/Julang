@@ -95,6 +95,7 @@ class AnalyzeCommand : CliktCommand(name = "analyze") {
           julayc analyze -s Raft -s Client --procs input/raft/main.jul
           julayc analyze -s RaftCore --procs-detail input/raft/main.jul
           julayc analyze -s NodeLogic --tree --actions input/raft/main.jul
+          julayc analyze -s TermTest1 --json regression/input/basic/test1.jul
     """.trimIndent()
 
     private val libraryPaths by option(
@@ -158,12 +159,17 @@ class AnalyzeCommand : CliktCommand(name = "analyze") {
         help = "Include internal and composition-hidden synced actions in listings (hidden by default)",
     ).flag()
 
+    private val json by option(
+        "--json",
+        help = "Emit machine-readable alphabet JSON for the scope (external, source-internal, composition-hidden sync groups)",
+    ).flag()
+
     private val input by argument(
         help = "Jul source file to analyze",
     ).path(mustExist = true, canBeFile = true)
 
     override fun run() {
-        val anyView = showTree || showActions || actionsDetail || showProcs || procsDetail
+        val anyView = showTree || showActions || actionsDetail || showProcs || procsDetail || json
         val options = AnalyzeOptions(
             scopeNames = scopeNames,
             showTree = if (anyView) showTree else true,
@@ -176,6 +182,7 @@ class AnalyzeCommand : CliktCommand(name = "analyze") {
             includeInternal = includeInternal,
             scopeIntersect = scopeIntersect,
             scopeMutual = scopeMutual,
+            json = json,
         )
         analyzeJulFile(input, options, libraryPaths)
     }

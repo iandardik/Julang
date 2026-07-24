@@ -41,6 +41,7 @@ Inspect composition and actions **without** codegen:
 java -jar build/libs/julayc.jar analyze path/to/file.jul
 java -jar build/libs/julayc.jar analyze -s NodeLogic --actions path/to/file.jul
 java -jar build/libs/julayc.jar analyze -s Raft -s Client --procs path/to/file.jul
+java -jar build/libs/julayc.jar analyze -s TermTest1 --json regression/input/basic/test1.jul
 ```
 
 Common options (see `--help` for the full list):
@@ -53,7 +54,12 @@ Common options (see `--help` for the full list):
 | `--procs` / `--procs-detail` | List procs |
 | `--intersect` / `--mutual` | How multiple scopes combine for action views |
 | `--include-internal` | Include `internal` and composition-hidden synced actions; with `--actions-detail`, each occurrence and hidden `scope=` channel key is listed separately |
+| `--json` | Emit machine-readable alphabet JSON for the scope: `external`, `sourceInternal`, and `compositionHidden` sync groups (with peer procs). Used by the VS Code extension; suppresses human-readable views |
 | `-L` | Module search path (same as compile) |
+
+## VS Code / Cursor extension
+
+The [`vscode-julay/`](../vscode-julay/) extension adds `.jul` highlighting, snippets, compile tasks, go-to-definition, hover alphabets, and a panel for external vs source-internal vs composition-hidden actions. See [vscode-julay/README.md](../vscode-julay/README.md) for install and settings.
 
 ## Testing
 
@@ -68,3 +74,4 @@ End-to-end cases: [regression/README.md](../regression/README.md).
 - [Getting started](getting-started.md)
 - [Modules](language/modules.md)
 - [Specifications](language/specifications.md)
+- [VS Code extension](../vscode-julay/README.md)

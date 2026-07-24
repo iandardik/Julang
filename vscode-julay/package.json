@@ -1,0 +1,108 @@
+{
+  "name": "julay",
+  "displayName": "Julay",
+  "description": "Syntax highlighting, snippets, tasks, go-to-definition, and external alphabet viewing for Julay",
+  "version": "0.1.0",
+  "publisher": "julay",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets",
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:julay"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "julay",
+        "aliases": [
+          "Julay",
+          "julay"
+        ],
+        "extensions": [
+          ".jul"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "julay",
+        "scopeName": "source.julay",
+        "path": "./syntaxes/julay.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "julay",
+        "path": "./snippets/julay.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "julay.showExternalAlphabet",
+        "title": "Julay: Show External Alphabet"
+      },
+      {
+        "command": "julay.refreshAlphabet",
+        "title": "Julay: Refresh Alphabet Cache"
+      }
+    ],
+    "configuration": {
+      "title": "Julay",
+      "properties": {
+        "julay.julaycPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to julayc.jar. Empty = search workspace build/libs/julayc.jar then julayc.jar."
+        },
+        "julay.javaPath": {
+          "type": "string",
+          "default": "java",
+          "description": "Java executable used to run julayc."
+        },
+        "julay.entryFile": {
+          "type": "string",
+          "default": "",
+          "description": "Optional relative path to the Julay entry .jul file (for imports / analyze when not editing the entry)."
+        },
+        "julay.extraLibraryPaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra module search directories passed as -L to julayc."
+        }
+      }
+    },
+    "taskDefinitions": [
+      {
+        "type": "julay",
+        "required": [
+          "task"
+        ],
+        "properties": {
+          "task": {
+            "type": "string",
+            "enum": [
+              "compile",
+              "compileEntry",
+              "analyzeAlphabet"
+            ],
+            "description": "Julay task kind"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Proc/spec name for analyzeAlphabet"
+          }
+        }
+      }
+    ]
+  }
+}

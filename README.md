@@ -45,6 +45,7 @@ For a fuller walkthrough, see [Getting started](docs/getting-started.md).
 - **[Language guide](docs/language/README.md)**
 - **[Examples](docs/examples/README.md)** — echo, inc, and list servers
 - **[Tooling](docs/tooling.md)** — `julayc` and `julayc analyze`
+- **[VS Code extension](vscode-julay/README.md)** — highlighting, alphabet panel, go-to-def
 - **[Regression tests](regression/README.md)** — end-to-end harness for contributors
 
 ## Repository layout
@@ -53,6 +54,7 @@ For a fuller walkthrough, see [Getting started](docs/getting-started.md).
 |------|------|
 | `src/` | Compiler, runtime, and embedded stdlib |
 | `input/` | Larger demos (echo / inc / list servers, Raft, …) |
+| `vscode-julay/` | VS Code / Cursor extension |
 | `regression/` | End-to-end test cases and harness |
 | `docs/` | Language guide and example walkthroughs |
 

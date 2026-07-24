@@ -1,0 +1,97 @@
+{
+  "scopeName": "source.julay",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#keywords" },
+    { "include": "#operators" },
+    { "include": "#numbers" },
+    { "include": "#identifiers" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.julay",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.julay",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.julay",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.julay",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.julay",
+          "match": "\\b(if|else|let|when|in|all|exists)\\b"
+        },
+        {
+          "name": "keyword.other.julay",
+          "match": "\\b(import|export|obj|sort|proc|compile|spec|invariant|var|const|constructor|transition|internal|provider|client|session|guard|transit|error|before|after|fun)\\b"
+        },
+        {
+          "name": "constant.language.boolean.julay",
+          "match": "\\b(true|false)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.logical.julay",
+          "match": "<=>|=>|~=|~|&|\\|"
+        },
+        {
+          "name": "keyword.operator.assignment.julay",
+          "match": ":=|\\|="
+        },
+        {
+          "name": "keyword.operator.comparison.julay",
+          "match": "<=|>=|<|>|="
+        },
+        {
+          "name": "keyword.operator.arithmetic.julay",
+          "match": "\\+|\\-|\\*|/|%"
+        },
+        {
+          "name": "keyword.operator.parallel.julay",
+          "match": "\\|\\|"
+        },
+        {
+          "name": "keyword.operator.arrow.julay",
+          "match": "->"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.julay",
+          "match": "\\b-?[0-9]+\\.[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.julay",
+          "match": "\\b-?[0-9]+\\b"
+        }
+      ]
+    },
+    "identifiers": {
+      "name": "variable.other.julay",
+      "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+    }
+  }
+}

@@ -27,6 +27,8 @@ data class AnalyzeOptions(
      * every selected scope is only a client).
      */
     val scopeMutual: Boolean = false,
+    /** Emit machine-readable alphabet JSON (IDE / tooling). Suppresses human text views. */
+    val json: Boolean = false,
 ) {
     val showActionView: Boolean
         get() = showActions || actionsDetail

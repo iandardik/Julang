@@ -11,7 +11,8 @@ Julay is a verification-aware language for building distributed systems correctl
 
 ## Tooling
 
-- [Tooling](tooling.md) — `julayc`, `julayc analyze`, module search path
+- [Tooling](tooling.md) — `julayc`, `julayc analyze`, `--json`, module search path
+- [VS Code / Cursor extension](../vscode-julay/README.md) — highlighting, alphabet panel, go-to-definition
 
 ## For contributors
 

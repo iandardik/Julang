@@ -1,0 +1,123 @@
+{
+  "proc assembly": {
+    "prefix": "proc",
+    "body": [
+      "proc ${1:Name} := ${2:A} || ${3:B}",
+      "",
+      "compile ${1:Name}"
+    ],
+    "description": "Proc assembly with compile target"
+  },
+  "proc class": {
+    "prefix": "procclass",
+    "body": [
+      "proc ${1:Name} {",
+      "\tvar ${2:x} : ${3:Int}",
+      "",
+      "\tconstructor initially(args : List<String>) {",
+      "\t\ttransit:",
+      "\t\t\t${2:x} := ${4:0}",
+      "\t}",
+      "",
+      "\ttransition ${5:step}() {",
+      "\t\tguard: true",
+      "\t\ttransit:",
+      "\t}",
+      "}"
+    ],
+    "description": "Proc class with initially and a transition"
+  },
+  "constructor initially": {
+    "prefix": "initially",
+    "body": [
+      "constructor initially(args : List<String>) {",
+      "\ttransit:",
+      "\t\t$0",
+      "}"
+    ],
+    "description": "initially constructor"
+  },
+  "transition": {
+    "prefix": "transition",
+    "body": [
+      "transition ${1:name}(${2:args}) {",
+      "\tguard: ${3:true}",
+      "\ttransit:",
+      "\t\t$0",
+      "}"
+    ],
+    "description": "Ordinary transition"
+  },
+  "internal transition": {
+    "prefix": "internal",
+    "body": [
+      "internal transition ${1:name}(${2:args}) {",
+      "\tguard: ${3:true}",
+      "\ttransit:",
+      "\t\t$0",
+      "}"
+    ],
+    "description": "Source-internal transition"
+  },
+  "provider transition": {
+    "prefix": "provider",
+    "body": [
+      "provider transition ${1:name}(${2:args}) {",
+      "\tguard: ${3:true}",
+      "\ttransit:",
+      "\t\t$0",
+      "}"
+    ],
+    "description": "Provider transition"
+  },
+  "client transition": {
+    "prefix": "client",
+    "body": [
+      "client transition ${1:name}(${2:args}) {",
+      "\tguard: ${3:true}",
+      "\ttransit:",
+      "\t\t$0",
+      "}"
+    ],
+    "description": "Client transition"
+  },
+  "session transition": {
+    "prefix": "session",
+    "body": [
+      "session transition ${1:name}(${2:args}) {",
+      "\tguard: ${3:true}",
+      "\ttransit:",
+      "\t\t$0",
+      "}"
+    ],
+    "description": "Session transition"
+  },
+  "spec": {
+    "prefix": "spec",
+    "body": [
+      "spec ${1:Name} := <${2:true}> ${3:System} <${4:Inv}>"
+    ],
+    "description": "Assume-guarantee spec"
+  },
+  "invariant": {
+    "prefix": "invariant",
+    "body": [
+      "invariant ${1:Inv} := ${2:true}"
+    ],
+    "description": "Invariant declaration"
+  },
+  "compile": {
+    "prefix": "compile",
+    "body": [
+      "compile ${1:Name}"
+    ],
+    "description": "Compile directive"
+  },
+  "import": {
+    "prefix": "import",
+    "body": [
+      "import ${1:module.Name}"
+    ],
+    "description": "Import declaration"
+  }
+}

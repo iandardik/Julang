@@ -39,6 +39,11 @@ fun printAnalyzeViews(
 ) {
     require(ast is RootNode)
 
+    if (options.json) {
+        printAlphabetJson(ast, scope, librariesInUse, procDecls)
+        return
+    }
+
     if (options.showTree) {
         printCompositionTrees(
             rootNames = scope.rootNames,
