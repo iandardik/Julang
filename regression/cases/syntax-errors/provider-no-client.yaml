@@ -1,4 +1,4 @@
-source: regression/input/syntax-errors/service-no-consumer.jul
+source: regression/input/syntax-errors/provider-no-client.jul
 expectCompileFailure: false
 expectCompileOutputContains:
   - "warning: action \"println\" is a provider with no clients and will never synchronize (intentional deadlock)"

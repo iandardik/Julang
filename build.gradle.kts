@@ -54,15 +54,29 @@ val downloadTla2tools by tasks.registering {
     description = "Download pinned tla2tools.jar for TLC smoke tests"
     val dest = tla2toolsJar
     outputs.file(dest)
+    onlyIf {
+        !dest.get().asFile.exists() || dest.get().asFile.length() == 0L
+    }
     doLast {
         val out = dest.get().asFile
         out.parentFile.mkdirs()
         val url = URI(
             "https://github.com/tlaplus/tlaplus/releases/download/$tla2toolsVersion/tla2tools.jar",
         ).toURL()
-        url.openStream().use { input ->
-            out.outputStream().use { output -> input.copyTo(output) }
+        var lastError: Exception? = null
+        repeat(3) { attempt ->
+            try {
+                url.openStream().use { input ->
+                    out.outputStream().use { output -> input.copyTo(output) }
+                }
+                return@doLast
+            } catch (e: Exception) {
+                lastError = e
+                out.delete()
+                Thread.sleep(1_000L * (attempt + 1))
+            }
         }
+        throw lastError ?: IllegalStateException("Failed to download tla2tools.jar")
     }
 }
 

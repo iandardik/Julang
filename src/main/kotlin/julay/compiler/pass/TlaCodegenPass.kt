@@ -53,13 +53,6 @@ fun tlaCodegenPass(
         specAliases,
     )
 
-    val servicedActions = leaves.flatMap { leaf ->
-        val pc = pclassNodes[leaf.name] ?: return@flatMap emptyList()
-        pc.localDecls().flatMap { it.transitions() }
-            .filter { it.modifier == TSAction.SyncRole.Provider }
-            .map { it.action.name }
-    }.toSet()
-
     val constants = linkedSetOf<String>()
     leaves.forEach { leaf ->
         if (leaf.paramType != null) {
@@ -109,7 +102,7 @@ fun tlaCodegenPass(
     val reservedTlaIds = constants + setOf("Int", "Nat", "Boolean", "Real") +
         actionArgNames(leaves, pclassNodes)
 
-    val offers = collectTlaActionOffers(leaves, pclassNodes, servicedActions)
+    val offers = collectTlaActionOffers(leaves, pclassNodes)
     val sessionPairs = detectTwoSidedSessionPairs(offers)
     val emittedOfferLists = collectEmittedOfferLists(offers)
     val killTargets = collectKillTargets(emittedOfferLists, sessionPairs)
@@ -329,7 +322,6 @@ private fun safeType(vn: VarNode): Type = try {
 private fun collectTlaActionOffers(
     leaves: List<SpecLeaf>,
     pclasses: Map<String, ProcClassNode>,
-    servicedActions: Set<String>,
 ): List<TlaActionOffer> {
     val offers = mutableListOf<TlaActionOffer>()
     leaves.forEach { leaf ->
@@ -382,14 +374,14 @@ private fun sessionPairForOffers(
 private fun collectEmittedOfferLists(offers: List<TlaActionOffer>): List<List<TlaActionOffer>> {
     val result = mutableListOf<List<TlaActionOffer>>()
     offers.groupBy { it.decl.action.name }.forEach { (_, group) ->
-        val services = group.filter { it.role == TSAction.SyncRole.Provider }
-        val consumers = group.filter { it.role == TSAction.SyncRole.Client }
+        val providers = group.filter { it.role == TSAction.SyncRole.Provider }
+        val clients = group.filter { it.role == TSAction.SyncRole.Client }
         val constructors = group.filter { it.isConstructor }
         val internals = group.filter { it.role == TSAction.SyncRole.Internal && !it.isConstructor }
         val defaults = group.filter { it.role == TSAction.SyncRole.Default && !it.isConstructor }
 
-        if (services.size == 1 && consumers.isNotEmpty()) {
-            consumers.forEach { cons -> result += listOf(services[0], cons) }
+        if (providers.size == 1 && clients.isNotEmpty()) {
+            clients.forEach { cli -> result += listOf(providers[0], cli) }
             return@forEach
         }
         if (constructors.size == 1 && defaults.size == 1) {
@@ -402,11 +394,11 @@ private fun collectEmittedOfferLists(offers: List<TlaActionOffer>): List<List<Tl
             defaults.size >= 2 -> result += defaults
             defaults.size == 1 -> result += defaults
         }
-        if (services.isNotEmpty() && consumers.isEmpty()) {
-            services.forEach { result += listOf(it) }
+        if (providers.isNotEmpty() && clients.isEmpty()) {
+            providers.forEach { result += listOf(it) }
         }
-        if (consumers.isNotEmpty() && services.isEmpty()) {
-            consumers.forEach { result += listOf(it) }
+        if (clients.isNotEmpty() && providers.isEmpty()) {
+            clients.forEach { result += listOf(it) }
         }
     }
     return result
@@ -832,27 +824,27 @@ private fun buildTlaActions(
     )
 
     byName.forEach { (actionName, group) ->
-        val services = group.filter { it.role == TSAction.SyncRole.Provider }
-        val consumers = group.filter { it.role == TSAction.SyncRole.Client }
+        val providers = group.filter { it.role == TSAction.SyncRole.Provider }
+        val clients = group.filter { it.role == TSAction.SyncRole.Client }
         val constructors = group.filter { it.isConstructor }
         val internals = group.filter { it.role == TSAction.SyncRole.Internal && !it.isConstructor }
         val defaults = group.filter { it.role == TSAction.SyncRole.Default && !it.isConstructor }
 
-        if (services.size == 1 && consumers.isNotEmpty()) {
-            val svc = services[0]
-            val needDisambiguate = consumers.size > 1
-            consumers.forEach { cons ->
+        if (providers.size == 1 && clients.isNotEmpty()) {
+            val prov = providers[0]
+            val needDisambiguate = clients.size > 1
+            clients.forEach { cli ->
                 val name: String
                 val comment: String?
                 if (needDisambiguate) {
-                    name = "${actionName}_${svc.leaf.tlaName}_${cons.leaf.tlaName}"
+                    name = "${actionName}_${prov.leaf.tlaName}_${cli.leaf.tlaName}"
                     comment =
-                        "$actionName action where ${svc.leaf.tlaName} is the servicer and ${cons.leaf.tlaName} is the consumer"
+                        "$actionName action where ${prov.leaf.tlaName} is the provider and ${cli.leaf.tlaName} is the client"
                 } else {
                     name = actionName
                     comment = null
                 }
-                result += emit(name, listOf(svc, cons), comment)
+                result += emit(name, listOf(prov, cli), comment)
             }
             return@forEach
         }
@@ -905,34 +897,34 @@ private fun buildTlaActions(
             defaults.size == 1 -> result += emit(actionName, defaults)
         }
 
-        if (services.isNotEmpty() && consumers.isEmpty()) {
-            val disambiguate = services.size > 1
-            services.forEach { svc ->
+        if (providers.isNotEmpty() && clients.isEmpty()) {
+            val disambiguate = providers.size > 1
+            providers.forEach { prov ->
                 val name: String
                 val comment: String?
                 if (disambiguate) {
-                    name = "${actionName}_${svc.leaf.tlaName}"
-                    comment = "$actionName action on ${svc.leaf.tlaName}"
+                    name = "${actionName}_${prov.leaf.tlaName}"
+                    comment = "$actionName action on ${prov.leaf.tlaName}"
                 } else {
                     name = actionName
                     comment = null
                 }
-                result += emit(name, listOf(svc), comment)
+                result += emit(name, listOf(prov), comment)
             }
         }
-        if (consumers.isNotEmpty() && services.isEmpty()) {
-            val disambiguate = consumers.size > 1
-            consumers.forEach { cons ->
+        if (clients.isNotEmpty() && providers.isEmpty()) {
+            val disambiguate = clients.size > 1
+            clients.forEach { cli ->
                 val name: String
                 val comment: String?
                 if (disambiguate) {
-                    name = "${actionName}_${cons.leaf.tlaName}"
-                    comment = "$actionName action on ${cons.leaf.tlaName}"
+                    name = "${actionName}_${cli.leaf.tlaName}"
+                    comment = "$actionName action on ${cli.leaf.tlaName}"
                 } else {
                     name = actionName
                     comment = null
                 }
-                result += emit(name, listOf(cons), comment)
+                result += emit(name, listOf(cli), comment)
             }
         }
     }

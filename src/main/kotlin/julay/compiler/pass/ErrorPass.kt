@@ -113,7 +113,7 @@ private fun RootNode.actionConsistencyErrors(
         )
     }
 
-    // Source-internal names must not also appear as ordinary/service/session offers in the same program.
+    // Source-internal names must not also appear as ordinary/provider/session offers in the same program.
     val internalMixErrors = alphabetResult.allOffers.groupBy { it.name }.entries.flatMap { (name, named) ->
         val internals = named.filter { it.sourceInternal }
         val others = named.filter { !it.sourceInternal }
@@ -152,11 +152,10 @@ private fun RootNode.actionConsistencyErrors(
         }
         val transitions = namedOffers.filter { !it.isConstructor }
         val constructors = namedOffers.filter { it.isConstructor }
-        val services = transitions.filter { it.decl.modifier == TSAction.SyncRole.Provider }
+        val providers = transitions.filter { it.decl.modifier == TSAction.SyncRole.Provider }
+        val clients = transitions.filter { it.decl.modifier == TSAction.SyncRole.Client }
         val internals = transitions.filter { it.decl.modifier == TSAction.SyncRole.Internal }
-        val defaults = transitions.filter {
-            it.decl.modifier == TSAction.SyncRole.Default || it.decl.modifier == TSAction.SyncRole.Client
-        }
+        val defaults = transitions.filter { it.decl.modifier == TSAction.SyncRole.Default }
 
         val sessionFlags = namedOffers.map { it.decl.isSession }
         val isSession = sessionFlags.any { it }
@@ -175,11 +174,19 @@ private fun RootNode.actionConsistencyErrors(
         }
         val sessionTagErrors = if (isSession) {
             buildList {
-                if (services.isNotEmpty()) {
+                if (providers.isNotEmpty()) {
                     add(
                         OneLocCompileError(
-                            services[0].decl.loc,
+                            providers[0].decl.loc,
                             "Expected session action \"$name\" not to use the provider tag",
+                        ),
+                    )
+                }
+                if (clients.isNotEmpty()) {
+                    add(
+                        OneLocCompileError(
+                            clients[0].decl.loc,
+                            "Expected session action \"$name\" not to use the client tag",
                         ),
                     )
                 }
@@ -197,7 +204,9 @@ private fun RootNode.actionConsistencyErrors(
         }
 
         val tagMixErrors = buildList {
-            if (internals.isNotEmpty() && (services.isNotEmpty() || defaults.isNotEmpty())) {
+            if (internals.isNotEmpty() &&
+                (providers.isNotEmpty() || clients.isNotEmpty() || defaults.isNotEmpty())
+            ) {
                 add(
                     OneLocCompileError(
                         internals[0].decl.loc,
@@ -205,25 +214,45 @@ private fun RootNode.actionConsistencyErrors(
                     ),
                 )
             }
-            if (services.size > 1) {
+            if (providers.size > 1) {
                 add(
                     TwoLocsCompileError(
-                        services[0].decl.loc,
-                        services[1].decl.loc,
+                        providers[0].decl.loc,
+                        providers[1].decl.loc,
                         "Expected at most one proc to declare provider for action \"$name\"",
                     ),
                 )
             }
-            if (services.isNotEmpty()) {
+            if (providers.isNotEmpty()) {
                 transitions.filter { it.decl.modifier == TSAction.SyncRole.Internal }.forEach { offer ->
                     add(
                         TwoLocsCompileError(
-                            services[0].decl.loc,
+                            providers[0].decl.loc,
                             offer.decl.loc,
                             "Expected action \"$name\" not to mix provider with internal",
                         ),
                     )
                 }
+                defaults.forEach { offer ->
+                    add(
+                        TwoLocsCompileError(
+                            providers[0].decl.loc,
+                            offer.decl.loc,
+                            "Action \"$name\" cannot mix an untagged transition with a `provider` " +
+                                "transition; tag the client as `client` (or hide ordinary peers first)",
+                        ),
+                    )
+                }
+            }
+            if (clients.isNotEmpty() && defaults.isNotEmpty()) {
+                add(
+                    TwoLocsCompileError(
+                        defaults[0].decl.loc,
+                        clients[0].decl.loc,
+                        "Action \"$name\" cannot mix an untagged transition with a `client` " +
+                            "transition; tag the client as `client` (or hide ordinary peers first)",
+                    ),
+                )
             }
         }
 
@@ -237,11 +266,11 @@ private fun RootNode.actionConsistencyErrors(
                     ),
                 )
             }
-            if (constructors.isNotEmpty() && services.isNotEmpty()) {
+            if (constructors.isNotEmpty() && providers.isNotEmpty()) {
                 add(
                     TwoLocsCompileError(
                         constructors[0].decl.loc,
-                        services[0].decl.loc,
+                        providers[0].decl.loc,
                         "Expected constructors not to use an action provided by another proc (\"$name\")",
                     ),
                 )
@@ -260,13 +289,15 @@ private fun RootNode.actionConsistencyErrors(
         val peerErrors = when {
             // Source-internal already handled above; composition-hidden pairs are sized below.
             internals.isNotEmpty() -> emptyList()
-            services.isNotEmpty() -> emptyList() // any number of default consumers OK
+            // Provider + any number of clients is OK; Default+provider already reported above.
+            providers.isNotEmpty() -> emptyList()
+            clients.isNotEmpty() -> emptyList() // dangling client caught by alphabetIntegrityErrors
             else -> {
                 val t = transitions.map { it.pclassKey }.toSet().size
                 val c = if (constructors.isNotEmpty()) 1 else 0
                 when {
                     t + c == 2 -> emptyList()
-                    // JAR compile uses unsyncedNonServiceErrors for a clearer message.
+                    // JAR compile uses unsyncedOrdinaryErrors for a clearer message.
                     jarUnsyncedCheck && t + c < 2 -> emptyList()
                     else -> assertOrCompileError(
                         false,
@@ -286,7 +317,7 @@ private fun RootNode.actionConsistencyErrors(
     }
 
     val unsynced = if (jarUnsyncedCheck && program != null) {
-        unsyncedNonServiceErrors(alphabetResult.external)
+        unsyncedOrdinaryErrors(alphabetResult.external)
     } else {
         emptyList()
     }
@@ -320,12 +351,12 @@ private fun RootNode.actionConsistencyWarnings(
     return offers.groupBy { it.decl.action.name }.entries.flatMap { (name, namedOffers) ->
         if (name == "initially") return@flatMap emptyList()
         val transitions = namedOffers.filter { !it.isConstructor }
-        val services = transitions.filter { it.decl.modifier == TSAction.SyncRole.Provider }
+        val providers = transitions.filter { it.decl.modifier == TSAction.SyncRole.Provider }
         val clients = transitions.filter { it.decl.modifier == TSAction.SyncRole.Client }
-        if (services.size == 1 && clients.isEmpty()) {
+        if (providers.size == 1 && clients.isEmpty()) {
             listOf(
                 OneLocCompileWarning(
-                    services[0].decl.loc,
+                    providers[0].decl.loc,
                     "action \"$name\" is a provider with no clients and will never synchronize (intentional deadlock)",
                 ),
             )

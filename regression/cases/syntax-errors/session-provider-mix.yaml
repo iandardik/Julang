@@ -1,4 +1,4 @@
-source: regression/input/syntax-errors/session-service-mix.jul
+source: regression/input/syntax-errors/session-provider-mix.jul
 expectCompileFailure: true
 expectCompileOutputContains:
   - 'Expected action "ping" to have matching session tags on every offer'

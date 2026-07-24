@@ -56,7 +56,7 @@ fun compileJulFile(
             return
         }
         // Specs allow unilateral assume/system actions; only shared alphabet-integrity
-        // checks (duplicate external / dual service) must match JAR.
+        // checks (duplicate external / dual provider) must match JAR.
         if (!runSpecAlphabetIntegrityPass(ast, specDecl, procDecls, librariesInUse)) {
             return
         }

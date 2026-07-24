@@ -42,13 +42,14 @@ Here the two occurrences of `X` sync with `A` and `B` respectively on a shared a
 
 `client` is an explicit opt-in: two clients never pairwise-hide with each other, so they can wait for a `provider` that appears later in the composition tree. Ordinary peers that already hid `w` inside a library stay sealed — `(A || B) || P || C` still compiles when `A`/`B` are ordinary and `P`/`C` are provider/client.
 
+Same-class ordinary offers never sync: when two occurrences of class `X` both expose untagged `w` at a compose step (e.g. `(A || X) || (B || X)` with no peer syncing on `w`), that is a **compose-time** error. A later `provider` cannot redeem those offers (ordinary + provider is also illegal).
+
 ### Alphabet integrity (JAR and TLA+)
 
 These checks apply to the **compile/spec target** (same rules for JAR and TLA+):
 
 - External `client` of `w` with no `provider` `w` → error.
 - At most one `provider` per action name.
-- If two or more occurrences of the same class still expose the same **ordinary** action `w` externally, that is an error. Tag those callers `client` and supply one `provider` instead of leaving them untagged.
 
 JAR `compile` targets may not leave unsynced ordinary actions in their external alphabet (tag them `internal` if a solo step is intentional). Specs may still use unilateral assume/system actions.
 

@@ -1,5 +1,6 @@
 package julay.regression
 
+import julay.compiler.warmGradleForProgramCompile
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.assertTrue
@@ -15,6 +16,7 @@ object RegressionRunner {
         check(cases.isNotEmpty()) {
             "No regression cases matched REGRESSION_CASE=${caseFilter ?: "(unset)"}"
         }
+        warmGradle(projectRoot)
         cases.forEach { case ->
             if (case.disabled) {
                 println("Regression case: ${case.id} (skipped, disabled)")
@@ -36,6 +38,19 @@ object RegressionRunner {
                 block()
             }
         }
+    }
+
+    /** Prefetch Gradle distro/plugins/daemon so case compiles fit in [RegressionTimeouts.CASE_MS]. */
+    private fun warmGradle(projectRoot: File) {
+        val compilerJar = File(projectRoot, "build/libs/julayc.jar").takeIf { it.exists() }
+            ?: File(projectRoot, "julayc.jar")
+        check(compilerJar.exists()) {
+            "julayc.jar not found for Gradle warmup. Run ./gradlew shadowJar first."
+        }
+        val warmupDir = File(projectRoot, "build/regression-gradle-warmup")
+        println("Warming Gradle (distro + Kotlin/Shadow plugins)…")
+        warmGradleForProgramCompile(warmupDir, compilerJar.toPath())
+        println("  Gradle warmup done")
     }
 
     fun runCase(projectRoot: File, case: CaseFile) {

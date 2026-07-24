@@ -5,7 +5,7 @@ Julay libraries are reusable procs and functions that programs `import`. There a
 1. **`.jul` modules** — ordinary Julay source, often shipped under the embedded stdlib or found via `JULAY_PATH` / `-L`
 2. **Kotlin-native** — `TransitionSystem` implementations registered in `LibraryRegistry`
 
-Consumers should not need to know which style a library uses. Authors must, especially for Kotlin-native channel keys under occurrence-based `||`.
+Callers of a library should not need to know which style it uses. Authors must, especially for Kotlin-native channel keys under occurrence-based `||`.
 
 ## `.jul` libraries
 

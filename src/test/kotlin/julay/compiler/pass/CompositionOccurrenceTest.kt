@@ -63,7 +63,7 @@ class CompositionOccurrenceTest {
     }
 
     @Test
-    fun danglingWOnTwoXCopiesIsIntegrityError() {
+    fun danglingWOnTwoXCopiesIsComposeError() {
         val leafMap = mapOf(
             "A" to listOf(offer("A", "other")),
             "B" to listOf(offer("B", "other")),
@@ -73,8 +73,8 @@ class CompositionOccurrenceTest {
         val bx = ProcDecl("BX", listOf(ProcDecl("B", emptyList(), ProcDeclType.Proc), ProcDecl("X", emptyList(), ProcDeclType.Proc)), ProcDeclType.Proc)
         val root = ProcDecl("P", listOf(ax, bx), ProcDeclType.Proc)
         val result = computeCompositionAlphabet(root, listOf(root, ax, bx), leafMap)
-        val errs = alphabetIntegrityErrors(result)
-        assertTrue(errs.any { it.toString().contains("Multiple occurrences of \"X\"") })
+        assertTrue(result.errors.any { it.toString().contains("Multiple occurrences of \"X\"") })
+        assertTrue(alphabetIntegrityErrors(result).isEmpty())
     }
 
     @Test
@@ -174,11 +174,21 @@ class CompositionOccurrenceTest {
     }
 
     @Test
-    fun sameClassNeverSyncsOnCompose() {
+    fun sameClassOrdinaryIsComposeError() {
         val left = listOf(offer("X", "w").copy(occurrenceId = "x1"))
         val right = listOf(offer("X", "w").copy(occurrenceId = "x2"))
         val (composed, errs) = composeAlphabets(left, right, "scope")
-        assertTrue(errs.isEmpty())
+        assertTrue(errs.any { it.toString().contains("Multiple occurrences of \"X\"") })
+        assertEquals(2, composed.size)
+        assertTrue(composed.none { it.compositionHidden })
+    }
+
+    @Test
+    fun sameClassClientsDoNotComposeError() {
+        val left = listOf(offer("X", "w", client = true).copy(occurrenceId = "x1"))
+        val right = listOf(offer("X", "w", client = true).copy(occurrenceId = "x2"))
+        val (composed, errs) = composeAlphabets(left, right, "scope")
+        assertTrue(errs.isEmpty(), errs.toString())
         assertEquals(2, composed.size)
         assertTrue(composed.none { it.compositionHidden })
     }

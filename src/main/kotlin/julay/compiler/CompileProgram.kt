@@ -4,12 +4,45 @@ import julay.compiler.ast.RootNode
 import julay.compiler.decl.ProcDecl
 import julay.compiler.pass.codegenPass
 import java.io.File
+import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
 
-private const val GRADLE_WRAPPER_TIMEOUT_MINUTES = 5L
 private const val GRADLE_BUILD_TIMEOUT_MINUTES = 10L
+private const val GRADLE_WARMUP_TIMEOUT_MINUTES = 5L
+private const val WRAPPER_RESOURCE_PREFIX = "gradle-wrapper-template/"
+
+/**
+ * Download the vendored Gradle distribution, start the daemon, and resolve the same
+ * Kotlin/Shadow plugins used by [compileProgram]. Call once before a burst of compiles
+ * (e.g. the regression suite) so each case stays within a short timeout.
+ */
+fun warmGradleForProgramCompile(
+    workDir: File,
+    compilerJar: Path = resolveCompilerJar(),
+) {
+    if (!workDir.exists() && !workDir.mkdirs()) {
+        error("Could not create Gradle warmup dir: $workDir")
+    }
+    installVendoredGradleWrapper(workDir)
+    File(workDir, "settings.gradle.kts").writeText(gradleSettingsFileContents("julay-gradle-warmup"))
+    File(workDir, "Warmup.kt").writeText("fun main() {}\n")
+    File(workDir, "build.gradle.kts").writeText(
+        gradleBuildFileContents("Warmup", "Warmup", compilerJar),
+    )
+    val result = runShellCommand(
+        "cd ${workDir.absolutePath}; ./gradlew --version && ./gradlew shadowJar 2>&1",
+        GRADLE_WARMUP_TIMEOUT_MINUTES,
+    )
+    if (result.timedOut) {
+        error("Gradle warmup timed out after ${GRADLE_WARMUP_TIMEOUT_MINUTES}m:\n${result.output}")
+    }
+    check(result.exitCode == 0) {
+        "Gradle warmup failed (exit ${result.exitCode}):\n${result.output}"
+    }
+}
 
 fun compileProgram(
     program: ProcDecl,
@@ -38,16 +71,10 @@ fun compileProgram(
     File("$buildDir/build.gradle.kts").delete()
 
     File("$buildDir/settings.gradle.kts").writeText(gradleSettingsFileContents(program.name))
-    val wrapperResult = runShellCommand(
-        "cd $buildDir; gradle wrapper --gradle-version 8.5",
-        GRADLE_WRAPPER_TIMEOUT_MINUTES,
-    )
-    if (wrapperResult.timedOut) {
-        println("Gradle wrapper timed out for program \"${program.name}\"")
-        return
-    }
-    if (wrapperResult.exitCode != 0) {
-        println("Gradle wrapper failed for program \"${program.name}\" (exit ${wrapperResult.exitCode}):\n${wrapperResult.output}")
+    try {
+        installVendoredGradleWrapper(File(buildDir))
+    } catch (e: Exception) {
+        println("Failed to install Gradle wrapper for program \"${program.name}\": ${e.message}")
         return
     }
 
@@ -69,6 +96,32 @@ fun compileProgram(
     if (!keepBuild) {
         deleteDirectory(File(buildDir))
     }
+}
+
+/**
+ * Copy a checked-in Gradle wrapper into [buildDir] instead of invoking host `gradle wrapper`,
+ * which is flaky under Gradle 9+ (HEAD validation of services.gradle.org often 504s).
+ */
+private fun installVendoredGradleWrapper(buildDir: File) {
+    // gradle-wrapper.jar is stored as .jar.bin so ShadowJar does not explode it into the fat jar.
+    val copies = listOf(
+        "gradlew" to "gradlew",
+        "gradlew.bat" to "gradlew.bat",
+        "gradle/wrapper/gradle-wrapper.jar.bin" to "gradle/wrapper/gradle-wrapper.jar",
+        "gradle/wrapper/gradle-wrapper.properties" to "gradle/wrapper/gradle-wrapper.properties",
+    )
+    for ((resourceRel, destRel) in copies) {
+        val resource = WRAPPER_RESOURCE_PREFIX + resourceRel
+        val stream = Julayc::class.java.classLoader.getResourceAsStream(resource)
+            ?: error("Missing classpath resource: $resource")
+        val dest = File(buildDir, destRel)
+        dest.parentFile?.mkdirs()
+        stream.use { input ->
+            Files.copy(input, dest.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+    val gradlew = File(buildDir, "gradlew")
+    gradlew.setExecutable(true)
 }
 
 private data class ShellResult(val exitCode: Int, val output: String, val timedOut: Boolean)

@@ -316,7 +316,7 @@ export proc RaftCore {
 
 
     /*
-     * The services that RaftCore provides for accessing its info.
+     * The provider transitions that RaftCore offers for accessing its info.
      * Essentially, the transitions below are getters.
      */
 

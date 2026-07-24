@@ -224,9 +224,9 @@ class Proc(
                     TSAction.SyncRole.Default, TSAction.SyncRole.Internal ->
                         ctx.mkEq(ctx.mkIntConst("classID"), ctx.mkInt(tsInfo.classID()))
                     TSAction.SyncRole.Provider ->
-                        ctx.mkEq(ctx.mkBoolConst("serviceTransition"), ctx.mkTrue())
+                        ctx.mkEq(ctx.mkBoolConst("providerClientTransition"), ctx.mkTrue())
                     TSAction.SyncRole.Client ->
-                        ctx.mkEq(ctx.mkBoolConst("serviceTransition"), ctx.mkFalse())
+                        ctx.mkEq(ctx.mkBoolConst("providerClientTransition"), ctx.mkFalse())
                 }
                 // Affinity exclusivity is enforced by routing onto the dedicated session SyncChannel
                 // once affinity exists (see resolveSyncChannel). First contact may use the static channel.

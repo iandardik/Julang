@@ -39,17 +39,9 @@ fun codegenPass(
     }
     val procClassByName = procClasses.associateBy { it.name }
 
-    val servicedActionNames = (
-        procClasses.flatMap { it.transitions } +
-            librariesInUse.flatMap { LibraryRegistry.actionDecls(it) }
-        )
-        .filter { it.modifier == TSAction.SyncRole.Provider }
-        .map { it.action.name }
-        .toSet()
-
     // One StaticInfo per leaf occurrence (Julay and Kotlin libraries), with occurrence channel keys.
     val staticInfoExprs = occurrences.map { occ ->
-        occurrenceStaticInfoExpr(occ, channelKeys, servicedActionNames, procClassByName, libPClassNames)
+        occurrenceStaticInfoExpr(occ, channelKeys, procClassByName, libPClassNames)
     }
     val staticInfoBody = staticInfoExprs.joinToString(",\n") { it }
     val staticInfo = "val tsInfo = setOf(\n" + staticInfoBody.prependIndent() + "\n)"
@@ -123,7 +115,7 @@ fun codegenPass(
         dataClassSection +
         objClassSection +
         parametricTypeSection +
-        procClasses.joinToString("\n\n") { it.kotlinClassString(objClassDecls, servicedActionNames, classBodyKeys) } +
+        procClasses.joinToString("\n\n") { it.kotlinClassString(objClassDecls, classBodyKeys) } +
         "\n\n" +
         mainFunction
 
@@ -133,7 +125,6 @@ fun codegenPass(
 private fun occurrenceStaticInfoExpr(
     occ: LeafOccurrence,
     channelKeys: Map<LeafActionId, String>,
-    servicedActionNames: Set<String>,
     procClassByName: Map<String, ProcClassDecl>,
     libPClassNames: Set<String>,
 ): String {
@@ -153,7 +144,7 @@ private fun occurrenceStaticInfoExpr(
         }
     } else {
         val pc = procClassByName.getValue(occ.pclassName)
-        pc.kotlinStaticInfoString(servicedActionNames, occ.occurrenceId, channelKeys)
+        pc.kotlinStaticInfoString(occ.occurrenceId, channelKeys)
     }
 }
 
@@ -398,7 +389,6 @@ private fun ActionDecl.kotlinErrorString(
 
 private fun ProcClassDecl.kotlinClassString(
     objClassDecls: List<ObjClassDecl>,
-    servicedActionNames: Set<String>,
     channelKeys: Map<LeafActionId, String>,
 ): String {
     val stateVarTypes = stateVars.associate { Pair(it.name, it.type) }
@@ -414,7 +404,7 @@ private fun ProcClassDecl.kotlinClassString(
     val registerTypes = ""
     val actionsStr = "override suspend fun actions(ctx: Context): Set<TSAction> = setOf(\n" +
         transitions.joinToString(",\n") {
-            it.kotlinActionString(stateVarTypes, servicedActionNames, name, channelKeys).prependIndent()
+            it.kotlinActionString(stateVarTypes, name, channelKeys).prependIndent()
         } +
         "\n)"
     val transitStr = "override suspend fun transit(act: ConcreteAction) {" +
@@ -458,13 +448,11 @@ private fun ProcClassDecl.kotlinClassString(
 }
 
 private fun ProcClassDecl.kotlinStaticInfoString(
-    servicedActionNames: Set<String>,
     occurrenceId: String,
     channelKeys: Map<LeafActionId, String>,
 ): String {
     val transitionInfo = transitions.joinToString(",\n") {
         it.kotlinStaticInfoString(
-            servicedActionNames,
             name,
             occurrenceId,
             channelKeys,
@@ -476,7 +464,6 @@ private fun ProcClassDecl.kotlinStaticInfoString(
     val constructorPairs = constructors
         .joinToString(",\n") { ctor ->
             val actSigStr = ctor.kotlinStaticInfoString(
-                servicedActionNames,
                 name,
                 occurrenceId,
                 channelKeys,
@@ -500,7 +487,6 @@ private fun ActionDecl.resolvedSyncRole(): TSAction.SyncRole = modifier
 
 private fun ActionDecl.kotlinActionString(
     stateVarTypes: Map<String, Type>,
-    servicedActionNames: Set<String>,
     pclassName: String,
     channelKeys: Map<LeafActionId, String>,
 ): String {
@@ -508,7 +494,6 @@ private fun ActionDecl.kotlinActionString(
     val argSymbols = actionArgSymbols(action.args)
 
     val actionSigStr = kotlinStaticInfoString(
-        servicedActionNames,
         pclassName,
         occurrenceId = "",
         channelKeys,
@@ -587,7 +572,6 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
 }
 
 private fun ActionDecl.kotlinStaticInfoString(
-    servicedActionNames: Set<String> = emptySet(),
     pclassName: String = "",
     occurrenceId: String = "",
     channelKeys: Map<LeafActionId, String> = emptyMap(),

@@ -95,9 +95,9 @@ curl -s -X POST -d 'world' http://localhost:8000/
 ## Language features showcased
 
 - `List<String>` state and list concatenation in `transit`
-- Service interface for a collection resource
+- `provider` interface for a collection resource
 - Same HTTP session + modular layout as echo/inc
-- Printer as a separate consumer of `getList`
+- Printer as a separate `client` of `getList`
 
 ## Compare to inc server
 

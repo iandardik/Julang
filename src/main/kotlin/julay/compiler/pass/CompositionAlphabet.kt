@@ -350,9 +350,24 @@ fun composeAlphabets(
                     result.addAll(r)
                     continue
                 }
-                // Same class never syncs: if every offer on both sides shares one pclass, leave as-is.
+                // Same class never syncs. Ordinary/session duplicates are an immediate error
+                // (a later provider cannot redeem them). Clients still pass through to wait for a provider.
                 val classes = both.map { it.pclassKey }.toSet()
                 if (classes.size == 1) {
+                    if (hasOrdinary) {
+                        val pclass = classes.first()
+                        val sample = both[0]
+                        val other = both.getOrElse(1) { sample }
+                        errors.add(
+                            TwoLocsCompileError(
+                                sample.loc,
+                                other.loc,
+                                "Multiple occurrences of \"$pclass\" expose unsynced action \"$name\" in the composition; " +
+                                    "sync each occurrence with a different-class peer, tag the action `internal`, " +
+                                    "or tag callers `client` with a single `provider` for \"$name\"",
+                            ),
+                        )
+                    }
                     result.addAll(l)
                     result.addAll(r)
                     continue
@@ -396,14 +411,12 @@ private fun findSignatureMismatch(
 }
 
 /** JAR-target check: leftover ordinary actions in the external alphabet are unsynced. */
-fun unsyncedNonServiceErrors(external: List<AlphabetOffer>): List<CompileError> {
-    val providedNames = external.filter { it.isProvider }.map { it.name }.toSet()
-    return external
+fun unsyncedOrdinaryErrors(external: List<AlphabetOffer>): List<CompileError> =
+    external
         .filter { offer ->
             offer.name != "initially" &&
                 !offer.isProvider &&
-                !offer.isClient &&
-                offer.name !in providedNames
+                !offer.isClient
         }
         .distinctBy { it.channelKey }
         .map { o ->
@@ -413,13 +426,13 @@ fun unsyncedNonServiceErrors(external: List<AlphabetOffer>): List<CompileError> 
                     "tag it `internal` if a solo step is intentional",
             )
         }
-}
 
 /**
  * Alphabet integrity for JAR and TLA+ targets (same checks):
- * - same-class duplicate external ordinary/session actions
  * - at most one provider per action name
  * - every external client must have a provider of the same name
+ *
+ * Same-class ordinary duplicates are reported eagerly in [composeAlphabets].
  */
 fun alphabetIntegrityErrors(
     alphabet: CompositionAlphabetResult,
@@ -454,24 +467,6 @@ fun alphabetIntegrityErrors(
                 clients.first().loc,
                 "Action \"$name\" is tagged `client` but has no `provider` in the composition",
             )
-        }
-    }
-
-    val ordinary = external.filter {
-        !it.isProvider && !it.isClient && it.name != "initially"
-    }
-    for ((name, named) in ordinary.groupBy { it.name }) {
-        for ((pclass, offers) in named.groupBy { it.pclassKey }) {
-            val occs = offers.map { it.occurrenceId }.toSet()
-            if (occs.size >= 2) {
-                val sample = offers[0]
-                errors += OneLocCompileError(
-                    sample.loc,
-                    "Multiple occurrences of \"$pclass\" expose unsynced action \"$name\" in the composition; " +
-                        "sync each occurrence with a different-class peer, tag the action `internal`, " +
-                        "or tag callers `client` with a single `provider` for \"$name\"",
-                )
-            }
         }
     }
     return errors

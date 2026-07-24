@@ -78,8 +78,8 @@ fun printActionView(
         offers = offers.filter { it.actionName in shared }
     }
     if (options.scopeMutual && options.scopeNames.size > 1 && scope.leafSets.size > 1) {
-        // Serviced status is program-wide: the service offer may be outside the selected scopes.
-        val servicedNames = collectListedActionOffers(
+        // Provider status is program-wide: the provider offer may be outside the selected scopes.
+        val providerNames = collectListedActionOffers(
             ast,
             allPClassNames + librariesInUse,
             librariesInUse,
@@ -91,7 +91,7 @@ fun printActionView(
             .toSet()
         val offersByAction = offers.groupBy { it.actionName }
         val mutualNames = offersByAction.keys.filter { actionName ->
-            scopesMutuallySyncOn(actionName, scope.leafSets, offersByAction[actionName].orEmpty(), servicedNames)
+            scopesMutuallySyncOn(actionName, scope.leafSets, offersByAction[actionName].orEmpty(), providerNames)
         }.toSet()
         offers = offers.filter { it.actionName in mutualNames }
     }
@@ -113,23 +113,23 @@ private fun externalActionNames(
 
 /**
  * True when every pair of selected scopes can sync on [actionName].
- * Consumers of a serviced action do not sync with each other.
+ * Clients of a provider action do not sync with each other.
  */
 private fun scopesMutuallySyncOn(
     actionName: String,
     leafSets: List<Set<String>>,
     actionOffers: List<ListedActionOffer>,
-    servicedNames: Set<String>,
+    providerNames: Set<String>,
 ): Boolean {
     val rolesPerScope = leafSets.map { leaves ->
         actionOffers
             .filter { it.pclassName in leaves }
-            .map { it.resolvedRole(servicedNames) }
+            .map { it.modifier }
             .toSet()
     }
     for (i in rolesPerScope.indices) {
         for (j in i + 1 until rolesPerScope.size) {
-            if (!scopesSyncOn(rolesPerScope[i], rolesPerScope[j], actionName in servicedNames)) {
+            if (!scopesSyncOn(rolesPerScope[i], rolesPerScope[j], actionName in providerNames)) {
                 return false
             }
         }
@@ -137,27 +137,20 @@ private fun scopesMutuallySyncOn(
     return true
 }
 
-private fun ListedActionOffer.resolvedRole(servicedNames: Set<String>): TSAction.SyncRole =
-    when {
-        modifier == TSAction.SyncRole.Client -> TSAction.SyncRole.Client
-        modifier == TSAction.SyncRole.Provider -> TSAction.SyncRole.Provider
-        else -> modifier
-    }
-
 /** Whether two scopes' role sets for one action form a valid sync pair. */
 private fun scopesSyncOn(
     rolesA: Set<TSAction.SyncRole>,
     rolesB: Set<TSAction.SyncRole>,
-    serviced: Boolean,
+    hasProvider: Boolean,
 ): Boolean {
-    if (serviced) {
+    if (hasProvider) {
         val aProvider = TSAction.SyncRole.Provider in rolesA
         val bProvider = TSAction.SyncRole.Provider in rolesB
         val aClient = TSAction.SyncRole.Client in rolesA
         val bClient = TSAction.SyncRole.Client in rolesB
         return (aProvider && bClient) || (bProvider && aClient)
     }
-    // Non-serviced pairwise rendezvous: Default (or session, still Default role) peers.
+    // Ordinary pairwise rendezvous: Default (or session, still Default role) peers.
     return TSAction.SyncRole.Default in rolesA && TSAction.SyncRole.Default in rolesB
 }
 
