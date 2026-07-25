@@ -9,16 +9,16 @@ fun assertOrCompileError(assertion : Boolean, error : CompileError) =
     if (assertion) listOf() else listOf(error)
 
 class OneLocCompileError(
-    private val loc : ProgramLoc,
-    private val msg : String
+    val loc : ProgramLoc,
+    val msg : String
 ) : CompileError {
     override fun toString() = "$loc: $msg"
 }
 
 class TwoLocsCompileError(
-    private val locA : ProgramLoc,
-    private val locB : ProgramLoc,
-    private val msg : String
+    val locA : ProgramLoc,
+    val locB : ProgramLoc,
+    val msg : String
 ) : CompileError {
     override fun toString() = "$locA incompatible with $locB: $msg"
 }
@@ -26,8 +26,8 @@ class TwoLocsCompileError(
 interface CompileWarning {}
 
 class OneLocCompileWarning(
-    private val loc : ProgramLoc,
-    private val msg : String
+    val loc : ProgramLoc,
+    val msg : String
 ) : CompileWarning {
     override fun toString() = "$loc: warning: $msg"
 }
@@ -38,6 +38,10 @@ class SourceLoc(
     private val loc : Pair<Int,Int>,
     private val file : Path? = null,
 ) : ProgramLoc {
+    val startLine: Int get() = loc.first
+    val endLine: Int get() = loc.second
+    val filePath: Path? get() = file
+
     override fun toString(): String {
         val lines = when {
             loc.first == loc.second -> "line ${loc.first}"
@@ -48,7 +52,7 @@ class SourceLoc(
 }
 
 class LibraryLoc(
-    private val name : String
+    val name : String
 ) : ProgramLoc {
     override fun toString() = "Library $name"
 }

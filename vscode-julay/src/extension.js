@@ -6,9 +6,11 @@ const { JulayCodeLensProvider } = require("./codeLensProvider");
 const { JulayDefinitionProvider } = require("./definitionProvider");
 const { JulayHoverProvider } = require("./hoverProvider");
 const { JulayTaskProvider } = require("./tasks");
+const { registerDiagnostics, runCheckOnDocument } = require("./diagnostics");
 
 function activate(context) {
   const codeLens = new JulayCodeLensProvider();
+  registerDiagnostics(context);
 
   context.subscriptions.push(
     vscode.languages.registerHoverProvider("julay", new JulayHoverProvider()),
@@ -34,6 +36,7 @@ function activate(context) {
       if (doc.languageId === "julay") {
         clearAlphabetCache();
         codeLens.refresh();
+        runCheckOnDocument(doc);
       }
     }),
   );

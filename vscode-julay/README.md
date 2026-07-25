@@ -1,6 +1,6 @@
 # Julay VS Code / Cursor extension
 
-Editor support for `.jul` files: syntax highlighting, snippets, compile/analyze tasks, go-to-definition, and **external alphabet** viewing.
+Editor support for `.jul` files: syntax highlighting, snippets, compile/analyze tasks, go-to-definition, **external alphabet** viewing, and **on-save diagnostics**.
 
 ## Prerequisites
 
@@ -43,6 +43,8 @@ code --install-extension julay-0.1.0.vsix
 | Hover alphabet | Hover a proc/spec name → external alphabet |
 | Alphabet panel | Command **Julay: Show External Alphabet** |
 | CodeLens | Above `proc` / `spec` declarations |
+| On-save diagnostics | Save a `.jul` file → Problems panel + squiggles (full error/warning messages) |
+| Re-check | Command **Julay: Re-check** |
 | Tasks | **Terminal → Run Task…** → Julay: Compile / Compile entry / Analyze alphabet |
 
 ### Alphabet panel
@@ -60,6 +62,16 @@ java -jar build/libs/julayc.jar analyze -s Name --json path/to/entry.jul
 ```
 
 The JSON includes `compositionGraph` (`nodes` + `edges` with `actions`) plus `external` / `sourceInternal` / `compositionHidden`.
+
+### On-save diagnostics
+
+On save (or **Julay: Re-check**), the extension runs:
+
+```bash
+java -jar build/libs/julayc.jar check --json path/to/saved.jul
+```
+
+Errors appear as red squiggles; soft sync-peer / unsynced-ordinary messages as yellow warnings. Hover a squiggle or open the **Problems** panel to read the full message. The saved file is the check entry (same as alphabet analyze) — use **Julay: Compile entry** for project-entry compile.
 
 ## Settings
 

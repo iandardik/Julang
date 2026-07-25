@@ -15,7 +15,7 @@ import julay.compiler.analysis.AnalyzeOptions
 
 class Julayc : CliktCommand(name = "julayc") {
     init {
-        subcommands(AnalyzeCommand())
+        subcommands(AnalyzeCommand(), CheckCommand())
     }
 
     /**
@@ -34,6 +34,7 @@ class Julayc : CliktCommand(name = "julayc") {
         (with builtin HttpServerRequest/Response and HttpClientRequest/Response obj types).
 
         Use `julayc analyze --help` to inspect program structure without codegen.
+        Use `julayc check --help` to type-check and emit diagnostics without codegen.
     """.trimIndent()
 
     private val keepBuild by option(
@@ -185,6 +186,45 @@ class AnalyzeCommand : CliktCommand(name = "analyze") {
             json = json,
         )
         analyzeJulFile(input, options, libraryPaths)
+    }
+}
+
+class CheckCommand : CliktCommand(name = "check") {
+    override fun help(context: Context) =
+        "Type-check without compiling; emit diagnostics for IDE squiggles"
+
+    override fun helpEpilog(context: Context) = """
+        Examples:
+          julayc check path/to/file.jul
+          julayc check --json path/to/file.jul
+    """.trimIndent()
+
+    private val libraryPaths by option(
+        "-L",
+        help = "Add a directory to the module search path",
+    ).path(mustExist = true, canBeDir = true).multiple()
+
+    private val allowUnindexedSpec by option(
+        "--allow-unindexed-spec",
+        help = "Warn instead of error when a multi-instance proc appears unindexed in a spec",
+    ).flag()
+
+    private val json by option(
+        "--json",
+        help = "Emit machine-readable diagnostics JSON (errors and warnings)",
+    ).flag()
+
+    private val input by argument(
+        help = "Jul source file to check",
+    ).path(mustExist = true, canBeFile = true)
+
+    override fun run() {
+        checkJulFileAndExit(
+            source = input,
+            extraLibraryPaths = libraryPaths,
+            asJson = json,
+            allowUnindexedSpec = allowUnindexedSpec,
+        )
     }
 }
 

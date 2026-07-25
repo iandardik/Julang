@@ -1,7 +1,7 @@
 {
   "name": "julay",
   "displayName": "Julay",
-  "description": "Syntax highlighting, snippets, tasks, go-to-definition, and external alphabet viewing for Julay",
+  "description": "Syntax highlighting, snippets, tasks, go-to-definition, external alphabet viewing, and on-save diagnostics for Julay",
   "version": "0.1.0",
   "publisher": "julay",
   "engines": {
@@ -51,6 +51,10 @@
       {
         "command": "julay.refreshAlphabet",
         "title": "Julay: Refresh Alphabet Cache"
+      },
+      {
+        "command": "julay.recheck",
+        "title": "Julay: Re-check"
       }
     ],
     "configuration": {

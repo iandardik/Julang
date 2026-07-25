@@ -57,9 +57,26 @@ Common options (see `--help` for the full list):
 | `--json` | Emit machine-readable alphabet JSON for the scope: `compositionGraph` (top-level `||` children and sync edges), `external`, `sourceInternal`, and `compositionHidden` sync groups. Used by the VS Code extension; suppresses human-readable views |
 | `-L` | Module search path (same as compile) |
 
+## `julayc check`
+
+Type-check without codegen (same cost profile as `analyze`). Used by the VS Code extension for on-save Problems/squiggles:
+
+```bash
+java -jar build/libs/julayc.jar check path/to/file.jul
+java -jar build/libs/julayc.jar check --json path/to/file.jul
+```
+
+| Option | Role |
+|--------|------|
+| `--json` | Emit machine-readable diagnostics JSON (`severity`, `message`, `file`, `startLine`, `endLine`, optional `related`) |
+| `-L` | Module search path (same as compile) |
+| `--allow-unindexed-spec` | Warn instead of error for unindexed multi-instance procs in specs |
+
+Exit code **1** if any error diagnostics; **0** if clean or warnings-only (including soft sync-peer warnings).
+
 ## VS Code / Cursor extension
 
-The [`vscode-julay/`](../vscode-julay/) extension adds `.jul` highlighting, snippets, compile tasks, go-to-definition, hover alphabets, and a panel with a top-level composition sync diagram plus external / source-internal / composition-hidden actions. See [vscode-julay/README.md](../vscode-julay/README.md) for install and settings.
+The [`vscode-julay/`](../vscode-julay/) extension adds `.jul` highlighting, snippets, compile tasks, go-to-definition, hover alphabets, a panel with a top-level composition sync diagram plus external / source-internal / composition-hidden actions, and **on-save diagnostics** (Problems panel + squiggles via `julayc check --json`). See [vscode-julay/README.md](../vscode-julay/README.md) for install and settings.
 
 ## Testing
 
