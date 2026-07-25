@@ -118,6 +118,46 @@ class AlphabetJsonTest {
     }
 
     @Test
+    fun providerClientTopLevelGraphShowsEdge() {
+        val dir = Files.createTempDirectory("julay-provider-client-graph")
+        val file = dir.resolve("main.jul")
+        file.writeText(
+            """
+            proc Hub {
+                constructor initially(args : List<String>) { transit: }
+                provider transition w() { transit: }
+            }
+            proc Cli {
+                constructor initially(args : List<String>) { transit: }
+                client transition w() { transit: }
+            }
+            proc P := Hub || Cli
+            compile P
+            """.trimIndent(),
+        )
+        val checked = prepareCheckedCompilation(file)
+        assertNotNull(checked)
+        val scope = resolveAnalyzeScope(
+            scopeNames = listOf("P"),
+            procDecls = checked.procDecls,
+            allPClassNames = checked.unit.allPClassNames,
+            allProcAliasNames = checked.unit.allProcNames,
+            librariesInUse = checked.librariesInUse,
+        )
+        assertNotNull(scope)
+        val json = buildAlphabetJsonDocument(
+            checked.ast as RootNode,
+            scope,
+            checked.librariesInUse,
+            checked.procDecls,
+        )
+        assertTrue(json.contains("\"nodes\": [\"Hub\", \"Cli\"]"), json)
+        assertTrue(json.contains("\"a\": \"Cli\""), json)
+        assertTrue(json.contains("\"b\": \"Hub\""), json)
+        assertTrue(json.contains("\"actions\": [\"w\"]"), json)
+    }
+
+    @Test
     fun leafSShowsIncrementAsExternal() {
         val dir = Files.createTempDirectory("julay-alphabet-json")
         val file = dir.resolve("main.jul")

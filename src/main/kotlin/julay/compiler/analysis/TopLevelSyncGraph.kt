@@ -9,6 +9,8 @@ import julay.compiler.pass.computeCompositionAlphabet
 /**
  * Immediate children of [root] as diagram nodes, with edges for actions that
  * composition-hide while folding those children (not nested syncs inside a child).
+ * Also includes provider↔client meetings (clients leave the external alphabet;
+ * providers keep a public action name as channel key).
  */
 data class TopLevelSyncGraph(
     val nodes: List<String>,
@@ -62,6 +64,16 @@ fun computeTopLevelSyncGraph(
     fun canonPair(x: String, y: String): Pair<String, String> =
         if (x <= y) x to y else y to x
 
+    fun addEdgesBetween(leftNodes: Set<String>, rightNodes: Set<String>, action: String) {
+        for (a in leftNodes) {
+            for (b in rightNodes) {
+                if (a != b) {
+                    edgeActions.getOrPut(canonPair(a, b)) { mutableSetOf() }.add(action)
+                }
+            }
+        }
+    }
+
     fun recordSyncs(
         left: List<AlphabetOffer>,
         right: List<AlphabetOffer>,
@@ -70,6 +82,8 @@ fun computeTopLevelSyncGraph(
     ) {
         val leftIds = left.map { it.leafId }.toSet()
         val rightIds = right.map { it.leafId }.toSet()
+
+        // Ordinary / session: private scoped channel keys.
         composed
             .filter { it.compositionHidden && it.channelKey.startsWith("$scopeId#") }
             .groupBy { it.channelKey }
@@ -82,14 +96,28 @@ fun computeTopLevelSyncGraph(
                 val rightNodes = offers.mapNotNull { o ->
                     if (o.leafId in rightIds) tags[o.leafId] else null
                 }.toSet()
-                for (a in leftNodes) {
-                    for (b in rightNodes) {
-                        if (a != b) {
-                            edgeActions.getOrPut(canonPair(a, b)) { mutableSetOf() }.add(action)
-                        }
-                    }
-                }
+                addEdgesBetween(leftNodes, rightNodes, action)
             }
+
+        // Provider ↔ client: clients leave the external alphabet but keep a public channel key.
+        // Detect from pre-compose externals so only meetings at this fold are recorded.
+        val leftByName = left.groupBy { it.name }
+        val rightByName = right.groupBy { it.name }
+        for (name in leftByName.keys.intersect(rightByName.keys)) {
+            if (name == "initially") continue
+            val l = leftByName.getValue(name)
+            val r = rightByName.getValue(name)
+            val leftHasProvider = l.any { it.isProvider }
+            val rightHasProvider = r.any { it.isProvider }
+            val leftHasClient = l.any { it.isClient }
+            val rightHasClient = r.any { it.isClient }
+            if (!((leftHasProvider && rightHasClient) || (rightHasProvider && leftHasClient))) {
+                continue
+            }
+            val leftNodes = l.mapNotNull { tags[it.leafId] }.toSet()
+            val rightNodes = r.mapNotNull { tags[it.leafId] }.toSet()
+            addEdgesBetween(leftNodes, rightNodes, name)
+        }
     }
 
     var acc = childAlphabets[0]
