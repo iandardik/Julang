@@ -3,7 +3,7 @@ const vscode = require("vscode");
 const {
   declaredProcNames,
   fetchAlphabet,
-  formatOfferSignature,
+  groupOffersBySignatureAndRole,
   identifierAt,
   clearAlphabetCache,
 } = require("./alphabet");
@@ -413,13 +413,18 @@ function renderOffers(offers, empty, showLeaf) {
   if (!offers.length) {
     return `<p class="empty">${esc(empty)}</p>`;
   }
-  const items = offers
-    .map((o) => {
-      const role = o.isConstructor ? "constructor" : o.modifier;
-      const leaf = showLeaf
-        ? ` (<code>${esc(o.pclassKey)}</code>)`
-        : "";
-      return `<li><code>${esc(formatOfferSignature(o))}</code> — ${esc(role)}${leaf}</li>`;
+  const items = groupOffersBySignatureAndRole(offers)
+    .map(({ signature, role, offers: group }) => {
+      let suffix = "";
+      if (showLeaf) {
+        const leaves = group
+          .map((o) => `<code>${esc(o.pclassKey)}</code>`)
+          .join(", ");
+        suffix = ` (${leaves})`;
+      } else if (group.length > 1) {
+        suffix = ` (${group.length})`;
+      }
+      return `<li><code>${esc(signature)}</code> — ${esc(role)}${suffix}</li>`;
     })
     .join("\n");
   return `<ul>${items}</ul>`;

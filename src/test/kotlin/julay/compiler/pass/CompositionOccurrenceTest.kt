@@ -79,7 +79,7 @@ class CompositionOccurrenceTest {
 
     @Test
     fun providerWithClientOccurrencesOk() {
-        // Two client offers of w (same class) must not hide; provider resolves the hub.
+        // Two client offers of w (same class) must not hide with each other; provider resolves the hub.
         val leafMap = mapOf(
             "A" to listOf(offer("A", "other")),
             "B" to listOf(offer("B", "other")),
@@ -93,6 +93,29 @@ class CompositionOccurrenceTest {
         val result = computeCompositionAlphabet(q, listOf(q, p, ax, bx), leafMap)
         assertTrue(result.errors.isEmpty(), result.errors.toString())
         assertTrue(alphabetIntegrityErrors(result).isEmpty())
+        val externalW = result.external.filter { it.name == "w" }
+        assertEquals(1, externalW.size)
+        assertTrue(externalW.single().isProvider)
+        val clientW = result.allOffers.filter { it.name == "w" && it.isClient }
+        assertEquals(2, clientW.size)
+        assertTrue(clientW.all { it.compositionHidden })
+    }
+
+    @Test
+    fun providerHidesSyncedClientsFromExternal() {
+        val left = listOf(offer("S", "w", provider = true).copy(occurrenceId = "s1"))
+        val right = listOf(offer("C", "w", client = true).copy(occurrenceId = "c1"))
+        val (composed, errs) = composeAlphabets(left, right, "scope")
+        assertTrue(errs.isEmpty(), errs.toString())
+        assertEquals(2, composed.size)
+        val provider = composed.single { it.isProvider }
+        val client = composed.single { it.isClient }
+        assertTrue(!provider.compositionHidden)
+        assertTrue(client.compositionHidden)
+        assertEquals("w", provider.channelKey)
+        assertEquals("w", client.channelKey)
+        val external = composed.filter { !it.sourceInternal && !it.compositionHidden }
+        assertEquals(listOf(provider), external)
     }
 
     @Test
@@ -171,6 +194,10 @@ class CompositionOccurrenceTest {
         val result = computeCompositionAlphabet(root, listOf(root, ab), leafMap)
         assertTrue(result.errors.isEmpty(), result.errors.toString())
         assertTrue(alphabetIntegrityErrors(result).isEmpty(), alphabetIntegrityErrors(result).toString())
+        val externalW = result.external.filter { it.name == "w" }
+        assertEquals(1, externalW.size)
+        assertTrue(externalW.single().isProvider)
+        assertTrue(result.allOffers.filter { it.name == "w" && it.isClient }.all { it.compositionHidden })
     }
 
     @Test

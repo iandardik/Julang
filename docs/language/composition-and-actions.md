@@ -12,7 +12,7 @@ Each component keeps its own state. They interact only by **synchronizing on sha
 
 `||` is **occurrence-based** and **left-associative**: each mention of a proc class is a separate occurrence (`A || A` is two occurrences of `A`, not one). Do not confuse this with exchanging action arguments **by copy** (no shared references).
 
-When both sides of a binary `||` offer the same **ordinary** (untagged) or `session` action with a matching signature, they sync and that action becomes **internal to the composition** — it is not part of the outer alphabet. Unilateral actions, `provider` actions, and `client` actions remain visible on the assembly until a provider and its clients meet. Source-tagged `internal` actions never leave their declaring proc and may reuse names freely.
+When both sides of a binary `||` offer the same **ordinary** (untagged) or `session` action with a matching signature, they sync and that action becomes **internal to the composition** — it is not part of the outer alphabet. Unilateral actions and unmatched `client` actions remain visible on the assembly. A `provider` stays external after meeting clients (further clients can still sync with it); those clients leave the external alphabet. Source-tagged `internal` actions never leave their declaring proc and may reuse names freely.
 
 ```jul
 proc X := A || B    // A,B sync on y → y internal to X (private channel)
@@ -36,7 +36,7 @@ Here the two occurrences of `X` sync with `A` and `B` respectively on a shared a
 |---------------|----------|
 | ordinary / ordinary | sync → composition-hide |
 | `client` / `client` | do **not** hide; both stay external |
-| `client` / `provider` | no hide; shared public channel |
+| `client` / `provider` | provider stays external; clients leave the external alphabet |
 | ordinary / `provider` or ordinary / `client` | **compile error** |
 | `provider` / `provider` | **compile error** (at most one provider) |
 

@@ -117,17 +117,33 @@ function formatOfferSignature(offer) {
   return `${offer.name}${args}`;
 }
 
+function groupOffersBySignatureAndRole(offers) {
+  const groups = [];
+  const indexByKey = new Map();
+  for (const o of offers) {
+    const role = o.isConstructor ? "constructor" : o.modifier;
+    const signature = formatOfferSignature(o);
+    const key = `${signature}\0${role}`;
+    let idx = indexByKey.get(key);
+    if (idx === undefined) {
+      idx = groups.length;
+      indexByKey.set(key, idx);
+      groups.push({ signature, role, offers: [] });
+    }
+    groups[idx].offers.push(o);
+  }
+  return groups;
+}
+
 function formatExternalMarkdown(scope) {
   const lines = [`### External alphabet of \`${scope.name}\``, ""];
   if (!scope.external || scope.external.length === 0) {
     lines.push("_Empty_ (no external actions).");
     return lines.join("\n");
   }
-  for (const offer of scope.external) {
-    const role = offer.isConstructor ? "constructor" : offer.modifier;
-    lines.push(
-      `- \`${formatOfferSignature(offer)}\` — ${role}`,
-    );
+  for (const { signature, role, offers } of groupOffersBySignatureAndRole(scope.external)) {
+    const suffix = offers.length > 1 ? ` (${offers.length})` : "";
+    lines.push(`- \`${signature}\` — ${role}${suffix}`);
   }
   return lines.join("\n");
 }
@@ -155,6 +171,7 @@ module.exports = {
   clearAlphabetCache,
   fetchAlphabet,
   formatOfferSignature,
+  groupOffersBySignatureAndRole,
   formatExternalMarkdown,
   identifierAt,
   declaredProcNames,

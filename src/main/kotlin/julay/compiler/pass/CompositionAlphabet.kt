@@ -339,9 +339,13 @@ fun composeAlphabets(
                     continue
                 }
                 if (hasProvider) {
-                    // Provider + clients escape (shared public channel); do not composition-hide.
-                    result.addAll(l)
-                    result.addAll(r)
+                    // Provider stays external (further clients can still sync); clients that meet
+                    // it leave the external alphabet. Keep the public channelKey (action name).
+                    result.addAll(
+                        (l + r).map { offer ->
+                            if (offer.isClient) offer.copy(compositionHidden = true) else offer
+                        },
+                    )
                     continue
                 }
                 if (hasClient) {
