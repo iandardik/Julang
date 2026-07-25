@@ -82,6 +82,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             ctx.spec(),
             ctx.invariant_decl(),
             ctx.fun_decl(),
+            ctx.procfun_decl(),
         )
         val node = visit(decl)
         if (node is DeclNode && ctx.EXPORT() != null) {
@@ -117,6 +118,31 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             throw RuntimeException("Expected function body to be an expression")
         }
         return FunNode(name, typeParams, args, returnType, body, sourceLocation(ctx))
+    }
+
+    override fun visitProcfun_decl(ctx: JulayParser.Procfun_declContext?): ASTNode {
+        val name = ctx!!.ID().text
+        val args = visit(ctx.args()).let { argsNode ->
+            if (argsNode !is ArgsNode) {
+                throw RuntimeException("Expected ArgsNode but got $argsNode")
+            }
+            argsNode
+        }
+        val returnType = parseTypeExpr(ctx.typeExpr())
+        val localDecls = ctx.procfun_body()
+            .map { visit(it) }
+            .map {
+                if (it !is ProcClassDeclNode) {
+                    throw RuntimeException("Expected ProcClassDeclNode but got $it")
+                }
+                it
+            }
+        return ProcFunNode(name, args, returnType, localDecls, sourceLocation(ctx))
+    }
+
+    override fun visitProcfun_body(ctx: JulayParser.Procfun_bodyContext?): ASTNode {
+        val body = oneChoice(ctx!!.`var`(), ctx.constructor(), ctx.transition())
+        return visit(body)
     }
 
     override fun visitFun_call(ctx: JulayParser.Fun_callContext?): ASTNode {
@@ -269,7 +295,12 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         val name = ctx!!.ID().text
         val typeExpr = parseTypeExpr(ctx.typeExpr())
         val isConst = ctx.CONST() != null
-        return VarNode(name, typeExpr, sourceLocation(ctx), isConst = isConst)
+        val initExpr = ctx.expr()?.let { visit(it) }?.also {
+            if (it !is ExprNode) {
+                throw RuntimeException("Expected init expression but got $it")
+            }
+        } as ExprNode?
+        return VarNode(name, typeExpr, sourceLocation(ctx), isConst = isConst, initExpr = initExpr)
     }
 
     override fun visitConstructor(ctx: JulayParser.ConstructorContext?): ASTNode {
@@ -346,8 +377,23 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     }
 
     override fun visitAction_body(ctx: JulayParser.Action_bodyContext?): ASTNode {
-        val body = oneChoice(ctx!!.guard(), ctx.before(), ctx.transit(), ctx.error(), ctx.after())
+        val body = oneChoice(
+            ctx!!.guard(),
+            ctx.before(),
+            ctx.transit(),
+            ctx.error(),
+            ctx.after(),
+            ctx.return_clause(),
+        )
         return visit(body)
+    }
+
+    override fun visitReturn_clause(ctx: JulayParser.Return_clauseContext?): ASTNode {
+        val expr = visit(ctx!!.expr())
+        if (expr !is ExprNode) {
+            throw RuntimeException("Expected return expression")
+        }
+        return ReturnNode(expr, sourceLocation(ctx))
     }
 
     override fun visitGuard(ctx: JulayParser.GuardContext?): ASTNode {

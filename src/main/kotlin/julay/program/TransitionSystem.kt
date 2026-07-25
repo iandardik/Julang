@@ -41,4 +41,10 @@ interface TransitionSystem {
 
     /** Current sync peer for this transit (or null); cleared by [Proc] after transit. */
     fun setSessionPeer(peer: Proc?) {}
+
+    /**
+     * If the last [transit] was a procfun `return:`, returns that value and clears it.
+     * Default: not a procfun.
+     */
+    fun consumeProcFunReturn(): Value? = null
 }

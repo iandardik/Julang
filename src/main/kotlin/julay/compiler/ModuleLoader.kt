@@ -149,6 +149,7 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
                 moduleProcNames,
                 moduleImportTable,
                 moduleSymbolsSnapshot,
+                collectProcFunNames(root),
             ),
         )
 

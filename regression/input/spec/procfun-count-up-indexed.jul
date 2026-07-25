@@ -1,0 +1,31 @@
+sort Idx := {"a", "b"}
+
+procfun countUp(n : Int) : Int {
+    var steps : Int := 0
+    var result : Int := 0
+
+    internal transition step() {
+        guard: steps < n
+        transit:
+            result := steps + 1
+            steps := steps + 1
+    }
+
+    transition done() {
+        guard: steps = n
+        return: result
+    }
+}
+
+proc Main {
+    var out : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            out := countUp(1)
+    }
+}
+
+spec CountUpIndexed := Main[k : Idx]
+
+compile CountUpIndexed

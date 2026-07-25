@@ -16,7 +16,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CompletableDeferred
 import java.util.Optional
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -54,9 +56,16 @@ class Program {
      * Session actions in the program alphabet, keyed by name (for session install during sync).
      */
     private val sessionActionsByName: Map<String, SymbolicAction>
+    private val procFunByName: Map<String, TransitionSystemStaticInfo>
+    private val procFunWaiters = ConcurrentHashMap<Long, CompletableDeferred<Value>>()
 
-    constructor(componentInfo: Set<TransitionSystemStaticInfo>, cliArgs: List<String> = emptyList()) {
+    constructor(
+        componentInfo: Set<TransitionSystemStaticInfo>,
+        cliArgs: List<String> = emptyList(),
+        procFunInfo: Set<TransitionSystemStaticInfo> = emptySet(),
+    ) {
         this.componentInfo = componentInfo
+        this.procFunByName = procFunInfo.associateBy { it.name }
 
         val argsVar = Variable("args", listType(stringType))
         initiallyAction = SymbolicAction("initially", listOf(argsVar))
@@ -65,14 +74,15 @@ class Program {
             mapOf(argsVar to Value(cliArgs, listType(stringType))),
         )
 
-        constructorsByAction = componentInfo
+        val allInfo = componentInfo + procFunInfo
+        constructorsByAction = allInfo
             .flatMap { info ->
                 info.constructors.map { (act, ctor) -> act to (info to ctor) }
             }
             .groupBy({ it.first }, { it.second })
         constructorActions = constructorsByAction.keys
 
-        val allActions = componentInfo.flatMap { it.alphabet }.toSet()
+        val allActions = allInfo.flatMap { it.alphabet }.toSet()
         sessionActionsByName = allActions.filter { it.isSession }.associateBy { it.channelKey }
 
         val actionCounts = allActions.associateWith { setAct ->
@@ -149,6 +159,47 @@ class Program {
     suspend fun run() {
         spawn(initiallyConcrete, parent = null)
         awaitCancellation()
+    }
+
+    fun completeProcFunReturn(procId: Long, value: Value) {
+        procFunWaiters.remove(procId)?.complete(value)
+    }
+
+    /**
+     * Spawn-and-await a procfun instance: runs until a `return:` transition, then yields the value.
+     * The instance participates in SyncChannels so `client` steps can meet providers.
+     */
+    suspend fun invokeProcFun(name: String, argValues: List<Any>): Any {
+        val info = procFunByName[name]
+            ?: throw JulayException("Unknown procfun \"$name\"")
+        val ctorEntry = info.constructors.entries.singleOrNull()
+            ?: throw JulayException("Procfun \"$name\" must have exactly one constructor")
+        val ctorSym = ctorEntry.key
+        val factory = ctorEntry.value
+        if (ctorSym.args.size != argValues.size) {
+            throw JulayException(
+                "Procfun \"$name\" expects ${ctorSym.args.size} argument(s) but got ${argValues.size}",
+            )
+        }
+        val concreteArgs = ctorSym.args.zip(argValues).associate { (v, arg) ->
+            v to Value(arg, v.type)
+        }
+        val ctorAct = ConcreteAction(ctorSym, concreteArgs)
+        val ts = factory(this, ctorAct)
+        val deferred = CompletableDeferred<Value>()
+        val child = Proc(ts, info, staticChannelTable, this, constructorAct = ctorAct)
+        procFunWaiters[child.procId] = deferred
+        val job = godScope.launch(start = CoroutineStart.LAZY) {
+            child.run()
+            if (!deferred.isCompleted) {
+                deferred.completeExceptionally(
+                    JulayException("Procfun \"$name\" exited without return"),
+                )
+            }
+        }
+        child.bindRunJob(job)
+        job.start()
+        return deferred.await().value
     }
 
     private fun constraintsSatisfiable(constraints: Set<Constraint>): Boolean =

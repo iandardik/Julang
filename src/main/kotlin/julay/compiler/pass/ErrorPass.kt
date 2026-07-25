@@ -16,6 +16,7 @@ fun ASTNode.errorPass(
 ): List<CompileError> = when (this) {
     is RootNode -> errorPassRoot(procs, librariesInUse, program, procDecls)
     is ProcClassNode -> errorPassProcClass(procs, librariesInUse)
+    is ProcFunNode -> errorPassProcFun(procs, librariesInUse)
     is ObjClassNode -> errorPassObjClass(procs, librariesInUse)
     is ConstructorNode -> errorPassConstructor(procs, librariesInUse)
     is TransitionNode -> errorPassTransition(procs, librariesInUse)
@@ -466,19 +467,36 @@ private fun ProcClassNode.errorPassProcClass(procs: Set<String>, librariesInUse:
             )
         }
     val stateVars = localDecls.flatMap { it.stateVariables() }.map { it.name }
+    val inlinedVars = localDecls
+        .filterIsInstance<VarNode>()
+        .filter { it.initExpr != null }
+        .map { it.name }
+        .toSet()
     val ctorsCompleteAssgnErrors = localDecls
         .filterIsInstance<ConstructorNode>()
         .flatMap { ctorNode ->
             val stateVarSet = stateVars.toSet()
-            val assignedVarSet = ctorNode.transitVars().map { transitRootVar(it.first) }.toSet()
+            val assignedVarSet = ctorNode.transitVars().map { transitRootVar(it.first) }.toSet() + inlinedVars
             val missingStateVars = stateVarSet.minus(assignedVarSet)
+            val doubleInits = ctorNode.transitVars()
+                .map { transitRootVar(it.first) }
+                .filter { it in inlinedVars }
+                .distinct()
             assertOrCompileError(
                 missingStateVars.isEmpty(),
                 OneLocCompileError(
                     ctorNode.programLocation(),
                     "Expected each constructor to assign a value to every state variable; missing assignments to $missingStateVars",
                 ),
-            )
+            ) + doubleInits.flatMap { name ->
+                assertOrCompileError(
+                    false,
+                    OneLocCompileError(
+                        ctorNode.programLocation(),
+                        "Variable \"$name\" is initialized inline and cannot also be assigned in the constructor",
+                    ),
+                )
+            }
         }
     val constVarNames = localDecls
         .filterIsInstance<VarNode>()
@@ -488,6 +506,15 @@ private fun ProcClassNode.errorPassProcClass(procs: Set<String>, librariesInUse:
     val constAssignInTransitionErrors = localDecls
         .filterIsInstance<TransitionNode>()
         .flatMap { transNode -> constAssignmentErrors(transNode, constVarNames) }
+    val returnInProcErrors = localDecls
+        .filterIsInstance<TransitionNode>()
+        .filter { it.body().any { b -> b.returns().isNotEmpty() } }
+        .map {
+            OneLocCompileError(
+                it.programLocation(),
+                "return: is only allowed inside a procfun",
+            )
+        }
     val atLeastOneConstructorErrors = assertOrCompileError(
         localDecls.flatMap { it.constructors() }.isNotEmpty(),
         OneLocCompileError(programLocation(), "Expected \"${procClassNodeName()}\" to have at least one constructor"),
@@ -508,7 +535,129 @@ private fun ProcClassNode.errorPassProcClass(procs: Set<String>, librariesInUse:
     }
     return children.flatMap { it.errorPass(procs, librariesInUse) } + sessionPeerNameErrors +
         repeatStateVarNameErrors + ctorsCompleteAssgnErrors +
-        constAssignInTransitionErrors + atLeastOneConstructorErrors + ctorTransActionNotMutexErrors
+        constAssignInTransitionErrors + returnInProcErrors + atLeastOneConstructorErrors + ctorTransActionNotMutexErrors
+}
+
+private fun ProcFunNode.errorPassProcFun(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
+    val localDecls = localDecls()
+    val argNames = try {
+        procFunArgs().actionArgs().map { it.name }.toSet()
+    } catch (_: RuntimeException) {
+        emptySet()
+    }
+    val varNodes = localDecls.filterIsInstance<VarNode>()
+    val redeclArgErrors = varNodes.filter { it.name in argNames }.map {
+        OneLocCompileError(
+            it.programLocation(),
+            "Procfun parameter \"${it.name}\" cannot be redeclared as a state variable",
+        )
+    }
+    val repeatStateVarNameErrors = varNodes
+        .groupBy { it.name }
+        .flatMap { (_, nodes) ->
+            if (nodes.size == 1) emptyList()
+            else listOf(
+                TwoLocsCompileError(
+                    nodes[0].programLocation(),
+                    nodes[1].programLocation(),
+                    "Expected state variables to have unique names",
+                ),
+            )
+        }
+    val transitions = localDecls.filterIsInstance<TransitionNode>()
+    val reservedInvoke = procFunInvokeCtor(name())
+    val invokeNameClash = transitions.filter { it.transitionName() == reservedInvoke }.map {
+        OneLocCompileError(
+            it.programLocation(),
+            "Transition name \"$reservedInvoke\" is reserved for the synthetic procfun constructor",
+        )
+    }
+    val returnTransitions = transitions.filter { it.body().any { b -> b.returns().isNotEmpty() } }
+    val nonReturnTransitions = transitions.filter { it !in returnTransitions }
+    val needReturn = assertOrCompileError(
+        returnTransitions.isNotEmpty(),
+        OneLocCompileError(programLocation(), "Expected procfun \"${name()}\" to have at least one return transition"),
+    )
+    val modifierErrors = nonReturnTransitions.flatMap { trans ->
+        val decl = trans.transitions().single()
+        val hasReturn = false
+        val mod = trans.modifier()
+        val ok = mod == TSAction.SyncRole.Internal || mod == TSAction.SyncRole.Client
+        assertOrCompileError(
+            ok && !trans.isSessionTransition(),
+            OneLocCompileError(
+                trans.programLocation(),
+                "Procfun transitions must be tagged internal or client (except return transitions)",
+            ),
+        )
+    }
+    val returnModifierErrors = returnTransitions.flatMap { trans ->
+        val hasModifier = trans.modifier() != TSAction.SyncRole.Default || trans.isSessionTransition()
+        val hasTransit = trans.body().any { it.transits().isNotEmpty() || it is TransitNode }
+        val hasError = trans.body().any { it.errors().isNotEmpty() }
+        assertOrCompileError(
+            !hasModifier,
+            OneLocCompileError(
+                trans.programLocation(),
+                "Return transitions in a procfun must be untagged (no internal/client/provider/session)",
+            ),
+        ) + assertOrCompileError(
+            !hasTransit,
+            OneLocCompileError(
+                trans.programLocation(),
+                "Return transitions cannot have a transit: block",
+            ),
+        ) + assertOrCompileError(
+            !hasError,
+            OneLocCompileError(
+                trans.programLocation(),
+                "Return transitions cannot have an error: block",
+            ),
+        )
+    }
+    val returnOutsideProcFunOnOrdinary = emptyList<CompileError>() // checked: return only on procfun via structure
+    val inlinedVars = varNodes.filter { it.initExpr != null }.map { it.name }.toSet()
+    val stateVarNames = varNodes.map { it.name }.toSet()
+    // Args are initialized by the call; inline inits cover some vars; optional ctor covers the rest.
+    val ctors = localDecls.filterIsInstance<ConstructorNode>()
+    val ctorErrors = when {
+        ctors.size > 1 -> listOf(
+            OneLocCompileError(programLocation(), "Procfun \"${name()}\" may have at most one constructor"),
+        )
+        else -> ctors.flatMap { ctor ->
+            val assigned = ctor.transitVars().map { transitRootVar(it.first) }.toSet()
+            val double = assigned.intersect(inlinedVars)
+            val missing = stateVarNames - inlinedVars - assigned
+            double.map {
+                OneLocCompileError(
+                    ctor.programLocation(),
+                    "Variable \"$it\" is initialized inline and cannot also be assigned in the constructor",
+                )
+            } + assertOrCompileError(
+                missing.isEmpty(),
+                OneLocCompileError(
+                    ctor.programLocation(),
+                    "Expected constructor to assign every non-inline state variable; missing $missing",
+                ),
+            )
+        }
+    }
+    val noCtorMissing = if (ctors.isEmpty()) {
+        val missing = stateVarNames - inlinedVars
+        assertOrCompileError(
+            missing.isEmpty(),
+            OneLocCompileError(
+                programLocation(),
+                "Procfun \"${name()}\" state variables must be initialized inline or in a constructor; missing $missing",
+            ),
+        )
+    } else emptyList()
+    val constVarNames = varNodes.filter { it.isConst }.map { it.name }.toSet() + argNames
+    val constAssignErrors = transitions.flatMap { constAssignmentErrors(it, constVarNames) }
+    val returnInOrdinaryProc = emptyList<CompileError>()
+    return children.flatMap { it.errorPass(procs, librariesInUse) } + redeclArgErrors +
+        repeatStateVarNameErrors + invokeNameClash + needReturn + modifierErrors + returnModifierErrors +
+        ctorErrors + noCtorMissing + constAssignErrors + returnOutsideProcFunOnOrdinary + returnInOrdinaryProc
 }
 
 /** Validate exitSession(Peer) / killSessionPeer(Peer): leaf proc class, not self. */

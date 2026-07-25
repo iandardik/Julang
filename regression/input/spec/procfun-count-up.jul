@@ -1,0 +1,29 @@
+procfun countUp(n : Int) : Int {
+    var i : Int := 0
+    var result : Int := 0
+
+    internal transition step() {
+        guard: i < n
+        transit:
+            result := i + 1
+            i := i + 1
+    }
+
+    transition done() {
+        guard: i = n
+        return: result
+    }
+}
+
+proc Main {
+    var out : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            out := countUp(2)
+    }
+}
+
+spec CountUpSpec := Main
+
+compile CountUpSpec

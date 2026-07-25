@@ -37,13 +37,18 @@ fun RootNode.typePass(
     val allFuns = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<FunNode>() }
         .associateBy { it.name() }
+    val allProcFuns = unit.modules
+        .flatMap { it.root.declNodes().filterIsInstance<ProcFunNode>() }
+        .associateBy { it.name() }
     val signatureErrors = allFuns.values.flatMap { it.typePassFunSignature(built) }
-    val recursionErrors = funRecursionErrors(allFuns)
+    val procFunSigErrors = allProcFuns.values.flatMap { it.typePassProcFunSignature(built) }
+    val recursionErrors = funRecursionErrors(allFuns) + procFunRecursionErrors(allProcFuns)
     val funBodyErrors = unit.modules.flatMap { module ->
         val callable = callableFuns(module)
         val builtins = callableFunBuiltins(module)
+        val procFuns = callableProcFuns(module)
         module.root.declNodes().filterIsInstance<FunNode>().flatMap { funNode ->
-            funNode.typePassFunBody(callable, built, builtins)
+            funNode.typePassFunBody(callable, built, builtins, procFuns)
         }
     }
     // Typecheck each module with that module's imports so julay.funlib.* (and imported
@@ -51,13 +56,14 @@ fun RootNode.typePass(
     val otherErrors = unit.modules.flatMap { module ->
         val callable = callableFuns(module)
         val builtins = callableFunBuiltins(module)
+        val procFuns = callableProcFuns(module)
         module.root.declNodes()
             .filter { it !is FunNode && it !is SpecNode && it !is InvariantNode }
-            .flatMap { it.typePass(emptyMap(), built, callable, emptyMap(), builtins) }
+            .flatMap { it.typePass(emptyMap(), built, callable, emptyMap(), builtins, procFuns) }
     }
     val specResult = unit.root.specTypePass(unit, allowUnindexedSpec)
     return TypePassResult(
-        errors = built.errors + signatureErrors + recursionErrors + funBodyErrors + otherErrors + specResult.errors,
+        errors = built.errors + signatureErrors + procFunSigErrors + recursionErrors + funBodyErrors + otherErrors + specResult.errors,
         warnings = specResult.warnings,
     )
 }
@@ -68,37 +74,40 @@ fun ASTNode.typePass(
     funEnv: Map<String, FunNode> = emptyMap(),
     typeParamEnv: Map<String, Type> = emptyMap(),
     funBuiltinEnv: Map<String, FunBuiltin> = emptyMap(),
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> = when (this) {
-    is ProcClassNode -> typePassProcClass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is VarNode -> typePassVarNode(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is ConstructorNode -> typePassConstructor(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is TransitionNode -> typePassTransition(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is ArgNode -> typePassArgNode(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is GuardNode -> typePassGuard(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is VarTransitNode -> typePassVarTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is MapIndexTransitNode -> typePassMapIndexTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is ErrorNode -> typePassError(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is BeforeNode -> typePassBefore(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is AfterNode -> typePassAfter(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is CallStmtNode -> typePassCallStmt(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is UnaryOpExprNode -> typePassUnaryOp(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is BinaryOpExprNode -> typePassBinaryOp(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is IfElseExprNode -> typePassIfElse(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is LetExprNode -> typePassLet(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is WhenExprNode -> typePassWhen(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is ObjClassLiteralExprNode -> typePassObjClassLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is FieldAccessExprNode -> typePassFieldAccess(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is MemberAccessExprNode -> typePassMemberAccess(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is ListLiteralExprNode -> typePassListLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is EmptyBracketLiteralExprNode -> typePassEmptyBracketLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is SetLiteralExprNode -> typePassSetLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is MapLiteralExprNode -> typePassMapLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is IndexExprNode -> typePassIndex(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is SliceExprNode -> typePassSlice(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is FunCallExprNode -> typePassFunCall(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is SymbolValueExprNode -> typePassSymbol(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    is ExprNode -> typePassExpr(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-    else -> children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    is ProcClassNode -> typePassProcClass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is ProcFunNode -> typePassProcFun(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is VarNode -> typePassVarNode(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is ConstructorNode -> typePassConstructor(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is TransitionNode -> typePassTransition(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is ArgNode -> typePassArgNode(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is GuardNode -> typePassGuard(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is ReturnNode -> typePassReturn(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is VarTransitNode -> typePassVarTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is MapIndexTransitNode -> typePassMapIndexTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is ErrorNode -> typePassError(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is BeforeNode -> typePassBefore(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is AfterNode -> typePassAfter(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is CallStmtNode -> typePassCallStmt(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is UnaryOpExprNode -> typePassUnaryOp(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is BinaryOpExprNode -> typePassBinaryOp(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is IfElseExprNode -> typePassIfElse(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is LetExprNode -> typePassLet(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is WhenExprNode -> typePassWhen(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is ObjClassLiteralExprNode -> typePassObjClassLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is FieldAccessExprNode -> typePassFieldAccess(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is MemberAccessExprNode -> typePassMemberAccess(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is ListLiteralExprNode -> typePassListLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is EmptyBracketLiteralExprNode -> typePassEmptyBracketLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is SetLiteralExprNode -> typePassSetLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is MapLiteralExprNode -> typePassMapLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is IndexExprNode -> typePassIndex(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is SliceExprNode -> typePassSlice(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is FunCallExprNode -> typePassFunCall(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is SymbolValueExprNode -> typePassSymbol(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is ExprNode -> typePassExpr(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    else -> children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
 }
 
 private fun ProcClassNode.typePassProcClass(
@@ -107,11 +116,12 @@ private fun ProcClassNode.typePassProcClass(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
     val localDecls = localDecls()
     val varErrors = localDecls
         .filterIsInstance<VarNode>()
-        .flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+        .flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (varErrors.isNotEmpty()) {
         return varErrors
     }
@@ -119,20 +129,40 @@ private fun ProcClassNode.typePassProcClass(
         .filterIsInstance<VarNode>()
         .associate { it.name to it.type }
     return varErrors + localDecls.flatMap { decl ->
-        if (decl is VarNode) emptyList() else decl.typePass(localSymbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+        if (decl is VarNode) emptyList() else decl.typePass(localSymbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     }
 }
 
-private fun VarNode.typePassVarNode(symbolEnv: Map<String, Type>, registry: ObjClassRegistry, funEnv: Map<String, FunNode>, typeParamEnv: Map<String, Type>,
-    funBuiltinEnv: Map<String, FunBuiltin>): List<CompileError> =
-    when (val result = registry.resolveTypeExpr(typeExpr, typeParamEnv, programLocation())) {
+private fun VarNode.typePassVarNode(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
+): List<CompileError> {
+    return when (val result = registry.resolveTypeExpr(typeExpr, typeParamEnv, programLocation())) {
         is TypeResolveResult.Found -> {
             resolveType(result.type)
-            listOfNotNull(sortDomainOnlyError(result.type, programLocation()))
+            val sortErr = listOfNotNull(sortDomainOnlyError(result.type, programLocation()))
+            val init = initExpr ?: return sortErr
+            // Empty {} / [] need the declared type before typePass (same as transit assigns).
+            applyExpectedCollectionType(init, result.type)
+            val initErrors = init.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+            if (initErrors.isNotEmpty()) return sortErr + initErrors
+            applyExpectedCollectionType(init, result.type)
+            sortErr + assertOrCompileError(
+                init.getType() == result.type,
+                OneLocCompileError(
+                    init.programLocation(),
+                    "Expected init of \"$name\" to have type ${result.type} but got ${init.getType()}",
+                ),
+            )
         }
         is TypeResolveResult.Error ->
             listOf(OneLocCompileError(programLocation(), "${result.message} for state variable \"$name\""))
     }
+}
 
 private fun ConstructorNode.typePassConstructor(
     symbolEnv: Map<String, Type>,
@@ -140,10 +170,11 @@ private fun ConstructorNode.typePassConstructor(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
-    val argErrors = constructorArgs().typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    val argErrors = constructorArgs().typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     val actionEnv = symbolEnv + constructorArgs().argsTypeMap() + constructorArgs().actionArgs().associate { it.name to it.type }
-    return argErrors + body().flatMap { it.typePass(actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    return argErrors + body().flatMap { it.typePass(actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
 }
 
 private fun TransitionNode.typePassTransition(
@@ -152,14 +183,16 @@ private fun TransitionNode.typePassTransition(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
-    val argErrors = transitionArgs().typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    val argErrors = transitionArgs().typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     val actionEnv = symbolEnv + transitionArgs().argsTypeMap() + transitionArgs().actionArgs().associate { it.name to it.type }
-    return argErrors + body().flatMap { it.typePass(actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    return argErrors + body().flatMap { it.typePass(actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
 }
 
 private fun ArgNode.typePassArgNode(symbolEnv: Map<String, Type>, registry: ObjClassRegistry, funEnv: Map<String, FunNode>, typeParamEnv: Map<String, Type>,
-    funBuiltinEnv: Map<String, FunBuiltin>): List<CompileError> =
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap()): List<CompileError> =
     when (val result = registry.resolveTypeExpr(argTypeExpr(), typeParamEnv, programLocation())) {
         is TypeResolveResult.Found -> {
             resolveArgType(result.type)
@@ -170,8 +203,9 @@ private fun ArgNode.typePassArgNode(symbolEnv: Map<String, Type>, registry: ObjC
     }
 
 private fun GuardNode.typePassGuard(symbolEnv: Map<String, Type>, registry: ObjClassRegistry, funEnv: Map<String, FunNode>, typeParamEnv: Map<String, Type>,
-    funBuiltinEnv: Map<String, FunBuiltin>): List<CompileError> {
-    val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap()): List<CompileError> {
+    val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (childrenErrors.isNotEmpty()) {
         return childrenErrors
     }
@@ -188,8 +222,9 @@ private fun ErrorNode.typePassError(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
-    val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (childrenErrors.isNotEmpty()) {
         return childrenErrors
     }
@@ -208,6 +243,7 @@ private fun VarTransitNode.typePassVarTransit(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
     val varType = symbolEnv[varName]
     // Undeclared targets take priority over RHS errors (e.g. untyped empty list literals).
@@ -224,7 +260,7 @@ private fun VarTransitNode.typePassVarTransit(
         }
     }
     expectedType?.let { applyExpectedCollectionType(transitExpr(), it) }
-    val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (childrenErrors.isNotEmpty()) {
         return childrenErrors
     }
@@ -269,8 +305,9 @@ private fun BeforeNode.typePassBefore(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> =
-    befores().flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    befores().flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
 
 private fun AfterNode.typePassAfter(
     symbolEnv: Map<String, Type>,
@@ -278,8 +315,9 @@ private fun AfterNode.typePassAfter(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> =
-    afters().flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    afters().flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
 
 private fun CallStmtNode.typePassCallStmt(
     symbolEnv: Map<String, Type>,
@@ -287,6 +325,7 @@ private fun CallStmtNode.typePassCallStmt(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
     funBuiltinEnv[callName()]?.let { builtin ->
         resolveBuiltin(builtin)
@@ -316,7 +355,7 @@ private fun CallStmtNode.typePassCallStmt(
                 ),
             )
         }
-        val childrenErrors = callArgs().flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+        val childrenErrors = callArgs().flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
         if (childrenErrors.isNotEmpty()) {
             return childrenErrors
         }
@@ -328,7 +367,7 @@ private fun CallStmtNode.typePassCallStmt(
     }
     // User fun: reuse FunCallExprNode typing, then copy resolution onto this stmt.
     val asExpr = FunCallExprNode(callName(), callArgs(), programLocation(), typeArgs = callTypeArgs())
-    val errors = asExpr.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    val errors = asExpr.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     if (errors.isNotEmpty()) {
         return errors
     }
@@ -343,8 +382,9 @@ private fun UnaryOpExprNode.typePassUnaryOp(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
-    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (childErrors.isNotEmpty()) {
         return childErrors
     }
@@ -362,8 +402,9 @@ private fun BinaryOpExprNode.typePassBinaryOp(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
-    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (childErrors.isNotEmpty()) {
         return childErrors
     }
@@ -468,8 +509,9 @@ private fun BinaryOpExprNode.typePassBinaryOp(
 }
 
 private fun IfElseExprNode.typePassIfElse(symbolEnv: Map<String, Type>, registry: ObjClassRegistry, funEnv: Map<String, FunNode>, typeParamEnv: Map<String, Type>,
-    funBuiltinEnv: Map<String, FunBuiltin>): List<CompileError> {
-    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap()): List<CompileError> {
+    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (childErrors.isNotEmpty()) {
         return childErrors
     }
@@ -497,7 +539,8 @@ private fun IfElseExprNode.ifElseTypeErrors(): List<CompileError> {
 }
 
 private fun LetExprNode.typePassLet(symbolEnv: Map<String, Type>, registry: ObjClassRegistry, funEnv: Map<String, FunNode>, typeParamEnv: Map<String, Type>,
-    funBuiltinEnv: Map<String, FunBuiltin>): List<CompileError> {
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap()): List<CompileError> {
     val typeErrors = when (val result = registry.resolveTypeExpr(letTypeExpr(), typeParamEnv, programLocation())) {
         is TypeResolveResult.Found -> {
             resolveLetType(result.type)
@@ -528,7 +571,7 @@ private fun LetExprNode.typePassLet(symbolEnv: Map<String, Type>, registry: ObjC
 
     val declaredType = resolvedLetType
     applyExpectedCollectionType(letInitExpr(), declaredType)
-    val initErrors = letInitExpr().typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    val initErrors = letInitExpr().typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     if (initErrors.isNotEmpty()) {
         return initErrors
     }
@@ -545,14 +588,15 @@ private fun LetExprNode.typePassLet(symbolEnv: Map<String, Type>, registry: ObjC
     }
 
     val bodyEnv = symbolEnv + (letName() to declaredType)
-    val bodyErrors = bodyExpr().typePass(bodyEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    val bodyErrors = bodyExpr().typePass(bodyEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     inferExprType(bodyEnv)
     return bodyErrors
 }
 
 private fun WhenExprNode.typePassWhen(symbolEnv: Map<String, Type>, registry: ObjClassRegistry, funEnv: Map<String, FunNode>, typeParamEnv: Map<String, Type>,
-    funBuiltinEnv: Map<String, FunBuiltin>): List<CompileError> {
-    val subjectErrors = subjectExpr()?.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) ?: emptyList()
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap()): List<CompileError> {
+    val subjectErrors = subjectExpr()?.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) ?: emptyList()
     if (subjectErrors.isNotEmpty()) {
         return subjectErrors
     }
@@ -567,12 +611,12 @@ private fun WhenExprNode.typePassWhen(symbolEnv: Map<String, Type>, registry: Ob
             is WhenArm.Subject -> {
                 val patternErrors = when (val pattern = arm.pattern) {
                     is WhenPattern.Primitive -> emptyList()
-                    is WhenPattern.Struct -> pattern.literal.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+                    is WhenPattern.Struct -> pattern.literal.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
                 }
-                patternErrors + arm.expr.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+                patternErrors + arm.expr.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
             }
-            is WhenArm.Guard -> arm.cond.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) + arm.expr.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-            is WhenArm.Else -> arm.expr.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+            is WhenArm.Guard -> arm.cond.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) + arm.expr.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+            is WhenArm.Else -> arm.expr.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
         }
     }
     if (armErrors.isNotEmpty()) {
@@ -722,6 +766,7 @@ private fun ObjClassLiteralExprNode.typePassObjClassLiteral(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
     val classErrors = when (val classResult = registry.resolveTypeExpr(typeExpr, typeParamEnv, programLocation())) {
         is TypeResolveResult.Error ->
@@ -768,7 +813,7 @@ private fun ObjClassLiteralExprNode.typePassObjClassLiteral(
         return classErrors + duplicateFieldErrors + fieldSetErrors
     }
 
-    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (childErrors.isNotEmpty()) {
         return childErrors
     }
@@ -793,6 +838,7 @@ private fun FieldAccessExprNode.typePassFieldAccess(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
     val baseType = symbolEnv[baseSymbol]
     if (baseType == null) {
@@ -802,7 +848,7 @@ private fun FieldAccessExprNode.typePassFieldAccess(
         is FieldPathResult.Error -> listOf(OneLocCompileError(programLocation(), result.message))
         is FieldPathResult.Resolved -> {
             resolveFieldAccess(result.type, result.relPath)
-            val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+            val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
             inferExprType(symbolEnv)
             childErrors
         }
@@ -815,8 +861,9 @@ private fun MemberAccessExprNode.typePassMemberAccess(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
-    val baseErrors = baseExpr.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    val baseErrors = baseExpr.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     if (baseErrors.isNotEmpty()) {
         return baseErrors
     }
@@ -835,8 +882,9 @@ private fun MemberAccessExprNode.typePassMemberAccess(
 }
 
 private fun ExprNode.typePassExpr(symbolEnv: Map<String, Type>, registry: ObjClassRegistry, funEnv: Map<String, FunNode>, typeParamEnv: Map<String, Type>,
-    funBuiltinEnv: Map<String, FunBuiltin>): List<CompileError> {
-    val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap()): List<CompileError> {
+    val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     inferExprType(symbolEnv)
     return childrenErrors
 }
@@ -847,6 +895,7 @@ private fun SymbolValueExprNode.typePassSymbol(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
     if (symbol !in symbolEnv) {
         return listOf(OneLocCompileError(programLocation(), "Unknown variable \"$symbol\""))
@@ -861,8 +910,9 @@ private fun FunCallExprNode.typePassFunCall(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
-    val argErrors = callArgs().flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    val argErrors = callArgs().flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (argErrors.isNotEmpty()) {
         return argErrors
     }
@@ -898,6 +948,57 @@ private fun FunCallExprNode.typePassFunCall(
         resolveInstantiatedReturnType(returnType)
         inferExprType(symbolEnv)
         return emptyList()
+    }
+    procFunEnv[callName()]?.let { procFun ->
+        resolveProcFun(procFun)
+        if (callTypeArgs().isNotEmpty()) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected procfun \"${callName()}\" not to take type arguments",
+                ),
+            )
+        }
+        val params = try {
+            procFun.procFunArgs().actionArgs()
+        } catch (_: RuntimeException) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Parameter types not resolved for procfun \"${callName()}\"",
+                ),
+            )
+        }
+        if (params.size != callArgs().size) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected procfun \"${callName()}\" to take ${params.size} argument(s) but got ${callArgs().size}",
+                ),
+            )
+        }
+        val typeMismatchErrors = callArgs().zip(params).flatMap { (arg, param) ->
+            assertOrCompileError(
+                arg.getType() == param.type,
+                OneLocCompileError(
+                    arg.programLocation(),
+                    "Expected argument \"${param.name}\" of \"${callName()}\" to have type ${param.type} but got ${arg.getType()}",
+                ),
+            )
+        }
+        if (typeMismatchErrors.isEmpty()) {
+            try {
+                inferExprType(symbolEnv)
+            } catch (_: RuntimeException) {
+                return listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "Return type not resolved for procfun \"${callName()}\"",
+                    ),
+                )
+            }
+        }
+        return typeMismatchErrors
     }
     val funNode = funEnv[callName()]
         ?: return listOf(OneLocCompileError(programLocation(), "Unknown function \"${callName()}\""))
@@ -1076,6 +1177,7 @@ private fun EmptyBracketLiteralExprNode.typePassEmptyBracketLiteral(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
     resolvedListTypeOrNull()?.let {
         inferExprType(symbolEnv)
@@ -1099,8 +1201,9 @@ private fun ListLiteralExprNode.typePassListLiteral(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
-    val childErrors = elements.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    val childErrors = elements.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (childErrors.isNotEmpty()) {
         return childErrors
     }
@@ -1137,8 +1240,9 @@ private fun IndexExprNode.typePassIndex(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
-    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (childErrors.isNotEmpty()) {
         return childErrors
     }
@@ -1174,6 +1278,7 @@ private fun MapIndexTransitNode.typePassMapIndexTransit(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
     val mapVarType = symbolEnv[mapVar]
     if (mapVarType == null) {
@@ -1187,7 +1292,7 @@ private fun MapIndexTransitNode.typePassMapIndexTransit(
             ),
         )
     }
-    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (childErrors.isNotEmpty()) {
         return childErrors
     }
@@ -1217,8 +1322,9 @@ private fun SetLiteralExprNode.typePassSetLiteral(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
-    val childErrors = elements.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    val childErrors = elements.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (childErrors.isNotEmpty()) {
         return childErrors
     }
@@ -1255,10 +1361,11 @@ private fun MapLiteralExprNode.typePassMapLiteral(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
     val childErrors = entries.flatMap { (k, v) ->
-        k.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) +
-            v.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+        k.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) +
+            v.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     }
     if (childErrors.isNotEmpty()) {
         return childErrors
@@ -1306,8 +1413,9 @@ private fun SliceExprNode.typePassSlice(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
-    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (childErrors.isNotEmpty()) {
         return childErrors
     }
@@ -1332,6 +1440,7 @@ private fun FunNode.typePassFunBody(
     funEnv: Map<String, FunNode>,
     registry: ObjClassRegistry,
     funBuiltinEnv: Map<String, FunBuiltin> = emptyMap(),
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
     val params = try {
         funArgs().actionArgs()
@@ -1345,7 +1454,7 @@ private fun FunNode.typePassFunBody(
     }
     val paramEnv = params.associate { it.name to it.type }
     val typeParamEnv: Map<String, Type> = typeParams.associateWith { TypeVar(it) }
-    val bodyErrors = funBody().typePass(paramEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    val bodyErrors = funBody().typePass(paramEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     if (bodyErrors.isNotEmpty()) {
         return bodyErrors
     }
@@ -1356,6 +1465,142 @@ private fun FunNode.typePassFunBody(
             "Expected function \"${name()}\" to return $returnType but body has type ${funBody().getType()}",
         ),
     )
+}
+
+private fun ProcFunNode.typePassProcFunSignature(registry: ObjClassRegistry): List<CompileError> {
+    val argNodes = procFunArgs().children.filterIsInstance<ArgNode>()
+    val argErrors = argNodes.flatMap { arg ->
+        when (val result = registry.resolveTypeExpr(arg.argTypeExpr(), emptyMap(), arg.programLocation())) {
+            is TypeResolveResult.Found -> {
+                arg.resolveArgType(result.type)
+                listOfNotNull(sortDomainOnlyError(result.type, arg.programLocation()))
+            }
+            is TypeResolveResult.Error ->
+                listOf(
+                    OneLocCompileError(
+                        arg.programLocation(),
+                        "${result.message} for procfun argument \"${arg.argName()}\"",
+                    ),
+                )
+        }
+    }
+    val returnErrors = when (val result = registry.resolveTypeExpr(procFunReturnTypeExpr(), emptyMap(), programLocation())) {
+        is TypeResolveResult.Found -> {
+            resolveReturnType(result.type)
+            listOfNotNull(sortDomainOnlyError(result.type, programLocation()))
+        }
+        is TypeResolveResult.Error ->
+            listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "${result.message} for return type of procfun \"${name()}\"",
+                ),
+            )
+    }
+    return argErrors + returnErrors
+}
+
+private fun ProcFunNode.typePassProcFun(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode>,
+): List<CompileError> {
+    val argErrors = procFunArgs().typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    if (argErrors.isNotEmpty()) return argErrors
+    val argEnv = try {
+        procFunArgs().actionArgs().associate { it.name to it.type }
+    } catch (_: RuntimeException) {
+        return emptyList()
+    }
+    // Type vars in declaration order so later inits can see earlier ones + args.
+    val vars = localDecls().filterIsInstance<VarNode>()
+    val initEnv = argEnv.toMutableMap()
+    val varErrors = mutableListOf<CompileError>()
+    for (v in vars) {
+        varErrors += v.typePass(initEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+        if (varErrors.isEmpty() || v.name in initEnv || runCatching { v.type }.isSuccess) {
+            try {
+                initEnv[v.name] = v.type
+            } catch (_: RuntimeException) {}
+        }
+    }
+    if (varErrors.isNotEmpty()) return varErrors
+    val localSymbolEnv = initEnv.toMap()
+    val returnType = try {
+        returnType
+    } catch (_: RuntimeException) {
+        return emptyList()
+    }
+    val bodyErrors = localDecls().flatMap { decl ->
+        when (decl) {
+            is VarNode -> emptyList()
+            is TransitionNode -> {
+                val transErrors = decl.typePass(localSymbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+                val returnExprs = decl.body().flatMap { it.returns() }
+                val retTypeErrors = returnExprs.flatMap { expr ->
+                    assertOrCompileError(
+                        expr.getType() == returnType,
+                        OneLocCompileError(
+                            expr.programLocation(),
+                            "Expected return of procfun \"${name()}\" to have type $returnType but got ${expr.getType()}",
+                        ),
+                    )
+                }
+                transErrors + retTypeErrors
+            }
+            else -> decl.typePass(localSymbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+        }
+    }
+    return bodyErrors
+}
+
+private fun ReturnNode.typePassReturn(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode>,
+): List<CompileError> =
+    children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
+
+private fun procFunRecursionErrors(allProcFuns: Map<String, ProcFunNode>): List<CompileError> {
+    if (allProcFuns.isEmpty()) return emptyList()
+    val callGraph = allProcFuns.mapValues { (_, pf) ->
+        pf.localDecls().flatMap { collectFunCallNamesFromNode(it) }.filter { it in allProcFuns }.toSet()
+    }
+    val errors = mutableListOf<CompileError>()
+    val visiting = mutableSetOf<String>()
+    val visited = mutableSetOf<String>()
+
+    fun dfs(name: String, path: List<String>) {
+        if (name in visited) return
+        if (name in visiting) {
+            val cycleStart = path.indexOf(name)
+            val cycle = (path.drop(cycleStart) + name).joinToString(" -> ")
+            errors.add(
+                OneLocCompileError(
+                    allProcFuns.getValue(name).programLocation(),
+                    "Recursive procfun calls are not allowed: $cycle",
+                ),
+            )
+            return
+        }
+        visiting.add(name)
+        callGraph[name].orEmpty().forEach { callee -> dfs(callee, path + name) }
+        visiting.remove(name)
+        visited.add(name)
+    }
+    allProcFuns.keys.forEach { dfs(it, emptyList()) }
+    return errors.distinctBy { it.toString() }
+}
+
+private fun collectFunCallNamesFromNode(node: ASTNode): Set<String> = when (node) {
+    is FunCallExprNode -> setOf(node.callName()) + node.children.flatMap { collectFunCallNamesFromNode(it) }
+    else -> node.children.flatMap { collectFunCallNamesFromNode(it) }.toSet()
 }
 
 private fun funRecursionErrors(allFuns: Map<String, FunNode>): List<CompileError> {

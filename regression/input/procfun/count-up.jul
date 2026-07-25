@@ -1,0 +1,40 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+
+procfun countUp(n : Int) : Int {
+    var i : Int := 0
+    var result : Int := 0
+
+    internal transition step() {
+        guard: i < n
+        transit:
+            result := i + 1
+            i := i + 1
+    }
+
+    transition done() {
+        guard: i = n
+        return: result
+    }
+}
+
+proc Main {
+    var out : Int
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            out := countUp(3)
+            done := false
+    }
+
+    internal transition finish() {
+        guard: ~done
+        transit: done := true
+        after:
+            println(out + "")
+            exitProcess()
+    }
+}
+
+compile Main

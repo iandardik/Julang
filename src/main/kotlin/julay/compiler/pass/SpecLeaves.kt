@@ -16,6 +16,8 @@ data class SpecLeaf(
     val introducingAssembly: String = name,
     /** Assigned TLA identifier (may differ from [name] when renaming for ties). */
     val tlaName: String = name,
+    /** True when this leaf is a procfun call-site occurrence (not a `||` peer). */
+    val isProcFun: Boolean = false,
 ) {
     val isParameterized: Boolean get() = paramName != null
     fun identityKey(): String {
@@ -204,4 +206,174 @@ fun assignTlaLeafNames(leaves: List<SpecLeaf>): List<SpecLeaf> {
         used += tlaName
         leaf.copy(tlaName = tlaName)
     }
+}
+
+/**
+ * A whole-RHS procfun call in a host action transit (`x := countUp(2)`).
+ * [occurrence] is filled after [assignTlaLeafNames].
+ */
+data class ProcFunCallSite(
+    val hostName: String,
+    val hostActionName: String,
+    val isHostConstructor: Boolean,
+    val procFunName: String,
+    val call: FunCallExprNode,
+    val assignVars: List<String>,
+    val occurrence: SpecLeaf,
+)
+
+/**
+ * Raw call site before leaf naming; [occurrenceId] ties to the matching [SpecLeaf].
+ */
+data class ProcFunCallSiteDraft(
+    val host: SpecLeaf,
+    val hostActionName: String,
+    val isHostConstructor: Boolean,
+    val procFunName: String,
+    val call: FunCallExprNode,
+    val assignVars: List<String>,
+    val occurrenceId: String,
+)
+
+/**
+ * Discover whole-RHS procfun call sites under host leaves (one draft per call).
+ */
+fun discoverProcFunCallSiteDrafts(
+    hostLeaves: List<SpecLeaf>,
+    pclasses: Map<String, ProcClassNode>,
+): List<ProcFunCallSiteDraft> {
+    val out = mutableListOf<ProcFunCallSiteDraft>()
+    hostLeaves.forEach { host ->
+        val pc = pclasses[host.name] ?: return@forEach
+        collectWholeRhsProcFunCalls(pc).forEach { hit ->
+            val pfName = hit.call.resolvedProcFunOrNull()?.procFunName() ?: return@forEach
+            out += ProcFunCallSiteDraft(
+                host = host,
+                hostActionName = hit.actionName,
+                isHostConstructor = hit.isCtor,
+                procFunName = pfName,
+                call = hit.call,
+                assignVars = hit.assignVars,
+                occurrenceId = freshSpecOccurrenceId(pfName),
+            )
+        }
+    }
+    return out
+}
+
+/** SpecLeaves for [drafts], inheriting each host's index binders. */
+fun procFunLeavesFromDrafts(drafts: List<ProcFunCallSiteDraft>): List<SpecLeaf> =
+    drafts.map { draft ->
+        SpecLeaf(
+            name = draft.procFunName,
+            paramName = draft.host.paramName,
+            paramType = draft.host.paramType,
+            occurrenceId = draft.occurrenceId,
+            introducingAssembly = draft.host.tlaName,
+            tlaName = draft.procFunName,
+            isProcFun = true,
+        )
+    }
+
+/**
+ * Each whole-RHS textual procfun call site under a host leaf becomes its own SpecLeaf occurrence,
+ * inheriting the host's index binders.
+ */
+fun discoverProcFunOccurrenceLeaves(
+    hostLeaves: List<SpecLeaf>,
+    pclasses: Map<String, ProcClassNode>,
+): List<SpecLeaf> =
+    procFunLeavesFromDrafts(discoverProcFunCallSiteDrafts(hostLeaves, pclasses))
+
+/**
+ * Build named [ProcFunCallSite]s after [assignTlaLeafNames] on host+procfun leaves.
+ */
+fun resolveProcFunCallSites(
+    drafts: List<ProcFunCallSiteDraft>,
+    namedLeaves: List<SpecLeaf>,
+): List<ProcFunCallSite> {
+    val byOccId = namedLeaves.filter { it.isProcFun }.associateBy { it.occurrenceId }
+    val hostsByKey = namedLeaves.filter { !it.isProcFun }.associateBy { it.identityKey() }
+    return drafts.mapNotNull { draft ->
+        val occ = byOccId[draft.occurrenceId] ?: return@mapNotNull null
+        val host = hostsByKey[draft.host.identityKey()]
+            ?: namedLeaves.firstOrNull { !it.isProcFun && it.name == draft.host.name }
+            ?: return@mapNotNull null
+        ProcFunCallSite(
+            hostName = host.tlaName,
+            hostActionName = draft.hostActionName,
+            isHostConstructor = draft.isHostConstructor,
+            procFunName = draft.procFunName,
+            call = draft.call,
+            assignVars = draft.assignVars,
+            occurrence = occ,
+        )
+    }
+}
+
+/**
+ * Collect actions whose transit has exactly one whole-RHS procfun call (v1 coupling shape).
+ */
+private fun collectWholeRhsProcFunCalls(pc: ProcClassNode): List<WholeRhsHit> {
+    val out = mutableListOf<WholeRhsHit>()
+    pc.localDecls().filterIsInstance<ConstructorNode>().forEach { ctor ->
+        val decl = ctor.constructors().single()
+        wholeRhsProcFunCall(decl)?.let { (call, vars) ->
+            out += WholeRhsHit(decl.action.name, true, call, vars)
+        }
+    }
+    pc.localDecls().filterIsInstance<TransitionNode>().forEach { tr ->
+        val decl = tr.transitions().single()
+        wholeRhsProcFunCall(decl)?.let { (call, vars) ->
+            out += WholeRhsHit(decl.action.name, false, call, vars)
+        }
+    }
+    return out
+}
+
+private data class WholeRhsHit(
+    val actionName: String,
+    val isCtor: Boolean,
+    val call: FunCallExprNode,
+    val assignVars: List<String>,
+)
+
+private fun wholeRhsProcFunCall(
+    decl: julay.compiler.decl.ActionDecl,
+): Pair<FunCallExprNode, List<String>>? {
+    val hits = decl.transits.mapNotNull { update ->
+        when (update) {
+            is julay.compiler.decl.TransitUpdate.Assign -> {
+                val call = update.expr as? FunCallExprNode ?: return@mapNotNull null
+                if (call.resolvedProcFunOrNull() == null) return@mapNotNull null
+                julay.program.type.transitRootVar(update.key) to call
+            }
+            else -> null
+        }
+    }
+    if (hits.isEmpty()) return null
+    val calls = hits.map { it.second }.distinct()
+    // v1: exactly one distinct procfun call in the action
+    if (calls.size != 1) return null
+    return calls.single() to hits.map { it.first }
+}
+
+/** Build a synthetic [ProcClassNode] view of a procfun for TLA leaf lookup. */
+fun ProcFunNode.asSyntheticProcClass(): ProcClassNode {
+    val argNodes = procFunArgs().children.filterIsInstance<ArgNode>()
+    val argVars = argNodes.map { arg ->
+        val vn = VarNode(arg.argName(), arg.argTypeExpr(), programLocation(), isConst = true)
+        try {
+            vn.resolveType(arg.type)
+        } catch (_: RuntimeException) {}
+        vn
+    }
+    val invokeCtor = ConstructorNode(
+        procFunInvokeCtor(name()),
+        procFunArgs(),
+        emptyList(),
+        programLocation(),
+    )
+    val body = argVars + listOf(invokeCtor) + localDecls().filter { it !is ConstructorNode }
+    return ProcClassNode(name(), body, programLocation())
 }

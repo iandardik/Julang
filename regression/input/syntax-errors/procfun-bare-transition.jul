@@ -1,0 +1,20 @@
+procfun bad(n : Int) : Int {
+    var i : Int := 0
+
+    transition step() {
+        transit: i := i + 1
+    }
+
+    transition done() {
+        return: i
+    }
+}
+
+proc Main {
+    var x : Int
+    constructor initially(args : List<String>) {
+        transit: x := 0
+    }
+}
+
+compile Main

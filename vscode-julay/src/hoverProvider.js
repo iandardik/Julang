@@ -9,9 +9,9 @@ const {
 
 const KEYWORDS = new Set([
   "if", "else", "let", "when", "in", "all", "exists",
-  "import", "export", "obj", "sort", "proc", "compile", "spec", "invariant",
+  "import", "export", "obj", "sort", "proc", "procfun", "compile", "spec", "invariant",
   "var", "const", "constructor", "transition", "internal", "provider", "client",
-  "session", "guard", "transit", "error", "before", "after", "fun",
+  "session", "guard", "transit", "error", "before", "after", "return", "fun",
   "true", "false",
 ]);
 

@@ -3,6 +3,7 @@ package julay.compiler
 import julay.compiler.ast.ASTNode
 import julay.compiler.ast.CompileNode
 import julay.compiler.ast.RootNode
+import julay.compiler.collectProcFunNames
 import julay.compiler.decl.ProcDecl
 import julay.compiler.decl.ProcDeclType
 import julay.compiler.pass.errorPass
@@ -56,6 +57,10 @@ fun resolveCompileTargets(
     val specs = mutableListOf<ProcDecl>()
     val missing = mutableListOf<String>()
     for (name in names) {
+        if (name in collectProcFunNames(ast)) {
+            println("Cannot compile procfun \"$name\" as a JAR or spec target; call it from a proc instead")
+            return null
+        }
         val decl = byName[name]
         when {
             decl?.type == ProcDeclType.Spec -> specs += decl

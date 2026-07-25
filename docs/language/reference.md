@@ -4,10 +4,10 @@ Compact cheat sheet. For explanations, use the other chapters.
 
 ## Keywords
 
-`proc` `obj` `sort` `fun` `import` `export` `compile` `spec` `invariant`  
+`proc` `procfun` `obj` `sort` `fun` `import` `export` `compile` `spec` `invariant`  
 `var` `const` `constructor` `transition`  
-`internal` `provider` `session`  
-`guard` `before` `transit` `error` `after`  
+`internal` `provider` `client` `session`  
+`guard` `before` `transit` `error` `after` `return`  
 `all` `exists` `if` `else` `let` `when` `in`  
 `true` `false`
 
@@ -29,9 +29,10 @@ Compact cheat sheet. For explanations, use the other chapters.
 import Module.Path
 proc Name { ... }
 proc Name := Expr
+procfun name(...) : Type { ... }
 obj Name { ... }
 sort Name := { lit, ... }
-fun name(...) : Type { ... }
+fun name(...) : Type = expr
 invariant Name := Expr
 spec Name := <Assume> System <Guarantee>
 spec Name := System |= Guarantee

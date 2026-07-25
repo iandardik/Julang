@@ -1,0 +1,2 @@
+source: regression/input/syntax-errors/procfun-return-tagged.jul
+expectCompileFailure: true

@@ -125,6 +125,30 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
+	@Override public void enterProcfun_decl(JulayParser.Procfun_declContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitProcfun_decl(JulayParser.Procfun_declContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void enterProcfun_body(JulayParser.Procfun_bodyContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitProcfun_body(JulayParser.Procfun_bodyContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
 	@Override public void enterProc(JulayParser.ProcContext ctx) { }
 	/**
 	 * {@inheritDoc}
@@ -372,6 +396,18 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 * <p>The default implementation does nothing.</p>
 	 */
 	@Override public void exitAction_body(JulayParser.Action_bodyContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void enterReturn_clause(JulayParser.Return_clauseContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitReturn_clause(JulayParser.Return_clauseContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *

@@ -69,7 +69,10 @@ fun emptyCompilationUnit(entryPath: Path): CompilationUnit {
 }
 
 fun collectDeclNames(root: RootNode): Set<String> =
-    root.declNodes().filter { it !is FunNode && it !is CompileNode }.map { it.name() }.toSet()
+    root.declNodes()
+        .filter { it !is FunNode && it !is ProcFunNode && it !is CompileNode }
+        .map { it.name() }
+        .toSet()
 
 fun collectPClassNames(root: RootNode): Set<String> =
     root.declNodes().filterIsInstance<ProcClassNode>().map { it.name() }.toSet()
@@ -79,6 +82,9 @@ fun collectProcAliasNames(root: RootNode): Set<String> =
         .filter { it is ProcNode || it is SpecNode }
         .map { it.name() }
         .toSet()
+
+fun collectProcFunNames(root: RootNode): Set<String> =
+    root.declNodes().filterIsInstance<ProcFunNode>().map { it.name() }.toSet()
 
 fun declFromResolvedSymbol(symbol: ResolvedSymbol): DeclNode? = when (symbol) {
     is ResolvedSymbol.LocalDecl -> symbol.decl
@@ -92,6 +98,15 @@ fun callableFuns(module: LoadedModule): Map<String, FunNode> {
     val imported = module.importTable.shortNames.mapNotNull { (name, symbol) ->
         val decl = declFromResolvedSymbol(symbol)
         if (decl is FunNode) name to decl else null
+    }.toMap()
+    return local + imported
+}
+
+fun callableProcFuns(module: LoadedModule): Map<String, ProcFunNode> {
+    val local = module.root.declNodes().filterIsInstance<ProcFunNode>().associateBy { it.name() }
+    val imported = module.importTable.shortNames.mapNotNull { (name, symbol) ->
+        val decl = declFromResolvedSymbol(symbol)
+        if (decl is ProcFunNode) name to decl else null
     }.toMap()
     return local + imported
 }

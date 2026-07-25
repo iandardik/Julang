@@ -1,0 +1,6 @@
+source: regression/input/procfun/count-up.jul
+programs:
+  - name: Main
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/procfun-count-up.stdout

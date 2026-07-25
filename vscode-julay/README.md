@@ -38,7 +38,7 @@ code --install-extension julay-0.1.0.vsix
 | Feature | How |
 |---------|-----|
 | Syntax highlighting | Automatic for `*.jul` |
-| Snippets | Prefixes: `proc`, `procclass`, `transition`, `internal`, `provider`, `client`, `session`, `spec`, … |
+| Snippets | Prefixes: `proc`, `procclass`, `procfun`, `transition`, `internal`, `provider`, `client`, `session`, `spec`, … |
 | Go to definition | `F12` / Cmd-click on proc names, actions, and `import path.Name` (not jar stdlib) |
 | Hover alphabet | Hover a proc/spec name → external alphabet |
 | Alphabet panel | Command **Julay: Show External Alphabet** |

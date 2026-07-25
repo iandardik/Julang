@@ -1,0 +1,2 @@
+source: regression/input/syntax-errors/procfun-in-parallel.jul
+expectCompileFailure: true

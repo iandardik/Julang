@@ -27,6 +27,26 @@
     ],
     "description": "Proc class with initially and a transition"
   },
+  "procfun": {
+    "prefix": "procfun",
+    "body": [
+      "procfun ${1:name}(${2:args}) : ${3:Int} {",
+      "\tvar ${4:x} : ${3:Int} := ${5:0}",
+      "",
+      "\tinternal transition ${6:step}() {",
+      "\t\tguard: ${7:true}",
+      "\t\ttransit:",
+      "\t\t\t$0",
+      "\t}",
+      "",
+      "\ttransition ${8:done}() {",
+      "\t\tguard: true",
+      "\t\treturn: ${4:x}",
+      "\t}",
+      "}"
+    ],
+    "description": "Procfun with internal step and return"
+  },
   "constructor initially": {
     "prefix": "initially",
     "body": [

@@ -65,6 +65,18 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitFun_decl(JulayParser.Fun_declContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#procfun_decl}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitProcfun_decl(JulayParser.Procfun_declContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#procfun_body}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitProcfun_body(JulayParser.Procfun_bodyContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#proc}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
@@ -190,6 +202,12 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 * @return the visitor result
 	 */
 	T visitAction_body(JulayParser.Action_bodyContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#return_clause}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitReturn_clause(JulayParser.Return_clauseContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link JulayParser#guard}.
 	 * @param ctx the parse tree

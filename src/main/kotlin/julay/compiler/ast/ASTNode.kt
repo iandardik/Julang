@@ -56,6 +56,7 @@ abstract class ActionBodyNode(
     open fun befores() : List<CallStmtNode> = body.flatMap { it.befores() }
     open fun afters() : List<CallStmtNode> = body.flatMap { it.afters() }
     open fun errors() : List<ErrorArmNode> = body.flatMap { it.errors() }
+    open fun returns() : List<ExprNode> = body.flatMap { it.returns() }
 }
 
 abstract class ExprNode(children : List<ASTNode>) : ASTNode(children) {
@@ -296,6 +297,54 @@ class FunNode(
     }
 }
 
+/**
+ * Process-backed blocking function: args become consts, body has state + internal/client
+ * steps and untagged `return:` transitions. Invoked via call expressions (not `||`).
+ */
+class ProcFunNode(
+    private val name: String,
+    private val args: ArgsNode,
+    private val returnTypeExpr: TypeExpr,
+    private val localDecls: List<ProcClassDeclNode>,
+    private val loc: ProgramLoc,
+) : DeclNode(listOf(args) + localDecls) {
+    private var returnTypeResolution: TypeNameResolution = TypeNameResolution.Unresolved
+
+    val returnType: Type
+        get() = when (val resolution = returnTypeResolution) {
+            is TypeNameResolution.Resolved -> resolution.type
+            is TypeNameResolution.Unresolved ->
+                throw RuntimeException("Return type not resolved for procfun \"$name\"")
+        }
+
+    override fun programLocation() = loc
+    override fun name() = name
+    internal fun procFunName() = name
+    internal fun procFunArgs(): ArgsNode = args
+    internal fun procFunReturnTypeExpr(): TypeExpr = returnTypeExpr
+    internal fun localDecls(): List<ProcClassDeclNode> = localDecls
+    internal fun withLocalDecls(decls: List<ProcClassDeclNode>): ProcFunNode =
+        ProcFunNode(name, args, returnTypeExpr, decls, loc).also {
+            it.visibility = this.visibility
+            when (val r = returnTypeResolution) {
+                is TypeNameResolution.Resolved -> it.resolveReturnType(r.type)
+                else -> {}
+            }
+        }
+    internal fun resolveReturnType(type: Type) {
+        returnTypeResolution = TypeNameResolution.Resolved(type)
+    }
+    override fun toString(): String {
+        val displayReturn = when (val resolution = returnTypeResolution) {
+            is TypeNameResolution.Resolved -> resolution.type
+            is TypeNameResolution.Unresolved -> returnTypeExpr
+        }
+        val body = localDecls.joinToString("\n") { "$it".prependIndent() }
+        val export = if (isExported) "export " else ""
+        return "${export}procfun $name($args) : $displayReturn {\n$body\n}"
+    }
+}
+
 class FunCallExprNode(
     private val name: String,
     private val args: List<ExprNode>,
@@ -306,6 +355,7 @@ class FunCallExprNode(
 ) : ExprNode(args) {
     private var resolvedFun: FunNode? = resolved
     private var resolvedBuiltin: FunBuiltin? = null
+    private var resolvedProcFun: ProcFunNode? = null
     private var specializedBody: ExprNode? = null
 
     override fun programLocation() = loc
@@ -314,13 +364,21 @@ class FunCallExprNode(
     fun callTypeArgs(): List<TypeExpr> = typeArgs
     internal fun resolvedFunOrNull(): FunNode? = resolvedFun
     internal fun resolvedBuiltinOrNull(): FunBuiltin? = resolvedBuiltin
+    internal fun resolvedProcFunOrNull(): ProcFunNode? = resolvedProcFun
     internal fun resolveFun(funNode: FunNode) {
         resolvedFun = funNode
         resolvedBuiltin = null
+        resolvedProcFun = null
     }
     internal fun resolveBuiltin(builtin: FunBuiltin) {
         resolvedBuiltin = builtin
         resolvedFun = null
+        resolvedProcFun = null
+    }
+    internal fun resolveProcFun(procFun: ProcFunNode) {
+        resolvedProcFun = procFun
+        resolvedFun = null
+        resolvedBuiltin = null
     }
     internal fun resolveInstantiatedReturnType(type: Type) {
         instantiatedReturnType = type
@@ -345,6 +403,9 @@ class FunCallExprNode(
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
+        if (resolvedProcFun != null) {
+            throw RuntimeException("Procfun \"$name\" cannot be used in guards at $loc")
+        }
         resolvedBuiltin?.let { builtin ->
             if (builtin.returnType == null) {
                 throw RuntimeException("Function \"${builtin.name}\" cannot be used in guards")
@@ -370,6 +431,16 @@ class FunCallExprNode(
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        resolvedProcFun?.let { pf ->
+            val argStrs = args.map { it.toTransitString(symbolTypes, argSymbols) }
+            val argsList = if (argStrs.isEmpty()) {
+                "emptyList()"
+            } else {
+                "listOf(${argStrs.joinToString(", ")})"
+            }
+            val retTy = pf.returnType.toKotlinTypeString()
+            return "(hostProc.invokeProcFun(\"${pf.procFunName()}\", $argsList) as $retTy)"
+        }
         resolvedBuiltin?.let { builtin ->
             val argStrs = args.map { it.toTransitString(symbolTypes, argSymbols) }
             return builtin.kotlinCodegen(argStrs)
@@ -379,6 +450,7 @@ class FunCallExprNode(
 
     override fun inferType(symbolEnv: Map<String, Type>): Type {
         instantiatedReturnType?.let { return it }
+        resolvedProcFun?.let { return it.returnType }
         resolvedBuiltin?.let { builtin ->
             return builtin.returnType
                 ?: throw RuntimeException("Function \"${builtin.name}\" returns no value at $loc")
@@ -405,7 +477,8 @@ class VarNode(
     val typeExpr : TypeExpr,
     private val loc : ProgramLoc,
     val isConst : Boolean = false,
-) : ProcClassDeclNode(listOf()) {
+    val initExpr : ExprNode? = null,
+) : ProcClassDeclNode(listOfNotNull(initExpr)) {
     private var typeResolution : TypeNameResolution = TypeNameResolution.Unresolved
     val type : Type
         get() = when (val resolution = typeResolution) {
@@ -440,7 +513,8 @@ class VarNode(
             is TypeNameResolution.Unresolved -> typeExpr
         }
         val keyword = if (isConst) "const" else "var"
-        return "$keyword $name : $displayType"
+        val init = initExpr?.let { " := $it" } ?: ""
+        return "$keyword $name : $displayType$init"
     }
 }
 
@@ -494,21 +568,28 @@ class TransitionNode(
     override fun transitions(): List<ActionDecl> {
         val actionArgs = args.actionArgs()
         val guards = body.flatMap { it.guards() }
+        val returnExprs = body.flatMap { it.returns() }
+        val returnExpr = when (returnExprs.size) {
+            0 -> null
+            1 -> returnExprs[0]
+            else -> throw RuntimeException("Transition \"$name\" has multiple return: clauses at $loc")
+        }
         return listOf(
             ActionDecl(
                 SymbolicAction(
                     name,
                     actionArgs,
-                    isInternal = modifier == TSAction.SyncRole.Internal,
+                    isInternal = modifier == TSAction.SyncRole.Internal || returnExpr != null,
                     isSession = isSession,
                 ),
                 guards,
                 body.flatMap { it.transits() },
-                modifier,
+                if (returnExpr != null) TSAction.SyncRole.Internal else modifier,
                 loc,
                 body.flatMap { it.befores() },
                 body.flatMap { it.afters() },
                 body.flatMap { it.errors() },
+                returnExpr = returnExpr,
             )
         )
     }
@@ -516,6 +597,8 @@ class TransitionNode(
     internal fun body(): List<ActionBodyNode> = body
     internal fun transitionArgs(): ArgsNode = args
     internal fun actionArgs(): List<Variable> = args.actionArgs()
+    internal fun modifier(): TSAction.SyncRole = modifier
+    internal fun isSessionTransition(): Boolean = isSession
     internal fun withBody(newBody: List<ActionBodyNode>): TransitionNode =
         TransitionNode(modifier, name, args, newBody, programLocation(), isSession)
     override fun toString(): String {
@@ -574,6 +657,19 @@ class GuardNode(
     override fun toString(): String {
         val exprStr = "$expr".prependIndent()
         return "guard:\n$exprStr"
+    }
+}
+
+class ReturnNode(
+    private val expr: ExprNode,
+    private val loc: ProgramLoc,
+) : ActionBodyNode(listOf(), listOf(expr)) {
+    override fun programLocation() = loc
+    internal fun returnExpr() = expr
+    override fun returns(): List<ExprNode> = listOf(expr)
+    override fun toString(): String {
+        val exprStr = "$expr".prependIndent()
+        return "return:\n$exprStr"
     }
 }
 

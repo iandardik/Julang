@@ -73,6 +73,10 @@ class Proc(
      */
     fun resolveSymbolicAction(act: SymbolicAction): SymbolicAction = tsInfo.resolveAction(act)
 
+    /** Blocking call into a registered procfun (spawn-and-await until `return:`). */
+    suspend fun invokeProcFun(name: String, args: List<Any>): Any =
+        program.invokeProcFun(name, args)
+
     /**
      * Close dedicated sessions with [peerProcId] and clear affinity to that peer.
      * Does not kill either proc.
@@ -264,6 +268,11 @@ class Proc(
         }
         if (program.isConstructorAction(act.symAction)) {
             program.spawn(act, parent = this)
+        }
+        // Procfun return: deliver value to waiter and exit this proc.
+        transitionSystem.consumeProcFunReturn()?.let { value ->
+            program.completeProcFunReturn(procId, value)
+            return false
         }
         return !silentlyKilled.get()
     }

@@ -24,6 +24,9 @@ data class ActionDecl(
     val befores: List<CallStmtNode> = emptyList(),
     val afters: List<CallStmtNode> = emptyList(),
     val errors: List<ErrorArmNode> = emptyList(),
+    /** When non-null, this transition is a procfun return edge (mutually exclusive with [transits]). */
+    val returnExpr: ExprNode? = null,
 ) {
     val isSession: Boolean get() = action.isSession
+    val isReturn: Boolean get() = returnExpr != null
 }

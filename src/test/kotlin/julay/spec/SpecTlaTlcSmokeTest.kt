@@ -774,6 +774,97 @@ class SpecTlaTlcSmokeTest {
         }
     }
 
+    @Test
+    fun procfunCountUpEmitsTerminatedAndTlcParses() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-procfun").toFile()
+        try {
+            val source = File("regression/input/spec/procfun-count-up.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("CountUpSpec.tla")
+            val cfg = File("CountUpSpec.cfg")
+            assertTrue(tla.exists(), "expected CountUpSpec.tla")
+            assertTrue(cfg.exists(), "expected CountUpSpec.cfg")
+            val tlaText = tla.readText()
+            val cfgText = cfg.readText()
+            assertTrue(
+                tlaText.contains("countUp_terminated") || tlaText.contains("terminated"),
+                "expected terminated state for procfun;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("Terminates == GF("),
+                "expected Terminates == GF(...);\n$tlaText",
+            )
+            assertTrue(
+                cfgText.contains("PROPERTY") && cfgText.contains("Terminates"),
+                "expected PROPERTY …Terminates in cfg;\n$cfgText",
+            )
+            assertTrue(tlaText.contains("initially_invoke"), "expected initially_invoke;\n$tlaText")
+            assertTrue(tlaText.contains("Main_blocking"), "expected Main_blocking;\n$tlaText")
+            assertTrue(tlaText.contains("returnTo_initially"), "expected returnTo_initially;\n$tlaText")
+            assertTrue(tlaText.contains("invoke_countUp"), "expected invoke_countUp flag;\n$tlaText")
+            assertFalse(tlaText.contains("__invoke"), "should not emit __invoke;\n$tlaText")
+            assertTrue(
+                tlaText.contains("out' = result") ||
+                    tlaText.contains("Main_out' = countUp_result") ||
+                    (tlaText.contains("out'") && tlaText.contains("result")),
+                "expected out coupled to procfun return (result);\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("invokes the procfun countUp before executing"),
+                "expected initially_invoke comment;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("The guards for initially appear in initially_invoke"),
+                "expected initially resume comment;\n$tlaText",
+            )
+            tla.copyTo(File(work, "CountUpSpec.tla"), overwrite = true)
+            cfg.copyTo(File(work, "CountUpSpec.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "CountUpSpec")
+        } finally {
+            work.deleteRecursively()
+            File("CountUpSpec.tla").delete()
+            File("CountUpSpec.cfg").delete()
+        }
+    }
+
+    @Test
+    fun procfunIndexedInheritsParentIndexAndTlcParses() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-procfun-idx").toFile()
+        try {
+            val source = File("regression/input/spec/procfun-count-up-indexed.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("CountUpIndexed.tla")
+            val cfg = File("CountUpIndexed.cfg")
+            assertTrue(tla.exists(), "expected CountUpIndexed.tla")
+            assertTrue(cfg.exists(), "expected CountUpIndexed.cfg")
+            val tlaText = tla.readText()
+            assertTrue(
+                tlaText.contains("Terminates ==") && tlaText.contains("GF("),
+                "expected indexed Terminates property;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("countUp_terminated") &&
+                    tlaText.contains("|-> FALSE"),
+                "expected terminated indexed Init;\n$tlaText",
+            )
+            tla.copyTo(File(work, "CountUpIndexed.tla"), overwrite = true)
+            cfg.copyTo(File(work, "CountUpIndexed.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "CountUpIndexed")
+        } finally {
+            work.deleteRecursively()
+            File("CountUpIndexed.tla").delete()
+            File("CountUpIndexed.cfg").delete()
+        }
+    }
+
     private fun assumeTlcPresent() {
         if (!TLC_JAR.isFile) {
             fail("TLC jar not found at ${TLC_JAR.path}")

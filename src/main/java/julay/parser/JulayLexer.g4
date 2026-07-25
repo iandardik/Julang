@@ -63,6 +63,8 @@ ERROR : 'error' ;
 BEFORE : 'before' ;
 AFTER : 'after' ;
 FUN : 'fun' ;
+PROCFUN : 'procfun' ;
+RETURN : 'return' ;
 
 REAL : [-]?[0-9]+ '.' [0-9]+ ;
 INT : [-]?[0-9]+ ;

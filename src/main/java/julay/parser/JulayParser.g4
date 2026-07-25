@@ -30,6 +30,7 @@ decl
     | EXPORT? spec
     | EXPORT? invariant_decl
     | EXPORT? fun_decl
+    | EXPORT? procfun_decl
     ;
 
 typeExpr
@@ -47,6 +48,16 @@ typeParams
 
 fun_decl
     : FUN ID typeParams? args COLON typeExpr EQ expr
+    ;
+
+procfun_decl
+    : PROCFUN ID args COLON typeExpr LCURLY procfun_body* RCURLY
+    ;
+
+procfun_body
+    : var
+    | constructor
+    | transition
     ;
 
 proc
@@ -116,7 +127,7 @@ field
     ;
 
 var
-    : (VAR | CONST) ID COLON typeExpr
+    : (VAR | CONST) ID COLON typeExpr (ASGN_EQ expr)?
     ;
 
 constructor
@@ -148,6 +159,11 @@ action_body
     | transit
     | error
     | after
+    | return_clause
+    ;
+
+return_clause
+    : RETURN COLON expr
     ;
 
 guard

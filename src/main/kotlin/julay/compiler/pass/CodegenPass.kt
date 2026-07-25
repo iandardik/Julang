@@ -37,6 +37,7 @@ fun codegenPass(
         julay.tools.assert(procClass.size == 1, "Expected exactly one proc class for \"$proc\" but found: ${procClass.size}")
         procClass
     }
+    val procFunClasses = ast.procFunClassPass()
     val procClassByName = procClasses.associateBy { it.name }
 
     // One StaticInfo per leaf occurrence (Julay and Kotlin libraries), with occurrence channel keys.
@@ -45,11 +46,21 @@ fun codegenPass(
     }
     val staticInfoBody = staticInfoExprs.joinToString(",\n") { it }
     val staticInfo = "val tsInfo = setOf(\n" + staticInfoBody.prependIndent() + "\n)"
+    val procFunStaticInfos = procFunClasses.joinToString(",\n") { pc ->
+        pc.kotlinStaticInfoString(occurrenceId = pc.name, channelKeys = emptyMap())
+    }
+    val procFunInfoBlock = if (procFunClasses.isEmpty()) {
+        "emptySet<TransitionSystemStaticInfo>()"
+    } else {
+        "setOf(\n${procFunStaticInfos.prependIndent()}\n)"
+    }
+    val procFunInfo = "val procFunInfo = $procFunInfoBlock"
     val objClassDecls = ast.resolvedObjClassDecls()
         .filterNot { ObjClassBuiltinRegistry.isBuiltin(it.name) }
-    val runProgram = "Program(tsInfo, args.toList()).run()"
+    val runProgram = "Program(tsInfo, args.toList(), procFunInfo).run()"
     val mainFunction = "suspend fun main(args : Array<String>) {" +
         "\n$staticInfo".prependIndent() +
+        "\n$procFunInfo".prependIndent() +
         "\n$runProgram".prependIndent() +
         "\n}"
 
@@ -91,9 +102,9 @@ fun codegenPass(
             append("\n\n")
         }
     }
-    val parametricTypeSection = parametricTypeValsSection(procClasses, objClassDecls)
+    val parametricTypeSection = parametricTypeValsSection(procClasses + procFunClasses, objClassDecls)
     val mainClassName = program.name.replaceFirstChar { it.uppercase() }
-    val effectImports = if (procClasses.any { it.usesEffects() }) {
+    val effectImports = if ((procClasses + procFunClasses).any { it.usesEffects() }) {
         EffectBuiltinRegistry.kotlinCodegenImports().joinToString("\n") { "import $it" } + "\n"
     } else {
         ""
@@ -111,11 +122,12 @@ fun codegenPass(
             }
         }
     }
+    val allClasses = procClasses + procFunClasses
     val sourceText = "$imports$effectImports\n" +
         dataClassSection +
         objClassSection +
         parametricTypeSection +
-        procClasses.joinToString("\n\n") { it.kotlinClassString(objClassDecls, classBodyKeys) } +
+        allClasses.joinToString("\n\n") { it.kotlinClassString(objClassDecls, classBodyKeys) } +
         "\n\n" +
         mainFunction
 
@@ -433,8 +445,14 @@ private fun ProcClassDecl.kotlinClassString(
     val hostBindStr =
         "private lateinit var hostProc: Proc\n" +
             "private var sessionPeer: Proc? = null\n" +
+            "private var _procFunReturn: Value? = null\n" +
             "override fun bindHostProc(host: Proc) { hostProc = host }\n" +
-            "override fun setSessionPeer(peer: Proc?) { sessionPeer = peer }"
+            "override fun setSessionPeer(peer: Proc?) { sessionPeer = peer }\n" +
+            "override fun consumeProcFunReturn(): Value? {\n" +
+            "    val v = _procFunReturn\n" +
+            "    _procFunReturn = null\n" +
+            "    return v\n" +
+            "}"
     return "class $name(" +
         "\nprivate val program: Program".prependIndent() +
         "\n) : TransitionSystem {" +
@@ -527,6 +545,19 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
     // and no side effects happen upon an error.
     val errorStr = kotlinErrorString(stateVarTypes)
     val (beforeArgSnapshots, beforeLines) = kotlinCallStmtsString(befores, stateVarTypes, "__beforeArg")
+    if (returnExpr != null) {
+        val retType = returnExpr.getType()
+        val retStr = returnExpr.toTransitString(symbolTypes, argSymbols)
+        val (afterArgSnapshots, afterLines) = kotlinCallStmtsString(afters, stateVarTypes, "__afterArg")
+        return listOfNotNull(errorStr.takeIf { it.isNotEmpty() })
+            .plus(beforeArgSnapshots)
+            .plus(beforeLines)
+            .plus(afterArgSnapshots)
+            .plus("val __procFunRet: ${retType.toKotlinTypeString()} = $retStr")
+            .plus("_procFunReturn = Value(__procFunRet, ${retType.toCodegenTypeVal()})")
+            .plus(afterLines)
+            .joinToString("\n")
+    }
     // Simultaneous assignment: evaluate every RHS against the pre-transit state, then
     // apply updates. Later lines must not observe earlier assignments in the same block
     // (e.g. `peersLeft := peersLeft - 1` then `step := if (peersLeft - 1 = 0) ...`).

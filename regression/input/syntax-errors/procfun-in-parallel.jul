@@ -1,0 +1,15 @@
+procfun helper(n : Int) : Int {
+    var i : Int := n
+    transition done() { return: i }
+}
+
+proc Main {
+    var x : Int
+    constructor initially(args : List<String>) {
+        transit: x := 0
+    }
+}
+
+proc Bad := helper || Main
+
+compile Bad
