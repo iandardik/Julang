@@ -8,7 +8,7 @@ From the same source you can build an executable system and, where you write a `
 
 A Julay **program is a sequence of actions**.
 
-- Procs may **construct** upon an action or **transition** upon an action (subject to guards and synchronization with peers).
+- Procs may **construct** upon an action or **transition** upon an action (subject to synchronization with peers; transitions may also use guards—constructors cannot).
 - Every program **begins with the `initially` action**. After that, execution continues through **user-defined** actions—transitions and any further constructors used when spawning.
 
 ## Mental model

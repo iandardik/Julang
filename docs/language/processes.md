@@ -51,7 +51,7 @@ Compiled JARs pass command-line arguments into `args`. After `initially`, execut
 
 ## Transition anatomy
 
-A transition (or constructor body) may include:
+A **transition** body may include:
 
 | Clause | Meaning |
 |--------|---------|
@@ -60,6 +60,8 @@ A transition (or constructor body) may include:
 | `transit:` | State updates for this proc (may include IO in expressions)—see [Before/after and IO](effects.md) |
 | `error:` | Alternate updates when the step is taken in an error path (when used) |
 | `after:` | Calls after state updates (IO allowed; no assignments)—see [Before/after and IO](effects.md) |
+
+**Constructors cannot have `guard:`.** A constructor body may only use `before:`, `transit:`, `error:`, and `after:`. Spawning is gated by peers’ transition guards (and session rebind rules), not by a guard on the constructor itself.
 
 Example (from [`regression/input/basic/test1.jul`](../../regression/input/basic/test1.jul)):
 
@@ -74,7 +76,7 @@ internal transition println(msg : String) {
 }
 ```
 
-Omitted clauses default sensibly (`guard` true when absent, empty `before` / `transit` / `after` when absent).
+Omitted clauses default sensibly (`guard` true when absent on a transition, empty `before` / `transit` / `after` when absent).
 
 ## Choosing actions
 

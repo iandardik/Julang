@@ -57,6 +57,8 @@ Full tables: [Standard library](standard-library.md). Calling conventions: [Side
 
 ## Common mistakes
 
+- Constructors cannot have `guard:` (only transitions can)—see [`constructor-has-guard.jul`](../../regression/input/syntax-errors/constructor-has-guard.jul).
+
 Browse negative cases under:
 
 - [`regression/input/syntax-errors/`](../../regression/input/syntax-errors/)
