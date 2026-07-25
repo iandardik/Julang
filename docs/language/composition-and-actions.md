@@ -51,7 +51,7 @@ These checks apply to the **compile/spec target** (same rules for JAR and TLA+):
 - External `client` of `w` with no `provider` `w` → error.
 - At most one `provider` per action name.
 
-JAR `compile` targets may not leave unsynced ordinary actions in their external alphabet (tag them `internal` if a solo step is intentional). Specs may still use unilateral assume/system actions.
+JAR `compile` targets **warn** (but still succeed) when unsynced ordinary or session actions remain in their external alphabet — those offers simply never enable at runtime. Tag them `internal` if a solo step is intentional. Specs may still use unilateral assume/system actions.
 
 ### TLA+ occurrence names
 

@@ -28,7 +28,6 @@ fun analyzeJulFile(
                     program.name,
                     program = program,
                     procDecls = procDecls,
-                    jarUnsyncedCheck = false,
                 )
             ) {
                 return

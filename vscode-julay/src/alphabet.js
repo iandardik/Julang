@@ -4,7 +4,6 @@ const fs = require("fs");
 const {
   getJavaPath,
   libraryPathArgs,
-  resolveEntryFile,
   resolveJulaycJar,
 } = require("./config");
 
@@ -56,7 +55,7 @@ async function fetchAlphabet(document, scopeName) {
     };
   }
 
-  const entryFile = resolveEntryFile(document);
+  const entryFile = document.uri.fsPath;
   let mtimeMs = 0;
   try {
     mtimeMs = fs.statSync(entryFile).mtimeMs;

@@ -37,7 +37,6 @@ fun compileJulFile(
                 program.name,
                 program = program,
                 procDecls = procDecls,
-                jarUnsyncedCheck = true,
             )
         ) {
             return

@@ -13,21 +13,26 @@ fun ASTNode.errorPass(
     librariesInUse: Set<String> = emptySet(),
     program: ProcDecl? = null,
     procDecls: List<ProcDecl> = emptyList(),
-    jarUnsyncedCheck: Boolean = false,
 ): List<CompileError> = when (this) {
-    is RootNode -> errorPassRoot(procs, librariesInUse, program, procDecls, jarUnsyncedCheck)
+    is RootNode -> errorPassRoot(procs, librariesInUse, program, procDecls)
     is ProcClassNode -> errorPassProcClass(procs, librariesInUse)
     is ObjClassNode -> errorPassObjClass(procs, librariesInUse)
     is ConstructorNode -> errorPassConstructor(procs, librariesInUse)
     is TransitionNode -> errorPassTransition(procs, librariesInUse)
-    else -> children.flatMap { it.errorPass(procs, librariesInUse, program, procDecls, jarUnsyncedCheck) }
+    else -> children.flatMap { it.errorPass(procs, librariesInUse, program, procDecls) }
 }
 
 fun ASTNode.warningPass(
     procs: Set<String>,
     librariesInUse: Set<String> = emptySet(),
+    program: ProcDecl? = null,
+    procDecls: List<ProcDecl> = emptyList(),
 ): List<CompileWarning> =
-    if (this is RootNode) actionConsistencyWarnings(procs, librariesInUse) else emptyList()
+    if (this is RootNode) {
+        actionConsistencyWarnings(procs, librariesInUse, program, procDecls)
+    } else {
+        emptyList()
+    }
 
 private data class ActionOffer(
     val pclassKey: String,
@@ -68,10 +73,9 @@ private fun RootNode.errorPassRoot(
     librariesInUse: Set<String>,
     program: ProcDecl? = null,
     procDecls: List<ProcDecl> = emptyList(),
-    jarUnsyncedCheck: Boolean = false,
 ): List<CompileError> =
     children.flatMap { it.errorPass(procs, librariesInUse) } +
-        actionConsistencyErrors(procs, librariesInUse, program, procDecls, jarUnsyncedCheck) +
+        actionConsistencyErrors(procs, librariesInUse, program, procDecls) +
         overlappingDeclNamesErrors()
 
 private fun RootNode.actionConsistencyErrors(
@@ -79,7 +83,6 @@ private fun RootNode.actionConsistencyErrors(
     librariesInUse: Set<String>,
     program: ProcDecl?,
     procDecls: List<ProcDecl>,
-    jarUnsyncedCheck: Boolean,
 ): List<CompileError> {
     val leafMap = leafActionMap(this, procs, librariesInUse)
     val alphabetResult = if (program != null) {
@@ -286,43 +289,10 @@ private fun RootNode.actionConsistencyErrors(
             }
         }
 
-        val peerErrors = when {
-            // Source-internal already handled above; composition-hidden pairs are sized below.
-            internals.isNotEmpty() -> emptyList()
-            // Provider + any number of clients is OK; Default+provider already reported above.
-            providers.isNotEmpty() -> emptyList()
-            clients.isNotEmpty() -> emptyList() // dangling client caught by alphabetIntegrityErrors
-            else -> {
-                val t = transitions.map { it.pclassKey }.toSet().size
-                val c = if (constructors.isNotEmpty()) 1 else 0
-                when {
-                    t + c == 2 -> emptyList()
-                    // JAR compile uses unsyncedOrdinaryErrors for a clearer message.
-                    jarUnsyncedCheck && t + c < 2 -> emptyList()
-                    else -> assertOrCompileError(
-                        false,
-                        OneLocCompileError(
-                            refAction.loc,
-                            "Expected default/session action \"$name\" to have exactly two sync peers " +
-                                "(two transitioning procs, or one transition and one constructor), but found " +
-                                "$t transitioning proc(s) and $c constructor offer(s)",
-                        ),
-                    )
-                }
-            }
-        }
-
-        argMismatches + sessionMixErrors + sessionTagErrors + tagMixErrors +
-            constructorErrors + peerErrors
+        argMismatches + sessionMixErrors + sessionTagErrors + tagMixErrors + constructorErrors
     }
 
     val sessionOrdinaryPairErrors = sessionOrdinaryPairMixErrors(offers)
-
-    val unsynced = if (jarUnsyncedCheck && program != null) {
-        unsyncedOrdinaryErrors(alphabetResult.external)
-    } else {
-        emptyList()
-    }
 
     val integrity = if (program != null) {
         alphabetIntegrityErrors(alphabetResult)
@@ -331,7 +301,7 @@ private fun RootNode.actionConsistencyErrors(
     }
 
     return alphabetResult.errors + internalMixErrors + consistencyErrors +
-        sessionOrdinaryPairErrors + unsynced + integrity
+        sessionOrdinaryPairErrors + integrity
 }
 
 /**
@@ -397,9 +367,11 @@ private fun initiallyConsistencyErrors(offers: List<ActionOffer>): List<CompileE
 private fun RootNode.actionConsistencyWarnings(
     procs: Set<String>,
     librariesInUse: Set<String>,
+    program: ProcDecl?,
+    procDecls: List<ProcDecl>,
 ): List<CompileWarning> {
     val offers = collectActionOffers(procs, librariesInUse)
-    return offers.groupBy { it.decl.action.name }.entries.flatMap { (name, namedOffers) ->
+    val providerDeadlock = offers.groupBy { it.decl.action.name }.entries.flatMap { (name, namedOffers) ->
         if (name == "initially") return@flatMap emptyList()
         val transitions = namedOffers.filter { !it.isConstructor }
         val providers = transitions.filter { it.decl.modifier == TSAction.SyncRole.Provider }
@@ -415,7 +387,49 @@ private fun RootNode.actionConsistencyWarnings(
             emptyList()
         }
     }
+
+    // With a compile target, prefer the external-alphabet unsynced message.
+    // Without one (plain analyze), warn on peer-count mismatches across the CU.
+    val syncWarnings = if (program != null) {
+        val leafMap = leafActionMap(this, procs, librariesInUse)
+        val alphabetResult = computeCompositionAlphabet(program, procDecls, leafMap)
+        unsyncedOrdinaryWarnings(alphabetResult.external)
+    } else {
+        missingSyncPeerWarnings(offers)
+    }
+
+    return providerDeadlock + syncWarnings
 }
+
+/** Warn when a default/session action does not have exactly two sync peers. */
+private fun missingSyncPeerWarnings(offers: List<ActionOffer>): List<CompileWarning> =
+    offers.groupBy { it.channelKey }.entries.flatMap { (_, namedOffers) ->
+        val name = namedOffers[0].decl.action.name
+        if (name == "initially") return@flatMap emptyList()
+        if (namedOffers.all { it.sourceInternal }) return@flatMap emptyList()
+        val transitions = namedOffers.filter { !it.isConstructor }
+        val constructors = namedOffers.filter { it.isConstructor }
+        val providers = transitions.filter { it.decl.modifier == TSAction.SyncRole.Provider }
+        val clients = transitions.filter { it.decl.modifier == TSAction.SyncRole.Client }
+        val internals = transitions.filter { it.decl.modifier == TSAction.SyncRole.Internal }
+        if (internals.isNotEmpty() || providers.isNotEmpty() || clients.isNotEmpty()) {
+            return@flatMap emptyList()
+        }
+        val t = transitions.map { it.pclassKey }.toSet().size
+        val c = if (constructors.isNotEmpty()) 1 else 0
+        if (t + c == 2) {
+            emptyList()
+        } else {
+            listOf(
+                OneLocCompileWarning(
+                    namedOffers[0].decl.loc,
+                    "default/session action \"$name\" does not have exactly two sync peers " +
+                        "(two transitioning procs, or one transition and one constructor); found " +
+                        "$t transitioning proc(s) and $c constructor offer(s)",
+                ),
+            )
+        }
+    }
 
 private fun RootNode.overlappingDeclNamesErrors(): List<CompileError> {
     val decls = declNodes().filter { it !is CompileNode }

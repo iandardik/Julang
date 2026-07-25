@@ -1,7 +1,9 @@
 package julay.compiler.pass
 
 import julay.compiler.CompileError
+import julay.compiler.CompileWarning
 import julay.compiler.OneLocCompileError
+import julay.compiler.OneLocCompileWarning
 import julay.compiler.ProgramLoc
 import julay.compiler.TwoLocsCompileError
 import julay.compiler.ast.RootNode
@@ -414,8 +416,8 @@ private fun findSignatureMismatch(
     return null
 }
 
-/** JAR-target check: leftover ordinary actions in the external alphabet are unsynced. */
-fun unsyncedOrdinaryErrors(external: List<AlphabetOffer>): List<CompileError> =
+/** JAR-target warning: leftover ordinary/session actions in the external alphabet are unsynced. */
+fun unsyncedOrdinaryWarnings(external: List<AlphabetOffer>): List<CompileWarning> =
     external
         .filter { offer ->
             offer.name != "initially" &&
@@ -424,7 +426,7 @@ fun unsyncedOrdinaryErrors(external: List<AlphabetOffer>): List<CompileError> =
         }
         .distinctBy { it.channelKey }
         .map { o ->
-            OneLocCompileError(
+            OneLocCompileWarning(
                 o.loc,
                 "Action \"${o.name}\" is not synchronized with any peer; " +
                     "tag it `internal` if a solo step is intentional",

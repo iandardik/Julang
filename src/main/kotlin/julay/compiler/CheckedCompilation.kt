@@ -162,14 +162,12 @@ fun runErrorAndWarningPasses(
     programName: String? = null,
     program: ProcDecl? = null,
     procDecls: List<ProcDecl> = emptyList(),
-    jarUnsyncedCheck: Boolean = false,
 ): Boolean {
     val errors = ast.errorPass(
         components,
         librariesInUse,
         program = program,
         procDecls = procDecls,
-        jarUnsyncedCheck = jarUnsyncedCheck,
     )
     if (errors.isNotEmpty()) {
         errors.forEach { println(it) }
@@ -180,6 +178,6 @@ fun runErrorAndWarningPasses(
         }
         return false
     }
-    ast.warningPass(components, librariesInUse).forEach { System.err.println(it) }
+    ast.warningPass(components, librariesInUse, program, procDecls).forEach { System.err.println(it) }
     return true
 }
