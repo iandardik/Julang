@@ -44,10 +44,26 @@ function findActionInDocument(document, name) {
 
 function moduleSearchDirs(document) {
   const dirs = [];
-  const entry = resolveEntryFile(document);
-  dirs.push(path.dirname(entry));
-  dirs.push(path.dirname(document.uri.fsPath));
   const root = workspaceRoot();
+  const entry = resolveEntryFile(document);
+
+  function addAncestors(startFile) {
+    let dir = path.dirname(startFile);
+    for (let i = 0; i < 8; i++) {
+      dirs.push(dir);
+      if (root && path.resolve(dir) === path.resolve(root)) {
+        break;
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir) {
+        break;
+      }
+      dir = parent;
+    }
+  }
+
+  addAncestors(entry);
+  addAncestors(document.uri.fsPath);
   for (const p of getExtraLibraryPaths()) {
     const abs = path.isAbsolute(p) ? p : path.join(root || "", p);
     dirs.push(abs);

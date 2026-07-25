@@ -76,7 +76,7 @@ async function fetchAlphabet(document, scopeName) {
     "-s",
     scopeName,
     "--json",
-    ...libraryPathArgs(),
+    ...libraryPathArgs(entryFile),
     entryFile,
   ];
 

@@ -143,14 +143,14 @@ class JulayTaskTerminal {
         "-s",
         scope,
         "--json",
-        ...libraryPathArgs(),
+        ...libraryPathArgs(targetFile),
         targetFile,
       ];
       await this.exec(java, args);
       return;
     }
 
-    const args = ["-jar", jar, ...libraryPathArgs(), targetFile];
+    const args = ["-jar", jar, ...libraryPathArgs(targetFile), targetFile];
     await this.exec(java, args);
   }
 

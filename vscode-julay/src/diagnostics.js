@@ -150,7 +150,7 @@ async function runCheckOnDocument(document) {
     jar,
     "check",
     "--json",
-    ...libraryPathArgs(),
+    ...libraryPathArgs(entryFile),
     entryFile,
   ];
 

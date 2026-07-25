@@ -90,15 +90,44 @@ function resolveEntryFile(document) {
   return current;
 }
 
-function libraryPathArgs() {
+function libraryPathArgs(entryFile) {
   const root = workspaceRoot();
+  const seen = new Set();
   const args = [];
+
+  function addDir(dir) {
+    if (!dir) {
+      return;
+    }
+    const abs = path.resolve(dir);
+    if (seen.has(abs) || !fs.existsSync(abs)) {
+      return;
+    }
+    seen.add(abs);
+    args.push("-L", abs);
+  }
+
   for (const p of getExtraLibraryPaths()) {
-    const abs = path.isAbsolute(p) ? p : path.join(root || "", p);
-    if (fs.existsSync(abs)) {
-      args.push("-L", abs);
+    addDir(path.isAbsolute(p) ? p : path.join(root || "", p));
+  }
+
+  // Ancestors of the entry file so imports like `node.lib.Node` resolve when
+  // the open file lives under input/raft/node/ (needs -L input/raft).
+  if (entryFile) {
+    let dir = path.dirname(entryFile);
+    for (let i = 0; i < 8; i++) {
+      addDir(dir);
+      if (root && path.resolve(dir) === path.resolve(root)) {
+        break;
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir) {
+        break;
+      }
+      dir = parent;
     }
   }
+
   return args;
 }
 
