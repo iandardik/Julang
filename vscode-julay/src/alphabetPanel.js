@@ -304,6 +304,8 @@ function renderCompositionGraph(graph) {
   });
 
   // Pass 3: assign Y from packed lane heights, then draw.
+  // Draw all connector paths first, then all action bubbles, so a line that
+  // crosses another edge's bubble is covered by that bubble (SVG z-order).
   let laneY = yBox + 14;
   const laneTops = lanes.map((lane) => {
     const y = laneY;
@@ -311,21 +313,27 @@ function renderCompositionGraph(graph) {
     return y;
   });
 
-  const edgeParts = layouts.map((layout) => {
+  const pathParts = [];
+  const bubbleParts = [];
+  layouts.forEach((layout) => {
     const labelY = laneTops[layout.lane];
     const railY = labelY + layout.labelH / 2;
+    pathParts.push(
+      `<path d="M ${layout.x1} ${yBox} V ${railY} H ${layout.labelX}" class="edge-line" fill="none"/>`,
+      `<path d="M ${layout.labelX + layout.labelW} ${railY} H ${layout.x2} V ${yBox}" class="edge-line" fill="none"/>`,
+    );
     const textEls = layout.lines
       .map((ln, li) => {
         const ty = labelY + boxPadY + lineH * (li + 0.72);
         return `<text x="${layout.mid}" y="${ty}" text-anchor="middle" class="edge-label">${esc(ln)}</text>`;
       })
       .join("\n");
-    return `
-      <path d="M ${layout.x1} ${yBox} V ${railY} H ${layout.labelX}" class="edge-line" fill="none"/>
-      <path d="M ${layout.labelX + layout.labelW} ${railY} H ${layout.x2} V ${yBox}" class="edge-line" fill="none"/>
+    bubbleParts.push(`
       <rect x="${layout.labelX}" y="${labelY}" width="${layout.labelW}" height="${layout.labelH}" rx="4" class="edge-action-box"/>
-      ${textEls}`;
+      ${textEls}`);
   });
+
+  const edgeParts = [...pathParts, ...bubbleParts];
 
   const height = Math.max(padTop + boxH + 40, laneY + 8);
 
@@ -417,9 +425,7 @@ function renderOffers(offers, empty, showLeaf) {
     .map(({ signature, role, offers: group }) => {
       let suffix = "";
       if (showLeaf) {
-        const leaves = group
-          .map((o) => `<code>${esc(o.pclassKey)}</code>`)
-          .join(", ");
+        const leaves = group.map((o) => esc(o.pclassKey)).join(", ");
         suffix = ` (${leaves})`;
       } else if (group.length > 1) {
         suffix = ` (${group.length})`;
@@ -476,9 +482,9 @@ function wrapHtml(body) {
   li { margin: 0.35rem 0; }
   .diagram-wrap { overflow-x: auto; margin: 0.75rem 0; }
   .node-box {
-    fill: var(--vscode-editor-background, #1e1e1e);
-    stroke: var(--vscode-focusBorder, #007acc);
-    stroke-width: 1.5;
+    fill: var(--vscode-input-background, #3c3c3c);
+    stroke: var(--vscode-panel-border, var(--vscode-foreground, #cccccc));
+    stroke-width: 2;
   }
   .node-label { fill: var(--vscode-foreground); font-family: var(--vscode-editor-font-family); font-size: 12px; }
   .edge-line { stroke: var(--vscode-descriptionForeground, #888); stroke-width: 1.25; }
