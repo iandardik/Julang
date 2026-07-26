@@ -2,6 +2,7 @@ import julay.proclib.HttpServer
 import julay.funlib.parseInt
 import julay.funlib.split
 import node.lib.fieldValue
+import node.lib.encodeAppendEntriesResp
 import node.lib.encodeRequestVoteResp
 
 procfun inRequestVoteRPC(req : HttpServerRequest) : HttpServerResponse {
@@ -28,17 +29,96 @@ procfun inRequestVoteRPC(req : HttpServerRequest) : HttpServerResponse {
             & candidateId = rvCand
             & lastLogIndex = rvLastIdx
             & lastLogTerm = rvLastTerm
-        transit:
-            respBody := encodeRequestVoteResp(outTerm, voteGranted)
-            step := "ret"
-    }
-
-    transition ret() {
-        guard:
-            step = "ret"
         return:
              HttpServerResponse {
-                body := respBody,
+                body := encodeRequestVoteResp(outTerm, voteGranted),
+                code := 200
+            }
+    }
+}
+
+procfun inAppendEntriesRPC(req :  HttpServerRequest) : HttpServerResponse {
+    var step : String := "handle"
+    var aeTerm : Int := parseInt(fieldValue(split(req.body, "|")[0]))
+    var aeLeaderId : Int := parseInt(fieldValue(split(req.body, "|")[1]))
+    var aePrevIdx : Int := parseInt(fieldValue(split(req.body, "|")[2]))
+    var aePrevTerm : Int := parseInt(fieldValue(split(req.body, "|")[3]))
+    var aeEntriesLen : Int := 0
+    var aeEntryTerm : Int := parseInt(fieldValue(split(req.body, "|")[5]))
+    var aeEntryValue : String := fieldValue(split(req.body, "|")[6])
+    var aeLeaderCommit : Int := parseInt(fieldValue(split(req.body, "|")[7]))
+    var respBody : String := ""
+
+    // TODO rename to: handleAppendEntriesRequest
+    transition receiveAppendEntries(
+        inTerm : Int, leaderId : Int, prevLogIndex : Int, prevLogTerm : Int,
+        entriesLen : Int, entryTerm : Int, entryValue : String, leaderCommit : Int,
+        outTerm : Int, success : Boolean, matchIdx : Int
+    ) {
+        guard:
+            & step = "handle"
+            & inTerm = aeTerm & leaderId = aeLeaderId
+            & prevLogIndex = aePrevIdx & prevLogTerm = aePrevTerm
+            & entriesLen = aeEntriesLen & entryTerm = aeEntryTerm
+            & entryValue = aeEntryValue & leaderCommit = aeLeaderCommit
+        return:
+            HttpServerResponse {
+                body := encodeAppendEntriesResp(outTerm, success, matchIdx),
+                code := 200
+            }
+    }
+}
+
+procfun clientAppendRPC(req : HttpServerRequest) : HttpServerResponse {
+    var step : String := "clientRequest"
+    var appendIdx : Int := -1
+
+    transition clientRequest(value : String, idx : Int) {
+        guard:
+            & step = "clientRequest"
+            & value = req.body
+        transit:
+            step := "waitForCommit"
+            appendIdx := idx
+    }
+
+    /*
+     * Per the RaftProtocol, respond to the client once the value is committed.
+    */
+    client transition committed(value : String, idx : Int) {
+        guard:
+            & step = "waitForCommit"
+            & value = req.body
+            & idx = appendIdx
+        return:
+            HttpServerResponse {
+                body := "OK " + appendIdx,
+                code := 200
+            }
+    }
+
+    transition leaderRedirect(leader : Node) {
+        return:
+            HttpServerResponse {
+                body := "LEADER " + leader.url,
+                code := 303
+            }
+    }
+
+    transition noLeader() {
+        return:
+            HttpServerResponse {
+                body := "NO_LEADER",
+                code := 503
+            }
+    }
+}
+
+procfun clientGetRPC(req : HttpServerRequest) : HttpServerResponse {
+    client transition getCommitted(stateMachine : List<String>) {
+        return:
+            HttpServerResponse {
+                body := stateMachine + "",
                 code := 200
             }
     }
@@ -59,8 +139,8 @@ proc RpcReqHandler {
             httpResp := when (req.path) {
                 "raft/requestVote" -> inRequestVoteRPC(req)
                 "raft/appendEntries" -> inAppendEntriesRPC(req)
-                "client/append" -> inClientAppendRPC(req)
-                "client/get" -> inClientGetRPC(req)
+                "client/append" -> clientAppendRPC(req)
+                "client/get" -> clientGetRPC(req)
                 else -> HttpServerResponse { body := "NOT_FOUND", code := 404 }
             }
             /*
