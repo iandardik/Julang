@@ -4,8 +4,10 @@ import julay.funlib.readFile
 import julay.funlib.split
 import julay.funlib.trim
 import julay.funlib.parseInt
+import node.core.RaftCore
 import node.lib.isBlankOrComment
 import node.lib.Node
+import node.rpc_in.RpcIn
 
 obj CfgPair {
     me : Node
@@ -51,7 +53,7 @@ proc RaftNodeMain {
     const self : Node
     const theCluster : Set<Node>
     const listenPort : Int
-    var step : String := "startCore"
+    var step : String := "startServer"
 
     constructor initially(args : List<String>) {
         transit:
@@ -60,6 +62,16 @@ proc RaftNodeMain {
             self := cfg.me
             theCluster := cfg.cluster
             listenPort := portFromUrl(cfg.me.url)
+        error:
+            (length(args) ~= 2) -> "usage: RaftNode.jar <config_file> <node_id>"
+    }
+
+    transition startServer(port : Int) {
+        guard:
+            & step = "startServer"
+            & port = listenPort
+        transit:
+            step := "startCore"
     }
 
     transition startRaftCore(me : Node, cluster : Set<Node>) {
@@ -71,3 +83,5 @@ proc RaftNodeMain {
             step := "done"
     }
 }
+
+export proc Raft := RaftNodeMain || RaftCore || RpcIn

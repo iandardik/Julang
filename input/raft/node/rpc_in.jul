@@ -1,4 +1,48 @@
 import julay.proclib.HttpServer
+import julay.funlib.parseInt
+import julay.funlib.split
+import node.lib.fieldValue
+import node.lib.encodeRequestVoteResp
+
+procfun inRequestVoteRPC(req : HttpServerRequest) : HttpServerResponse {
+    // TODO right now a malformed req body can crash the server
+    const rvTerm : Int := parseInt(fieldValue(split(req.body, "|")[0]))
+    const rvCand : Int := parseInt(fieldValue(split(req.body, "|")[1]))
+    const rvLastIdx : Int := parseInt(fieldValue(split(req.body, "|")[2]))
+    const rvLastTerm : Int := parseInt(fieldValue(split(req.body, "|")[3]))
+    var respBody : String := ""
+    var step : String := "handle"
+
+    // TODO rename to: handleRequestVoteRequest
+    transition receiveVoteRequest(
+        inTerm : Int,
+        candidateId : Int,
+        lastLogIndex : Int,
+        lastLogTerm : Int,
+        outTerm : Int,
+        voteGranted : Boolean
+    ) {
+        guard:
+            & step = "handle"
+            & inTerm = rvTerm
+            & candidateId = rvCand
+            & lastLogIndex = rvLastIdx
+            & lastLogTerm = rvLastTerm
+        transit:
+            respBody := encodeRequestVoteResp(outTerm, voteGranted)
+            step := "ret"
+    }
+
+    transition ret() {
+        guard:
+            step = "ret"
+        return:
+             HttpServerResponse {
+                body := respBody,
+                code := 200
+            }
+    }
+}
 
 /*
  * A RpcReqHandler get created for each incoming request.
@@ -11,7 +55,15 @@ proc RpcReqHandler {
     session constructor receiveRequest(req : HttpServerRequest) {
         transit:
             httpReq := req
-            httpResp := HttpServerResponse { body := "", code := 500 }
+            //httpResp := HttpServerResponse { body := "", code := 500 }
+            httpResp := when (req.path) {
+                "raft/requestVote" -> inRequestVoteRPC(req)
+                "raft/appendEntries" -> inAppendEntriesRPC(req)
+                "client/append" -> inClientAppendRPC(req)
+                "client/get" -> inClientGetRPC(req)
+                else -> HttpServerResponse { body := "NOT_FOUND", code := 404 }
+            }
+            /*
             step := when (req.path) {
                 "raft/requestVote" -> "startInRequestVoteRpc"
                 "raft/appendEntries" -> "startInAppendEntriesRpc"
@@ -19,6 +71,7 @@ proc RpcReqHandler {
                 "client/get" -> "startClientGetRpc"
                 else -> "badPath"
             }
+            */
     }
 
     /*
@@ -109,20 +162,12 @@ proc RpcReqHandler {
 
 proc ServerInitializer {
     var started : Boolean
-    var myPort : Int
+    var listenPort : Int
 
-    constructor initially(args : List<String>) {
+    constructor startServer(port : Int) {
         transit:
             started := false
-            myPort := 0
-    }
-
-    client transition getListenPort(port : Int) {
-        guard:
-            & ~started
-            & myPort = 0
-        transit:
-            myPort := port
+            listenPort := port
         error:
             (port <= 0) -> "Invalid port passed to the server"
     }
@@ -130,8 +175,8 @@ proc ServerInitializer {
     session transition createHttpServer(port : Int) {
         guard:
             & ~started
-            & myPort > 0
-            & port = myPort
+            & listenPort > 0
+            & port = listenPort
         transit:
             started := true
     }

@@ -12,9 +12,8 @@ import node.lib.entryValueAt
  */
 
 export proc RaftCore {
-    const selfId : Int
-    const clusterSize : Int
-    var self : Node
+    const self : Node
+    const cluster : Set<Node>
     var currentTerm : Int
     var state : String
     var votedFor : Int
@@ -31,11 +30,10 @@ export proc RaftCore {
     var startElection : Boolean
     var startLeaderHeartbeat : Boolean
 
-    constructor startRaftCore(id : Int, n : Int, url : String) {
+    constructor startRaftCore(me : Node, cluster : Set<Node>) {
         transit:
-            selfId := id
-            clusterSize := n
-            self := Node { id := id, url := url }
+            self := me
+            cluster := cluster
             currentTerm := 0
             state := "Follower"
             votedFor := -1
@@ -66,7 +64,7 @@ export proc RaftCore {
         voteGranted : Boolean
     ) {
         guard:
-            & candidateId >= 0 & candidateId < clusterSize
+            & candidateId >= 0 & candidateId < length(cluster)
             & (
                 | (
                     & inTerm > currentTerm
@@ -101,7 +99,7 @@ export proc RaftCore {
         guard:
             & startFollowerHeartbeat
             & me = self
-            & n = clusterSize
+            & n = length(cluster)
         transit:
             startFollowerHeartbeat := false
     }
@@ -122,14 +120,14 @@ export proc RaftCore {
             & (state = "Follower" | state = "Candidate")
             & epoch = electionEpoch
             & term = currentTerm + 1
-            & candId = selfId
+            & candId = self.id
             & lastIdx = length(log)
             & lastT = lastLogTermVar
         transit:
             state := "Candidate"
             currentTerm := currentTerm + 1
-            votedFor := selfId
-            votesGranted := {selfId}
+            votedFor := self.id
+            votesGranted := {self.id}
             voteCount := 1
             electionEpoch := electionEpoch + 1
             knownLeaderId := -1
@@ -152,9 +150,9 @@ export proc RaftCore {
         guard:
             & startElection
             & me = self
-            & n = clusterSize
+            & n = length(cluster)
             & term = currentTerm
-            & candId = selfId
+            & candId = self.id
             & lastIdx = length(log)
             & lastTerm = lastLogTermVar
         transit:
@@ -169,7 +167,7 @@ export proc RaftCore {
             & state = "Candidate"
             & term = currentTerm
             & peerId >= 0
-            & peerId < clusterSize
+            & peerId < length(cluster)
         transit:
             votesGranted := if (granted) { votesGranted + {peerId} } else { votesGranted }
             voteCount := if (granted) { voteCount + 1 } else { voteCount }
@@ -191,10 +189,10 @@ export proc RaftCore {
     transition becomeLeader() {
         guard:
             & state = "Candidate"
-            & voteCount * 2 > clusterSize
+            & voteCount * 2 > length(cluster)
         transit:
             state := "Leader"
-            knownLeaderId := selfId
+            knownLeaderId := self.id
             electionEpoch := electionEpoch + 1
             startLeaderHeartbeat := true
     }
@@ -206,7 +204,7 @@ export proc RaftCore {
         guard:
             & startLeaderHeartbeat
             & me = self
-            & n = clusterSize
+            & n = length(cluster)
         transit:
             startLeaderHeartbeat := false
     }
@@ -257,7 +255,7 @@ export proc RaftCore {
         guard:
             & state = "Leader"
             & peerId >= 0
-            & peerId < clusterSize
+            & peerId < length(cluster)
             & inTerm = currentTerm
         transit:
             commitIndex := if (success & matchIdx > commitIndex) { matchIdx } else { commitIndex }
@@ -281,7 +279,7 @@ export proc RaftCore {
     ) {
         guard:
             & leaderId >= 0
-            & leaderId < clusterSize
+            & leaderId < length(cluster)
             & (
                 | (inTerm < currentTerm & outTerm = currentTerm & ~success & matchIdx = 0)
                 | (
@@ -327,7 +325,7 @@ export proc RaftCore {
     provider transition hasQuorum(flag : Boolean) {
         guard:
             & state = "Candidate"
-            & ((flag & voteCount * 2 > clusterSize) | (~flag & voteCount * 2 <= clusterSize))
+            & ((flag & voteCount * 2 > length(cluster)) | (~flag & voteCount * 2 <= length(cluster)))
     }
 
     provider transition getElectionSnapshot(
@@ -341,7 +339,7 @@ export proc RaftCore {
         guard:
             & epoch = electionEpoch
             & term = currentTerm
-            & candId = selfId
+            & candId = self.id
             & lastIdx = length(log)
             & lastT = lastLogTermVar
             & role = state
@@ -368,7 +366,7 @@ export proc RaftCore {
             & state = "Leader"
             & data = AppendEntriesData {
                 term := currentTerm,
-                leaderId := selfId,
+                leaderId := self.id,
                 prevLogIndex := length(log),
                 prevLogTerm := lastLogTermVar,
                 entryTerm := 0,
