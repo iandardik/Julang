@@ -145,6 +145,7 @@ fun computeTopLevelSyncGraph(
     // Spawn-await call edges: top-level child → called procfun (no action labels).
     val pclasses = ast?.declNodes()?.filterIsInstance<ProcClassNode>()?.associateBy { it.name() }.orEmpty()
     val extraProcFunNodes = linkedSetOf<String>()
+    val callerToCallees = mutableMapOf<String, MutableSet<String>>()
     if (ast != null && procFunNames.isNotEmpty() && pclasses.isNotEmpty()) {
         childDecls.forEachIndexed { index, child ->
             val callerNode = childNodes[index]
@@ -154,13 +155,14 @@ fun computeTopLevelSyncGraph(
                     ?: pf.also { extraProcFunNodes += it }
                 if (callerNode != calleeNode) {
                     edgeActions.getOrPut(canonPair(callerNode, calleeNode)) { mutableSetOf() }
+                    callerToCallees.getOrPut(callerNode) { mutableSetOf() }.add(calleeNode)
                 }
             }
         }
     }
 
-    val nodes = childNodes + extraProcFunNodes.filter { it !in childNodes }.sorted()
-    if (nodes.size < 2) {
+    val procFunOnly = extraProcFunNodes.filter { it !in childNodes }
+    if (childNodes.size + procFunOnly.size < 2) {
         return TopLevelSyncGraph(nodes = emptyList(), edges = emptyList())
     }
 
@@ -174,7 +176,156 @@ fun computeTopLevelSyncGraph(
         }
         .sortedWith(compareBy({ it.a }, { it.b }))
 
+    val nodes = orderDiagramNodes(
+        childNodes = childNodes,
+        procFunNodes = procFunOnly,
+        edges = edges,
+        callerToCallees = callerToCallees,
+    )
+
     return TopLevelSyncGraph(nodes = nodes, edges = edges)
+}
+
+/**
+ * Order diagram nodes to cut edge crossings: optimally arrange || children for sync
+ * edges, then append called procfuns (grouped by caller) so call edges stay short
+ * and do not stretch across the composition spine.
+ */
+internal fun orderDiagramNodes(
+    childNodes: List<String>,
+    procFunNodes: List<String>,
+    edges: List<TopLevelSyncEdge>,
+    callerToCallees: Map<String, Set<String>>,
+): List<String> {
+    if (childNodes.isEmpty()) {
+        return procFunNodes.sorted()
+    }
+    val syncPairs = edges
+        .filter { it.actions.isNotEmpty() }
+        .map { it.a to it.b }
+        .filter { (a, b) -> a in childNodes && b in childNodes }
+    val childOrder = minimizeChildOrderCrossings(childNodes, syncPairs, callerToCallees)
+
+    val result = childOrder.toMutableList()
+    val placed = childOrder.toMutableSet()
+    for (child in childOrder) {
+        val callees = callerToCallees[child].orEmpty()
+            .filter { it in procFunNodes }
+            .sorted()
+        for (pf in callees) {
+            if (placed.add(pf)) result += pf
+        }
+    }
+    for (pf in procFunNodes.sorted()) {
+        if (placed.add(pf)) result += pf
+    }
+    return result
+}
+
+/**
+ * Choose a permutation of [children] that minimizes sync-edge crossings (then total
+ * span, then prefers callers with procfuns toward the end so call edges stay short).
+ * Brute-force for small n; otherwise iterative adjacent swaps. Ties keep the relative
+ * order closest to [children].
+ */
+private fun minimizeChildOrderCrossings(
+    children: List<String>,
+    syncPairs: List<Pair<String, String>>,
+    callerToCallees: Map<String, Set<String>>,
+): List<String> {
+    if (children.size <= 1) return children
+
+    fun score(order: List<String>): List<Int> {
+        val pos = order.withIndex().associate { it.value to it.index }
+        var crossings = 0
+        var span = 0
+        for (i in syncPairs.indices) {
+            val (a, b) = syncPairs[i]
+            val a1 = minOf(pos.getValue(a), pos.getValue(b))
+            val a2 = maxOf(pos.getValue(a), pos.getValue(b))
+            span += a2 - a1
+            for (j in i + 1 until syncPairs.size) {
+                val (c, d) = syncPairs[j]
+                val b1 = minOf(pos.getValue(c), pos.getValue(d))
+                val b2 = maxOf(pos.getValue(c), pos.getValue(d))
+                if ((a1 < b1 && b1 < a2 && a2 < b2) || (b1 < a1 && a1 < b2 && b2 < a2)) {
+                    crossings++
+                }
+            }
+        }
+        // Prefer composition children that call procfuns toward the right end.
+        var callerEnd = 0
+        for (c in children) {
+            val nCall = callerToCallees[c]?.size ?: 0
+            callerEnd -= nCall * pos.getValue(c)
+        }
+        var drift = 0
+        for (i in children.indices) {
+            drift += kotlin.math.abs(pos.getValue(children[i]) - i)
+        }
+        return listOf(crossings, span, callerEnd, drift)
+    }
+
+    fun better(a: List<Int>, b: List<Int>): Boolean {
+        for (i in a.indices) {
+            if (a[i] < b[i]) return true
+            if (a[i] > b[i]) return false
+        }
+        return false
+    }
+
+    if (syncPairs.isEmpty() && callerToCallees.values.all { it.isEmpty() }) {
+        return children
+    }
+
+    if (children.size <= 7) {
+        var best = children
+        var bestScore = score(children)
+        permute(children) { perm ->
+            val s = score(perm)
+            if (better(s, bestScore)) {
+                bestScore = s
+                best = perm
+            }
+        }
+        return best
+    }
+
+    val order = children.toMutableList()
+    var improved = true
+    var guard = 0
+    while (improved && guard++ < children.size * children.size) {
+        improved = false
+        var bestScore = score(order)
+        for (i in 0 until order.lastIndex) {
+            order[i] = order[i + 1].also { order[i + 1] = order[i] }
+            val s = score(order)
+            if (better(s, bestScore)) {
+                bestScore = s
+                improved = true
+            } else {
+                order[i] = order[i + 1].also { order[i + 1] = order[i] }
+            }
+        }
+    }
+    return order
+}
+
+/** Invoke [visit] for every permutation of [items] (including the identity). */
+private fun permute(items: List<String>, visit: (List<String>) -> Unit) {
+    val arr = items.toMutableList()
+    fun go(k: Int) {
+        if (k == arr.size) {
+            visit(arr.toList())
+            return
+        }
+        for (i in k until arr.size) {
+            arr[k] = arr[i].also { arr[i] = arr[k] }
+            go(k + 1)
+            arr[k] = arr[i].also { arr[i] = arr[k] }
+        }
+    }
+    go(0)
 }
 
 /** Procfun names called by non-procfun host leaves under [child]. */

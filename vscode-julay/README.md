@@ -63,7 +63,7 @@ Backed by:
 java -jar build/libs/julayc.jar analyze -s Name --json path/to/entry.jul
 ```
 
-The JSON includes `compositionGraph` (`nodes` + `edges` with `actions`) plus `external` / `sourceInternal` / `compositionHidden`.
+The JSON includes `compositionGraph` (`nodes` ordered to reduce edge crossings + `edges` with `actions`) plus `external` / `sourceInternal` / `compositionHidden`.
 
 ### On-save diagnostics
 

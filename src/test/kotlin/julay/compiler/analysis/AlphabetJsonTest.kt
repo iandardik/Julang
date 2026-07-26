@@ -5,6 +5,7 @@ import julay.compiler.prepareCheckedCompilation
 import java.nio.file.Files
 import kotlin.io.path.writeText
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -217,6 +218,78 @@ class AlphabetJsonTest {
                 graphBlock.contains("\"b\": \"clientAppendRPC\"") &&
                 graphBlock.contains("\"actions\": []"),
             "expected unlabeled call edge RpcReqHandler—clientAppendRPC:\n$graphBlock",
+        )
+        // Caller with procfuns is ordered at the end of the || spine, then callees.
+        assertTrue(
+            graphBlock.contains("\"nodes\": [\"Peer\", \"RpcReqHandler\", \"clientAppendRPC\"]") ||
+                graphBlock.contains("\"nodes\": [\"RpcReqHandler\", \"Peer\", \"clientAppendRPC\"]"),
+            "expected procfun after caller on the spine:\n$graphBlock",
+        )
+    }
+
+    @Test
+    fun compositionGraphOrdersSyncSpineThenProcFuns() {
+        // ServerInitializer — HttpServer — RpcReqHandler — helpers minimizes crossings
+        // vs composition order RpcReqHandler || ServerInitializer || HttpServer.
+        val dir = Files.createTempDirectory("julay-graph-order")
+        val file = dir.resolve("main.jul")
+        file.writeText(
+            """
+            procfun helper(n : Int) : Int {
+                transition done() { return: n }
+            }
+
+            proc RpcReqHandler {
+                var out : Int
+                constructor initially(args : List<String>) {
+                    transit: out := helper(1)
+                }
+                session transition ping() { transit: }
+            }
+            proc ServerInitializer {
+                constructor initially(args : List<String>) { transit: }
+                session transition setup() { transit: }
+            }
+            proc HttpServer {
+                constructor initially(args : List<String>) { transit: }
+                session transition setup() { transit: }
+                session transition ping() { transit: }
+            }
+
+            proc RpcIn := RpcReqHandler || ServerInitializer || HttpServer
+            compile RpcIn
+            """.trimIndent(),
+        )
+        val checked = prepareCheckedCompilation(file)
+        assertNotNull(checked)
+        val scope = resolveAnalyzeScope(
+            scopeNames = listOf("RpcIn"),
+            procDecls = checked.procDecls,
+            allPClassNames = checked.unit.allPClassNames,
+            allProcAliasNames = checked.unit.allProcNames,
+            librariesInUse = checked.librariesInUse,
+            procFunNames = julay.compiler.collectProcFunNames(checked.ast as RootNode),
+        )
+        assertNotNull(scope)
+        val json = buildAlphabetJsonDocument(
+            checked.ast as RootNode,
+            scope,
+            checked.librariesInUse,
+            checked.procDecls,
+        )
+        val graphIdx = json.indexOf("\"compositionGraph\"")
+        val externalIdx = json.indexOf("\"external\"")
+        assertTrue(graphIdx >= 0 && externalIdx > graphIdx, json)
+        val graphBlock = json.substring(graphIdx, externalIdx)
+        val nodesMatch = Regex(""""nodes": \[([^\]]+)\]""").find(graphBlock)
+        assertNotNull(nodesMatch, graphBlock)
+        val nodes = nodesMatch!!.groupValues[1]
+            .split(",")
+            .map { it.trim().removeSurrounding("\"") }
+        assertEquals(
+            listOf("ServerInitializer", "HttpServer", "RpcReqHandler", "helper"),
+            nodes,
+            "sync spine then caller then procfun:\n$graphBlock",
         )
     }
 
