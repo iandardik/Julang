@@ -1,0 +1,7 @@
+source: regression/input/procfun/when-nested-call.jul
+programs:
+  - name: P
+    run:
+      timeoutMs: 60000
+      expectStdoutContains:
+        - "2"

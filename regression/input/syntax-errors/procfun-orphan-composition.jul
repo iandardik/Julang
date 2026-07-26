@@ -1,0 +1,15 @@
+procfun helper(x : Int) : Int {
+    transition done() {
+        return: x
+    }
+}
+
+proc Other {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+}
+
+proc Bad := Other || helper
+
+compile Bad

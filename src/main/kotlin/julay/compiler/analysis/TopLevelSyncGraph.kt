@@ -28,6 +28,7 @@ fun computeTopLevelSyncGraph(
     procDecls: List<ProcDecl>,
     leafOffersByPclass: Map<String, List<AlphabetOffer>>,
     procFunNames: Set<String> = emptySet(),
+    ast: julay.compiler.ast.RootNode? = null,
 ): TopLevelSyncGraph {
     val procDeclMap = procDecls.associateBy { it.name }
     fun resolve(pd: ProcDecl): ProcDecl = procDeclMap[pd.name] ?: pd
@@ -50,7 +51,7 @@ fun computeTopLevelSyncGraph(
     val childAlphabets = resolvedRoot.components.mapIndexed { index, child ->
         val childResolved = resolve(child)
         val childAlphabet = computeCompositionAlphabet(
-            childResolved, procDecls, leafOffersByPclass, procFunNames,
+            childResolved, procDecls, leafOffersByPclass, procFunNames, ast,
         )
         val node = nodes[index]
         // Prefix occurrence ids so LeafActionIds stay unique across children

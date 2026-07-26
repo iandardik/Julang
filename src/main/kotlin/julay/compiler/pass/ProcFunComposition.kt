@@ -41,7 +41,7 @@ fun RootNode.procFunCompositionErrors(procDecls: List<ProcDecl>): List<CompileEr
             .distinct()
         val called = hostLeaves.flatMap { host ->
             val pc = pclasses[host] ?: return@flatMap emptyList()
-            collectWholeRhsProcFunCalls(pc).mapNotNull { it.call.resolvedProcFunOrNull()?.procFunName() }
+            collectProcFunCallsInProc(pc).mapNotNull { it.resolvedProcFunOrNull()?.procFunName() }
         }.toSet()
         val orphanErrors = composed.distinct().filter { it !in called }.map { pf ->
             OneLocCompileError(
@@ -73,8 +73,8 @@ fun RootNode.procFunHavocWarnings(
     val missing = linkedSetOf<String>()
     hostLeaves.forEach { host ->
         val pc = pclasses[host] ?: return@forEach
-        collectWholeRhsProcFunCalls(pc).forEach { hit ->
-            val pf = hit.call.resolvedProcFunOrNull()?.procFunName() ?: return@forEach
+        collectProcFunCallsInProc(pc).forEach { call ->
+            val pf = call.resolvedProcFunOrNull()?.procFunName() ?: return@forEach
             if (pf in procFunNames && pf !in composed) missing += pf
         }
     }

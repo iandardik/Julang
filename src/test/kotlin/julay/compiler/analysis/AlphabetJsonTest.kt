@@ -158,6 +158,186 @@ class AlphabetJsonTest {
     }
 
     @Test
+    fun calledProcFunFoldsIntoParentWithoutExplicitComposition() {
+        val dir = Files.createTempDirectory("julay-procfun-call-fold")
+        val file = dir.resolve("main.jul")
+        file.writeText(
+            """
+            procfun clientAppendRPC(n : Int) : Int {
+                client transition noLeader() {
+                    return: 0
+                }
+                transition done() {
+                    return: n
+                }
+            }
+
+            proc Handler {
+                var out : Int
+                constructor initially(args : List<String>) {
+                    transit: out := clientAppendRPC(1)
+                }
+            }
+
+            proc RpcIn := Handler
+            compile RpcIn
+            """.trimIndent(),
+        )
+        val checked = prepareCheckedCompilation(file)
+        assertNotNull(checked)
+        val scope = resolveAnalyzeScope(
+            scopeNames = listOf("RpcIn"),
+            procDecls = checked.procDecls,
+            allPClassNames = checked.unit.allPClassNames,
+            allProcAliasNames = checked.unit.allProcNames,
+            librariesInUse = checked.librariesInUse,
+            procFunNames = julay.compiler.collectProcFunNames(checked.ast as RootNode),
+        )
+        assertNotNull(scope)
+        val json = buildAlphabetJsonDocument(
+            checked.ast as RootNode,
+            scope,
+            checked.librariesInUse,
+            checked.procDecls,
+        )
+        assertTrue(json.contains("\"name\": \"noLeader\""), "called procfun should fold into parent:\n$json")
+        assertTrue(!json.contains("\"name\": \"clientAppendRPC_call\""), json)
+        assertTrue(!json.contains("\"name\": \"clientAppendRPC_ret\""), json)
+    }
+
+    @Test
+    fun standaloneProcFunShowsUserActionsInExternalAlphabet() {
+        val dir = Files.createTempDirectory("julay-procfun-alphabet")
+        val file = dir.resolve("main.jul")
+        file.writeText(
+            """
+            procfun countUp(n : Int) : Int {
+                var i : Int := 0
+                var result : Int := 0
+
+                internal transition step() {
+                    guard: i < n
+                    transit:
+                        result := i + 1
+                        i := i + 1
+                }
+
+                transition done() {
+                    guard: i = n
+                    return: result
+                }
+            }
+
+            compile countUp
+            """.trimIndent(),
+        )
+        val checked = prepareCheckedCompilation(file)
+        assertNotNull(checked)
+        val scope = resolveAnalyzeScope(
+            scopeNames = listOf("countUp"),
+            procDecls = checked.procDecls,
+            allPClassNames = checked.unit.allPClassNames,
+            allProcAliasNames = checked.unit.allProcNames,
+            librariesInUse = checked.librariesInUse,
+            procFunNames = julay.compiler.collectProcFunNames(checked.ast as RootNode),
+        )
+        assertNotNull(scope)
+        val json = buildAlphabetJsonDocument(
+            checked.ast as RootNode,
+            scope,
+            checked.librariesInUse,
+            checked.procDecls,
+        )
+        assertTrue(json.contains("\"name\": \"step\""), json)
+        assertTrue(json.contains("\"name\": \"done\""), json)
+        // Bare return must stay ordinary in the IR alphabet (not rewritten to source-internal).
+        assertTrue(
+            json.contains(Regex("""\"name\": \"done\"[\s\S]*?\"modifier\": \"ordinary\"""")),
+            "bare return done() must remain ordinary:\n$json",
+        )
+        assertTrue(!json.contains("\"name\": \"countUp_call\""), json)
+        assertTrue(!json.contains("\"name\": \"countUp_ret\""), json)
+    }
+
+    @Test
+    fun whenNestedProcFunCallDoesNotOrphanAndFoldsNoLeader() {
+        val dir = Files.createTempDirectory("julay-procfun-fold")
+        val file = dir.resolve("main.jul")
+        file.writeText(
+            """
+            procfun clientAppendRPC(n : Int) : Int {
+                client transition noLeader() {
+                    return: 0
+                }
+                transition done() {
+                    return: n
+                }
+            }
+
+            proc Handler {
+                var out : Int
+                var path : String
+
+                constructor initially(args : List<String>) {
+                    transit:
+                        path := "a"
+                        out := 0
+                }
+
+                transition dispatch() {
+                    transit:
+                        out := when (path) {
+                            "a" -> clientAppendRPC(1)
+                            else -> 0
+                        }
+                }
+            }
+
+            proc RpcIn := Handler || clientAppendRPC
+            compile RpcIn
+            """.trimIndent(),
+        )
+        val checked = prepareCheckedCompilation(file)
+        assertNotNull(checked)
+
+        // Orphan check sees when-nested calls.
+        val components = checked.unit.allPClassNames + checked.librariesInUse
+        val ok = julay.compiler.runErrorAndWarningPasses(
+            checked.ast,
+            components,
+            checked.librariesInUse,
+            programName = null,
+            program = null,
+            procDecls = checked.procDecls,
+        )
+        assertTrue(ok, "when-nested composed procfun must not orphan")
+
+        val scope = resolveAnalyzeScope(
+            scopeNames = listOf("RpcIn"),
+            procDecls = checked.procDecls,
+            allPClassNames = checked.unit.allPClassNames,
+            allProcAliasNames = checked.unit.allProcNames,
+            librariesInUse = checked.librariesInUse,
+        )
+        assertNotNull(scope)
+        val json = buildAlphabetJsonDocument(
+            checked.ast as RootNode,
+            scope,
+            checked.librariesInUse,
+            checked.procDecls,
+        )
+        assertTrue(json.contains("\"name\": \"noLeader\""), "noLeader should appear in alphabet:\n$json")
+        assertTrue(
+            !json.contains("\"name\": \"clientAppendRPC_call\""),
+            "synthetic call must stay out of IDE alphabet:\n$json",
+        )
+        assertTrue(
+            !json.contains("\"name\": \"clientAppendRPC_ret\""),
+            "synthetic ret must stay out of IDE alphabet:\n$json",
+        )
+    }
+
+    @Test
     fun leafSShowsIncrementAsExternal() {
         val dir = Files.createTempDirectory("julay-alphabet-json")
         val file = dir.resolve("main.jul")

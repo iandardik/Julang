@@ -6,6 +6,7 @@ import julay.compiler.OneLocCompileError
 import julay.compiler.OneLocCompileWarning
 import julay.compiler.ProgramLoc
 import julay.compiler.TwoLocsCompileError
+import julay.compiler.ast.ProcClassNode
 import julay.compiler.ast.RootNode
 import julay.compiler.decl.ActionDecl
 import julay.compiler.decl.ProcClassDecl
@@ -107,15 +108,10 @@ fun leafActionMap(ast: RootNode, procs: Set<String>, librariesInUse: Set<String>
     val julay = ast.declNodes()
         .flatMap { it.procClassPass(procs) }
         .associate { pc -> pc.name to pc.toAlphabetOffers() }
+    // Always index every procfun in the CU so call-site alphabet folding can stamp helpers
+    // that are invoked but not listed in ||.
     val procFuns = ast.procFunClassPass()
-        .filter { it.name in procs || procs.isEmpty() }
         .associate { pc -> pc.name to pc.toAlphabetOffers() }
-    // When procs is a specific set, only include named procfuns that are in scope.
-    val procFunFiltered = if (procs.isEmpty()) {
-        procFuns
-    } else {
-        procFuns.filterKeys { it in procs }
-    }
     val libs = librariesInUse
         .filter { it in procs && LibraryRegistry.isKotlinLibrary(it) }
         .associate { libName ->
@@ -132,7 +128,7 @@ fun leafActionMap(ast: RootNode, procs: Set<String>, librariesInUse: Set<String>
             }
             libName to offers
         }
-    return julay + procFunFiltered + libs
+    return julay + procFuns + libs
 }
 
 private fun ProcClassDecl.toAlphabetOffers(): List<AlphabetOffer> =
@@ -209,12 +205,16 @@ fun collectLeafOccurrences(
  * Compute the inductive alphabet of [root] (a JAR/analyze/TLA target), assigning private channel
  * keys to composition-hidden syncs so nested assemblies do not cross-sync on the same surface name.
  * Expands named assemblies by occurrence (`M || M` → two independent expansions).
+ *
+ * When [ast] is provided, procfuns **called** by host leaves under [root] also contribute their
+ * non-synthetic alphabet — even if they are not listed in `||` (TLA coupling still requires `||`).
  */
 fun computeCompositionAlphabet(
     root: ProcDecl,
     procDecls: List<ProcDecl>,
     leafOffersByPclass: Map<String, List<AlphabetOffer>>,
     procFunNames: Set<String> = emptySet(),
+    ast: RootNode? = null,
 ): CompositionAlphabetResult {
     resetCompositionScopeCounter()
     val procDeclMap = procDecls.associateBy { it.name }
@@ -236,12 +236,20 @@ fun computeCompositionAlphabet(
     ): List<AlphabetOffer> {
         val occurrenceId = freshOccurrenceId(pclass)
         leafOccurrences += LeafOccurrence(pclass, occurrenceId, introducingAssembly)
-        // Procfuns listed in || are composition metadata unless this root *is* the procfun.
-        if (pclass in procFunNames && root.name != pclass) {
-            return emptyList()
-        }
         val templates = leafOffersByPclass[pclass] ?: emptyList()
-        val offers = templates.map { template ->
+        // Composed / call-folded procfuns contribute their non-synthetic alphabet to the parent;
+        // *_call / *_ret stay hidden (spawn-await plumbing, not SyncChannel peers).
+        // Standalone analyze/compile of the procfun alone still stamps all offers.
+        val filtered = if (pclass in procFunNames && root.name != pclass) {
+            templates.filterNot { offer ->
+                offer.name == procFunCallCtor(pclass) ||
+                    offer.name == procFunRetAction(pclass) ||
+                    offer.name.startsWith("invoke_")
+            }
+        } else {
+            templates
+        }
+        val offers = filtered.map { template ->
             val channelKey = if (template.sourceInternal) {
                 "$occurrenceId#internal#${template.name}"
             } else {
@@ -283,7 +291,25 @@ fun computeCompositionAlphabet(
         return acc
     }
 
-    val allOffers = alphabetOf(root, root.name, root.name)
+    var allOffers = alphabetOf(root, root.name, root.name)
+
+    // Fold alphabets of procfuns called by hosts, even when not listed in ||.
+    if (ast != null && procFunNames.isNotEmpty() && root.name !in procFunNames) {
+        val pclasses = ast.declNodes().filterIsInstance<ProcClassNode>().associateBy { it.name() }
+        val alreadyStamped = leafOccurrences.map { it.pclassName }.toSet()
+        val called = calledProcFunNamesUnder(root, procDecls, procFunNames, pclasses)
+            .filter { it !in alreadyStamped }
+            .sorted()
+        for (pf in called) {
+            val pfOffers = stampLeafOffers(pf, pf)
+            if (pfOffers.isEmpty()) continue
+            val (composed, composeErrors) = composeAlphabets(allOffers, pfOffers, freshScopeId(root.name))
+            errors.addAll(composeErrors)
+            allOffers = composed
+            recordKeys(allOffers)
+        }
+    }
+
     val external = allOffers.filter { !it.sourceInternal && !it.compositionHidden }
     return CompositionAlphabetResult(
         external = external,
@@ -292,6 +318,23 @@ fun computeCompositionAlphabet(
         leafOccurrences = leafOccurrences.toList(),
         errors = errors,
     )
+}
+
+/** Procfun names called by any non-procfun host leaf under [root]. */
+internal fun calledProcFunNamesUnder(
+    root: ProcDecl,
+    procDecls: List<ProcDecl>,
+    procFunNames: Set<String>,
+    pclasses: Map<String, ProcClassNode>,
+): Set<String> {
+    val hosts = collectLeafOccurrences(root, procDecls)
+        .map { it.pclassName }
+        .filter { it !in procFunNames }
+        .distinct()
+    return hosts.flatMap { host ->
+        val pc = pclasses[host] ?: return@flatMap emptyList()
+        collectProcFunCallsInProc(pc).mapNotNull { it.resolvedProcFunOrNull()?.procFunName() }
+    }.filter { it in procFunNames }.toSet()
 }
 
 /**
@@ -451,11 +494,15 @@ fun unsyncedOrdinaryWarnings(external: List<AlphabetOffer>): List<CompileWarning
  * Alphabet integrity for JAR and TLA+ targets (same checks):
  * - at most one provider per action name
  * - every external client must have a provider of the same name
+ *   (except clients whose only offers come from composed procfuns —
+ *   those surface in the parent alphabet for analyze/IDE, matched later
+ *   when a provider peer is composed)
  *
  * Same-class ordinary duplicates are reported eagerly in [composeAlphabets].
  */
 fun alphabetIntegrityErrors(
     alphabet: CompositionAlphabetResult,
+    procFunNames: Set<String> = emptySet(),
 ): List<CompileError> {
     val external = alphabet.external
     val errors = mutableListOf<CompileError>()
@@ -483,6 +530,7 @@ fun alphabetIntegrityErrors(
     val providerNames = providerCountByName.keys
     for ((name, clients) in external.filter { it.isClient }.groupBy { it.name }) {
         if (name !in providerNames) {
+            if (clients.all { it.pclassKey in procFunNames }) continue
             errors += OneLocCompileError(
                 clients.first().loc,
                 "Action \"$name\" is tagged `client` but has no `provider` in the composition",

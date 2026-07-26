@@ -26,6 +26,7 @@ object RegressionCases {
         val source = root["source"] as String
         val tags = (root["tags"] as? List<*>)?.map { it.toString() } ?: emptyList()
         val expectCompileFailure = root["expectCompileFailure"] as? Boolean ?: false
+        val expectJars = root["expectJars"] as? Boolean ?: false
         val disabled = root["disabled"] as? Boolean ?: false
         val expectCompileOutputContains =
             (root["expectCompileOutputContains"] as? List<*>)?.map { it.toString() } ?: emptyList()
@@ -33,14 +34,14 @@ object RegressionCases {
         val programsRaw = root["programs"] as? List<Map<String, Any>> ?: emptyList()
         val programs = programsRaw.map { parseProgram(it) }
         if (!disabled) {
-            check(expectCompileFailure || programs.isNotEmpty() || expectCompileOutputContains.isNotEmpty()) {
-                "Case ${file.name} must set expectCompileFailure: true, declare at least one program, " +
+            check(expectCompileFailure || programs.isNotEmpty() || expectCompileOutputContains.isNotEmpty() || expectJars) {
+                "Case ${file.name} must set expectCompileFailure: true, expectJars: true, declare at least one program, " +
                     "or set expectCompileOutputContains"
             }
         }
         return CaseFile(
             caseId(casesDir, file), source, tags, disabled,
-            expectCompileFailure, expectCompileOutputContains, programs,
+            expectCompileFailure, expectCompileOutputContains, programs, expectJars,
         )
     }
 

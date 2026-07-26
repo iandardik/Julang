@@ -26,7 +26,7 @@ fun codegenPass(
     val libPClassNames = librariesInUse
     val leafMap = leafActionMap(ast, program.allProcNames(procDecls), librariesInUse)
     val alphabet = computeCompositionAlphabet(
-        program, procDecls, leafMap, collectProcFunNames(ast),
+        program, procDecls, leafMap, collectProcFunNames(ast), ast,
     )
     val channelKeys = alphabet.channelKeys
     val procFunNames = collectProcFunNames(ast)
@@ -510,7 +510,21 @@ private fun ProcClassDecl.kotlinStaticInfoString(
         "\n)"
 }
 
-private fun ActionDecl.resolvedSyncRole(): TSAction.SyncRole = modifier
+/**
+ * Sync role for Kotlin [TSAction] / SyncChannel sizing.
+ * ActionDecl.modifier is never rewritten for procfuns (alphabet / TLA keep the source tag).
+ * Bare `return:` steps still need sync size 1 under spawn-and-await so they can fire without a
+ * peer; the conceptual completion edge is `_ret` (TLA/alphabet). Runtime delivers via [returnExpr].
+ */
+private fun ActionDecl.resolvedSyncRole(): TSAction.SyncRole =
+    if (returnExpr != null &&
+        modifier == TSAction.SyncRole.Default &&
+        !action.isSession
+    ) {
+        TSAction.SyncRole.Internal
+    } else {
+        modifier
+    }
 
 private fun ActionDecl.kotlinActionString(
     stateVarTypes: Map<String, Type>,
@@ -658,7 +672,9 @@ private fun ActionDecl.kotlinStaticInfoString(
             ?: action.channelKey
     }
     val flags = buildList {
-        if (action.isInternal || modifier == TSAction.SyncRole.Internal) add("isInternal = true")
+        if (action.isInternal || resolvedSyncRole() == TSAction.SyncRole.Internal) {
+            add("isInternal = true")
+        }
         if (action.isSession) add("isSession = true")
         if (resolvedKey != action.name) add("channelKey = \"${resolvedKey.escapeKotlinStringLiteral()}\"")
     }

@@ -59,13 +59,16 @@ Rules of the desugar:
 | Source | Becomes |
 |--------|---------|
 | Parameters | Implicit `const`s (plus bind in `F_call`) |
-| `return: e` | `transit: retVal := e` (transition **modifier preserved**) |
+| `return: e` | `transit: retVal := e`; sync modifier unchanged (`client` / `session` / `internal` / bare). Completion is the synthetic `_ret` edge |
 | — | Synthetic `F_call` constructor (spawn entry) |
 | — | Synthetic `F_ret` completion edge (`guard: ret = retVal`) |
 
 At **runtime**, a call still feels like one logical return: the caller spawns the instance from the call site (not via a SyncChannel peer in `||`), blocks until completion, then resumes with the value. The synthetic `_ret` is the completion edge in the IR; the caller does not manually sync on it.
 
-In the **VS Code** alphabet view, `F_call` and `F_ret` are hidden by default so the useful external surface (e.g. `getCommitted`) stays readable.
+### Alphabets in VS Code / `analyze --json`
+
+- **Standalone procfun** (`analyze -s F`): user transitions appear under **external** (including steps tagged `internal` and bare-return edges). Synthetic `F_call` / `F_ret` are omitted.
+- **Parent assembly** (e.g. `RpcIn`): every procfun **called** by a host under that assembly contributes its non-synthetic offers to the parent alphabet — **whether or not** the helper is listed in `||`. Source-internal stays out of the parent's external list; unmatched `client` / bare actions (e.g. `noLeader`) stay external on the parent.
 
 ## Spawn-and-await
 
@@ -121,7 +124,7 @@ procfun parseCfg(cfg : String) : Set<Node> {
 | Init XOR | A state name is initialized **either** inline **or** in the procfun's single optional constructor — never both. |
 | Step modifiers | Any of bare / `internal` / `client` / `session`. **`provider` is forbidden.** |
 | Reserved names | User transitions/ctors/vars cannot be named `initially`, `F_call`, `F_ret`, or `retVal`. |
-| Return | `return: expr` on a transition (any allowed modifier). Mutually exclusive with `transit:` / `error:`. Desugars to `retVal := expr`. Bare (untagged) return edges become `internal` for sync so they can complete under spawn-and-await; `client` / `session` / `internal` tags are preserved. ≥1 return required. |
+| Return | `return: expr` on a transition (any allowed modifier). Mutually exclusive with `transit:` / `error:`. Desugars to `retVal := expr` without changing the transition's sync tag. Synthetic `_ret` is the completion edge (alphabet / TLA); runtime still delivers the value when the return-bearing step fires. ≥1 return required. |
 | Call sites | Only in **transit RHS** (like value-returning effectful funlib). Not in guards or pure `fun` bodies. |
 | Recursion | Direct/mutual recursion among procfuns is rejected (loop with `internal` transitions instead). |
 
@@ -136,9 +139,15 @@ Procfun instances are **spawned from the caller** and block until completion —
 | Spec `Main \|\| F` | Full coupling: host `act_call` / `act_ret` + child occurrence. |
 | `compile F` / analyze F | Standalone helper TLA + alphabet. |
 
-**Orphan:** `Foo || F` when Foo never calls F → **error**.
+**Alphabet (analyze / IDE):** If a host under assembly `P` calls procfun `F`, `F`'s non-synthetic offers fold into `P`'s alphabet automatically. You do **not** need `P := … \|\| F` for that. Example: `RpcIn := RpcReqHandler \|\| HttpServer` still exposes `noLeader` from `clientAppendRPC` when `RpcReqHandler` calls it.
 
-**Duplicate:** `Main || F || F` → **error**. Listing F once whitelists the helper; call-site multiplicity still comes from the call graph.
+**`||` whitelist (TLA+ only):** Listing `\|\| F` selects full spawn-await coupling vs havoc. It does **not** gate alphabet folding.
+
+**Orphan:** `Foo || F` when Foo never calls F → **error**. The check walks nested transit exprs (e.g. calls under `when` / `if`), not only whole-RHS `x := F(...)`.
+
+**TLA coupling shape:** Coupled call sites still need a whole-RHS form (`x := F(...)`) for the spawn-await split. Nested-only calls are enough for orphan/alphabet, but stay havoc/ignore for coupling.
+
+**Duplicate:** `Main || F || F` → **error**. Listing F once whitelists the helper for TLA; call-site multiplicity still comes from the call graph.
 
 ### Soundness of havoc
 

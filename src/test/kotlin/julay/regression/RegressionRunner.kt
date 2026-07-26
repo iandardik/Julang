@@ -86,8 +86,18 @@ object RegressionRunner {
             }
 
             if (case.programs.isEmpty()) {
-                check(compileResult.jars.isNotEmpty() || case.expectCompileOutputContains.isNotEmpty()) {
-                    "No program JARs produced for ${case.source}\n--- compiler output ---\n${compileResult.output}"
+                if (case.expectJars) {
+                    check(compileResult.jars.isNotEmpty()) {
+                        "Expected JARs for case ${case.id} but none were produced\n--- compiler output ---\n${compileResult.output}"
+                    }
+                    assertTrue(
+                        !compileResult.output.contains("never called by a peer"),
+                        "Unexpected orphan error for case ${case.id}\n--- output ---\n${compileResult.output}",
+                    )
+                } else {
+                    check(compileResult.jars.isNotEmpty() || case.expectCompileOutputContains.isNotEmpty()) {
+                        "No program JARs produced for ${case.source}\n--- compiler output ---\n${compileResult.output}"
+                    }
                 }
                 return
             }

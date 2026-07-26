@@ -1,0 +1,49 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+
+procfun helper(x : Int) : Int {
+    transition done() {
+        return: x + 1
+    }
+}
+
+proc Handler {
+    var out : Int
+    var path : String
+    var finished : Boolean
+    var print : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            path := "a"
+            out := 0
+            finished := false
+            print := false
+    }
+
+    internal transition dispatch() {
+        guard: ~finished
+        transit:
+            out := when (path) {
+                "a" -> helper(1)
+                else -> 0
+            }
+            finished := true
+            print := true
+    }
+
+    internal transition println(msg : String) {
+        guard: print & (msg = out + "")
+        transit: print := false
+        after: println(msg)
+    }
+
+    internal transition exitSystem() {
+        guard: finished & ~print
+        after: exitProcess()
+    }
+}
+
+proc P := Handler || helper
+
+compile P

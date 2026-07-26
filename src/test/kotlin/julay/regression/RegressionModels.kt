@@ -10,6 +10,8 @@ data class CaseFile(
     val expectCompileFailure: Boolean,
     val expectCompileOutputContains: List<String>,
     val programs: List<ProgramCase>,
+    /** Compile must produce at least one program JAR (compile-only success). */
+    val expectJars: Boolean = false,
 )
 
 data class ProgramCase(

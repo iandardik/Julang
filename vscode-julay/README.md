@@ -40,9 +40,9 @@ code --install-extension julay-0.1.0.vsix
 | Syntax highlighting | Automatic for `*.jul` |
 | Snippets | Prefixes: `proc`, `procclass`, `procfun`, `transition`, `internal`, `provider`, `client`, `session`, `spec`, … |
 | Go to definition | `F12` / Cmd-click on proc names, actions, and `import path.Name` (not jar stdlib) |
-| Hover alphabet | Hover a proc/spec name → external alphabet |
+| Hover alphabet | Hover a proc / spec / **procfun** name → external alphabet |
 | Alphabet panel | Command **Julay: Show External Alphabet** |
-| CodeLens | Above `proc` / `spec` declarations |
+| CodeLens | Above `proc` / `spec` / **procfun** declarations |
 | On-save diagnostics | Save a `.jul` file → Problems panel + squiggles (full error/warning messages) |
 | Re-check | Command **Julay: Re-check** |
 | Tasks | **Terminal → Run Task…** → Julay: Compile / Compile entry / Analyze alphabet |
@@ -54,6 +54,8 @@ code --install-extension julay-0.1.0.vsix
 - Toggle **Show internal** to reveal two separate sections:
   1. **Source-internal** — tagged `internal` in the proc definition
   2. **Synchronized (composition-hidden)** — internalized by `||`, listing the synced peers (e.g. `S ‖ T`)
+
+**Procfun scopes:** analyzing a `procfun` alone lists its user actions under **external** (including `internal` / bare-return steps). Synthetic `F_call` / `F_ret` are hidden. **Parent procs** also show non-synthetic actions from any procfun **called** under them, even if that helper is not listed in `||` (see [Procfuns](../docs/language/procfun.md)).
 
 Backed by:
 
@@ -86,3 +88,4 @@ Errors appear as red squiggles; soft sync-peer / unsynced-ordinary messages as y
 
 - [Tooling](../docs/tooling.md) — `julayc` CLI including `--json`
 - [Composition and actions](../docs/language/composition-and-actions.md) — external vs composition-hidden alphabets
+- [Procfuns](../docs/language/procfun.md) — standalone vs parent alphabet folding

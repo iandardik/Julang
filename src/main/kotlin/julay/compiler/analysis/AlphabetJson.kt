@@ -21,14 +21,15 @@ fun buildAlphabetJsonDocument(
     librariesInUse: Set<String>,
     procDecls: List<ProcDecl>,
 ): String {
+    val procFunNames = collectProcFunNames(ast)
     val scopesJson = scope.rootNames.mapIndexed { i, rootName ->
         val leaves = scope.leafSets.getOrElse(i) { scope.leafComponents }
         val pd = procDecls.firstOrNull { it.name == rootName }
             ?: ProcDecl(rootName, emptyList(), ProcDeclType.Proc)
         val leafMap = leafActionMap(ast, leaves, librariesInUse)
-        val alphabet = computeCompositionAlphabet(pd, procDecls, leafMap, collectProcFunNames(ast))
-        val graph = computeTopLevelSyncGraph(pd, procDecls, leafMap, collectProcFunNames(ast))
-        scopeAlphabetJson(rootName, alphabet, graph)
+        val alphabet = computeCompositionAlphabet(pd, procDecls, leafMap, procFunNames, ast)
+        val graph = computeTopLevelSyncGraph(pd, procDecls, leafMap, procFunNames, ast)
+        scopeAlphabetJson(rootName, alphabet, graph, procFunNames)
     }
     return buildString {
         append("{\n  \"scopes\": [\n")
@@ -53,14 +54,27 @@ private fun scopeAlphabetJson(
     name: String,
     alphabet: CompositionAlphabetResult,
     graph: TopLevelSyncGraph,
+    procFunNames: Set<String>,
 ): String {
     // Hide synthetic procfun call/ret plumbing from IDE external alphabet by default.
     fun isSyntheticProcFunOffer(o: AlphabetOffer): Boolean {
         val n = o.name
         return n == "${o.pclassKey}_call" || n == "${o.pclassKey}_ret" || n.startsWith("invoke_")
     }
-    val external = alphabet.external.filterNot(::isSyntheticProcFunOffer)
-    val sourceInternal = alphabet.allOffers.filter { it.sourceInternal && !isSyntheticProcFunOffer(it) }
+    // Standalone procfun analyze: show the helper's full useful surface as "external"
+    // (including source-internal / bare-return steps). Synthetics stay hidden.
+    // Parent assemblies keep the usual external vs source-internal split.
+    val external: List<AlphabetOffer>
+    val sourceInternal: List<AlphabetOffer>
+    if (name in procFunNames) {
+        external = alphabet.allOffers.filterNot {
+            isSyntheticProcFunOffer(it) || it.compositionHidden
+        }
+        sourceInternal = emptyList()
+    } else {
+        external = alphabet.external.filterNot(::isSyntheticProcFunOffer)
+        sourceInternal = alphabet.allOffers.filter { it.sourceInternal && !isSyntheticProcFunOffer(it) }
+    }
     val hidden = alphabet.allOffers.filter { it.compositionHidden && !it.sourceInternal }
     val syncGroups = hidden.groupBy { it.channelKey }.entries.sortedBy { it.key }
 

@@ -114,7 +114,7 @@ private fun externalActionNames(
     val pd = procDecls.firstOrNull { it.name == rootName }
         ?: ProcDecl(rootName, emptyList(), ProcDeclType.Proc)
     val leafMap = leafActionMap(ast, leaves, librariesInUse)
-    return computeCompositionAlphabet(pd, procDecls, leafMap, collectProcFunNames(ast))
+    return computeCompositionAlphabet(pd, procDecls, leafMap, collectProcFunNames(ast), ast)
         .external.map { it.name }.toSet()
 }
 
@@ -215,7 +215,7 @@ private fun collectListedActionOffers(
         val pd = procDecls.firstOrNull { it.name == rootName }
             ?: ProcDecl(rootName, emptyList(), ProcDeclType.Proc)
         val leafMap = leafActionMap(ast, leaves, librariesInUse)
-        val alphabet = computeCompositionAlphabet(pd, procDecls, leafMap, collectProcFunNames(ast))
+        val alphabet = computeCompositionAlphabet(pd, procDecls, leafMap, collectProcFunNames(ast), ast)
         for (o in alphabet.allOffers) {
             if (o.pclassKey !in procs && o.pclassKey !in librariesInUse) continue
             val key = "${o.occurrenceId}\u0000${o.name}\u0000${o.isConstructor}"

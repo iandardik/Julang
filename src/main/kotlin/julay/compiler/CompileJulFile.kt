@@ -90,9 +90,12 @@ private fun runSpecAlphabetIntegrityPass(
     val components = program.allProcNames(procDecls)
     val leafMap = julay.compiler.pass.leafActionMap(ast, components, librariesInUse)
     val alphabet = julay.compiler.pass.computeCompositionAlphabet(
-        program, procDecls, leafMap, julay.compiler.collectProcFunNames(ast),
+        program, procDecls, leafMap, julay.compiler.collectProcFunNames(ast), ast,
     )
-    val errors = alphabet.errors + julay.compiler.pass.alphabetIntegrityErrors(alphabet)
+    val errors = alphabet.errors + julay.compiler.pass.alphabetIntegrityErrors(
+        alphabet,
+        julay.compiler.collectProcFunNames(ast),
+    )
     if (errors.isEmpty()) return true
     errors.forEach { System.err.println(it) }
     System.err.println("Found errors while compiling \"${program.name}\"; exiting.")

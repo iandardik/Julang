@@ -86,10 +86,10 @@ private fun ProcFunNode.buildCallCtor(
 }
 
 /**
- * `return: e` becomes `transit: retVal := e` (modifier preserved except bare → internal).
- * Bare `return:` fires solo under spawn-and-await (no SyncChannel peer); client/session keep tags.
- * [returnExpr] is kept so runtime still completes on this step (one logical return);
- * synthetic `_ret` is for TLA/alphabet and is omitted from Kotlin offers.
+ * `return: e` becomes `transit: retVal := e`. The transition's sync modifier is **unchanged**
+ * (`client` / `session` / `internal` / bare stay as written). Alphabet / TLA keep that tag;
+ * synthetic `_ret` is the completion edge there. Runtime still completes via [returnExpr] on this
+ * step (Kotlin SyncChannel solos bare returns without rewriting ActionDecl.modifier).
  */
 private fun rewriteReturnToRetVal(trans: TransitionNode, retType: Type): ActionDecl {
     val decl = trans.transitions().single()
@@ -104,23 +104,16 @@ private fun rewriteReturnToRetVal(trans: TransitionNode, retType: Type): ActionD
             }
         },
     )
-    // Untagged return edges complete alone; tagged client/session/internal keep their sync role.
-    val effectiveModifier =
-        if (decl.modifier == TSAction.SyncRole.Default && !decl.isSession) {
-            TSAction.SyncRole.Internal
-        } else {
-            decl.modifier
-        }
     return ActionDecl(
         SymbolicAction(
             decl.action.name,
             decl.action.args,
-            isInternal = effectiveModifier == TSAction.SyncRole.Internal,
+            isInternal = decl.modifier == TSAction.SyncRole.Internal,
             isSession = decl.isSession,
         ),
         decl.guards,
         decl.transits + retAssign,
-        effectiveModifier,
+        decl.modifier,
         decl.loc,
         decl.befores,
         decl.afters,

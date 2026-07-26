@@ -1,0 +1,4 @@
+source: regression/input/syntax-errors/procfun-orphan-composition.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - 'never called by a peer'

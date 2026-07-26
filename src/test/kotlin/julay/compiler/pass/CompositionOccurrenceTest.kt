@@ -160,6 +160,33 @@ class CompositionOccurrenceTest {
     }
 
     @Test
+    fun danglingClientFromProcFunIsNotIntegrityError() {
+        val leafMap = mapOf(
+            "Handler" to listOf(offer("Handler", "dispatch")),
+            "clientAppendRPC" to listOf(offer("clientAppendRPC", "noLeader", client = true)),
+        )
+        val root = ProcDecl(
+            "RpcIn",
+            listOf(
+                ProcDecl("Handler", emptyList(), ProcDeclType.Proc),
+                ProcDecl("clientAppendRPC", emptyList(), ProcDeclType.Proc),
+            ),
+            ProcDeclType.Proc,
+        )
+        val result = computeCompositionAlphabet(
+            root,
+            listOf(root),
+            leafMap,
+            procFunNames = setOf("clientAppendRPC"),
+        )
+        assertTrue(result.external.any { it.name == "noLeader" })
+        assertTrue(
+            alphabetIntegrityErrors(result, setOf("clientAppendRPC")).isEmpty(),
+            alphabetIntegrityErrors(result, setOf("clientAppendRPC")).toString(),
+        )
+    }
+
+    @Test
     fun danglingClientIsIntegrityError() {
         val leafMap = mapOf(
             "C" to listOf(offer("C", "w", client = true)),
@@ -218,6 +245,42 @@ class CompositionOccurrenceTest {
         assertTrue(errs.isEmpty(), errs.toString())
         assertEquals(2, composed.size)
         assertTrue(composed.none { it.compositionHidden })
+    }
+
+    @Test
+    fun composedProcFunFoldsNonSyntheticOffersIntoParent() {
+        val leafMap = mapOf(
+            "Handler" to listOf(offer("Handler", "dispatch")),
+            "clientAppendRPC" to listOf(
+                offer("clientAppendRPC", "clientAppendRPC_call").copy(isConstructor = true),
+                offer("clientAppendRPC", "noLeader", client = true),
+                offer("clientAppendRPC", "committed", client = true),
+                offer("clientAppendRPC", "clientAppendRPC_ret"),
+                offer("clientAppendRPC", "step", internal = true),
+            ),
+        )
+        val root = ProcDecl(
+            "RpcIn",
+            listOf(
+                ProcDecl("Handler", emptyList(), ProcDeclType.Proc),
+                ProcDecl("clientAppendRPC", emptyList(), ProcDeclType.Proc),
+            ),
+            ProcDeclType.Proc,
+        )
+        val result = computeCompositionAlphabet(
+            root,
+            listOf(root),
+            leafMap,
+            procFunNames = setOf("clientAppendRPC"),
+        )
+        assertTrue(result.errors.isEmpty(), result.errors.toString())
+        assertTrue(result.external.any { it.name == "noLeader" && it.isClient })
+        assertTrue(result.external.any { it.name == "committed" && it.isClient })
+        assertTrue(result.external.none { it.name == "clientAppendRPC_call" })
+        assertTrue(result.external.none { it.name == "clientAppendRPC_ret" })
+        assertTrue(result.allOffers.none { it.name == "clientAppendRPC_call" })
+        assertTrue(result.allOffers.none { it.name == "clientAppendRPC_ret" })
+        assertTrue(result.allOffers.any { it.name == "step" && it.sourceInternal })
     }
 
     @Test

@@ -342,6 +342,7 @@ fun resolveHavocProcFunCallSites(
 
 /**
  * Collect actions whose transit has exactly one whole-RHS procfun call (v1 coupling shape).
+ * Used for TLA+ spawn-await coupling only — not for orphan / alphabet call detection.
  */
 internal fun collectWholeRhsProcFunCalls(pc: ProcClassNode): List<WholeRhsHit> {
     val out = mutableListOf<WholeRhsHit>()
@@ -366,6 +367,35 @@ internal data class WholeRhsHit(
     val call: FunCallExprNode,
     val assignVars: List<String>,
 )
+
+/**
+ * All resolved procfun calls appearing anywhere in constructor/transition transit exprs
+ * (including nested under `when` / `if` / etc.). Used for orphan and havoc warnings.
+ */
+internal fun collectProcFunCallsInProc(pc: ProcClassNode): List<FunCallExprNode> {
+    val out = mutableListOf<FunCallExprNode>()
+    fun walkExpr(expr: ExprNode) {
+        if (expr is FunCallExprNode && expr.resolvedProcFunOrNull() != null) {
+            out += expr
+        }
+        expr.children.filterIsInstance<ExprNode>().forEach { walkExpr(it) }
+    }
+    fun walkDecl(decl: julay.compiler.decl.ActionDecl) {
+        decl.transits.forEach { update ->
+            when (update) {
+                is julay.compiler.decl.TransitUpdate.Assign -> walkExpr(update.expr)
+                is julay.compiler.decl.TransitUpdate.MapPut -> {
+                    walkExpr(update.key)
+                    walkExpr(update.value)
+                }
+                is julay.compiler.decl.TransitUpdate.Let -> walkExpr(update.init)
+            }
+        }
+    }
+    pc.localDecls().filterIsInstance<ConstructorNode>().forEach { walkDecl(it.constructors().single()) }
+    pc.localDecls().filterIsInstance<TransitionNode>().forEach { walkDecl(it.transitions().single()) }
+    return out
+}
 
 private fun wholeRhsProcFunCall(
     decl: julay.compiler.decl.ActionDecl,

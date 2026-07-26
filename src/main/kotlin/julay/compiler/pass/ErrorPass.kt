@@ -88,7 +88,7 @@ private fun RootNode.actionConsistencyErrors(
 ): List<CompileError> {
     val leafMap = leafActionMap(this, procs, librariesInUse)
     val alphabetResult = if (program != null) {
-        computeCompositionAlphabet(program, procDecls, leafMap, collectProcFunNames(this))
+        computeCompositionAlphabet(program, procDecls, leafMap, collectProcFunNames(this), this)
     } else {
         // No composition root (e.g. analyze whole CU): unique keys for internals only.
         val all = leafMap.values.flatten()
@@ -297,7 +297,7 @@ private fun RootNode.actionConsistencyErrors(
     val sessionOrdinaryPairErrors = sessionOrdinaryPairMixErrors(offers)
 
     val integrity = if (program != null) {
-        alphabetIntegrityErrors(alphabetResult)
+        alphabetIntegrityErrors(alphabetResult, collectProcFunNames(this))
     } else {
         emptyList()
     }
@@ -395,7 +395,7 @@ private fun RootNode.actionConsistencyWarnings(
     val syncWarnings = if (program != null) {
         val leafMap = leafActionMap(this, procs, librariesInUse)
         val alphabetResult = computeCompositionAlphabet(
-            program, procDecls, leafMap, collectProcFunNames(this),
+            program, procDecls, leafMap, collectProcFunNames(this), this,
         )
         unsyncedOrdinaryWarnings(alphabetResult.external)
     } else {

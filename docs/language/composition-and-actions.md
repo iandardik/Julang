@@ -48,10 +48,14 @@ Same-class ordinary offers never sync: when two occurrences of class `X` both ex
 
 These checks apply to the **compile/spec target** (same rules for JAR and TLA+):
 
-- External `client` of `w` with no `provider` `w` → error.
+- External `client` of `w` with no `provider` `w` → error, **except** when every external client offer for `w` comes from a **procfun** (call-folded or listed in `||`). Those surfaces stay visible on the parent until a provider peer is composed.
 - At most one `provider` per action name.
 
 JAR `compile` targets **warn** (but still succeed) when unsynced ordinary or session actions remain in their external alphabet — those offers simply never enable at runtime. Tag them `internal` if a solo step is intentional. Specs may still use unilateral assume/system actions.
+
+### Procfuns and alphabets
+
+Procfuns are not SyncChannel-started by `||` (see [Procfuns](procfun.md)). For **analyze / IDE alphabets**, any procfun **called** by a host under an assembly contributes its non-synthetic actions to that assembly — with or without `|| F`. Listing `|| F` only whitelists TLA+ coupling vs havoc.
 
 ### TLA+ occurrence names
 
@@ -112,5 +116,6 @@ For ordinary sync, different classes declare the same action name. For a shared 
 ## See also
 
 - [Processes](processes.md)
+- [Procfuns](procfun.md) — call-site alphabet folding; `||` as TLA metadata
 - [Sessions](sessions.md)
 - [Creating libraries](creating-libraries.md)

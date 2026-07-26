@@ -48,7 +48,7 @@ compile Name1, Name2, ...
 
 `compile` targets: **proc** → JAR; **spec** → `.tla` / `.cfg`; **procfun** → standalone TLA/analyze (not a JAR root).
 
-Procfuns may appear in `||` as **spec metadata** (whitelist for coupling vs havoc). See [Procfuns](procfun.md).
+Procfuns may appear in `||` as **TLA+ metadata** (couple vs havoc). Parent **alphabets** always include called procfuns' non-synthetic actions, with or without `||`. See [Procfuns](procfun.md).
 
 ## Funlib (`import julay.funlib.<name>`)
 
