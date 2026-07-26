@@ -134,7 +134,7 @@ function alphabetHtml(scope, entryFile, internal, leafProcs) {
     leafProcs,
   );
   const syncSection = renderSyncGroups(scope.compositionHidden || []);
-  const graphSection = renderCompositionGraph(scope.compositionGraph);
+  const graphSection = renderCompositionGraph(scope.compositionGraph, scope.name);
 
   return wrapHtml(`
     <div class="toolbar">
@@ -163,200 +163,25 @@ function alphabetHtml(scope, entryFile, internal, leafProcs) {
 }
 
 /**
- * Horizontal node boxes with one labeled connector per sync edge.
- * Attachment points are offset toward each neighbor so adjacent edges
- * (A—B and B—C) do not share a vertical stem at B.
+ * Composition sync shell: graph data + mount points. Layout and node filtering
+ * run in the webview so unchecking a proc reflows the diagram immediately.
  */
-function renderCompositionGraph(graph) {
+function renderCompositionGraph(graph, scopeName) {
   if (!graph || !Array.isArray(graph.nodes) || graph.nodes.length < 2) {
     return "";
   }
-  const nodes = graph.nodes;
-  const edges = Array.isArray(graph.edges) ? graph.edges : [];
-  const n = nodes.length;
-  const minBoxW = 72;
-  const maxBoxW = 148;
-  const boxPad = 16;
-  // Uniform box width: wide enough for the longest name, but capped so neighbors stay separated.
-  const boxW = Math.min(
-    maxBoxW,
-    Math.max(minBoxW, ...nodes.map((name) => estimateTextWidth(name) + boxPad)),
-  );
-  const displayNames = nodes.map((name) => ellipsizeToWidth(name, boxW - boxPad));
-  const boxH = 36;
-  const gap = 40;
-  const padX = 20;
-  const padTop = 24;
-  const width = padX * 2 + n * boxW + (n - 1) * gap;
-
-  const nodeX = (i) => padX + i * (boxW + gap);
-  const nodeCenter = (i) => nodeX(i) + boxW / 2;
-  const indexOf = (name) => nodes.indexOf(name);
-
-  const normalized = edges
-    .map((edge) => {
-      const ia = indexOf(edge.a);
-      const ib = indexOf(edge.b);
-      if (ia < 0 || ib < 0) {
-        return null;
-      }
-      const left = Math.min(ia, ib);
-      const right = Math.max(ia, ib);
-      return {
-        left,
-        right,
-        aName: nodes[left],
-        bName: nodes[right],
-        actions: edge.actions || [],
-        span: right - left,
-      };
-    })
-    .filter(Boolean)
-    .sort((e1, e2) => e1.span - e2.span || e1.left - e2.left || e1.right - e2.right);
-
-  const portsLeft = nodes.map(() => []);
-  const portsRight = nodes.map(() => []);
-  normalized.forEach((edge, ei) => {
-    portsRight[edge.left].push(ei);
-    portsLeft[edge.right].push(ei);
-  });
-
-  function attachX(nodeIndex, edgeIndex, side) {
-    const slots = side === "right" ? portsRight[nodeIndex] : portsLeft[nodeIndex];
-    const slot = Math.max(0, slots.indexOf(edgeIndex));
-    const count = Math.max(1, slots.length);
-    const fan = (slot - (count - 1) / 2) * 10;
-    const toward = side === "right" ? 1 : -1;
-    return nodeCenter(nodeIndex) + toward * (boxW * 0.28) + fan;
-  }
-
-  const nodeRects = nodes
-    .map((name, i) => {
-      const x = nodeX(i);
-      const y = padTop;
-      const label = displayNames[i];
-      return `
-        <g>
-          <title>${esc(name)}</title>
-          <rect x="${x}" y="${y}" width="${boxW}" height="${boxH}" rx="6" class="node-box"/>
-          <text x="${nodeCenter(i)}" y="${y + boxH / 2 + 4}" text-anchor="middle" class="node-label">${esc(label)}</text>
-        </g>`;
-    })
-    .join("\n");
-
-  const yBox = padTop + boxH;
-  const lineH = 14;
-  const boxPadX = 8;
-  const boxPadY = 6;
-  const laneGap = 10;
-  const intervalPad = 6;
-
-  // Pass 1: geometry for every edge (no Y yet).
-  const layouts = normalized.map((edge, ei) => {
-    const x1 = attachX(edge.left, ei, "right");
-    const x2 = attachX(edge.right, ei, "left");
-    const mid = (x1 + x2) / 2;
-    const spanW = Math.abs(x2 - x1);
-    const maxLabelW = Math.min(Math.max(spanW - 8, 150), width - 32);
-    const lines = wrapActionLines(edge.actions, maxLabelW - 2 * boxPadX);
-    const textBlockH = Math.max(1, lines.length) * lineH;
-    const labelH = textBlockH + 2 * boxPadY;
-    const labelW = Math.min(
-      maxLabelW,
-      Math.max(56, ...lines.map((ln) => estimateTextWidth(ln) + 2 * boxPadX)),
-    );
-    const labelX = mid - labelW / 2;
-    return {
-      x1,
-      x2,
-      mid,
-      lines,
-      labelH,
-      labelW,
-      labelX,
-      xMin: labelX - intervalPad,
-      xMax: labelX + labelW + intervalPad,
-    };
-  });
-
-  // Pass 2: first-fit pack onto shared horizontal lanes when intervals don't overlap.
-  const lanes = []; // { members: number[], maxH: number }
-  layouts.forEach((layout, i) => {
-    let placed = false;
-    for (let li = 0; li < lanes.length; li++) {
-      const lane = lanes[li];
-      const overlaps = lane.members.some((j) => {
-        const other = layouts[j];
-        return layout.xMin < other.xMax && layout.xMax > other.xMin;
-      });
-      if (!overlaps) {
-        lane.members.push(i);
-        lane.maxH = Math.max(lane.maxH, layout.labelH);
-        layout.lane = li;
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) {
-      layout.lane = lanes.length;
-      lanes.push({ members: [i], maxH: layout.labelH });
-    }
-  });
-
-  // Pass 3: assign Y from packed lane heights, then draw.
-  // Draw all connector paths first, then all action bubbles, so a line that
-  // crosses another edge's bubble is covered by that bubble (SVG z-order).
-  let laneY = yBox + 14;
-  const laneTops = lanes.map((lane) => {
-    const y = laneY;
-    laneY += lane.maxH + laneGap;
-    return y;
-  });
-
-  const pathParts = [];
-  const bubbleParts = [];
-  layouts.forEach((layout) => {
-    const labelY = laneTops[layout.lane];
-    const railY = labelY + layout.labelH / 2;
-    pathParts.push(
-      `<path d="M ${layout.x1} ${yBox} V ${railY} H ${layout.labelX}" class="edge-line" fill="none"/>`,
-      `<path d="M ${layout.labelX + layout.labelW} ${railY} H ${layout.x2} V ${yBox}" class="edge-line" fill="none"/>`,
-    );
-    const textEls = layout.lines
-      .map((ln, li) => {
-        const ty = labelY + boxPadY + lineH * (li + 0.72);
-        return `<text x="${layout.mid}" y="${ty}" text-anchor="middle" class="edge-label">${esc(ln)}</text>`;
-      })
-      .join("\n");
-    bubbleParts.push(`
-      <rect x="${layout.labelX}" y="${labelY}" width="${layout.labelW}" height="${layout.labelH}" rx="4" class="edge-action-box"/>
-      ${textEls}`);
-  });
-
-  const edgeParts = [...pathParts, ...bubbleParts];
-
-  const height = Math.max(padTop + boxH + 40, laneY + 8);
-
-  const edgeList =
-    normalized.length === 0
-      ? `<p class="empty">No composition-hidden syncs among top-level children.</p>`
-      : `<ul class="edge-list">${normalized
-          .map((e) => {
-            const acts = e.actions.join(", ");
-            return `<li><code>${esc(e.aName)}</code> ― <code>${esc(e.bName)}</code>: ${esc(acts)}</li>`;
-          })
-          .join("")}</ul>`;
-
+  const payload = JSON.stringify({
+    scope: scopeName || "",
+    nodes: graph.nodes,
+    edges: Array.isArray(graph.edges) ? graph.edges : [],
+  }).replace(/</g, "\\u003c");
   return `
     <h2>Composition sync</h2>
-    <p class="hint">Immediate children and actions internalized by <code>||</code> between them. Hover a node for its full name.</p>
-    <div class="diagram-wrap">
-      <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Composition sync diagram">
-        ${edgeParts.join("\n")}
-        ${nodeRects}
-      </svg>
-    </div>
-    ${edgeList}
+    <p class="hint">Immediate children, called procfuns, and actions internalized by <code>||</code> between children. Solid lines are composition syncs; dotted lines are spawn-await procfun calls. Uncheck a proc’s box to hide it and its edges.</p>
+    <script type="application/json" id="compositionGraphData">${payload}</script>
+    <div class="diagram-wrap" id="compositionSvgWrap"></div>
+    <div id="compositionFilters" class="diagram-filters"></div>
+    <div id="compositionEdgeList"></div>
   `;
 }
 
@@ -417,6 +242,237 @@ function wrapActionLines(actions, maxWidthPx) {
   return kept;
 }
 
+/**
+ * Build SVG + edge-list HTML for the visible subset of [graph].
+ * Shared by the webview redraw path (inlined below) — kept here for tests/docs parity.
+ */
+function buildCompositionDiagramContent(nodes, edges) {
+  if (!nodes || nodes.length < 2) {
+    return {
+      svg: `<p class="empty">Select at least two procs to show the diagram.</p>`,
+      edgeList: "",
+    };
+  }
+  const n = nodes.length;
+  const minBoxW = 88;
+  const maxBoxW = 160;
+  const boxPad = 28;
+  const boxW = Math.min(
+    maxBoxW,
+    Math.max(minBoxW, ...nodes.map((name) => estimateTextWidth(name) + boxPad)),
+  );
+  const displayNames = nodes.map((name) => ellipsizeToWidth(name, Math.max(24, boxW - boxPad - 18)));
+  const boxH = 36;
+  const gap = 40;
+  const padX = 20;
+  const padTop = 24;
+  const width = padX * 2 + n * boxW + (n - 1) * gap;
+
+  const nodeX = (i) => padX + i * (boxW + gap);
+  const nodeCenter = (i) => nodeX(i) + boxW / 2;
+  const indexOf = (name) => nodes.indexOf(name);
+
+  const normalized = edges
+    .map((edge) => {
+      const ia = indexOf(edge.a);
+      const ib = indexOf(edge.b);
+      if (ia < 0 || ib < 0) {
+        return null;
+      }
+      const left = Math.min(ia, ib);
+      const right = Math.max(ia, ib);
+      const actions = Array.isArray(edge.actions) ? edge.actions : [];
+      return {
+        left,
+        right,
+        aName: nodes[left],
+        bName: nodes[right],
+        actions,
+        isCallEdge: actions.length === 0,
+        span: right - left,
+      };
+    })
+    .filter(Boolean)
+    .sort((e1, e2) => e1.span - e2.span || e1.left - e2.left || e1.right - e2.right);
+
+  const portsLeft = nodes.map(() => []);
+  const portsRight = nodes.map(() => []);
+  normalized.forEach((edge, ei) => {
+    portsRight[edge.left].push(ei);
+    portsLeft[edge.right].push(ei);
+  });
+
+  function attachX(nodeIndex, edgeIndex, side) {
+    const slots = side === "right" ? portsRight[nodeIndex] : portsLeft[nodeIndex];
+    const slot = Math.max(0, slots.indexOf(edgeIndex));
+    const count = Math.max(1, slots.length);
+    const fan = (slot - (count - 1) / 2) * 10;
+    const toward = side === "right" ? 1 : -1;
+    return nodeCenter(nodeIndex) + toward * (boxW * 0.28) + fan;
+  }
+
+  const nodeRects = nodes
+    .map((name, i) => {
+      const x = nodeX(i);
+      const y = padTop;
+      const label = displayNames[i];
+      const checkY = y + (boxH - 14) / 2;
+      return `
+        <g>
+          <title>${esc(name)}</title>
+          <rect x="${x}" y="${y}" width="${boxW}" height="${boxH}" rx="6" class="node-box"/>
+          <foreignObject x="${x + 6}" y="${checkY}" width="16" height="16">
+            <div xmlns="http://www.w3.org/1999/xhtml" class="node-check-wrap">
+              <input type="checkbox" class="node-check" data-node="${esc(name)}" checked/>
+            </div>
+          </foreignObject>
+          <text x="${x + 24}" y="${y + boxH / 2 + 4}" text-anchor="start" class="node-label">${esc(label)}</text>
+        </g>`;
+    })
+    .join("\n");
+
+  const yBox = padTop + boxH;
+  const lineH = 14;
+  const boxPadX = 8;
+  const boxPadY = 6;
+  const laneGap = 10;
+  const intervalPad = 6;
+
+  const layouts = normalized.map((edge, ei) => {
+    const x1 = attachX(edge.left, ei, "right");
+    const x2 = attachX(edge.right, ei, "left");
+    const mid = (x1 + x2) / 2;
+    const spanW = Math.abs(x2 - x1);
+    const spanMin = Math.min(x1, x2);
+    const spanMax = Math.max(x1, x2);
+    if (edge.isCallEdge) {
+      return {
+        x1,
+        x2,
+        mid,
+        lines: [],
+        isCallEdge: true,
+        labelH: 8,
+        labelW: 0,
+        labelX: mid,
+        // Pack against the full horizontal run so dotted rails do not share a
+        // Y with a solid edge whose action bubble sits elsewhere on the span.
+        xMin: spanMin - intervalPad,
+        xMax: spanMax + intervalPad,
+      };
+    }
+    const maxLabelW = Math.min(Math.max(spanW - 8, 150), width - 32);
+    const lines = wrapActionLines(edge.actions, maxLabelW - 2 * boxPadX);
+    const textBlockH = Math.max(1, lines.length) * lineH;
+    const labelH = textBlockH + 2 * boxPadY;
+    const labelW = Math.min(
+      maxLabelW,
+      Math.max(56, ...lines.map((ln) => estimateTextWidth(ln) + 2 * boxPadX)),
+    );
+    const labelX = mid - labelW / 2;
+    return {
+      x1,
+      x2,
+      mid,
+      lines,
+      isCallEdge: false,
+      labelH,
+      labelW,
+      labelX,
+      // Sync packing uses the full connector span as well (not just the label),
+      // so solid/dotted horizontals that share a corridor get different lanes.
+      xMin: Math.min(spanMin, labelX) - intervalPad,
+      xMax: Math.max(spanMax, labelX + labelW) + intervalPad,
+    };
+  });
+
+  // Lanes are kind-segregated: call (dotted) and sync (solid) never share a rail Y.
+  const lanes = [];
+  layouts.forEach((layout, i) => {
+    let placed = false;
+    for (let li = 0; li < lanes.length; li++) {
+      const lane = lanes[li];
+      if (lane.isCallEdge !== layout.isCallEdge) continue;
+      const overlaps = lane.members.some((j) => {
+        const other = layouts[j];
+        return layout.xMin < other.xMax && layout.xMax > other.xMin;
+      });
+      if (!overlaps) {
+        lane.members.push(i);
+        lane.maxH = Math.max(lane.maxH, layout.labelH);
+        layout.lane = li;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      layout.lane = lanes.length;
+      lanes.push({
+        members: [i],
+        maxH: layout.labelH,
+        isCallEdge: layout.isCallEdge,
+      });
+    }
+  });
+
+  let laneY = yBox + 14;
+  const laneTops = lanes.map((lane) => {
+    const y = laneY;
+    laneY += lane.maxH + laneGap;
+    return y;
+  });
+
+  const pathParts = [];
+  const bubbleParts = [];
+  layouts.forEach((layout) => {
+    const labelY = laneTops[layout.lane];
+    const railY = labelY + layout.labelH / 2;
+    if (layout.isCallEdge) {
+      pathParts.push(
+        `<path d="M ${layout.x1} ${yBox} V ${railY} H ${layout.x2} V ${yBox}" class="edge-line edge-line-call" fill="none"/>`,
+      );
+      return;
+    }
+    pathParts.push(
+      `<path d="M ${layout.x1} ${yBox} V ${railY} H ${layout.labelX}" class="edge-line" fill="none"/>`,
+      `<path d="M ${layout.labelX + layout.labelW} ${railY} H ${layout.x2} V ${yBox}" class="edge-line" fill="none"/>`,
+    );
+    const textEls = layout.lines
+      .map((ln, li) => {
+        const ty = labelY + boxPadY + lineH * (li + 0.72);
+        return `<text x="${layout.mid}" y="${ty}" text-anchor="middle" class="edge-label">${esc(ln)}</text>`;
+      })
+      .join("\n");
+    bubbleParts.push(`
+      <rect x="${layout.labelX}" y="${labelY}" width="${layout.labelW}" height="${layout.labelH}" rx="4" class="edge-action-box"/>
+      ${textEls}`);
+  });
+
+  const height = Math.max(padTop + boxH + 40, laneY + 8);
+  const edgeParts = [...pathParts, ...bubbleParts];
+
+  const edgeList =
+    normalized.length === 0
+      ? `<p class="empty">No composition-hidden syncs or procfun calls among visible procs.</p>`
+      : `<ul class="edge-list">${normalized
+          .map((e) => {
+            if (e.isCallEdge) {
+              return `<li><code>${esc(e.aName)}</code> ― <code>${esc(e.bName)}</code> <span class="hint">(call)</span></li>`;
+            }
+            const acts = e.actions.join(", ");
+            return `<li><code>${esc(e.aName)}</code> ― <code>${esc(e.bName)}</code>: ${esc(acts)}</li>`;
+          })
+          .join("")}</ul>`;
+
+  return {
+    svg: `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Composition sync diagram">
+        ${edgeParts.join("\n")}
+        ${nodeRects}
+      </svg>`,
+    edgeList,
+  };
+}
+
 function renderOffers(offers, empty, showLeaf) {
   if (!offers.length) {
     return `<p class="empty">${esc(empty)}</p>`;
@@ -465,6 +521,18 @@ function renderSyncGroups(groups) {
 }
 
 function wrapHtml(body) {
+  // Geometry helpers are defined in this module; inject their source into the webview
+  // so node filtering can reflow the diagram without a round-trip.
+  const diagramLib = [
+    estimateTextWidth,
+    ellipsizeToWidth,
+    wrapActionLines,
+    esc,
+    buildCompositionDiagramContent,
+  ]
+    .map((fn) => fn.toString())
+    .join("\n");
+
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -481,6 +549,45 @@ function wrapHtml(body) {
   ul { padding-left: 1.25rem; }
   li { margin: 0.35rem 0; }
   .diagram-wrap { overflow-x: auto; margin: 0.75rem 0; }
+  .diagram-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.75rem;
+    margin: 0.35rem 0 0.5rem;
+  }
+  .diagram-filters:empty { display: none; margin: 0; }
+  .diagram-filters .filters-label {
+    opacity: 0.8;
+    font-size: 0.85rem;
+    width: 100%;
+    margin: 0;
+  }
+  .diagram-filters label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.65rem;
+    border: 2px solid var(--vscode-panel-border, #555);
+    border-radius: 6px;
+    background: var(--vscode-input-background, #3c3c3c);
+    cursor: pointer;
+    user-select: none;
+    font-family: var(--vscode-editor-font-family);
+    font-size: 12px;
+  }
+  .node-check-wrap {
+    margin: 0;
+    padding: 0;
+    width: 14px;
+    height: 14px;
+    line-height: 14px;
+  }
+  .node-check-wrap input {
+    margin: 0;
+    cursor: pointer;
+    width: 14px;
+    height: 14px;
+  }
   .node-box {
     fill: var(--vscode-input-background, #3c3c3c);
     stroke: var(--vscode-panel-border, var(--vscode-foreground, #cccccc));
@@ -488,6 +595,7 @@ function wrapHtml(body) {
   }
   .node-label { fill: var(--vscode-foreground); font-family: var(--vscode-editor-font-family); font-size: 12px; }
   .edge-line { stroke: var(--vscode-descriptionForeground, #888); stroke-width: 1.25; }
+  .edge-line-call { stroke-dasharray: 4 3; }
   .edge-action-box {
     fill: var(--vscode-badge-background, #4d4d4d);
     stroke: var(--vscode-badge-background, #4d4d4d);
@@ -511,6 +619,88 @@ ${body}
   if (leaf) leaf.addEventListener('change', () => vscode.postMessage({ type: 'toggleLeafProcs', value: leaf.checked }));
   const refresh = document.getElementById('refresh');
   if (refresh) refresh.addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
+
+  ${diagramLib}
+
+  (function initCompositionDiagram() {
+    const dataEl = document.getElementById('compositionGraphData');
+    const filtersEl = document.getElementById('compositionFilters');
+    const svgWrap = document.getElementById('compositionSvgWrap');
+    const edgeListEl = document.getElementById('compositionEdgeList');
+    if (!dataEl || !filtersEl || !svgWrap || !edgeListEl) return;
+
+    let graph;
+    try {
+      graph = JSON.parse(dataEl.textContent);
+    } catch (_) {
+      return;
+    }
+    const allNodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+    const allEdges = Array.isArray(graph.edges) ? graph.edges : [];
+    if (allNodes.length < 2) return;
+
+    const state = vscode.getState() || {};
+    const filterState = state.compositionNodeFilter || {};
+    const scopeKey = graph.scope || "";
+    const savedHidden = Array.isArray(filterState[scopeKey]) ? filterState[scopeKey] : [];
+    const hidden = new Set(savedHidden.filter((n) => allNodes.includes(n)));
+
+    function persist() {
+      const next = Object.assign({}, vscode.getState() || {});
+      const filters = Object.assign({}, next.compositionNodeFilter || {});
+      filters[scopeKey] = Array.from(hidden);
+      next.compositionNodeFilter = filters;
+      vscode.setState(next);
+    }
+
+    function setHidden(name, isHidden) {
+      if (isHidden) hidden.add(name);
+      else hidden.delete(name);
+      persist();
+      redraw();
+    }
+
+    function redraw() {
+      const visible = allNodes.filter((n) => !hidden.has(n));
+      const visibleSet = new Set(visible);
+      const edges = allEdges.filter(
+        (e) => visibleSet.has(e.a) && visibleSet.has(e.b),
+      );
+      const built = buildCompositionDiagramContent(visible, edges);
+      svgWrap.innerHTML = built.svg;
+      edgeListEl.innerHTML = built.edgeList;
+
+      const hiddenNodes = allNodes.filter((n) => hidden.has(n));
+      filtersEl.innerHTML = hiddenNodes.length === 0
+        ? ""
+        : '<p class="filters-label">Hidden (check to show):</p>' +
+          hiddenNodes
+            .map((name) =>
+              '<label data-node="' + esc(name) + '">' +
+              '<input type="checkbox" data-node="' + esc(name) + '"/>' +
+              '<span title="' + esc(name) + '">' + esc(name) + '</span></label>',
+            )
+            .join("");
+    }
+
+    svgWrap.addEventListener('change', (ev) => {
+      const input = ev.target;
+      if (!input || !input.classList || !input.classList.contains('node-check')) return;
+      const name = input.getAttribute('data-node');
+      if (!name) return;
+      if (!input.checked) setHidden(name, true);
+    });
+
+    filtersEl.addEventListener('change', (ev) => {
+      const input = ev.target;
+      if (!input || input.type !== 'checkbox') return;
+      const name = input.getAttribute('data-node');
+      if (!name) return;
+      if (input.checked) setHidden(name, false);
+    });
+
+    redraw();
+  })();
 </script>
 </body>
 </html>`;

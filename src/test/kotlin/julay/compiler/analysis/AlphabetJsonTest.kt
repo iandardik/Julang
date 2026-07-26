@@ -158,6 +158,69 @@ class AlphabetJsonTest {
     }
 
     @Test
+    fun compositionGraphIncludesProcFunCallEdgesWithoutActions() {
+        val dir = Files.createTempDirectory("julay-procfun-graph")
+        val file = dir.resolve("main.jul")
+        file.writeText(
+            """
+            procfun clientAppendRPC(n : Int) : Int {
+                client transition noLeader() {
+                    return: 0
+                }
+                transition done() {
+                    return: n
+                }
+            }
+
+            proc RpcReqHandler {
+                var out : Int
+                constructor initially(args : List<String>) {
+                    transit: out := clientAppendRPC(1)
+                }
+            }
+
+            proc Peer {
+                constructor initially(args : List<String>) { transit: }
+                transition tick() { transit: }
+            }
+
+            proc RpcIn := RpcReqHandler || Peer
+            compile RpcIn
+            """.trimIndent(),
+        )
+        val checked = prepareCheckedCompilation(file)
+        assertNotNull(checked)
+        val scope = resolveAnalyzeScope(
+            scopeNames = listOf("RpcIn"),
+            procDecls = checked.procDecls,
+            allPClassNames = checked.unit.allPClassNames,
+            allProcAliasNames = checked.unit.allProcNames,
+            librariesInUse = checked.librariesInUse,
+            procFunNames = julay.compiler.collectProcFunNames(checked.ast as RootNode),
+        )
+        assertNotNull(scope)
+        val json = buildAlphabetJsonDocument(
+            checked.ast as RootNode,
+            scope,
+            checked.librariesInUse,
+            checked.procDecls,
+        )
+        val graphIdx = json.indexOf("\"compositionGraph\"")
+        val externalIdx = json.indexOf("\"external\"")
+        assertTrue(graphIdx >= 0 && externalIdx > graphIdx, json)
+        val graphBlock = json.substring(graphIdx, externalIdx)
+        assertTrue(graphBlock.contains("\"RpcReqHandler\""), graphBlock)
+        assertTrue(graphBlock.contains("\"Peer\""), graphBlock)
+        assertTrue(graphBlock.contains("\"clientAppendRPC\""), graphBlock)
+        assertTrue(
+            graphBlock.contains("\"a\": \"RpcReqHandler\"") &&
+                graphBlock.contains("\"b\": \"clientAppendRPC\"") &&
+                graphBlock.contains("\"actions\": []"),
+            "expected unlabeled call edge RpcReqHandler—clientAppendRPC:\n$graphBlock",
+        )
+    }
+
+    @Test
     fun calledProcFunFoldsIntoParentWithoutExplicitComposition() {
         val dir = Files.createTempDirectory("julay-procfun-call-fold")
         val file = dir.resolve("main.jul")
