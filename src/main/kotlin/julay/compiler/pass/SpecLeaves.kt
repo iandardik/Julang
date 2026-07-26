@@ -312,9 +312,38 @@ fun resolveProcFunCallSites(
 }
 
 /**
+ * Resolve havoc call sites (procfun not in composition) — no child occurrence leaf.
+ */
+fun resolveHavocProcFunCallSites(
+    drafts: List<ProcFunCallSiteDraft>,
+    namedHostLeaves: List<SpecLeaf>,
+): List<ProcFunCallSite> {
+    val hostsByKey = namedHostLeaves.filter { !it.isProcFun }.associateBy { it.identityKey() }
+    return drafts.mapNotNull { draft ->
+        val host = hostsByKey[draft.host.identityKey()]
+            ?: namedHostLeaves.firstOrNull { !it.isProcFun && it.name == draft.host.name }
+            ?: return@mapNotNull null
+        ProcFunCallSite(
+            hostName = host.tlaName,
+            hostActionName = draft.hostActionName,
+            isHostConstructor = draft.isHostConstructor,
+            procFunName = draft.procFunName,
+            call = draft.call,
+            assignVars = draft.assignVars,
+            occurrence = SpecLeaf(
+                name = draft.procFunName,
+                occurrenceId = draft.occurrenceId,
+                introducingAssembly = host.tlaName,
+                isProcFun = true,
+            ),
+        )
+    }
+}
+
+/**
  * Collect actions whose transit has exactly one whole-RHS procfun call (v1 coupling shape).
  */
-private fun collectWholeRhsProcFunCalls(pc: ProcClassNode): List<WholeRhsHit> {
+internal fun collectWholeRhsProcFunCalls(pc: ProcClassNode): List<WholeRhsHit> {
     val out = mutableListOf<WholeRhsHit>()
     pc.localDecls().filterIsInstance<ConstructorNode>().forEach { ctor ->
         val decl = ctor.constructors().single()
@@ -331,7 +360,7 @@ private fun collectWholeRhsProcFunCalls(pc: ProcClassNode): List<WholeRhsHit> {
     return out
 }
 
-private data class WholeRhsHit(
+internal data class WholeRhsHit(
     val actionName: String,
     val isCtor: Boolean,
     val call: FunCallExprNode,
@@ -368,12 +397,16 @@ fun ProcFunNode.asSyntheticProcClass(): ProcClassNode {
         } catch (_: RuntimeException) {}
         vn
     }
-    val invokeCtor = ConstructorNode(
-        procFunInvokeCtor(name()),
+    val retVal = VarNode(PROC_FUN_RET_VAL, procFunReturnTypeExpr(), programLocation())
+    try {
+        retVal.resolveType(returnType)
+    } catch (_: RuntimeException) {}
+    val callCtor = ConstructorNode(
+        procFunCallCtor(name()),
         procFunArgs(),
         emptyList(),
         programLocation(),
     )
-    val body = argVars + listOf(invokeCtor) + localDecls().filter { it !is ConstructorNode }
+    val body = argVars + listOf(retVal) + listOf(callCtor) + localDecls().filter { it !is ConstructorNode }
     return ProcClassNode(name(), body, programLocation())
 }

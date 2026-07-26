@@ -800,24 +800,25 @@ class SpecTlaTlcSmokeTest {
                 cfgText.contains("PROPERTY") && cfgText.contains("Terminates"),
                 "expected PROPERTY …Terminates in cfg;\n$cfgText",
             )
-            assertTrue(tlaText.contains("initially_invoke"), "expected initially_invoke;\n$tlaText")
+            assertTrue(tlaText.contains("initially_call"), "expected initially_call;\n$tlaText")
+            assertTrue(tlaText.contains("initially_ret"), "expected initially_ret;\n$tlaText")
             assertTrue(tlaText.contains("Main_blocking"), "expected Main_blocking;\n$tlaText")
             assertTrue(tlaText.contains("returnTo_initially"), "expected returnTo_initially;\n$tlaText")
-            assertTrue(tlaText.contains("invoke_countUp"), "expected invoke_countUp flag;\n$tlaText")
+            assertTrue(tlaText.contains("call_countUp"), "expected call_countUp flag;\n$tlaText")
             assertFalse(tlaText.contains("__invoke"), "should not emit __invoke;\n$tlaText")
+            assertFalse(tlaText.contains("initially_invoke"), "legacy initially_invoke should be gone;\n$tlaText")
             assertTrue(
-                tlaText.contains("out' = result") ||
-                    tlaText.contains("Main_out' = countUp_result") ||
-                    (tlaText.contains("out'") && tlaText.contains("result")),
-                "expected out coupled to procfun return (result);\n$tlaText",
+                tlaText.contains("out' =") &&
+                    (tlaText.contains("retVal") || tlaText.contains("result")),
+                "expected out coupled to procfun retVal;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("invokes the procfun countUp before executing"),
-                "expected initially_invoke comment;\n$tlaText",
+                tlaText.contains("calls the procfun countUp before executing"),
+                "expected initially_call comment;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("The guards for initially appear in initially_invoke"),
-                "expected initially resume comment;\n$tlaText",
+                tlaText.contains("The guards for initially appear in initially_call"),
+                "expected initially_ret comment;\n$tlaText",
             )
             tla.copyTo(File(work, "CountUpSpec.tla"), overwrite = true)
             cfg.copyTo(File(work, "CountUpSpec.cfg"), overwrite = true)

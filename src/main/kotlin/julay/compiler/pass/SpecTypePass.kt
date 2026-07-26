@@ -73,11 +73,13 @@ private fun typePassSpec(
     val value = spec.specNodeValue()
 
     fun checkLeaves(leaves: List<SpecLeaf>, role: String) {
+        val procFunNames = collectProcFunNames(unit.root)
         leaves.forEach { leaf ->
             val known = leaf.name in pclassNodes ||
                 leaf.name in unit.allPClassNames ||
                 leaf.name in unit.allProcNames ||
                 leaf.name in unit.entryDeclNames ||
+                leaf.name in procFunNames ||
                 unit.importTable.shortNames.containsKey(leaf.name)
             if (!known) {
                 errors += OneLocCompileError(

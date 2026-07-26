@@ -25,9 +25,13 @@ fun codegenPass(
 ): CodegenResult {
     val libPClassNames = librariesInUse
     val leafMap = leafActionMap(ast, program.allProcNames(procDecls), librariesInUse)
-    val alphabet = computeCompositionAlphabet(program, procDecls, leafMap)
+    val alphabet = computeCompositionAlphabet(
+        program, procDecls, leafMap, collectProcFunNames(ast),
+    )
     val channelKeys = alphabet.channelKeys
-    val occurrences = alphabet.leafOccurrences
+    val procFunNames = collectProcFunNames(ast)
+    // Procfuns in || are spec metadata only — do not SyncChannel-start them as JAR peers.
+    val occurrences = alphabet.leafOccurrences.filter { it.pclassName !in procFunNames }
 
     val distinctPclasses = occurrences.map { it.pclassName }.toSet()
     val kotlinLibProcs = distinctPclasses.filter { it in libPClassNames && LibraryRegistry.isKotlinLibrary(it) }
@@ -405,6 +409,8 @@ private fun ProcClassDecl.kotlinClassString(
 ): String {
     val stateVarTypes = stateVars.associate { Pair(it.name, it.type) }
     // Nullable backing fields start as null; property accessors throw until finishConstruction.
+    // Synthetic F_ret is TLA/alphabet-only; runtime completes on return: via returnExpr.
+    val runtimeTransitions = transitions.filterNot { it.action.name == procFunRetAction(name) }
     val stateFieldsStr = stateVars.joinToString("\n") {
         val ident = it.name.toKotlinIdent()
         val ty = it.type.toKotlinTypeString()
@@ -415,13 +421,13 @@ private fun ProcClassDecl.kotlinClassString(
     }
     val registerTypes = ""
     val actionsStr = "override suspend fun actions(ctx: Context): Set<TSAction> = setOf(\n" +
-        transitions.joinToString(",\n") {
+        runtimeTransitions.joinToString(",\n") {
             it.kotlinActionString(stateVarTypes, name, channelKeys).prependIndent()
         } +
         "\n)"
     val transitStr = "override suspend fun transit(act: ConcreteAction) {" +
         "\nreturn when (act.symAction.name) {".prependIndent() +
-        transitions.joinToString("") {
+        runtimeTransitions.joinToString("") {
             "\n\"${it.action.name}\" -> {" + "\n${it.kotlinTransitString(stateVarTypes)}".prependIndent() + "\n}"
         }.prependIndent().prependIndent() +
         "\nelse -> throw RuntimeException(\"Action is outside my alphabet: \${act.symAction}\")".prependIndent().prependIndent() +
@@ -465,11 +471,14 @@ private fun ProcClassDecl.kotlinClassString(
         "\n}"
 }
 
+private fun ProcClassDecl.runtimeTransitionsForStaticInfo(): List<ActionDecl> =
+    transitions.filterNot { it.action.name == procFunRetAction(name) }
+
 private fun ProcClassDecl.kotlinStaticInfoString(
     occurrenceId: String,
     channelKeys: Map<LeafActionId, String>,
 ): String {
-    val transitionInfo = transitions.joinToString(",\n") {
+    val transitionInfo = runtimeTransitionsForStaticInfo().joinToString(",\n") {
         it.kotlinStaticInfoString(
             name,
             occurrenceId,

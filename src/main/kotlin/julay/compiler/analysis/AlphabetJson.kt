@@ -1,6 +1,7 @@
 package julay.compiler.analysis
 
 import julay.compiler.ast.RootNode
+import julay.compiler.collectProcFunNames
 import julay.compiler.decl.ProcDecl
 import julay.compiler.decl.ProcDeclType
 import julay.compiler.pass.AlphabetOffer
@@ -25,8 +26,8 @@ fun buildAlphabetJsonDocument(
         val pd = procDecls.firstOrNull { it.name == rootName }
             ?: ProcDecl(rootName, emptyList(), ProcDeclType.Proc)
         val leafMap = leafActionMap(ast, leaves, librariesInUse)
-        val alphabet = computeCompositionAlphabet(pd, procDecls, leafMap)
-        val graph = computeTopLevelSyncGraph(pd, procDecls, leafMap)
+        val alphabet = computeCompositionAlphabet(pd, procDecls, leafMap, collectProcFunNames(ast))
+        val graph = computeTopLevelSyncGraph(pd, procDecls, leafMap, collectProcFunNames(ast))
         scopeAlphabetJson(rootName, alphabet, graph)
     }
     return buildString {
@@ -53,8 +54,13 @@ private fun scopeAlphabetJson(
     alphabet: CompositionAlphabetResult,
     graph: TopLevelSyncGraph,
 ): String {
-    val external = alphabet.external
-    val sourceInternal = alphabet.allOffers.filter { it.sourceInternal }
+    // Hide synthetic procfun call/ret plumbing from IDE external alphabet by default.
+    fun isSyntheticProcFunOffer(o: AlphabetOffer): Boolean {
+        val n = o.name
+        return n == "${o.pclassKey}_call" || n == "${o.pclassKey}_ret" || n.startsWith("invoke_")
+    }
+    val external = alphabet.external.filterNot(::isSyntheticProcFunOffer)
+    val sourceInternal = alphabet.allOffers.filter { it.sourceInternal && !isSyntheticProcFunOffer(it) }
     val hidden = alphabet.allOffers.filter { it.compositionHidden && !it.sourceInternal }
     val syncGroups = hidden.groupBy { it.channelKey }.entries.sortedBy { it.key }
 

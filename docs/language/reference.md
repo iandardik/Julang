@@ -46,7 +46,9 @@ compile Name1, Name2, ...
 
 `Guarantee` may be a named invariant, an inline Boolean formula (`true` / `false` included), or `true` meaning no guarantee. Plain `spec := System` equals `<true> System <true>` / `--compile-tla`.
 
-`compile` targets: **proc** → JAR; **spec** → `.tla` / `.cfg`.
+`compile` targets: **proc** → JAR; **spec** → `.tla` / `.cfg`; **procfun** → standalone TLA/analyze (not a JAR root).
+
+Procfuns may appear in `||` as **spec metadata** (whitelist for coupling vs havoc). See [Procfuns](procfun.md).
 
 ## Funlib (`import julay.funlib.<name>`)
 

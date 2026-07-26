@@ -39,23 +39,14 @@ private fun validateProcExprsInNode(
     return when (node) {
         is ValueProcExprNode -> {
             val bare = if (!node.isQualified()) node.valueProcName() else null
+            // Procfuns may appear in || as spec/analyze metadata (not SyncChannel peers).
             if (bare != null && bare in procFunNames) {
-                return listOf(
-                    OneLocCompileError(
-                        node.programLocation(),
-                        "Procfun \"$bare\" cannot appear in parallel composition; call it as a function instead",
-                    ),
-                )
+                return emptyList()
             }
             val imported = if (bare != null) importTable.shortNames[bare] else null
             val importedDecl = imported?.let { declFromResolvedSymbol(it) }
             if (importedDecl is ProcFunNode) {
-                return listOf(
-                    OneLocCompileError(
-                        node.programLocation(),
-                        "Procfun \"${importedDecl.name()}\" cannot appear in parallel composition; call it as a function instead",
-                    ),
-                )
+                return emptyList()
             }
             val (_, error) = resolveProcLeaf(
                 node,

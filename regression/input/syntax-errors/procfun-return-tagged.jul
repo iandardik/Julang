@@ -5,7 +5,7 @@ procfun bad(n : Int) : Int {
         transit: i := n
     }
 
-    internal transition done() {
+    transition initially() {
         return: i
     }
 }

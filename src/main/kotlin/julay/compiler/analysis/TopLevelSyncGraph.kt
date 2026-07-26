@@ -27,6 +27,7 @@ fun computeTopLevelSyncGraph(
     root: ProcDecl,
     procDecls: List<ProcDecl>,
     leafOffersByPclass: Map<String, List<AlphabetOffer>>,
+    procFunNames: Set<String> = emptySet(),
 ): TopLevelSyncGraph {
     val procDeclMap = procDecls.associateBy { it.name }
     fun resolve(pd: ProcDecl): ProcDecl = procDeclMap[pd.name] ?: pd
@@ -48,7 +49,9 @@ fun computeTopLevelSyncGraph(
     val tags = mutableMapOf<LeafActionId, String>()
     val childAlphabets = resolvedRoot.components.mapIndexed { index, child ->
         val childResolved = resolve(child)
-        val childAlphabet = computeCompositionAlphabet(childResolved, procDecls, leafOffersByPclass)
+        val childAlphabet = computeCompositionAlphabet(
+            childResolved, procDecls, leafOffersByPclass, procFunNames,
+        )
         val node = nodes[index]
         // Prefix occurrence ids so LeafActionIds stay unique across children
         // (each computeCompositionAlphabet resets the occurrence counter).

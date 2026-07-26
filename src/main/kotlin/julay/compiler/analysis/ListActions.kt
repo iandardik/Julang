@@ -2,6 +2,7 @@ package julay.compiler.analysis
 
 import julay.compiler.ast.ASTNode
 import julay.compiler.ast.RootNode
+import julay.compiler.collectProcFunNames
 import julay.compiler.decl.ProcDecl
 import julay.compiler.decl.ProcDeclType
 import julay.compiler.pass.computeCompositionAlphabet
@@ -113,7 +114,8 @@ private fun externalActionNames(
     val pd = procDecls.firstOrNull { it.name == rootName }
         ?: ProcDecl(rootName, emptyList(), ProcDeclType.Proc)
     val leafMap = leafActionMap(ast, leaves, librariesInUse)
-    return computeCompositionAlphabet(pd, procDecls, leafMap).external.map { it.name }.toSet()
+    return computeCompositionAlphabet(pd, procDecls, leafMap, collectProcFunNames(ast))
+        .external.map { it.name }.toSet()
 }
 
 /**
@@ -213,7 +215,7 @@ private fun collectListedActionOffers(
         val pd = procDecls.firstOrNull { it.name == rootName }
             ?: ProcDecl(rootName, emptyList(), ProcDeclType.Proc)
         val leafMap = leafActionMap(ast, leaves, librariesInUse)
-        val alphabet = computeCompositionAlphabet(pd, procDecls, leafMap)
+        val alphabet = computeCompositionAlphabet(pd, procDecls, leafMap, collectProcFunNames(ast))
         for (o in alphabet.allOffers) {
             if (o.pclassKey !in procs && o.pclassKey !in librariesInUse) continue
             val key = "${o.occurrenceId}\u0000${o.name}\u0000${o.isConstructor}"

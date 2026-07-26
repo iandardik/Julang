@@ -3,7 +3,7 @@ const vscode = require("vscode");
 const { fetchAlphabet } = require("./alphabet");
 
 const PROC_DECL =
-  /^\s*(?:export\s+)?(proc|spec)\s+([A-Za-z_][A-Za-z0-9_]*)\b/;
+  /^\s*(?:export\s+)?(proc|spec|procfun)\s+([A-Za-z_][A-Za-z0-9_]*)\b/;
 
 class JulayCodeLensProvider {
   constructor() {

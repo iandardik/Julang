@@ -4,7 +4,7 @@ import julay.compiler.ast.*
 import julay.compiler.decl.TransitUpdate
 import julay.program.type.transitRootVar
 
-internal fun invokeFlagName(occurrence: SpecLeaf): String = "invoke_${occurrence.tlaName}"
+internal fun callFlagName(occurrence: SpecLeaf): String = "call_${occurrence.tlaName}"
 
 internal fun blockingVarName(hostTlaName: String): String = "${hostTlaName}_blocking"
 
@@ -12,29 +12,29 @@ internal fun returnToVarName(hostActionName: String): String = "returnTo_$hostAc
 
 /** Handshake booleans for procfun spawn-await coupling. */
 internal data class ProcFunHandshakeVars(
-    val invokeFlags: List<Pair<SpecLeaf, String>>, // occurrence leaf → invoke_* name
+    val callFlags: List<Pair<SpecLeaf, String>>, // occurrence leaf → call_* name
     val blockingByHost: Map<String, String>, // host tlaName → blocking var
     val returnToByKey: Map<Pair<String, String>, String>, // (hostTla, action) → returnTo_*
 ) {
     fun allNames(): List<String> =
-        invokeFlags.map { it.second } +
+        callFlags.map { it.second } +
             blockingByHost.values +
             returnToByKey.values
 }
 
 internal fun buildProcFunHandshakeVars(callSites: List<ProcFunCallSite>): ProcFunHandshakeVars {
-    val invokeFlags = callSites.map { it.occurrence to invokeFlagName(it.occurrence) }.distinctBy { it.second }
+    val callFlags = callSites.map { it.occurrence to callFlagName(it.occurrence) }.distinctBy { it.second }
     val blockingByHost = callSites.associate { it.hostName to blockingVarName(it.hostName) }
     val returnToByKey = callSites.associate {
         (it.hostName to it.hostActionName) to returnToVarName(it.hostActionName)
     }
-    return ProcFunHandshakeVars(invokeFlags, blockingByHost, returnToByKey)
+    return ProcFunHandshakeVars(callFlags, blockingByHost, returnToByKey)
 }
 
 /**
- * Emit `<action>_invoke` and resume `<action>` for a whole-RHS procfun call site.
+ * Emit `<action>_call` and `<action>_ret` for a whole-RHS procfun call site.
  */
-internal fun emitProcFunInvokeAndResume(
+internal fun emitProcFunCallAndRet(
     site: ProcFunCallSite,
     hostLeaf: SpecLeaf,
     hostOffer: TlaActionOffer,
@@ -45,7 +45,7 @@ internal fun emitProcFunInvokeAndResume(
     handshake: ProcFunHandshakeVars,
 ): List<TlaAction> {
     val child = site.occurrence
-    val invokeFlag = handshake.invokeFlags.first { it.first.occurrenceId == child.occurrenceId }.second
+    val callFlag = handshake.callFlags.first { it.first.occurrenceId == child.occurrenceId }.second
     val blocking = handshake.blockingByHost.getValue(site.hostName)
     val returnTo = handshake.returnToByKey.getValue(site.hostName to site.hostActionName)
 
@@ -73,23 +73,23 @@ internal fun emitProcFunInvokeAndResume(
     val childCtx = mapOf(child.name to child, child.tlaName to child)
     val hostArgNames = hostOffer.decl.action.args.map { it.name }.toSet()
 
-    // --- invoke action ---
-    val invokeParts = mutableListOf<String>()
-    val invokeChanged = mutableSetOf<String>()
+    // --- call action ---
+    val callParts = mutableListOf<String>()
+    val callChanged = mutableSetOf<String>()
 
     val hostConstructed = stateTlaName(hostLeaf.tlaName, "constructed", stateVarNames)
     if (site.isHostConstructor) {
-        invokeParts += "/\\ ~${idx(hostConstructed, hostBinder)}"
+        callParts += "/\\ ~${idx(hostConstructed, hostBinder)}"
     } else {
-        invokeParts += "/\\ ${idx(hostConstructed, hostBinder)}"
+        callParts += "/\\ ${idx(hostConstructed, hostBinder)}"
     }
-    invokeParts += "/\\ ~${idx(blocking, hostBinder)}"
+    callParts += "/\\ ~${idx(blocking, hostBinder)}"
 
     hostOffer.decl.guards.forEach { g ->
-        invokeParts += "/\\ ${exprToTla(g, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)}"
+        callParts += "/\\ ${exprToTla(g, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)}"
     }
 
-    // Call-arg → child param binds + inline inits + constructed (folded former invoke_* ctor).
+    // Call-arg → child param binds + inline inits + constructed (folded former F_call ctor).
     val argNodes = procFun.procFunArgs().children.filterIsInstance<ArgNode>()
     val callArgs = site.call.callArgs()
     require(argNodes.size == callArgs.size) {
@@ -100,8 +100,8 @@ internal fun emitProcFunInvokeAndResume(
         val rhs = exprToTla(expr, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)
         argTla[arg.argName()] = rhs
         val v = stateTlaName(child.tlaName, arg.argName(), stateVarNames)
-        invokeParts += "/\\ ${assignVal(v, childBinder, rhs)}"
-        invokeChanged += v
+        callParts += "/\\ ${assignVal(v, childBinder, rhs)}"
+        callChanged += v
     }
     procFun.localDecls().filterIsInstance<VarNode>().forEach { vn ->
         val init = vn.initExpr ?: return@forEach
@@ -111,70 +111,59 @@ internal fun emitProcFunInvokeAndResume(
             symbolOverrides = argTla,
         )
         val v = stateTlaName(child.tlaName, vn.name, stateVarNames)
-        invokeParts += "/\\ ${assignVal(v, childBinder, rhs)}"
-        invokeChanged += v
+        callParts += "/\\ ${assignVal(v, childBinder, rhs)}"
+        callChanged += v
     }
-    // Vars without inline init: leave at Init default (user ctor folded at runtime; v1 expects inline).
     val childConstructed = stateTlaName(child.tlaName, "constructed", stateVarNames)
-    invokeParts += "/\\ ${assignTrue(childConstructed, childBinder)}"
-    invokeChanged += childConstructed
+    callParts += "/\\ ${assignTrue(childConstructed, childBinder)}"
+    callChanged += childConstructed
 
-    invokeParts += "/\\ ${assignTrue(invokeFlag, childBinder)}"
-    invokeChanged += invokeFlag
-    invokeParts += "/\\ ${assignTrue(blocking, hostBinder)}   \\* so ${site.hostName} does not execute other actions in the meantime"
-    invokeChanged += blocking
+    callParts += "/\\ ${assignTrue(callFlag, childBinder)}"
+    callChanged += callFlag
+    callParts += "/\\ ${assignTrue(blocking, hostBinder)}   \\* so ${site.hostName} does not execute other actions in the meantime"
+    callChanged += blocking
 
-    val invokeUnchanged = allVars.filter { it !in invokeChanged }
-    if (invokeUnchanged.isNotEmpty()) {
-        invokeParts += "/\\ UNCHANGED <<${invokeUnchanged.joinToString(", ")}>>"
+    val callUnchanged = allVars.filter { it !in callChanged }
+    if (callUnchanged.isNotEmpty()) {
+        callParts += "/\\ UNCHANGED <<${callUnchanged.joinToString(", ")}>>"
     }
 
-    val invokeName = "${site.hostActionName}_invoke"
-    val invokeComment = "${site.hostActionName} invokes the procfun ${site.procFunName} before executing"
-    val invokeParams = mutableListOf<Pair<String, String>>()
+    val callName = "${site.hostActionName}_call"
+    val callComment = "${site.hostActionName} calls the procfun ${site.procFunName} before executing"
+    val callParams = mutableListOf<Pair<String, String>>()
     if (hostBinder != null) {
         val domain = typeDomainConstant(hostLeaf.paramType!!) ?: hostLeaf.paramType.toString()
-        invokeParams += hostBinder to domain
+        callParams += hostBinder to domain
     }
-    // Host action args referenced by guards / call args
     fun refsArg(argName: String): Boolean =
         hostOffer.decl.guards.any { exprReferencesSymbol(it, argName) } ||
             callArgs.any { exprReferencesSymbol(it, argName) }
     hostOffer.decl.action.args.filter { refsArg(it.name) }.forEach { arg ->
-        invokeParams += arg.name to typeToTlaDomain(arg.type)
+        callParams += arg.name to typeToTlaDomain(arg.type)
     }
-    val invokeSig = if (invokeParams.isEmpty()) invokeName
-    else "$invokeName(${invokeParams.joinToString(", ") { it.first }})"
-    val invokeAction = TlaAction(
-        invokeName,
-        "$invokeSig ==\n  ${invokeParts.joinToString("\n  ")}",
-        invokeParams.distinctBy { it.first },
-        comment = invokeComment,
+    val callSig = if (callParams.isEmpty()) callName
+    else "$callName(${callParams.joinToString(", ") { it.first }})"
+    val callAction = TlaAction(
+        callName,
+        "$callSig ==\n  ${callParts.joinToString("\n  ")}",
+        callParams.distinctBy { it.first },
+        comment = callComment,
     )
 
-    // --- resume action ---
-    val resumeParts = mutableListOf<String>()
-    val resumeChanged = mutableSetOf<String>()
-    resumeParts += "/\\ ${idx(returnTo, hostBinder)}"
-    resumeParts += "/\\ ${idx(blocking, hostBinder)}"
+    // --- ret action ---
+    val retParts = mutableListOf<String>()
+    val retChanged = mutableSetOf<String>()
+    retParts += "/\\ ${idx(returnTo, hostBinder)}"
+    retParts += "/\\ ${idx(blocking, hostBinder)}"
 
-    val returnExpr = procFun.localDecls().filterIsInstance<TransitionNode>()
-        .flatMap { it.transitions() }
-        .firstOrNull { it.isReturn }
-        ?.returnExpr
-        ?: error("procfun ${site.procFunName} has no return transition for TLA resume")
-
-    val retRhs = exprToTla(
-        returnExpr, childCtx, emptySet(), childBinder, childBare,
-        stateVarNames = stateVarNames,
-    )
+    val retValTla = stateTlaName(child.tlaName, PROC_FUN_RET_VAL, stateVarNames)
+    val retRhs = idx(retValTla, childBinder)
     site.assignVars.forEach { varName ->
         val v = stateTlaName(hostLeaf.tlaName, varName, stateVarNames)
-        resumeParts += "/\\ ${assignVal(v, hostBinder, retRhs)}"
-        resumeChanged += v
+        retParts += "/\\ ${assignVal(v, hostBinder, retRhs)}"
+        retChanged += v
     }
 
-    // Non-procfun assigns from the original transit (none in v1 whole-RHS-only case, but keep others).
     var letBindings = emptyMap<String, ExprNode>()
     fun substLets(expr: ExprNode): ExprNode {
         var result = expr
@@ -195,53 +184,141 @@ internal fun emitProcFunInvokeAndResume(
                 if (expr is FunCallExprNode && expr.resolvedProcFunOrNull() != null) return@forEach
                 val v = stateTlaName(hostLeaf.tlaName, root, stateVarNames)
                 val rhs = exprToTla(expr, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)
-                resumeParts += "/\\ ${assignVal(v, hostBinder, rhs)}"
-                resumeChanged += v
+                retParts += "/\\ ${assignVal(v, hostBinder, rhs)}"
+                retChanged += v
             }
             is TransitUpdate.MapPut -> {
-                // Map puts with procfun RHS are out of v1 scope; emit normally if no procfun.
                 val valueExpr = substLets(update.value)
                 if (valueExpr is FunCallExprNode && valueExpr.resolvedProcFunOrNull() != null) return@forEach
                 val v = stateTlaName(hostLeaf.tlaName, update.mapVar, stateVarNames)
                 val k = exprToTla(substLets(update.key), hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)
                 val vv = exprToTla(valueExpr, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)
                 if (hostBinder != null) {
-                    resumeParts += "/\\ $v' = [$v EXCEPT ![$hostBinder] = [@ EXCEPT ![$k] = $vv]]"
+                    retParts += "/\\ $v' = [$v EXCEPT ![$hostBinder] = [@ EXCEPT ![$k] = $vv]]"
                 } else {
-                    resumeParts += "/\\ $v' = [$v EXCEPT ![$k] = $vv]"
+                    retParts += "/\\ $v' = [$v EXCEPT ![$k] = $vv]"
                 }
-                resumeChanged += v
+                retChanged += v
             }
         }
     }
 
     if (site.isHostConstructor) {
-        resumeParts += "/\\ ${assignTrue(hostConstructed, hostBinder)}"
-        resumeChanged += hostConstructed
+        retParts += "/\\ ${assignTrue(hostConstructed, hostBinder)}"
+        retChanged += hostConstructed
     }
-    resumeParts += "/\\ ${assignFalse(blocking, hostBinder)}"
-    resumeChanged += blocking
-    resumeParts += "/\\ ${assignFalse(returnTo, hostBinder)}"
-    resumeChanged += returnTo
+    retParts += "/\\ ${assignFalse(blocking, hostBinder)}"
+    retChanged += blocking
+    retParts += "/\\ ${assignFalse(returnTo, hostBinder)}"
+    retChanged += returnTo
 
-    val resumeUnchanged = allVars.filter { it !in resumeChanged }
-    if (resumeUnchanged.isNotEmpty()) {
-        resumeParts += "/\\ UNCHANGED <<${resumeUnchanged.joinToString(", ")}>>"
+    val retUnchanged = allVars.filter { it !in retChanged }
+    if (retUnchanged.isNotEmpty()) {
+        retParts += "/\\ UNCHANGED <<${retUnchanged.joinToString(", ")}>>"
     }
 
-    val resumeComment = "The guards for ${site.hostActionName} appear in $invokeName"
-    val resumeParams = if (hostBinder != null) {
+    val retName = "${site.hostActionName}_ret"
+    val retComment = "The guards for ${site.hostActionName} appear in $callName"
+    val retParams = if (hostBinder != null) {
         val domain = typeDomainConstant(hostLeaf.paramType!!) ?: hostLeaf.paramType.toString()
         listOf(hostBinder to domain)
     } else emptyList()
-    val resumeSig = if (resumeParams.isEmpty()) site.hostActionName
-    else "${site.hostActionName}(${resumeParams.joinToString(", ") { it.first }})"
-    val resumeAction = TlaAction(
-        site.hostActionName,
-        "$resumeSig ==\n  ${resumeParts.joinToString("\n  ")}",
-        resumeParams,
-        comment = resumeComment,
+    val retSig = if (retParams.isEmpty()) retName
+    else "$retName(${retParams.joinToString(", ") { it.first }})"
+    val retAction = TlaAction(
+        retName,
+        "$retSig ==\n  ${retParts.joinToString("\n  ")}",
+        retParams,
+        comment = retComment,
     )
 
-    return listOf(invokeAction, resumeAction)
+    return listOf(callAction, retAction)
+}
+
+/**
+ * Collapse a host action with an uncomposed procfun call to a single step that
+ * havocs the assigned vars (`var' \\in Domain`).
+ */
+internal fun emitProcFunHavocAction(
+    site: ProcFunCallSite,
+    hostLeaf: SpecLeaf,
+    hostOffer: TlaActionOffer,
+    procFun: ProcFunNode,
+    allVars: List<String>,
+    stateVarsByLeaf: Map<String, Set<String>>,
+    stateVarNames: Map<Pair<String, String>, String>,
+    cfgOverrides: MutableSet<String>,
+): TlaAction {
+    val hostBare = stateVarsByLeaf[hostLeaf.tlaName].orEmpty()
+    val reserved = mutableSetOf<String>()
+    reserved += hostBare
+    val hostBinder = if (hostLeaf.isParameterized) {
+        indexBinderName(hostLeaf, reserved).also { reserved += it }
+    } else null
+
+    fun idx(v: String, binder: String?): String = if (binder != null) "$v[$binder]" else v
+    fun assignTrue(v: String, binder: String?): String =
+        if (binder != null) "$v' = [$v EXCEPT ![$binder] = TRUE]" else "$v' = TRUE"
+
+    val hostCtx = mapOf(hostLeaf.name to hostLeaf, hostLeaf.tlaName to hostLeaf)
+    val hostArgNames = hostOffer.decl.action.args.map { it.name }.toSet()
+    val parts = mutableListOf<String>()
+    val changed = mutableSetOf<String>()
+
+    val hostConstructed = stateTlaName(hostLeaf.tlaName, "constructed", stateVarNames)
+    if (site.isHostConstructor) {
+        parts += "/\\ ~${idx(hostConstructed, hostBinder)}"
+    } else {
+        parts += "/\\ ${idx(hostConstructed, hostBinder)}"
+    }
+    hostOffer.decl.guards.forEach { g ->
+        parts += "/\\ ${exprToTla(g, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)}"
+    }
+
+    val retDomain = typeToTlaDomain(procFun.returnType)
+    collectDomainModelName(retDomain, cfgOverrides)
+    site.assignVars.forEach { varName ->
+        val v = stateTlaName(hostLeaf.tlaName, varName, stateVarNames)
+        if (hostBinder != null) {
+            parts += "/\\ \\E __pf \\in $retDomain: $v' = [$v EXCEPT ![$hostBinder] = __pf]"
+        } else {
+            parts += "/\\ $v' \\in $retDomain"
+        }
+        changed += v
+    }
+
+    if (site.isHostConstructor) {
+        parts += "/\\ ${assignTrue(hostConstructed, hostBinder)}"
+        changed += hostConstructed
+    }
+
+    val unchanged = allVars.filter { it !in changed }
+    if (unchanged.isNotEmpty()) {
+        parts += "/\\ UNCHANGED <<${unchanged.joinToString(", ")}>>"
+    }
+
+    val params = mutableListOf<Pair<String, String>>()
+    if (hostBinder != null) {
+        val domain = typeDomainConstant(hostLeaf.paramType!!) ?: hostLeaf.paramType.toString()
+        params += hostBinder to domain
+    }
+    fun refsArg(argName: String): Boolean =
+        hostOffer.decl.guards.any { exprReferencesSymbol(it, argName) }
+    hostOffer.decl.action.args.filter { refsArg(it.name) }.forEach { arg ->
+        params += arg.name to typeToTlaDomain(arg.type)
+    }
+    val sig = if (params.isEmpty()) site.hostActionName
+    else "${site.hostActionName}(${params.joinToString(", ") { it.first }})"
+    return TlaAction(
+        site.hostActionName,
+        "$sig ==\n  ${parts.joinToString("\n  ")}",
+        params.distinctBy { it.first },
+        comment = "${site.hostActionName} havocs return of uncomposed procfun ${site.procFunName}",
+    )
+}
+
+private fun collectDomainModelName(domain: String, into: MutableSet<String>) {
+    // Simple domain names that need .cfg models (e.g. String, Int).
+    val base = domain.trim().removePrefix("(").substringBefore(" ")
+    if (base in setOf("Int", "Nat", "Real", "String")) into += base
 }

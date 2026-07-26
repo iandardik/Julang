@@ -17,7 +17,7 @@ const KEYWORDS = new Set([
 
 function looksLikeProcReference(document, position, name) {
   const line = document.lineAt(position.line).text;
-  if (/\b(proc|spec)\s+\w/.test(line) && line.includes(name)) {
+  if (/\b(proc|spec|procfun)\s+\w/.test(line) && line.includes(name)) {
     return true;
   }
   if (line.includes("||") || /:=/.test(line)) {

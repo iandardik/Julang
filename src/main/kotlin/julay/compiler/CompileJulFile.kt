@@ -3,6 +3,8 @@ package julay.compiler
 import julay.compiler.ast.SpecNode
 import julay.compiler.ast.ValueProcExprNode
 import julay.compiler.pass.compileSpecToTla
+import julay.compiler.pass.procFunCompositionErrors
+import julay.compiler.pass.procFunHavocWarnings
 import java.nio.file.Path
 
 fun compileJulFile(
@@ -78,9 +80,18 @@ private fun runSpecAlphabetIntegrityPass(
     procDecls: List<julay.compiler.decl.ProcDecl>,
     librariesInUse: Set<String>,
 ): Boolean {
+    val compositionErrors = ast.procFunCompositionErrors(procDecls)
+    if (compositionErrors.isNotEmpty()) {
+        compositionErrors.forEach { System.err.println(it) }
+        System.err.println("Found errors while compiling \"${program.name}\"; exiting.")
+        return false
+    }
+    ast.procFunHavocWarnings(program, procDecls).forEach { System.err.println(it) }
     val components = program.allProcNames(procDecls)
     val leafMap = julay.compiler.pass.leafActionMap(ast, components, librariesInUse)
-    val alphabet = julay.compiler.pass.computeCompositionAlphabet(program, procDecls, leafMap)
+    val alphabet = julay.compiler.pass.computeCompositionAlphabet(
+        program, procDecls, leafMap, julay.compiler.collectProcFunNames(ast),
+    )
     val errors = alphabet.errors + julay.compiler.pass.alphabetIntegrityErrors(alphabet)
     if (errors.isEmpty()) return true
     errors.forEach { System.err.println(it) }

@@ -49,19 +49,34 @@ fun tlaCodegenPass(
         ?.mapValues { (_, sort) -> "{${sort.cfgElements.joinToString(", ")}}" }
         ?: emptyMap()
 
-    val hostLeaves = expandLeavesToPclasses(
-        compositionLeavesOfSpec(spec),
-        pclassNodes,
+    val compositionLeaves = compositionLeavesOfSpec(spec)
+    val procFunNameSet = procFunNodes.keys
+    val composedProcFuns = compositionLeaves.map { it.name }.filter { it in procFunNameSet }.toSet()
+    // Composition listings of procfuns are metadata (whitelist), not free-standing SyncChannel peers —
+    // except when the entire system is a standalone procfun (compile F).
+    val standaloneProcFun = compositionLeaves.size == 1 && compositionLeaves.single().name in procFunNameSet
+    val hostLeavesRaw = expandLeavesToPclasses(
+        compositionLeaves.filter { it.name !in procFunNameSet || standaloneProcFun },
+        pclassNodes + procFunNodes.mapValues { (_, pf) -> pf.asSyntheticProcClass() },
         procAliases,
         specAliases,
+    ).map { leaf ->
+        if (leaf.name in procFunNameSet) leaf.copy(isProcFun = true) else leaf
+    }
+    val callSiteDraftsAll = discoverProcFunCallSiteDrafts(
+        hostLeavesRaw.filter { !it.isProcFun },
+        pclassNodes,
     )
-    val callSiteDrafts = discoverProcFunCallSiteDrafts(hostLeaves, pclassNodes)
-    val procFunLeavesRaw = procFunLeavesFromDrafts(callSiteDrafts)
-    val leaves = assignTlaLeafNames(hostLeaves + procFunLeavesRaw)
-    val callSites = resolveProcFunCallSites(callSiteDrafts, leaves)
+    val coupledDrafts = callSiteDraftsAll.filter { it.procFunName in composedProcFuns }
+    val havocDrafts = callSiteDraftsAll.filter { it.procFunName !in composedProcFuns }
+    val procFunLeavesRaw = procFunLeavesFromDrafts(coupledDrafts)
+    val leaves = assignTlaLeafNames(hostLeavesRaw + procFunLeavesRaw)
+    val callSites = resolveProcFunCallSites(coupledDrafts, leaves)
+    val havocSites = resolveHavocProcFunCallSites(havocDrafts, leaves)
     val handshake = buildProcFunHandshakeVars(callSites)
-    // Synthetic proc classes for procfun lookup (args + invoke_<name> + transitions).
+    // Synthetic proc classes for procfun lookup (args + F_call + transitions + F_ret).
     val pclassesForTla = pclassNodes + procFunNodes.mapValues { (_, pf) -> pf.asSyntheticProcClass() }
+    val procFunDecls = ast.procFunClassPass().associateBy { it.name }
 
     val constants = linkedSetOf<String>()
     leaves.forEach { leaf ->
@@ -100,6 +115,16 @@ fun tlaCodegenPass(
     }
     collectActionArgDomainModels(leaves, pclassesForTla, cfgOverrides)
     collectIoHavocDomainModels(leaves, pclassesForTla, cfgOverrides)
+    // Collect domains for havoc'd procfun returns.
+    havocSites.forEach { site ->
+        procFunNodes[site.procFunName]?.let { pf ->
+            try {
+                val d = typeToTlaDomain(pf.returnType)
+                val base = d.trim().removePrefix("(").substringBefore(" ")
+                if (base in setOf("Int", "Nat", "Real", "String")) cfgOverrides += base
+            } catch (_: RuntimeException) {}
+        }
+    }
     // String is not provided by EXTENDS; declare it CONSTANT when used as a domain.
     if ("String" in cfgOverrides) {
         constants += "String"
@@ -113,9 +138,9 @@ fun tlaCodegenPass(
         actionArgNames(leaves, pclassesForTla) +
         leaves.mapNotNull { it.paramName }.toSet()
 
-    val offers = collectTlaActionOffers(leaves, pclassesForTla)
-        // Call-site-driven: child construct is folded into parent *_invoke (no free-standing invoke_*).
-        .filterNot { it.isConstructor && it.leaf.isProcFun }
+    val offers = collectTlaActionOffers(leaves, pclassesForTla, procFunDecls)
+        // Coupled: child construct is folded into parent *_call. Standalone: keep F_call.
+        .filterNot { it.isConstructor && it.leaf.isProcFun && !standaloneProcFun }
     val sessionPairs = detectTwoSidedSessionPairs(offers)
     val emittedOfferLists = collectEmittedOfferLists(offers)
     val killTargets = collectKillTargets(emittedOfferLists, sessionPairs)
@@ -185,7 +210,7 @@ fun tlaCodegenPass(
                 initParts += "/\\ $varName = FALSE"
             }
         }
-        handshake.invokeFlags.forEach { (occ, varName) ->
+        handshake.callFlags.forEach { (occ, varName) ->
             variables += varName
             if (occ.isParameterized) {
                 val domain = typeDomainConstant(occ.paramType!!) ?: occ.paramType.toString()
@@ -220,6 +245,7 @@ fun tlaCodegenPass(
     val built = buildTlaActions(
         leaves, pclassesForTla, offers, sessionPairs, stateVarNames,
         killTargets, needsSessionException, callSites, handshake, procFunNodes,
+        havocSites, cfgOverrides,
     )
     val helpers = built.helpers
     val actions = built.actions
@@ -413,9 +439,20 @@ private fun safeType(vn: VarNode): Type = try {
 private fun collectTlaActionOffers(
     leaves: List<SpecLeaf>,
     pclasses: Map<String, ProcClassNode>,
+    procFunDecls: Map<String, julay.compiler.decl.ProcClassDecl> = emptyMap(),
 ): List<TlaActionOffer> {
     val offers = mutableListOf<TlaActionOffer>()
     leaves.forEach { leaf ->
+        val pfDecl = procFunDecls[leaf.name]
+        if (pfDecl != null && leaf.isProcFun) {
+            pfDecl.constructors.forEach { ctor ->
+                offers += TlaActionOffer(leaf, ctor, TSAction.SyncRole.Internal, isConstructor = true)
+            }
+            pfDecl.transitions.forEach { tr ->
+                offers += TlaActionOffer(leaf, tr, tr.modifier, isConstructor = false)
+            }
+            return@forEach
+        }
         val pc = pclasses[leaf.name] ?: return@forEach
         pc.localDecls().flatMap { it.constructors() }.forEach { ctor ->
             offers += TlaActionOffer(leaf, ctor, TSAction.SyncRole.Internal, isConstructor = true)
@@ -891,6 +928,8 @@ private fun buildTlaActions(
     callSites: List<ProcFunCallSite> = emptyList(),
     handshake: ProcFunHandshakeVars = ProcFunHandshakeVars(emptyList(), emptyMap(), emptyMap()),
     procFunNodes: Map<String, ProcFunNode> = emptyMap(),
+    havocSites: List<ProcFunCallSite> = emptyList(),
+    cfgOverrides: MutableSet<String> = linkedSetOf(),
 ): TlaBuildResult {
     val allVars = allTlaVars(leaves, pclasses, stateVarNames, killTargets) +
         handshake.allNames() +
@@ -908,12 +947,13 @@ private fun buildTlaActions(
     }
     val leafByTla = leaves.associateBy { it.tlaName }
     val callSiteByHostAction = callSites.associateBy { it.hostName to it.hostActionName }
+    val havocByHostAction = havocSites.associateBy { it.hostName to it.hostActionName }
     val returnToByOccurrence = callSites.associate {
         it.occurrence.occurrenceId to handshake.returnToByKey.getValue(it.hostName to it.hostActionName)
     }
     val blockingByHost = handshake.blockingByHost
     val hostsWithBlocking = blockingByHost.keys
-    val splitHostActions = callSiteByHostAction.keys
+    val splitHostActions = callSiteByHostAction.keys + havocByHostAction.keys
 
     val result = mutableListOf<TlaAction>()
     val byName = offers.groupBy { it.decl.action.name }
@@ -934,8 +974,17 @@ private fun buildTlaActions(
         val hostLeaf = leafByTla.getValue(offer.leaf.tlaName)
         val pf = procFunNodes[site.procFunName]
             ?: error("missing procfun ${site.procFunName}")
-        result += emitProcFunInvokeAndResume(
+        result += emitProcFunCallAndRet(
             site, hostLeaf, offer, pf, allVars, stateVarsByLeaf, stateVarNames, handshake,
+        )
+    }
+
+    fun emitHavoc(offer: TlaActionOffer, site: ProcFunCallSite) {
+        val hostLeaf = leafByTla.getValue(offer.leaf.tlaName)
+        val pf = procFunNodes[site.procFunName]
+            ?: error("missing procfun ${site.procFunName}")
+        result += emitProcFunHavocAction(
+            site, hostLeaf, offer, pf, allVars, stateVarsByLeaf, stateVarNames, cfgOverrides,
         )
     }
 
@@ -971,14 +1020,17 @@ private fun buildTlaActions(
             return@forEach
         }
 
+        fun emitSplitOrPlain(offer: TlaActionOffer): Boolean {
+            val key = offer.leaf.tlaName to offer.decl.action.name
+            callSiteByHostAction[key]?.let { emitCoupled(offer, it); return true }
+            havocByHostAction[key]?.let { emitHavoc(offer, it); return true }
+            return false
+        }
+
         // Solo constructors (any name, including initially) — valid leaf entry
         val disambiguateCtors = constructors.size > 1
         constructors.forEach { offer ->
-            val site = callSiteByHostAction[offer.leaf.tlaName to offer.decl.action.name]
-            if (site != null) {
-                emitCoupled(offer, site)
-                return@forEach
-            }
+            if (emitSplitOrPlain(offer)) return@forEach
             val name: String
             val comment: String?
             if (disambiguateCtors) {
@@ -1001,11 +1053,7 @@ private fun buildTlaActions(
 
         val disambiguateInternals = internals.size > 1
         internals.forEach { offer ->
-            val site = callSiteByHostAction[offer.leaf.tlaName to offer.decl.action.name]
-            if (site != null) {
-                emitCoupled(offer, site)
-                return@forEach
-            }
+            if (emitSplitOrPlain(offer)) return@forEach
             val name: String
             val comment: String?
             if (disambiguateInternals) {
@@ -1023,16 +1071,12 @@ private fun buildTlaActions(
                 val (coupled, plain) = defaults.partition {
                     (it.leaf.tlaName to it.decl.action.name) in splitHostActions
                 }
-                coupled.forEach { offer ->
-                    emitCoupled(offer, callSiteByHostAction.getValue(offer.leaf.tlaName to offer.decl.action.name))
-                }
+                coupled.forEach { offer -> emitSplitOrPlain(offer) }
                 if (plain.isNotEmpty()) result += emit(actionName, plain)
             }
             defaults.size == 1 -> {
                 val offer = defaults[0]
-                val site = callSiteByHostAction[offer.leaf.tlaName to offer.decl.action.name]
-                if (site != null) emitCoupled(offer, site)
-                else result += emit(actionName, defaults)
+                if (!emitSplitOrPlain(offer)) result += emit(actionName, defaults)
             }
         }
 
@@ -1264,7 +1308,9 @@ private fun emitConjoined(
                 "/\\ $c' = TRUE"
             }
         }
-        if (offer.decl.isReturn && offer.leaf.isProcFun) {
+        if (offer.decl.isReturn && offer.leaf.isProcFun &&
+            offer.decl.action.name == procFunRetAction(offer.leaf.name)
+        ) {
             val term = stateTlaName(offer.leaf.tlaName, "terminated", stateVarNames)
             targetChanged += term
             targetParts += if (self != null) {

@@ -26,6 +26,6 @@ proc Main {
     }
 }
 
-spec CountUpIndexed := Main[k : Idx]
+spec CountUpIndexed := Main[k : Idx] || countUp
 
 compile CountUpIndexed

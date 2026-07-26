@@ -107,6 +107,15 @@ fun leafActionMap(ast: RootNode, procs: Set<String>, librariesInUse: Set<String>
     val julay = ast.declNodes()
         .flatMap { it.procClassPass(procs) }
         .associate { pc -> pc.name to pc.toAlphabetOffers() }
+    val procFuns = ast.procFunClassPass()
+        .filter { it.name in procs || procs.isEmpty() }
+        .associate { pc -> pc.name to pc.toAlphabetOffers() }
+    // When procs is a specific set, only include named procfuns that are in scope.
+    val procFunFiltered = if (procs.isEmpty()) {
+        procFuns
+    } else {
+        procFuns.filterKeys { it in procs }
+    }
     val libs = librariesInUse
         .filter { it in procs && LibraryRegistry.isKotlinLibrary(it) }
         .associate { libName ->
@@ -123,7 +132,7 @@ fun leafActionMap(ast: RootNode, procs: Set<String>, librariesInUse: Set<String>
             }
             libName to offers
         }
-    return julay + libs
+    return julay + procFunFiltered + libs
 }
 
 private fun ProcClassDecl.toAlphabetOffers(): List<AlphabetOffer> =
@@ -205,6 +214,7 @@ fun computeCompositionAlphabet(
     root: ProcDecl,
     procDecls: List<ProcDecl>,
     leafOffersByPclass: Map<String, List<AlphabetOffer>>,
+    procFunNames: Set<String> = emptySet(),
 ): CompositionAlphabetResult {
     resetCompositionScopeCounter()
     val procDeclMap = procDecls.associateBy { it.name }
@@ -226,6 +236,10 @@ fun computeCompositionAlphabet(
     ): List<AlphabetOffer> {
         val occurrenceId = freshOccurrenceId(pclass)
         leafOccurrences += LeafOccurrence(pclass, occurrenceId, introducingAssembly)
+        // Procfuns listed in || are composition metadata unless this root *is* the procfun.
+        if (pclass in procFunNames && root.name != pclass) {
+            return emptyList()
+        }
         val templates = leafOffersByPclass[pclass] ?: emptyList()
         val offers = templates.map { template ->
             val channelKey = if (template.sourceInternal) {

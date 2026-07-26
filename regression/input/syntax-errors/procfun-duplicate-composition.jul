@@ -17,13 +17,11 @@ procfun countUp(n : Int) : Int {
 
 proc Main {
     var out : Int
-
     constructor initially(args : List<String>) {
-        transit:
-            out := countUp(2)
+        transit: out := countUp(2)
     }
 }
 
-spec CountUpSpec := Main || countUp
+spec Bad := Main || countUp || countUp
 
-compile CountUpSpec
+compile Bad

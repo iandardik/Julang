@@ -77,7 +77,8 @@ private fun RootNode.errorPassRoot(
 ): List<CompileError> =
     children.flatMap { it.errorPass(procs, librariesInUse) } +
         actionConsistencyErrors(procs, librariesInUse, program, procDecls) +
-        overlappingDeclNamesErrors()
+        overlappingDeclNamesErrors() +
+        procFunCompositionErrors(procDecls)
 
 private fun RootNode.actionConsistencyErrors(
     procs: Set<String>,
@@ -87,7 +88,7 @@ private fun RootNode.actionConsistencyErrors(
 ): List<CompileError> {
     val leafMap = leafActionMap(this, procs, librariesInUse)
     val alphabetResult = if (program != null) {
-        computeCompositionAlphabet(program, procDecls, leafMap)
+        computeCompositionAlphabet(program, procDecls, leafMap, collectProcFunNames(this))
     } else {
         // No composition root (e.g. analyze whole CU): unique keys for internals only.
         val all = leafMap.values.flatten()
@@ -393,13 +394,15 @@ private fun RootNode.actionConsistencyWarnings(
     // Without one (plain analyze), warn on peer-count mismatches across the CU.
     val syncWarnings = if (program != null) {
         val leafMap = leafActionMap(this, procs, librariesInUse)
-        val alphabetResult = computeCompositionAlphabet(program, procDecls, leafMap)
+        val alphabetResult = computeCompositionAlphabet(
+            program, procDecls, leafMap, collectProcFunNames(this),
+        )
         unsyncedOrdinaryWarnings(alphabetResult.external)
     } else {
         missingSyncPeerWarnings(offers)
     }
 
-    return providerDeadlock + syncWarnings
+    return providerDeadlock + syncWarnings + procFunHavocWarnings(program, procDecls)
 }
 
 /** Warn when a default/session action does not have exactly two sync peers. */
@@ -565,43 +568,46 @@ private fun ProcFunNode.errorPassProcFun(procs: Set<String>, librariesInUse: Set
             )
         }
     val transitions = localDecls.filterIsInstance<TransitionNode>()
-    val reservedInvoke = procFunInvokeCtor(name())
-    val invokeNameClash = transitions.filter { it.transitionName() == reservedInvoke }.map {
+    val ctors = localDecls.filterIsInstance<ConstructorNode>()
+    val reservedCall = procFunCallCtor(name())
+    val reservedRet = procFunRetAction(name())
+    val reservedNames = setOf("initially", reservedCall, reservedRet, PROC_FUN_RET_VAL)
+    val reservedNameClash = transitions.filter { it.transitionName() in reservedNames }.map {
         OneLocCompileError(
             it.programLocation(),
-            "Transition name \"$reservedInvoke\" is reserved for the synthetic procfun constructor",
+            "Name \"${it.transitionName()}\" is reserved in a procfun",
+        )
+    } + ctors.filter { it.constructorName() in reservedNames }.map {
+        OneLocCompileError(
+            it.programLocation(),
+            "Name \"${it.constructorName()}\" is reserved in a procfun",
+        )
+    } + varNodes.filter { it.name in reservedNames }.map {
+        OneLocCompileError(
+            it.programLocation(),
+            "Name \"${it.name}\" is reserved in a procfun",
         )
     }
     val returnTransitions = transitions.filter { it.body().any { b -> b.returns().isNotEmpty() } }
-    val nonReturnTransitions = transitions.filter { it !in returnTransitions }
     val needReturn = assertOrCompileError(
         returnTransitions.isNotEmpty(),
         OneLocCompileError(programLocation(), "Expected procfun \"${name()}\" to have at least one return transition"),
     )
-    val modifierErrors = nonReturnTransitions.flatMap { trans ->
-        val decl = trans.transitions().single()
-        val hasReturn = false
+    // Any modifier except provider; session is allowed. return: may appear on any such transition.
+    val modifierErrors = transitions.flatMap { trans ->
         val mod = trans.modifier()
-        val ok = mod == TSAction.SyncRole.Internal || mod == TSAction.SyncRole.Client
         assertOrCompileError(
-            ok && !trans.isSessionTransition(),
+            mod != TSAction.SyncRole.Provider,
             OneLocCompileError(
                 trans.programLocation(),
-                "Procfun transitions must be tagged internal or client (except return transitions)",
+                "Procfun transitions cannot be tagged provider",
             ),
         )
     }
-    val returnModifierErrors = returnTransitions.flatMap { trans ->
-        val hasModifier = trans.modifier() != TSAction.SyncRole.Default || trans.isSessionTransition()
+    val returnClauseErrors = returnTransitions.flatMap { trans ->
         val hasTransit = trans.body().any { it.transits().isNotEmpty() || it is TransitNode }
         val hasError = trans.body().any { it.errors().isNotEmpty() }
         assertOrCompileError(
-            !hasModifier,
-            OneLocCompileError(
-                trans.programLocation(),
-                "Return transitions in a procfun must be untagged (no internal/client/provider/session)",
-            ),
-        ) + assertOrCompileError(
             !hasTransit,
             OneLocCompileError(
                 trans.programLocation(),
@@ -619,7 +625,6 @@ private fun ProcFunNode.errorPassProcFun(procs: Set<String>, librariesInUse: Set
     val inlinedVars = varNodes.filter { it.initExpr != null }.map { it.name }.toSet()
     val stateVarNames = varNodes.map { it.name }.toSet()
     // Args are initialized by the call; inline inits cover some vars; optional ctor covers the rest.
-    val ctors = localDecls.filterIsInstance<ConstructorNode>()
     val ctorErrors = when {
         ctors.size > 1 -> listOf(
             OneLocCompileError(programLocation(), "Procfun \"${name()}\" may have at most one constructor"),
@@ -656,7 +661,7 @@ private fun ProcFunNode.errorPassProcFun(procs: Set<String>, librariesInUse: Set
     val constAssignErrors = transitions.flatMap { constAssignmentErrors(it, constVarNames) }
     val returnInOrdinaryProc = emptyList<CompileError>()
     return children.flatMap { it.errorPass(procs, librariesInUse) } + redeclArgErrors +
-        repeatStateVarNameErrors + invokeNameClash + needReturn + modifierErrors + returnModifierErrors +
+        repeatStateVarNameErrors + reservedNameClash + needReturn + modifierErrors + returnClauseErrors +
         ctorErrors + noCtorMissing + constAssignErrors + returnOutsideProcFunOnOrdinary + returnInOrdinaryProc
 }
 

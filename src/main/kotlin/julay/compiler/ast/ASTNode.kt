@@ -544,6 +544,7 @@ class ConstructorNode(
         )
     }
     internal fun body(): List<ActionBodyNode> = body
+    internal fun constructorName(): String = name
     internal fun constructorArgs(): ArgsNode = args
     internal fun actionArgs(): List<Variable> = args.actionArgs()
     internal fun withBody(newBody: List<ActionBodyNode>): ConstructorNode =
@@ -579,12 +580,12 @@ class TransitionNode(
                 SymbolicAction(
                     name,
                     actionArgs,
-                    isInternal = modifier == TSAction.SyncRole.Internal || returnExpr != null,
+                    isInternal = modifier == TSAction.SyncRole.Internal,
                     isSession = isSession,
                 ),
                 guards,
                 body.flatMap { it.transits() },
-                if (returnExpr != null) TSAction.SyncRole.Internal else modifier,
+                modifier,
                 loc,
                 body.flatMap { it.befores() },
                 body.flatMap { it.afters() },

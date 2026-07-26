@@ -33,17 +33,24 @@ data class CheckedCompilation(
 )
 
 /**
- * Resolve compile target names into JAR and TLA targets.
+ * Resolve compile target names into JAR, spec, and standalone-procfun TLA targets.
  * When [overrideNames] is non-empty, those names are used and source `compile`
  * directives are ignored; otherwise names come from `compile` directives.
  * Returns null if any name is unknown (errors already printed).
  */
+data class ResolvedCompileTargets(
+    val jars: List<ProcDecl>,
+    val specs: List<ProcDecl>,
+    /** Procfuns named by `compile` — emit standalone TLA (not JAR). */
+    val procFunTla: List<ProcDecl>,
+)
+
 fun resolveCompileTargets(
     ast: RootNode,
     unit: CompilationUnit,
     procDecls: List<ProcDecl>,
     overrideNames: List<String> = emptyList(),
-): Pair<List<ProcDecl>, List<ProcDecl>>? {
+): ResolvedCompileTargets? {
     val names = if (overrideNames.isNotEmpty()) {
         overrideNames.distinct()
     } else {
@@ -55,11 +62,14 @@ fun resolveCompileTargets(
     val byName = procDecls.associateBy { it.name }
     val jars = mutableListOf<ProcDecl>()
     val specs = mutableListOf<ProcDecl>()
+    val procFunTla = mutableListOf<ProcDecl>()
+    val procFunNames = collectProcFunNames(ast)
     val missing = mutableListOf<String>()
     for (name in names) {
-        if (name in collectProcFunNames(ast)) {
-            println("Cannot compile procfun \"$name\" as a JAR or spec target; call it from a proc instead")
-            return null
+        if (name in procFunNames) {
+            // Standalone TLA/analyze of the procfun — not a JAR root.
+            procFunTla += ProcDecl(name, emptyList(), ProcDeclType.Proc)
+            continue
         }
         val decl = byName[name]
         when {
@@ -73,7 +83,7 @@ fun resolveCompileTargets(
         println("Unknown compile name(s): ${missing.joinToString(", ")}")
         return null
     }
-    return jars to specs
+    return ResolvedCompileTargets(jars, specs, procFunTla)
 }
 
 /**
@@ -84,6 +94,7 @@ fun resolveCompileTlaTargets(
     unit: CompilationUnit,
     procDecls: List<ProcDecl>,
     names: List<String>,
+    procFunNames: Set<String> = emptySet(),
 ): List<ProcDecl>? {
     if (names.isEmpty()) return emptyList()
     val byName = procDecls.associateBy { it.name }
@@ -91,10 +102,10 @@ fun resolveCompileTlaTargets(
     val missing = mutableListOf<String>()
     val notProcs = mutableListOf<String>()
     for (name in names.distinct()) {
-        val decl = byName[name]
         when {
-            decl?.type == ProcDeclType.Proc -> procs += decl
-            decl?.type == ProcDeclType.Spec -> notProcs += name
+            name in procFunNames -> procs += ProcDecl(name, emptyList(), ProcDeclType.Proc)
+            byName[name]?.type == ProcDeclType.Proc -> procs += byName.getValue(name)
+            byName[name]?.type == ProcDeclType.Spec -> notProcs += name
             name in unit.allPClassNames -> procs += ProcDecl(name, emptyList(), ProcDeclType.Proc)
             else -> missing += name
         }
@@ -143,11 +154,15 @@ fun prepareCheckedCompilation(
         println("Found compile errors, exiting.")
         return null
     }
-    val (jarTargets, specTargets) = targets
-    val tlaProcTargets = resolveCompileTlaTargets(unit, procDecls, compileTlaNames) ?: run {
+    val jarTargets = targets.jars
+    val specTargets = targets.specs
+    val fromCompileTla = resolveCompileTlaTargets(
+        unit, procDecls, compileTlaNames, collectProcFunNames(ast),
+    ) ?: run {
         println("Found compile errors, exiting.")
         return null
     }
+    val tlaProcTargets = (fromCompileTla + targets.procFunTla).distinctBy { it.name }
 
     return CheckedCompilation(
         unit = unit,
