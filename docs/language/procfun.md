@@ -77,17 +77,20 @@ procfun parseCfg(cfg : String) : Set<Node> {
 proc RaftNodeMain {
     const self : Node
     const cluster : Set<Node>
+    const listenPort : Int
 
     constructor initially(args : List<String>) {
         transit:
-            // `let` is an expression — put it on an assign RHS (not as a bare transit statement)
-            self := let (id : Int := parseInt(args[1])) {
-                Node { id := id, url := "" }
-            }
-            cluster := parseCfg(args[0])
+            let id : Int := parseInt(args[1])
+            let cfg : CfgPair := parseCfg(args[0], id)
+            self := cfg.me
+            cluster := cfg.cluster
+            listenPort := portFromUrl(cfg.me.url)
     }
 }
 ```
+
+Transit statement `let`s share one binding across several assigns (see [Side effects](effects.md#transit-statement-let)). Expression `let` remains available inside a single RHS when you only need a local binder there.
 
 Keep `constructor initially` (not `transition initially`).
 

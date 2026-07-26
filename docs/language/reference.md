@@ -11,6 +11,8 @@ Compact cheat sheet. For explanations, use the other chapters.
 `all` `exists` `if` `else` `let` `when` `in`  
 `true` `false`
 
+`let` has two forms: expression `let (name : Type := init) { body }` ([Types and expressions](types-and-expressions.md#expression-let)) and transit statement `let name : Type := expr` ([Side effects](effects.md#transit-statement-let)).
+
 ## Operators
 
 | Class | Operators |

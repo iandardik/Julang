@@ -1,0 +1,5 @@
+source: regression/input/type-errors/let-stmt-init-mismatch.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected let initializer for \"n\" to have type Int but got Boolean"
+  - "Found type errors; exiting."

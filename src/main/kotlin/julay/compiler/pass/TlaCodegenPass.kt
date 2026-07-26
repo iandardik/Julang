@@ -1136,6 +1136,7 @@ private fun emitConjoined(
                         is TransitUpdate.Assign -> exprReferencesSymbol(update.expr, argName)
                         is TransitUpdate.MapPut ->
                             exprReferencesSymbol(update.key, argName) || exprReferencesSymbol(update.value, argName)
+                        is TransitUpdate.Let -> exprReferencesSymbol(update.init, argName)
                     }
                 }
         }
@@ -1191,14 +1192,26 @@ private fun emitConjoined(
         val self = selfOf(offer.leaf)
         val argNames = offer.decl.action.args.map { it.name }.toSet()
         val leafCtx = mapOf(offer.leaf.name to offer.leaf, offer.leaf.tlaName to offer.leaf)
+        var letBindings = emptyMap<String, ExprNode>()
+        fun substLets(expr: ExprNode): ExprNode {
+            var result = expr
+            for ((name, init) in letBindings) {
+                result = substituteExpr(result, name, init)
+            }
+            return result
+        }
         offer.decl.transits.forEach { update ->
             when (update) {
+                is TransitUpdate.Let -> {
+                    letBindings = letBindings + (update.name to substLets(update.init))
+                }
                 is TransitUpdate.Assign -> {
                     val root = update.key.substringBefore('.')
                     val v = stateTlaName(offer.leaf.tlaName, root, stateVarNames)
                     targetChanged += v
-                    if (exprContainsIoHavoc(update.expr)) {
-                        val domain = typeToTlaDomain(update.expr.getType())
+                    val expr = substLets(update.expr)
+                    if (exprContainsIoHavoc(expr)) {
+                        val domain = typeToTlaDomain(expr.getType())
                         targetParts += if (self != null) {
                             "/\\ \\E __io \\in $domain: $v' = [$v EXCEPT ![$self] = __io]"
                         } else {
@@ -1206,7 +1219,7 @@ private fun emitConjoined(
                         }
                     } else {
                         val rhs = exprToTla(
-                            update.expr, leafCtx, argNames, self,
+                            expr, leafCtx, argNames, self,
                             bareStateVars = stateVarsByLeaf[offer.leaf.tlaName].orEmpty(),
                             stateVarNames = stateVarNames,
                         )
@@ -1221,16 +1234,18 @@ private fun emitConjoined(
                     val v = stateTlaName(offer.leaf.tlaName, update.mapVar, stateVarNames)
                     targetChanged += v
                     val bare = stateVarsByLeaf[offer.leaf.tlaName].orEmpty()
-                    val k = exprToTla(update.key, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames)
-                    if (exprContainsIoHavoc(update.value)) {
-                        val domain = typeToTlaDomain(update.value.getType())
+                    val keyExpr = substLets(update.key)
+                    val valueExpr = substLets(update.value)
+                    val k = exprToTla(keyExpr, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames)
+                    if (exprContainsIoHavoc(valueExpr)) {
+                        val domain = typeToTlaDomain(valueExpr.getType())
                         targetParts += if (self != null) {
                             "/\\ \\E __io \\in $domain: $v' = [$v EXCEPT ![$self] = [@ EXCEPT ![$k] = __io]]"
                         } else {
                             "/\\ \\E __io \\in $domain: $v' = [$v EXCEPT ![$k] = __io]"
                         }
                     } else {
-                        val vv = exprToTla(update.value, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames)
+                        val vv = exprToTla(valueExpr, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames)
                         targetParts += if (self != null) {
                             "/\\ $v' = [$v EXCEPT ![$self] = [@ EXCEPT ![$k] = $vv]]"
                         } else {
@@ -1306,6 +1321,7 @@ private fun emitConjoined(
                         is TransitUpdate.Assign -> exprReferencesSymbol(update.expr, argName)
                         is TransitUpdate.MapPut ->
                             exprReferencesSymbol(update.key, argName) || exprReferencesSymbol(update.value, argName)
+                        is TransitUpdate.Let -> exprReferencesSymbol(update.init, argName)
                     }
                 }
         }
@@ -1638,6 +1654,7 @@ private fun collectIntLiteralsFromLeaves(
                             collectIntLiteralsFromExpr(update.key, into)
                             collectIntLiteralsFromExpr(update.value, into)
                         }
+                        is TransitUpdate.Let -> collectIntLiteralsFromExpr(update.init, into)
                     }
                 }
             }
@@ -1740,6 +1757,12 @@ private fun collectIoHavocDomainModels(
                         is TransitUpdate.MapPut -> if (exprContainsIoHavoc(update.value)) {
                             try {
                                 collectDomainModelNames(update.value.getType(), into)
+                            } catch (_: RuntimeException) {
+                            }
+                        }
+                        is TransitUpdate.Let -> if (exprContainsIoHavoc(update.init)) {
+                            try {
+                                collectDomainModelNames(update.init.getType(), into)
                             } catch (_: RuntimeException) {
                             }
                         }

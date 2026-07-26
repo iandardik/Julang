@@ -774,6 +774,38 @@ class MapIndexTransitNode(
     override fun toString(): String = "$mapVar[$key] := $value"
 }
 
+class LetTransitNode(
+    private val name: String,
+    private val typeExpr: TypeExpr,
+    private val initExpr: ExprNode,
+    private val loc: ProgramLoc,
+    resolvedType: Type? = null,
+) : ActionBodyNode(listOf(), listOf(initExpr)) {
+    private var letTypeResolution: Type? = resolvedType
+
+    val resolvedLetType: Type
+        get() = letTypeResolution
+            ?: throw RuntimeException("Type not resolved for transit let binding \"$name\" at $loc")
+
+    override fun programLocation() = loc
+    internal fun letName(): String = name
+    internal fun letTypeExpr(): TypeExpr = typeExpr
+    internal fun letTypeName(): String = typeExpr.toString()
+    internal fun letInitExpr(): ExprNode = initExpr
+    internal fun resolvedLetTypeOrNull(): Type? = letTypeResolution
+
+    internal fun resolveLetType(type: Type) {
+        letTypeResolution = type
+    }
+
+    override fun transitVars(): List<Pair<String, ProgramLoc>> = emptyList()
+
+    override fun transits(): List<TransitUpdate> =
+        listOf(TransitUpdate.Let(name, resolvedLetType, initExpr))
+
+    override fun toString(): String = "let $name : $typeExpr := $initExpr"
+}
+
 class VarTransitNode(
     val varName : String,
     val fieldPath : List<String> = emptyList(),

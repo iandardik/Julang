@@ -1,0 +1,73 @@
+import julay.funlib.length
+import julay.funlib.portFromUrl
+import julay.funlib.readFile
+import julay.funlib.split
+import julay.funlib.trim
+import julay.funlib.parseInt
+import node.lib.isBlankOrComment
+import node.lib.Node
+
+obj CfgPair {
+    me : Node
+    cluster : Set<Node>
+}
+
+procfun parseCfg(cfg : String, myIdx : Int) : CfgPair {
+    var rawLines : List<String> := split(readFile(cfg), "\n")
+    var idx : Int := 0
+    var meBuilder : Node := Node { id := 0, url := "" }
+    var clusterBuilder : Set<Node> := {}
+
+    internal transition parseAndBuildCluster() {
+        guard:
+            idx < length(rawLines)
+        transit:
+            let line : String := trim(rawLines[idx])
+            let isEntry : Boolean := ~isBlankOrComment(line)
+            let isMyNode : Boolean := isEntry & idx = myIdx
+            let nextNode : Node := Node { id := idx, url := line }
+            meBuilder := if (isMyNode) {
+                nextNode
+            } else {
+                meBuilder
+            }
+            clusterBuilder := if (isEntry) {
+                clusterBuilder + {nextNode}
+            } else {
+                clusterBuilder
+            }
+            idx := idx + 1
+    }
+
+    transition endParse() {
+        guard:
+            idx = length(rawLines)
+        return:
+            CfgPair { me := meBuilder, cluster := clusterBuilder }
+    }
+}
+
+proc RaftNodeMain {
+    const self : Node
+    const theCluster : Set<Node>
+    const listenPort : Int
+    var step : String := "startCore"
+
+    constructor initially(args : List<String>) {
+        transit:
+            let id : Int := parseInt(args[1])
+            let cfg : CfgPair := parseCfg(args[0], id)
+            self := cfg.me
+            theCluster := cfg.cluster
+            listenPort := portFromUrl(cfg.me.url)
+    }
+
+    transition startRaftCore(me : Node, cluster : Set<Node>) {
+        guard:
+            & step = "startCore"
+            & me = self
+            & cluster = theCluster
+        transit:
+            step := "done"
+    }
+}

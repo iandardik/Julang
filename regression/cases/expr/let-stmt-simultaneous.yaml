@@ -1,0 +1,6 @@
+source: regression/input/expr/let-stmt-simultaneous.jul
+programs:
+  - name: LetStmtSimultaneousTest
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/expr-let-stmt-simultaneous.stdout

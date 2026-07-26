@@ -56,6 +56,20 @@ targetNumReqs := if (length(args) > 0) {
 }
 ```
 
+### Expression `let`
+
+Syntax: `let (name : Type := init) { body }`.
+
+- `init` is typed in the outer environment (the bound name is not in scope there, unless it shadows an outer symbol of the same name).
+- `body` is typed with `name` in scope; the whole `let` has the type of `body`.
+- Allowed anywhere an expression is allowed: guards, transit RHS, returns, nested expressions.
+
+```jul
+x := let (inc : Int := 2) { inc + 3 }
+```
+
+To share one binding across **multiple** transit assignments, use a [transit statement `let`](effects.md#transit-statement-let) instead.
+
 ## User functions
 
 ```jul

@@ -764,6 +764,30 @@ private fun transitAssignmentNodes(body: List<ActionBodyNode>): List<ActionBodyN
 
 private fun actionBodyAssignmentErrors(body: List<ActionBodyNode>): List<CompileError> {
     val transitNodes = transitAssignmentNodes(body)
+    val seenLets = mutableSetOf<String>()
+    val assignToLetErrors = mutableListOf<CompileError>()
+    for (node in transitNodes) {
+        when (node) {
+            is LetTransitNode -> seenLets += node.letName()
+            is VarTransitNode -> {
+                if (node.varName in seenLets) {
+                    assignToLetErrors += OneLocCompileError(
+                        node.programLocation(),
+                        "Cannot assign to transit let binding \"${node.varName}\"",
+                    )
+                }
+            }
+            is MapIndexTransitNode -> {
+                if (node.mapVar in seenLets) {
+                    assignToLetErrors += OneLocCompileError(
+                        node.programLocation(),
+                        "Cannot assign to transit let binding \"${node.mapVar}\"",
+                    )
+                }
+            }
+            else -> {}
+        }
+    }
     val varTransitAssignments = transitNodes.flatMap { it.transitVars() }
     val wholeMapAssigns = transitNodes.filterIsInstance<VarTransitNode>()
         .filter { it.fieldPath.isEmpty() }
@@ -778,7 +802,7 @@ private fun actionBodyAssignmentErrors(body: List<ActionBodyNode>): List<Compile
             )
         }
     }
-    return duplicateAssignmentErrors(varTransitAssignments) { name ->
+    return assignToLetErrors + duplicateAssignmentErrors(varTransitAssignments) { name ->
         "Expected at most one assignment per variable, but found multiple assignments for \"$name\""
     } + overlapErrors
 }

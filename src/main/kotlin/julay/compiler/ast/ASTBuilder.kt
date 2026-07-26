@@ -482,7 +482,16 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     }
 
     override fun visitVar_transit(ctx: JulayParser.Var_transitContext?): ASTNode {
-        if (ctx!!.ID() != null && ctx.LBRACK() != null) {
+        if (ctx!!.LET() != null) {
+            val name = ctx.ID().text
+            val typeExpr = parseTypeExpr(ctx.typeExpr())
+            val init = visit(ctx.expr(0))
+            if (init !is ExprNode) {
+                throw RuntimeException("Expected transit let initializer to be an expression")
+            }
+            return LetTransitNode(name, typeExpr, init, sourceLocation(ctx))
+        }
+        if (ctx.ID() != null && ctx.LBRACK() != null) {
             val mapVar = ctx.ID().text
             val key = visit(ctx.expr(0))
             val value = visit(ctx.expr(1))

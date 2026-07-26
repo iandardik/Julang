@@ -1,6 +1,7 @@
 package julay.compiler.decl
 
 import julay.compiler.ast.ExprNode
+import julay.program.type.Type
 
 sealed class TransitUpdate {
     abstract fun transitRootVar(): String
@@ -11,5 +12,10 @@ sealed class TransitUpdate {
 
     data class MapPut(val mapVar: String, val key: ExprNode, val value: ExprNode) : TransitUpdate() {
         override fun transitRootVar(): String = mapVar
+    }
+
+    /** Transit-scoped temporary; evaluated against pre-state (+ earlier lets), not process state. */
+    data class Let(val name: String, val type: Type, val init: ExprNode) : TransitUpdate() {
+        override fun transitRootVar(): String = name
     }
 }

@@ -84,6 +84,8 @@ fun ASTNode.typePass(
     is ArgNode -> typePassArgNode(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is GuardNode -> typePassGuard(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is ReturnNode -> typePassReturn(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is TransitNode -> typePassTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is LetTransitNode -> typePassLetTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is VarTransitNode -> typePassVarTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is MapIndexTransitNode -> typePassMapIndexTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is ErrorNode -> typePassError(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
@@ -237,6 +239,96 @@ private fun ErrorNode.typePassError(
     return childrenErrors + condTypeErrors
 }
 
+private fun TransitNode.typePassTransit(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
+): List<CompileError> {
+    var letEnv = emptyMap<String, Type>()
+    val errors = mutableListOf<CompileError>()
+    for (item in transitBodies()) {
+        val rhsEnv = symbolEnv + letEnv
+        when (item) {
+            is LetTransitNode -> {
+                val itemErrors = item.typePassLetTransit(rhsEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+                errors += itemErrors
+                if (itemErrors.isEmpty()) {
+                    letEnv = letEnv + (item.letName() to item.resolvedLetType)
+                }
+            }
+            is VarTransitNode -> {
+                errors += item.typePassVarTransit(
+                    symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv, rhsEnv,
+                )
+            }
+            is MapIndexTransitNode -> {
+                errors += item.typePassMapIndexTransit(
+                    symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv, rhsEnv,
+                )
+            }
+            else -> {
+                errors += item.typePass(rhsEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+            }
+        }
+    }
+    return errors
+}
+
+private fun LetTransitNode.typePassLetTransit(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
+): List<CompileError> {
+    val typeErrors = when (val result = registry.resolveTypeExpr(letTypeExpr(), typeParamEnv, programLocation())) {
+        is TypeResolveResult.Found -> {
+            resolveLetType(result.type)
+            listOfNotNull(sortDomainOnlyError(result.type, programLocation()))
+        }
+        is TypeResolveResult.Error ->
+            listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Unknown type \"${letTypeName()}\" for transit let binding \"${letName()}\"",
+                ),
+            )
+    }
+    if (typeErrors.isNotEmpty()) {
+        return typeErrors
+    }
+
+    val selfRefErrors = assertOrCompileError(
+        letName() in symbolEnv || !exprReferencesSymbol(letInitExpr(), letName()),
+        OneLocCompileError(
+            letInitExpr().programLocation(),
+            "let initializer for \"${letName()}\" cannot reference the bound name",
+        ),
+    )
+    if (selfRefErrors.isNotEmpty()) {
+        return selfRefErrors
+    }
+
+    val declaredType = resolvedLetType
+    applyExpectedCollectionType(letInitExpr(), declaredType)
+    val initErrors = letInitExpr().typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    if (initErrors.isNotEmpty()) {
+        return initErrors
+    }
+
+    return assertOrCompileError(
+        letInitExpr().getType() == declaredType,
+        OneLocCompileError(
+            letInitExpr().programLocation(),
+            "Expected let initializer for \"${letName()}\" to have type $declaredType but got ${letInitExpr().getType()}",
+        ),
+    )
+}
+
 private fun VarTransitNode.typePassVarTransit(
     symbolEnv: Map<String, Type>,
     registry: ObjClassRegistry,
@@ -244,6 +336,7 @@ private fun VarTransitNode.typePassVarTransit(
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
+    rhsEnv: Map<String, Type> = symbolEnv,
 ): List<CompileError> {
     val varType = symbolEnv[varName]
     // Undeclared targets take priority over RHS errors (e.g. untyped empty list literals).
@@ -260,7 +353,7 @@ private fun VarTransitNode.typePassVarTransit(
         }
     }
     expectedType?.let { applyExpectedCollectionType(transitExpr(), it) }
-    val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
+    val childrenErrors = children.flatMap { it.typePass(rhsEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (childrenErrors.isNotEmpty()) {
         return childrenErrors
     }
@@ -1279,6 +1372,7 @@ private fun MapIndexTransitNode.typePassMapIndexTransit(
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
+    rhsEnv: Map<String, Type> = symbolEnv,
 ): List<CompileError> {
     val mapVarType = symbolEnv[mapVar]
     if (mapVarType == null) {
@@ -1292,7 +1386,7 @@ private fun MapIndexTransitNode.typePassMapIndexTransit(
             ),
         )
     }
-    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
+    val childErrors = children.flatMap { it.typePass(rhsEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (childErrors.isNotEmpty()) {
         return childErrors
     }

@@ -175,23 +175,36 @@ internal fun emitProcFunInvokeAndResume(
     }
 
     // Non-procfun assigns from the original transit (none in v1 whole-RHS-only case, but keep others).
+    var letBindings = emptyMap<String, ExprNode>()
+    fun substLets(expr: ExprNode): ExprNode {
+        var result = expr
+        for ((name, init) in letBindings) {
+            result = substituteExpr(result, name, init)
+        }
+        return result
+    }
     hostOffer.decl.transits.forEach { update ->
         when (update) {
+            is TransitUpdate.Let -> {
+                letBindings = letBindings + (update.name to substLets(update.init))
+            }
             is TransitUpdate.Assign -> {
                 val root = transitRootVar(update.key)
                 if (root in site.assignVars) return@forEach
-                if (update.expr is FunCallExprNode && update.expr.resolvedProcFunOrNull() != null) return@forEach
+                val expr = substLets(update.expr)
+                if (expr is FunCallExprNode && expr.resolvedProcFunOrNull() != null) return@forEach
                 val v = stateTlaName(hostLeaf.tlaName, root, stateVarNames)
-                val rhs = exprToTla(update.expr, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)
+                val rhs = exprToTla(expr, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)
                 resumeParts += "/\\ ${assignVal(v, hostBinder, rhs)}"
                 resumeChanged += v
             }
             is TransitUpdate.MapPut -> {
                 // Map puts with procfun RHS are out of v1 scope; emit normally if no procfun.
-                if (update.value is FunCallExprNode && update.value.resolvedProcFunOrNull() != null) return@forEach
+                val valueExpr = substLets(update.value)
+                if (valueExpr is FunCallExprNode && valueExpr.resolvedProcFunOrNull() != null) return@forEach
                 val v = stateTlaName(hostLeaf.tlaName, update.mapVar, stateVarNames)
-                val k = exprToTla(update.key, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)
-                val vv = exprToTla(update.value, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)
+                val k = exprToTla(substLets(update.key), hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)
+                val vv = exprToTla(valueExpr, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)
                 if (hostBinder != null) {
                     resumeParts += "/\\ $v' = [$v EXCEPT ![$hostBinder] = [@ EXCEPT ![$k] = $vv]]"
                 } else {

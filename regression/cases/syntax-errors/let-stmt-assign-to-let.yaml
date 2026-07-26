@@ -1,0 +1,5 @@
+source: regression/input/syntax-errors/let-stmt-assign-to-let.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Cannot assign to transit let binding \"t\""
+  - "Found errors while compiling \"P\"; exiting."

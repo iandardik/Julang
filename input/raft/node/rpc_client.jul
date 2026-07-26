@@ -1,109 +1,65 @@
-import node.lib.Node
+import julay.proclib.HttpClient
 
-/* This RPC handles incoming client requests (append / get), not peer Raft RPCs. */
 /*
- * Client command RPCs (append / get).
- *
- * One pclass for both commands so redirect stays coordinated with RaftCore + ClusterInfo.
- * Constructors keep the beginIncomingClientAppendRequest / beginIncomingClientGetRequest names.
- */
-
-export proc IncomingClientRPC {
-    const httpReq : HttpServerRequest
-    const reqBody : String
-    const kind : String
+ * Exactly one RpcClientHandler handles all outgoing RPCs.
+*/
+proc RpcClientHandler {
     var step : String
-    var appendIdx : Int
-    var respBody : String
-    var respCode : Int
-    var redirLeaderId : Int
+    var httpReq : HttpClientRequest
+    var httpResp : HttpClientResponse
 
-    constructor beginIncomingClientAppendRequest(req : HttpServerRequest) {
+    constructor startRpcClient() {
         transit:
-            httpReq := req
-            reqBody := req.body
-            kind := "append"
-            appendIdx := 0
+            step := "idle"
+            url := ""
+            body := ""
             respBody := ""
-            respCode := 500
-            redirLeaderId := -1
-            step := "clientAppendRequest"
     }
 
-    constructor beginIncomingClientGetRequest(req : HttpServerRequest) {
+    transition beginHttpRequestVote(peerUrl : String, reqBody : String) {
+        guard: step = "idle"
         transit:
-            httpReq := req
-            reqBody := req.body
-            kind := "get"
-            appendIdx := 0
-            respBody := ""
-            respCode := 500
-            redirLeaderId := -1
-            step := "clientGetRequest"
+            url := peerUrl
+            body := reqBody
+            step := "sendRequestVote"
     }
 
-    transition clientAppendRequest(value : String, ok : Boolean, idx : Int) {
-        guard: step = "clientAppendRequest" & value = reqBody
+    transition endHttpRequestVote(respOut : String) {
+        guard: step = "endRequestVote" & respOut = respBody
+        transit: step := "idle"
+    }
+
+    transition beginHttpAppendEntries(peerUrl : String, reqBody : String) {
+        guard: step = "idle"
         transit:
-            appendIdx := idx
-            step := if (ok) { "clientAppendRequestOk" } else { "redir" }
+            url := peerUrl
+            body := reqBody
+            step := "sendAppendEntries"
     }
 
-    internal transition finishAppendOk() {
-        guard: step = "clientAppendRequestOk"
+    transition endHttpAppendEntries(respOut : String) {
+        guard: step = "endAppendEntries" & respOut = respBody
+        transit: step := "idle"
+    }
+
+    session transition sendRequest(req : HttpClientRequest) {
+        guard:
+            | (step = "sendRequestVote" & req = HttpClientRequest {
+                url := url + "/raft/requestVote", method := "POST", body := body
+            })
+            | (step = "sendAppendEntries" & req = HttpClientRequest {
+                url := url + "/raft/appendEntries", method := "POST", body := body
+            })
         transit:
-            respBody := "OK " + appendIdx
-            respCode := 200
-            step := "finishClientAppendRequest"
+            step := if (step = "sendRequestVote") { "recvRequestVote" } else { "recvAppendEntries" }
     }
 
-    client transition getSerializedStateMachine(serializedSM : String, isLeader : Boolean) {
-        guard: step = "clientGetRequest"
+    session transition receiveResponse(resp : HttpClientResponse) {
+        guard: step = "recvRequestVote" | step = "recvAppendEntries"
         transit:
-            respBody := serializedSM
-            step := if (isLeader) { "clientGetRequestOk" } else { "redir" }
-    }
-
-    internal transition finishGetOk() {
-        guard: step = "clientGetRequestOk"
-        transit:
-            respCode := 200
-            step := "finishClientGetRequest"
-    }
-
-    client transition getRedirectLeader(leaderIdOut : Int, hasLeader : Boolean) {
-        guard: step = "redir"
-        transit:
-            redirLeaderId := leaderIdOut
-            step := if (hasLeader) { "redirUrl" } else { "redirNone" }
-    }
-
-    client transition lookupNodeById(id : Int, node : Node) {
-        guard: step = "redirUrl" & id = redirLeaderId
-        transit:
-            respBody := "LEADER " + node.url
-            respCode := 303
-            step := if (kind = "append") { "finishClientAppendRequest" } else { "finishClientGetRequest" }
-    }
-
-    internal transition redirectNoLeader() {
-        guard: step = "redirNone"
-        transit:
-            respBody := "NO_LEADER"
-            respCode := 503
-            step := if (kind = "append") { "finishClientAppendRequest" } else { "finishClientGetRequest" }
-    }
-
-    transition endIncomingClientAppendRequest(body : String, code : Int) {
-        guard: step = "finishClientAppendRequest" & body = respBody & code = respCode
-        transit: step := "done"
-    }
-
-    transition endIncomingClientGetRequest(body : String, code : Int) {
-        guard: step = "finishClientGetRequest" & body = respBody & code = respCode
-        transit: step := "done"
+            respBody := resp.body
+            step := if (step = "recvRequestVote") { "endRequestVote" } else { "endAppendEntries" }
     }
 }
 
-/* Handler only — compose with RpcTransport once under NodeLogic, not here. */
-export proc ClientRPCs := IncomingClientRPC
+export proc RpcClient := RpcClientHandler || HttpClient

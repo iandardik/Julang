@@ -13,7 +13,7 @@ Effectful **functions** (and any other callable) may appear in action clauses as
 
 1. `error:` checks (pre-state)
 2. **`before:`** calls
-3. **`transit:`** assignments (RHS evaluated simultaneously against pre-transit state, then applied)
+3. **`transit:`** (statement `let`s top-to-bottom against pre-state, then assignment RHSs against pre-state + in-scope lets, then simultaneous apply)
 4. **`after:`** calls
 
 You must import the function first, e.g. `import julay.funlib.println`.
@@ -43,7 +43,7 @@ internal transition step() {
 
 ### IO in `transit:`
 
-**`transit:`** is the only place for state assignments, and it **may** call value-returning IO functions on the RHS:
+**`transit:`** is the only place for state assignments, and it **may** call value-returning IO functions on the RHS (and in statement `let` initializers):
 
 ```jul
 import julay.funlib.readln
@@ -56,11 +56,37 @@ transit:
 
 Void functions such as `println` cannot appear in transit expressions—typechecking rejects them because they return no value. Put those in `before:` / `after:`.
 
+### Transit statement `let`
+
+Inside `transit:`, you may declare temporary bindings that are **not** process state:
+
+```jul
+transit:
+    let id : Int := parseInt(args[1])
+    let cfg : CfgPair := parseCfg(args[0], id)
+    self := cfg.me
+    theCluster := cfg.cluster
+    listenPort := portFromUrl(cfg.me.url)
+```
+
+Semantics:
+
+1. Each `let` initializer is evaluated top-to-bottom against **pre-transit** state, plus earlier lets in this block.
+2. Every assignment RHS is evaluated against pre-transit state plus lets textually **above** it.
+3. All assignments are then applied **simultaneously** (later lines do not observe earlier assigns).
+
+Rules:
+
+- Lets are scoped to this transit only; they do not persist as `var`/`const`.
+- Lets are not assignable targets (`t := …` after `let t …` is an error).
+- A let may shadow a state var or arg; the initializer may still refer to the outer same-named symbol (as with [expression `let`](types-and-expressions.md#expression-let)).
+- Prefer statement `let` when one value must feed **several** assigns; use expression `let` for a binding inside a single expression.
+
 ### TLA+ translation (IO havoc)
 
 `before:` / `after:` do not appear in the TLA+ action (runtime-only).
 
-When a **transit** assignment’s RHS involves IO such as `readln()` or `readFile(...)`, the TLA+ encoding **havocs** the target: the next value is chosen nondeterministically from the variable’s domain. For example:
+When a **transit** assignment’s RHS involves IO such as `readln()` or `readFile(...)` (including via a substituted transit `let`), the TLA+ encoding **havocs** the target: the next value is chosen nondeterministically from the variable’s domain. For example:
 
 ```jul
 import julay.funlib.readln
@@ -83,5 +109,6 @@ See also [Specifications](specifications.md).
 
 - [Standard library](standard-library.md) — which procs and functions have effects
 - [Processes](processes.md)
+- [Types and expressions](types-and-expressions.md) — expression `let`
 - [Sessions](sessions.md)
 - [Specifications](specifications.md)

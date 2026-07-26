@@ -185,6 +185,7 @@ error_arm
 var_transit
     : field_access ASGN_EQ expr
     | ID LBRACK expr RBRACK ASGN_EQ expr
+    | LET ID COLON typeExpr ASGN_EQ expr
     ;
 
 before

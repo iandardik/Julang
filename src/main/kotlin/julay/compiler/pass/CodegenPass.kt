@@ -561,32 +561,62 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
     // Simultaneous assignment: evaluate every RHS against the pre-transit state, then
     // apply updates. Later lines must not observe earlier assignments in the same block
     // (e.g. `peersLeft := peersLeft - 1` then `step := if (peersLeft - 1 = 0) ...`).
-    // Temps are explicitly typed so untyped builders like emptyList() still compile.
-    val transitRhsSnapshots = mutableListOf<String>()
-    val transitLines = transits.mapIndexed { i, update ->
+    // Transit lets are evaluated in order against pre-state (+ earlier lets) and are in
+    // scope for assignment RHSs textually below them. Temps are explicitly typed so
+    // untyped builders like emptyList() still compile.
+    var transitSymbolTypes = symbolTypes
+    var transitArgSymbols = argSymbols
+    var letReplacements = emptyMap<String, ExprNode>()
+    fun substTransitLets(expr: ExprNode): ExprNode {
+        var result = expr
+        for ((name, replacement) in letReplacements) {
+            result = substituteExpr(result, name, replacement)
+        }
+        return result
+    }
+
+    val transitEvalSnapshots = mutableListOf<String>()
+    val transitApplyLines = mutableListOf<String>()
+    var assignIndex = 0
+    for (update in transits) {
         when (update) {
+            is TransitUpdate.Let -> {
+                val localBind = "${update.name.toKotlinIdent()}__transitLet"
+                val init = substTransitLets(update.init)
+                val initStr = init.toTransitString(transitSymbolTypes, transitArgSymbols)
+                transitEvalSnapshots +=
+                    "val $localBind: ${update.type.toKotlinTypeString()} = $initStr"
+                val replacement = SymbolValueExprNode(localBind, update.init.programLocation()).also {
+                    it.setInferredType(TypePassType.Inferred(update.type))
+                }
+                letReplacements = letReplacements + (update.name to replacement)
+                transitSymbolTypes = transitSymbolTypes + (localBind to update.type)
+                transitArgSymbols = transitArgSymbols - update.name
+            }
             is TransitUpdate.Assign -> {
                 val rootVar = transitRootVar(update.key)
                 val rootType = stateVarTypes.getValue(rootVar)
                 val fieldPath = if (update.key.contains('.')) update.key.substringAfter('.').split('.') else emptyList()
                 val rhsType = transitAssignRhsType(rootType, fieldPath)
-                val temp = "__transitRhs_$i"
-                val rhs = update.expr.toTransitString(symbolTypes, argSymbols)
-                transitRhsSnapshots += "val $temp: ${rhsType.toKotlinTypeString()} = $rhs"
-                copyAssignmentString(rootVar, rootType, fieldPath, temp)
+                val temp = "__transitRhs_$assignIndex"
+                val rhs = substTransitLets(update.expr).toTransitString(transitSymbolTypes, transitArgSymbols)
+                transitEvalSnapshots += "val $temp: ${rhsType.toKotlinTypeString()} = $rhs"
+                transitApplyLines += copyAssignmentString(rootVar, rootType, fieldPath, temp)
+                assignIndex++
             }
             is TransitUpdate.MapPut -> {
                 val mapVar = update.mapVar.toKotlinIdent()
                 val mapType = stateVarTypes.getValue(update.mapVar) as MapType
-                val keyTemp = "__transitRhs_${i}_key"
-                val valTemp = "__transitRhs_${i}_val"
-                transitRhsSnapshots +=
-                    "val $keyTemp: ${mapType.keyType.toKotlinTypeString()} = ${update.key.toTransitString(symbolTypes, argSymbols)}"
-                transitRhsSnapshots +=
-                    "val $valTemp: ${mapType.valueType.toKotlinTypeString()} = ${update.value.toTransitString(symbolTypes, argSymbols)}"
+                val keyTemp = "__transitRhs_${assignIndex}_key"
+                val valTemp = "__transitRhs_${assignIndex}_val"
+                transitEvalSnapshots +=
+                    "val $keyTemp: ${mapType.keyType.toKotlinTypeString()} = ${substTransitLets(update.key).toTransitString(transitSymbolTypes, transitArgSymbols)}"
+                transitEvalSnapshots +=
+                    "val $valTemp: ${mapType.valueType.toKotlinTypeString()} = ${substTransitLets(update.value).toTransitString(transitSymbolTypes, transitArgSymbols)}"
                 // Key/value are pre-state; applying puts in order composes multiple updates
                 // to the same map (TLA+-style EXCEPT with several fields).
-                "$mapVar = $mapVar + ($keyTemp to $valTemp)"
+                transitApplyLines += "$mapVar = $mapVar + ($keyTemp to $valTemp)"
+                assignIndex++
             }
         }
     }
@@ -596,8 +626,8 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
         .plus(beforeArgSnapshots)
         .plus(beforeLines)
         .plus(afterArgSnapshots)
-        .plus(transitRhsSnapshots)
-        .plus(transitLines)
+        .plus(transitEvalSnapshots)
+        .plus(transitApplyLines)
         .plus(afterLines)
         .joinToString("\n")
 }

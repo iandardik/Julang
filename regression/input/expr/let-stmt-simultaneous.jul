@@ -1,0 +1,48 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+
+/*
+ * Transit lets see pre-state only. After `let t := y` and `y := t + 1`,
+ * a later `x := y` still binds the old y (simultaneous assignment).
+ */
+proc LetStmtSimultaneousDemo {
+    var x : Int
+    var y : Int
+    var print : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            x := 0
+            y := 10
+            print := false
+    }
+
+    internal transition bump() {
+        guard: ~print & x = 0 & y = 10
+        transit:
+            let t : Int := y
+            y := t + 1
+            x := y
+            print := true
+    }
+
+    internal transition println(msg : String) {
+        guard:
+            print & msg = ("" + x + "," + y)
+        transit:
+            print := false
+        after:
+            println(msg)
+    }
+
+    internal transition exitSystem() {
+        guard:
+            ~print & x = 10 & y = 11
+        after:
+            exitProcess()
+    }
+}
+
+proc LetStmtSimultaneousTest := LetStmtSimultaneousDemo
+
+compile LetStmtSimultaneousTest
