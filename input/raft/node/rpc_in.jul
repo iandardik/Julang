@@ -97,7 +97,7 @@ procfun clientAppendRPC(req : HttpServerRequest) : HttpServerResponse {
             }
     }
 
-    transition leaderRedirect(leader : Node) {
+    client transition leaderRedirect(leader : Node) {
         return:
             HttpServerResponse {
                 body := "LEADER " + leader.url,
@@ -105,7 +105,7 @@ procfun clientAppendRPC(req : HttpServerRequest) : HttpServerResponse {
             }
     }
 
-    transition noLeader() {
+    client transition noLeader() {
         return:
             HttpServerResponse {
                 body := "NO_LEADER",
@@ -128,115 +128,29 @@ procfun clientGetRPC(req : HttpServerRequest) : HttpServerResponse {
  * A RpcReqHandler get created for each incoming request.
 */
 proc RpcReqHandler {
-    const httpReq : HttpServerRequest
-    var httpResp : HttpServerResponse
-    var step : String
+    const httpResp : HttpServerResponse
+    var done : Boolean := false
 
     session constructor receiveRequest(req : HttpServerRequest) {
         transit:
-            httpReq := req
-            //httpResp := HttpServerResponse { body := "", code := 500 }
             httpResp := when (req.path) {
                 "raft/requestVote" -> inRequestVoteRPC(req)
                 "raft/appendEntries" -> inAppendEntriesRPC(req)
                 "client/append" -> clientAppendRPC(req)
                 "client/get" -> clientGetRPC(req)
-                else -> HttpServerResponse { body := "NOT_FOUND", code := 404 }
+                else -> HttpServerResponse {
+                    body := "NOT_FOUND",
+                    code := 404
+                }
             }
-            /*
-            step := when (req.path) {
-                "raft/requestVote" -> "startInRequestVoteRpc"
-                "raft/appendEntries" -> "startInAppendEntriesRpc"
-                "client/append" -> "startClientAppendRpc"
-                "client/get" -> "startClientGetRpc"
-                else -> "badPath"
-            }
-            */
     }
 
-    /*
-     * Handle bad paths.
-    */
-    internal transition badPath() {
-        guard:
-            step = "badPath"
-        transit:
-            httpResp := HttpServerResponse {
-                body := "NOT_FOUND",
-                code := 404
-            }
-            step := "sendResponse"
-    }
-
-    /*
-     * Start and end incoming RequestVote RPCs.
-    */
-
-    session transition startInRequestVoteRpc(req : HttpServerRequest) {
-        guard:
-            & step = "startInRequestVoteRpc"
-            & req = httpReq
-        transit:
-            step := "endInRequestVoteRpc"
-    }
-
-    session transition endInRequestVoteRpc(resp : HttpServerResponse) {
-        guard:
-            & step = "endInRequestVoteRpc"
-        transit:
-            step := "sendResponse"
-            httpResp := resp
-    }
-
-    /*
-     * Start and end incoming AppendEntries RPCs.
-    */
-
-    session transition startInAppendEntriesRpc(req : HttpServerRequest) {
-        guard:
-            & step = "startInAppendEntriesRpc"
-            & req = httpReq
-        transit:
-            step := "endInAppendEntriesRpc"
-    }
-
-    session transition endInAppendEntriesRpc(resp : HttpServerResponse) {
-        guard:
-            & step = "endInAppendEntriesRpc"
-        transit:
-            step := "sendResponse"
-            httpResp := resp
-    }
-
-    /*
-     * Start and end ClientAppend RPCs.
-    */
-
-    session transition startClientAppendRpc(req : HttpServerRequest) {
-        guard:
-            & step = "startClientAppendRpc"
-            & req = httpReq
-        transit:
-            step := "endClientAppendRpc"
-    }
-
-    session transition endClientAppendRpc(resp : HttpServerResponse) {
-        guard:
-            & step = "endClientAppendRpc"
-        transit:
-            step := "sendResponse"
-            httpResp := resp
-    }
-
-    /*
-     * Send the RPC response to the client.
-    */
     session transition sendResponse(resp : HttpServerResponse) {
         guard:
-            & step = "sendResponse"
+            & ~done
             & resp = httpResp
         transit:
-            step := "done"
+            done := true
     }
 }
 
