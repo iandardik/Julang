@@ -42,6 +42,10 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     private fun sourceLocation(ctx: ParserRuleContext) =
         SourceLoc(Pair(ctx.getStart().line, ctx.getStop().line), sourcePath)
 
+    /** Location of the header through `args` (not the `{ ... }` body). */
+    private fun signatureLocation(ctx: ParserRuleContext, argsCtx: ParserRuleContext) =
+        SourceLoc(Pair(ctx.getStart().line, argsCtx.getStop().line), sourcePath)
+
     override fun visitRoot(ctx: JulayParser.RootContext?): ASTNode {
         val importNodes = ctx!!.import_stmt().map {
             val node = visit(it)
@@ -346,7 +350,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 it
             }
         val isSession = ctx.SESSION() != null
-        return ConstructorNode(name, args, body, sourceLocation(ctx), isSession)
+        return ConstructorNode(name, args, body, signatureLocation(ctx, ctx.args()), isSession)
     }
 
     override fun visitTransition(ctx: JulayParser.TransitionContext?): ASTNode {
@@ -381,7 +385,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 }
                 it
             }
-        return TransitionNode(modifier, name, args, body, sourceLocation(ctx), isSession)
+        return TransitionNode(modifier, name, args, body, signatureLocation(ctx, ctx.args()), isSession)
     }
 
     override fun visitArgs(ctx: JulayParser.ArgsContext?): ASTNode {

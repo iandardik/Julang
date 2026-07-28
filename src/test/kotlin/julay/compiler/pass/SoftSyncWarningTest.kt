@@ -5,8 +5,10 @@ import julay.compiler.analysis.resolveAnalyzeScope
 import julay.compiler.ast.RootNode
 import julay.compiler.prepareCheckedCompilation
 import julay.compiler.runErrorAndWarningPasses
+import julay.compiler.toStructuredDiagnostic
 import java.nio.file.Files
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -172,5 +174,40 @@ class SoftSyncWarningTest {
             warnings.any { it.toString().contains("provider with no clients") },
             "expected provider-deadlock warning; got: $warnings",
         )
+    }
+
+    @Test
+    fun syncWarningsUnderlineSignatureLineOnly() {
+        val dir = Files.createTempDirectory("julay-sync-warn-sig")
+        val file = dir.resolve("solo.jul")
+        file.toFile().writeText(
+            """
+            proc Core {
+                constructor initially(args : List<String>) { transit: }
+                provider transition bump() {
+                    guard: true
+                }
+            }
+            proc P := Core
+            compile P
+            """.trimIndent(),
+        )
+
+        val checked = prepareCheckedCompilation(file)
+        assertNotNull(checked)
+        val program = checked.jarTargets.single()
+        val components = program.allProcNames(checked.procDecls)
+        val warnings = checked.ast.warningPass(
+            components,
+            checked.librariesInUse,
+            program,
+            checked.procDecls,
+        )
+        val bump = warnings.map { it.toStructuredDiagnostic(file) }.filter {
+            it.message.contains("bump") && it.message.contains("provider with no clients")
+        }
+        assertTrue(bump.isNotEmpty(), "expected bump warning; got: $warnings")
+        assertEquals(bump[0].startLine, bump[0].endLine, "signature-only underline; got: $bump")
+        assertEquals(3, bump[0].startLine, "bump signature is line 3; got: $bump")
     }
 }
