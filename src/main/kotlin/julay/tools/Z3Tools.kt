@@ -68,8 +68,8 @@ fun mapCellArrExpr(ctx: Context, cell: Expr<*>, arrAccessor: FuncDecl<*>): Expr<
 fun mapCellKeysExpr(ctx: Context, cell: Expr<*>, keysAccessor: FuncDecl<*>): Expr<*> =
     ctx.mkApp(keysAccessor, cell)
 
-fun mapCellSizeExpr(ctx: Context, cell: Expr<*>, sizeAccessor: FuncDecl<*>): Expr<*> =
-    ctx.mkApp(sizeAccessor, cell)
+fun mapCellSizeExpr(ctx: Context, cell: Expr<*>, sizeAccessor: FuncDecl<*>): IntExpr =
+    ctx.mkApp(sizeAccessor, cell) as IntExpr
 
 @Suppress("UNCHECKED_CAST")
 fun mapSelectExpr(ctx: Context, arr: Expr<*>, key: Expr<*>): Expr<*> =
@@ -94,8 +94,8 @@ fun mapMkCellExpr(
 fun setCellArrExpr(ctx: Context, cell: Expr<*>, arrAccessor: FuncDecl<*>): Expr<*> =
     ctx.mkApp(arrAccessor, cell)
 
-fun setCellSizeExpr(ctx: Context, cell: Expr<*>, sizeAccessor: FuncDecl<*>): Expr<*> =
-    ctx.mkApp(sizeAccessor, cell)
+fun setCellSizeExpr(ctx: Context, cell: Expr<*>, sizeAccessor: FuncDecl<*>): IntExpr =
+    ctx.mkApp(sizeAccessor, cell) as IntExpr
 
 fun setMkCellExpr(
     ctx: Context,

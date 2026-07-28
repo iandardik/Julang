@@ -1144,10 +1144,10 @@ class IfElseExprNode(
     internal fun thenExpr(): ExprNode = thenExpr
     internal fun elseExpr(): ExprNode = elseExpr
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
-        val condGuardStr = condExpr.toZ3GuardString(symbolTypes,argSymbols)
-        val thenGuardStr = thenExpr.toZ3GuardString(symbolTypes,argSymbols)
-        val elseGuardStr = elseExpr.toZ3GuardString(symbolTypes,argSymbols)
-        return "ctx.mkITE<BoolSort>($condGuardStr,$thenGuardStr,$elseGuardStr) as BoolExpr"
+        val condGuardStr = condExpr.toZ3GuardString(symbolTypes, argSymbols)
+        val thenGuardStr = thenExpr.toZ3GuardString(symbolTypes, argSymbols, forceString)
+        val elseGuardStr = elseExpr.toZ3GuardString(symbolTypes, argSymbols, forceString)
+        return mkIteGuardString(condGuardStr, thenGuardStr, elseGuardStr, getType(), forceString)
     }
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
         val condTransitStr = condExpr.toTransitString(symbolTypes,argSymbols)
@@ -1282,6 +1282,7 @@ class WhenExprNode(
     }
 
     private fun buildNestedZ3ITE(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        val resultType = getType()
         val elseArm = arms.last() as WhenArm.Else
         var result = elseArm.expr.toZ3GuardString(symbolTypes, argSymbols)
         for (arm in arms.dropLast(1).reversed()) {
@@ -1294,7 +1295,7 @@ class WhenExprNode(
                 }
                 is WhenArm.Else -> throw RuntimeException("Unexpected else arm before final position")
             }
-            result = "ctx.mkITE<BoolSort>($condStr,$branchStr,$result) as BoolExpr"
+            result = mkIteGuardString(condStr, branchStr, result, resultType, forceString = false)
         }
         return result
     }
@@ -1664,14 +1665,18 @@ class IndexExprNode(
         val baseStr = base.toZ3GuardString(symbolTypes, argSymbols)
         val indexStr = index.toZ3GuardString(symbolTypes, argSymbols)
         return when (val baseType = base.getType()) {
-            is ListType -> "ctx.mkSeqNthAny($baseStr, $indexStr)"
+            is ListType -> {
+                val nth = "ctx.mkSeqNthAny($baseStr, $indexStr)"
+                castFieldZ3(nth, baseType.elementType, forceString)
+            }
             is MapType -> {
                 val mapVal = baseType.toCodegenTypeVal()
                 val meta = "$mapVal.cellMetadata(ctx)"
-                "run { val __cell = $baseStr; val __keys = mapCellKeysExpr(ctx, __cell, $meta.keysAccessor); " +
+                val selected = "run { val __cell = $baseStr; val __keys = mapCellKeysExpr(ctx, __cell, $meta.keysAccessor); " +
                     "val __arr = mapCellArrExpr(ctx, __cell, $meta.arrAccessor); " +
                     "ctx.mkITE(ctx.mkSetMemberAny($indexStr, __keys), mapSelectExpr(ctx, __arr, $indexStr), " +
                     "${baseType.valueType.toCodegenTypeVal()}.toZ3Expr(Value(0, ${baseType.valueType.toCodegenTypeVal()}), ctx)) }"
+                castFieldZ3(selected, baseType.valueType, forceString)
             }
             else -> throw RuntimeException("Cannot index type $baseType at $loc")
         }
@@ -2174,6 +2179,17 @@ private fun asZ3Real(guardStr: String, type: Type): String =
 private fun asKotlinDouble(exprStr: String, type: Type): String =
     if (type is IntType) "($exprStr).toDouble()" else exprStr
 
+private fun mkIteGuardString(
+    condStr: String,
+    thenStr: String,
+    elseStr: String,
+    resultType: Type,
+    forceString: Boolean,
+): String {
+    val ite = "ctx.mkITE($condStr, $thenStr, $elseStr)"
+    return castFieldZ3(ite, resultType, forceString)
+}
+
 private fun castFieldZ3(fieldZ3: String, leafType: Type, forceString: Boolean): String {
     if (forceString) {
         return when (leafType) {
@@ -2194,7 +2210,7 @@ private fun castFieldZ3(fieldZ3: String, leafType: Type, forceString: Boolean): 
         is IntType -> "$fieldZ3 as IntExpr"
         is RealType -> "$fieldZ3 as RealExpr"
         is StringType -> "$fieldZ3 as Expr<SeqSort<CharSort>>"
-        is ListType -> fieldZ3
+        is ListType, is SetType, is MapType -> fieldZ3
         else -> throw RuntimeException("Invalid field type: $leafType")
     }
 }
