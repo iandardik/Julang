@@ -2,7 +2,7 @@ import julay.funlib.exitProcess
 import julay.funlib.println
 
 procfun helper(x : Int) : Int {
-    transition done() {
+    internal transition done() {
         return: x + 1
     }
 }

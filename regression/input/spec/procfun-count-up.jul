@@ -9,7 +9,7 @@ procfun countUp(n : Int) : Int {
             i := i + 1
     }
 
-    transition done() {
+    internal transition done() {
         guard: i = n
         return: result
     }

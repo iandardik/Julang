@@ -529,21 +529,11 @@ private fun ProcClassDecl.kotlinStaticInfoString(
 }
 
 /**
- * Sync role for Kotlin [TSAction] / SyncChannel sizing.
- * ActionDecl.modifier is never rewritten for procfuns (alphabet / TLA keep the source tag).
- * Bare `return:` steps still need sync size 1 under spawn-and-await so they can fire without a
- * peer; the conceptual completion edge is `_ret` (TLA/alphabet). Runtime delivers via [returnExpr].
+ * Sync role for Kotlin [TSAction] / SyncChannel sizing is always [ActionDecl.modifier].
+ * Codegen never rewrites tags for `return:` (or any other) steps. Synthetic `_ret` remains
+ * TLA/alphabet-only; runtime delivers via [returnExpr] when the source-tagged step fires.
+ * Solo completion under spawn-and-await requires an explicit `internal` (or a real peer).
  */
-private fun ActionDecl.resolvedSyncRole(): TSAction.SyncRole =
-    if (returnExpr != null &&
-        modifier == TSAction.SyncRole.Default &&
-        !action.isSession
-    ) {
-        TSAction.SyncRole.Internal
-    } else {
-        modifier
-    }
-
 private fun ActionDecl.kotlinActionString(
     stateVarTypes: Map<String, Type>,
     pclassName: String,
@@ -566,7 +556,7 @@ private fun ActionDecl.kotlinActionString(
         val body = guards.joinToString(", ") { it.toZ3GuardString(symbolTypes, argSymbols) }
         "ctx.mkAnd($body)"
     }
-    val syncRoleStr = when (resolvedSyncRole()) {
+    val syncRoleStr = when (modifier) {
         TSAction.SyncRole.Default -> "TSAction.SyncRole.Default"
         TSAction.SyncRole.Internal -> "TSAction.SyncRole.Internal"
         TSAction.SyncRole.Provider -> "TSAction.SyncRole.Provider"
@@ -690,7 +680,7 @@ private fun ActionDecl.kotlinStaticInfoString(
             ?: action.channelKey
     }
     val flags = buildList {
-        if (action.isInternal || resolvedSyncRole() == TSAction.SyncRole.Internal) {
+        if (action.isInternal || modifier == TSAction.SyncRole.Internal) {
             add("isInternal = true")
         }
         if (action.isSession) add("isSession = true")

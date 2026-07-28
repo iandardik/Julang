@@ -11,7 +11,7 @@ procfun countUp(n : Int) : Int {
             steps := steps + 1
     }
 
-    transition done() {
+    internal transition done() {
         guard: steps = n
         return: result
     }

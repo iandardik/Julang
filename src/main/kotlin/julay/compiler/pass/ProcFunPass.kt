@@ -88,8 +88,8 @@ private fun ProcFunNode.buildCallCtor(
 /**
  * `return: e` becomes `transit: retVal := e`. The transition's sync modifier is **unchanged**
  * (`client` / `session` / `internal` / bare stay as written). Alphabet / TLA keep that tag;
- * synthetic `_ret` is the completion edge there. Runtime still completes via [returnExpr] on this
- * step (Kotlin SyncChannel solos bare returns without rewriting ActionDecl.modifier).
+ * synthetic `_ret` is the completion edge there. Runtime still completes via [returnExpr] when
+ * this source-tagged step fires (codegen does not rewrite the modifier).
  */
 private fun rewriteReturnToRetVal(trans: TransitionNode, retType: Type): ActionDecl {
     val decl = trans.transitions().single()
