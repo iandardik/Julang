@@ -9,10 +9,10 @@ import node.lib.isBlankOrComment
 import node.lib.Node
 import node.rpc_in.RpcIn
 import node.rpc_out.RpcOut
-import node.election_timeout.ElectionTimeout
 import julay.proclib.Timer
-import node.candidate_election.CandidateElection
+import node.election_timeout.ElectionTimeout
 import node.leader_heartbeat.LeaderHeartbeat
+import node.vote_requester.VoteRequester
 
 obj CfgPair {
     me : Node
@@ -100,6 +100,5 @@ proc RaftNodeMain {
 
 export proc Raft := RaftNodeMain || RaftCore || RpcIn || RpcOut
     || ElectionTimeout || Timer || VoteRequester || LeaderHeartbeat
-    //|| ElectionTimeout || Timer || CandidateElection || LeaderHeartbeat
 
 export proc NodeLogic := Raft

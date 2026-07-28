@@ -14,6 +14,7 @@ export procfun startLeaderHeartbeat(self : Node, leaderTerm : Int, theCluster : 
     }
 }
 
+// TODO shouldn't need to export this
 export proc LeaderHeartbeat {
     const me : Node
     const leaderTerm : Int

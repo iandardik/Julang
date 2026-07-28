@@ -241,6 +241,7 @@ export proc RaftCore {
                 )
             )
         transit:
+            // TODO this most likely can cause a deadlock, in the case that a leader receives a heartbeat
             let _ : Boolean := gotHeartbeat()
             knownLeaderId := if (success) { leaderId } else { knownLeaderId }
             state := if (success & inTerm = currentTerm) { "Follower" } else { state }

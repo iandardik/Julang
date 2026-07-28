@@ -15,7 +15,8 @@ export procfun gotHeartbeat() : Boolean {
     }
 }
 
-proc ElectionTimeout {
+// TODO shouldn't need to export this
+export proc ElectionTimeout {
     const selfNode : Node
     const leaderTerm : Int
     const electTimeout : Int
