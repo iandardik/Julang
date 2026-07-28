@@ -13,7 +13,7 @@ procfun inRequestVoteRPC(req : HttpServerRequest) : HttpServerResponse {
     const rvLastTerm : Int := parseInt(fieldValue(split(req.body, "|")[3]))
     var step : String := "updateTerm"
 
-    client transition updateTerm(inTerm : Int) {
+    client transition UpdateTerm(inTerm : Int) {
         guard:
             & step = "updateTerm"
             & inTerm = rvTerm
@@ -54,7 +54,7 @@ procfun inAppendEntriesRPC(req :  HttpServerRequest) : HttpServerResponse {
     var aeEntryValue : String := fieldValue(split(req.body, "|")[6])
     var aeLeaderCommit : Int := parseInt(fieldValue(split(req.body, "|")[7]))
 
-    client transition updateTerm(inTerm : Int) {
+    client transition UpdateTerm(inTerm : Int) {
         guard:
             & step = "updateTerm"
             & inTerm = aeTerm
@@ -170,7 +170,7 @@ proc ServerInitializer {
     var started : Boolean
     var listenPort : Int
 
-    constructor startRpcIn(port : Int) {
+    constructor startServer(port : Int) {
         transit:
             started := false
             listenPort := port

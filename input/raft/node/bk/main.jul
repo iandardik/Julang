@@ -48,7 +48,7 @@ procfun parseCfg(cfg : String, myIdx : Int) : CfgPair {
             idx := idx + 1
     }
 
-    internal transition endParse() {
+    transition endParse() {
         guard:
             idx = length(rawLines)
         return:
@@ -60,7 +60,7 @@ proc RaftNodeMain {
     const self : Node
     const theCluster : List<Node>
     const listenPort : Int
-    var step : String := "startRpcIn"
+    var step : String := "startServer"
 
     constructor initially(args : List<String>) {
         transit:
@@ -73,9 +73,9 @@ proc RaftNodeMain {
             (length(args) ~= 2) -> "usage: RaftNode.jar <config_file> <node_id>"
     }
 
-    transition startRpcIn(port : Int) {
+    transition startServer(port : Int) {
         guard:
-            & step = "startRpcIn"
+            & step = "startServer"
             & port = listenPort
         transit:
             step := "startRpcOut"
@@ -99,7 +99,4 @@ proc RaftNodeMain {
 }
 
 export proc Raft := RaftNodeMain || RaftCore || RpcIn || RpcOut
-    || ElectionTimeout || Timer || VoteRequester || LeaderHeartbeat
-    //|| ElectionTimeout || Timer || CandidateElection || LeaderHeartbeat
-
-export proc NodeLogic := Raft
+    || ElectionTimeout || Timer || CandidateElection || LeaderHeartbeat

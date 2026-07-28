@@ -152,11 +152,9 @@ fi
 echo "=== wait ${ELECTION_WAIT_S}s for election/heartbeats ==="
 sleep "$ELECTION_WAIT_S"
 
-echo "=== curl GET /client/get on each node ==="
-leader_url=""
+echo "=== curl POST /client/get on each node (local state machines) ==="
 for idx in "${!URLS[@]}"; do
   url="${URLS[$idx]}"
-  port="${PORTS[$idx]}"
   echo -n "  $url: "
   body_file="$(mktemp)"
   code="$(curl -sS -m "$CURL_TIMEOUT_S" -o "$body_file" -w '%{http_code}' \
@@ -164,31 +162,14 @@ for idx in "${!URLS[@]}"; do
   body="$(cat "$body_file" 2>/dev/null || true)"
   rm -f "$body_file"
   echo "$body [$code]"
-  if [[ "$code" == "200" ]]; then
-    leader_url="$url"
-  elif [[ "$code" == "303" && "$body" == LEADER\ * ]]; then
-    leader_url="$(echo "$body" | sed 's/^LEADER //')"
-  elif [[ "$code" != "503" ]]; then
-    echo "error: unexpected response from $url: body='$body' code=$code" >&2
+  if [[ "$code" != "200" ]]; then
+    echo "error: expected local get 200 from $url, got code=$code body='$body'" >&2
     exit 1
   fi
 done
 
-if [[ -z "$leader_url" ]]; then
-  echo "error: no leader discovered (all NO_LEADER?)" >&2
-  exit 1
-fi
-echo "discovered leader: $leader_url"
-
-# Pick a follower URL for redirect path (prefer a non-leader if one exists).
+# Enter via first URL; RaftClient follows 303 LEADER redirects for append.
 follower_url="${URLS[0]}"
-for url in "${URLS[@]}"; do
-  if [[ "$url" != "$leader_url" ]]; then
-    follower_url="$url"
-    break
-  fi
-done
-
 VALUE="smoke-$(date +%s)"
 CLIENT_STEP_TIMEOUT_S="${CLIENT_STEP_TIMEOUT_S:-30}"
 echo "=== RaftClient append via $follower_url (≤${CLIENT_STEP_TIMEOUT_S}s) ==="
@@ -231,11 +212,43 @@ echo "$get_out" | grep -Fq "$VALUE" || {
   exit 1
 }
 echo "$get_out" | grep -q '^200 ' || {
-  # client prints each hop; final line should include 200
   echo "$get_out" | grep -q '200 \[' || {
     echo "error: get did not report 200" >&2
     exit 1
   }
 }
+
+echo "=== verify every node local state machine contains '$VALUE' ==="
+SM_WAIT_S="${SM_WAIT_S:-20}"
+sm_ok=0
+for ((t=0; t<SM_WAIT_S; t++)); do
+  missing=0
+  for url in "${URLS[@]}"; do
+    body_file="$(mktemp)"
+    code="$(curl -sS -m "$CURL_TIMEOUT_S" -o "$body_file" -w '%{http_code}' \
+      -X POST "${url}/client/get" -d '' || echo "fail")"
+    body="$(cat "$body_file" 2>/dev/null || true)"
+    rm -f "$body_file"
+    if [[ "$code" != "200" ]] || ! grep -Fq "$VALUE" <<<"$body"; then
+      missing=1
+      break
+    fi
+  done
+  if [[ "$missing" -eq 0 ]]; then
+    sm_ok=1
+    echo "all ${#URLS[@]} nodes have value after ${t}s"
+    break
+  fi
+  sleep 1
+done
+if [[ "$sm_ok" -ne 1 ]]; then
+  echo "error: not all followers/leader replicated '$VALUE' within ${SM_WAIT_S}s" >&2
+  for url in "${URLS[@]}"; do
+    echo -n "  $url: "
+    curl -sS -m "$CURL_TIMEOUT_S" -X POST "${url}/client/get" -d '' || true
+    echo
+  done
+  exit 1
+fi
 
 echo "=== smoke test passed ==="

@@ -1,0 +1,4 @@
+import node.main.Raft
+
+/* Thin shim so input/raft/main.jul can keep importing NodeLogic. */
+export proc NodeLogic := Raft

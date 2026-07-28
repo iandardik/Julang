@@ -1,19 +1,22 @@
 import julay.funlib.length
+import node.leader_heartbeat.gotHeartbeat
+import node.leader_heartbeat.startLeaderHeartbeat
 import node.lib.Entry
 import node.lib.Node
 import node.lib.AppendEntriesData
 import node.lib.entryValueAt
+import node.lib.entryTermAt
 
 /*
- * Local Raft state for one node.
- * RaftCore is a singleton--one RaftCore is expected to live on each node.
- * Peer URLs live in ClusterInfo; this core tracks leaderId for redirects.
- * RaftCore is the sole constructor of FollowerHeartbeat, CandidateElection, and LeaderHeartbeat.
+ * Local Raft state for one node (Ongaro-shaped action surface).
+ * RaftCore is a singleton per node and the sole constructor of
+ * ElectionTimeout, CandidateElection, and LeaderHeartbeat — at most one
+ * of those three drivers is alive at a time.
  */
 
 export proc RaftCore {
     const self : Node
-    const cluster : Set<Node>
+    const cluster : List<Node>
     var currentTerm : Int
     var state : String
     var votedFor : Int
@@ -21,17 +24,16 @@ export proc RaftCore {
     var lastLogTermVar : Int
     var commitIndex : Int
     var lastApplied : Int
-    var stateMachine : List<String>
+    var sm : List<String>
     var votesGranted : Set<Int>
-    var voteCount : Int
+    var votesResponded : Set<Node>
     var knownLeaderId : Int
-    var electionEpoch : Int
-    var startFollowerHeartbeat : Boolean
-    var startElection : Boolean
-    var startLeaderHeartbeat : Boolean
+    var nextIndex : Map<Int, Int>
+    var matchIndex : Map<Int, Int>
 
-    constructor startRaftCore(me : Node, cluster : Set<Node>) {
+    constructor startRaftCore(me : Node, cluster : List<Node>) {
         transit:
+            let _ : Boolean := startElectionTimeout(me, 0)
             self := me
             cluster := cluster
             currentTerm := 0
@@ -41,21 +43,127 @@ export proc RaftCore {
             lastLogTermVar := 0
             commitIndex := 0
             lastApplied := 0
-            stateMachine := []
+            sm := []
             votesGranted := {}
-            voteCount := 0
+            votesResponded := {}
             knownLeaderId := -1
-            electionEpoch := 0
-            startFollowerHeartbeat := true
-            startElection := false
-            startLeaderHeartbeat := false
+            nextIndex := []
+            matchIndex := []
     }
 
     /*
-     * A candidate (from a different node) is requesting a vote from us.
-     * Simplified RequestVote: grant if term ok and log at least as long
-     */
-    transition receiveVoteRequest(
+     * The "Timeout" transition in the Raft protocol.
+    */
+    transition electionTimeout() {
+        guard:
+            state = "Follower" | state = "Candidate"
+        transit:
+            let _ : Boolean := startElectionTimeout(self, currentTerm + 1)
+            state := "Candidate"
+            currentTerm := currentTerm + 1
+            votedFor := self.id
+            votesGranted := {self.id}
+            votesResponded := {self}
+            knownLeaderId := -1
+    }
+
+    /*
+     * Request a vote from the target node.
+    */
+    transition requestVote(target : Node, payload : VoteRequestData) {
+        guard:
+            & state = "Candidate"
+            & ~(target in votesResponded)
+            & payload = VoteRequestData {
+                term := currentTerm,
+                candidateId := self.id,
+                lastLogIndex := length(log),
+                lastLogTerm := lastLogTermVar
+            }
+    }
+
+    transition appendEntries(target : Node, payload : AppendEntriesData) {
+        guard:
+            & target ~= self
+            & state = "Leader"
+            & payload = if (nextIndex[target.id] < length(log)) {
+                // if there's at least one entry to send
+                let (nextLogIndex : Int := nextIndex[target.id]) {
+                let (prevLogIndex : Int := nextLogIndex - 1) {
+                let (prevLogTerm : Int := if (prevLogIndex > 0) { entryTermAt(log, prevLogIndex) } else { 0 }) {
+                    AppendEntriesData {
+                        term := currentTerm,
+                        leaderId := self.id,
+                        prevLogIndex := prevLogIndex,
+                        prevLogTerm := prevLogTerm,
+                        entry := log[nextLogIndex],
+                        entriesLen := 1,
+                        leaderCommit := commitIndex
+                    }
+                }}}
+            }
+            else {
+                // if there's no entry to send, then send a heartbeat
+                // TODO make a fun for a heartbeat AE
+                AppendEntriesData {
+                    term := currentTerm,
+                    leaderId := self.id,
+                    prevLogIndex := length(log),
+                    prevLogTerm := lastLogTermVar,
+                    entry := Entry { term := 0, value := "" },
+                    entriesLen := 0,
+                    leaderCommit := commitIndex
+                }
+            }
+    }
+
+    transition becomeLeader() {
+        guard:
+            & state = "Candidate"
+            & length(votesGranted) * 2 > length(cluster)
+        transit:
+            let _ : Boolean := startLeaderHeartbeat(self, currentTerm, cluster)
+            state := "Leader"
+            knownLeaderId := self.id
+            nextIndex := [] // TODO fix this
+            matchIndex := []
+            //spawnLeaderHeartbeat := true
+    }
+
+    // TODO do we really need to send back the idx to the client?
+    provider transition clientRequest(value : String, idx : Int) {
+        guard:
+            & state = "Leader"
+            & idx = length(log) + 1
+        transit:
+            log := log + [Entry { term := currentTerm, value := value }]
+            lastLogTermVar := currentTerm
+    }
+
+    internal transition advanceCommitIndex(newCommitIndex : Int) {
+        guard:
+            & state = "Leader"
+            & commitIndex < newCommitIndex
+            & newCommitIndex <= length(log)
+            & entryTermAt(log, newCommitIndex) = currentTerm
+            // TODO add this backin
+            /*& let (numAgree : Int := matchIndex.values.filter(i -> i >= commitIndex).length) {
+                numAgree * 2 > length(cluster)
+            }*/
+        transit:
+            commitIndex := commitIndex + 1
+    }
+
+    internal transition applyEntryToStateMachine() {
+        guard:
+            & lastApplied < commitIndex
+            & lastApplied < length(log)
+        transit:
+            sm := sm + [entryValueAt(log, lastApplied)]
+            lastApplied := lastApplied + 1
+    }
+
+    provider transition handleRequestVoteRequest(
         inTerm : Int,
         candidateId : Int,
         lastLogIndex : Int,
@@ -64,207 +172,42 @@ export proc RaftCore {
         voteGranted : Boolean
     ) {
         guard:
-            & candidateId >= 0 & candidateId < length(cluster)
-            & (
-                | (
-                    & inTerm > currentTerm
-                    & outTerm = inTerm
-                    & (
-                        | (voteGranted & lastLogIndex >= length(log))
-                        | (~voteGranted & lastLogIndex < length(log))
+            let (logOk : Boolean :=
+                (lastLogTerm > lastLogTermVar) | (lastLogTerm = lastLogTermVar & lastLogIndex >= length(log))
+            ) {
+                & inTerm <= currentTerm
+                & outTerm = currentTerm
+                & (
+                    | (
+                        & voteGranted
+                        & inTerm = currentTerm
+                        & (votedFor = -1 | votedFor = candidateId)
+                        & logOk
+                    )
+                    | (
+                        & ~voteGranted
+                        & ~(
+                            & inTerm = currentTerm
+                            & (votedFor = -1 | votedFor = candidateId)
+                            & logOk
+                        )
                     )
                 )
-                | (
-                    & inTerm = currentTerm
-                    & outTerm = currentTerm
-                    & (
-                        | (voteGranted & (votedFor = -1 | votedFor = candidateId) & lastLogIndex >= length(log))
-                        | (~voteGranted & ~((votedFor = -1 | votedFor = candidateId) & lastLogIndex >= length(log)))
-                    )
-                )
-                | (inTerm < currentTerm & outTerm = currentTerm & ~voteGranted)
-            )
+            }
         transit:
-            votedFor := if (voteGranted) { candidateId } else { if (inTerm > currentTerm) { -1 } else { votedFor } }
-            state := if (inTerm > currentTerm) { "Follower" } else { state }
-            knownLeaderId := if (inTerm > currentTerm) { -1 } else { knownLeaderId }
-            electionEpoch := if (inTerm > currentTerm) { electionEpoch + 1 } else { electionEpoch }
-            currentTerm := if (inTerm > currentTerm) { inTerm } else { currentTerm }
+            votedFor := if (voteGranted) { candidateId } else { votedFor }
     }
 
-    /*
-     * Start the FollowerHeartbeat process.
-     */
-    transition startFollowerHeartbeat(me : Node, n : Int) {
-        guard:
-            & startFollowerHeartbeat
-            & me = self
-            & n = length(cluster)
-        transit:
-            startFollowerHeartbeat := false
-    }
-
-    /*
-     * The FollowerHeartbeat process did not receive a heartbeat from
-     * a leader within the allotted timeout, and is now notifying /this/
-     * process.
-     */
-    transition becomeCandidate(
-        epoch : Int,
-        term : Int,
-        candId : Int,
-        lastIdx : Int,
-        lastT : Int
-    ) {
-        guard:
-            & (state = "Follower" | state = "Candidate")
-            & epoch = electionEpoch
-            & term = currentTerm + 1
-            & candId = self.id
-            & lastIdx = length(log)
-            & lastT = lastLogTermVar
-        transit:
-            state := "Candidate"
-            currentTerm := currentTerm + 1
-            votedFor := self.id
-            votesGranted := {self.id}
-            voteCount := 1
-            electionEpoch := electionEpoch + 1
-            knownLeaderId := -1
-            startElection := true
-    }
-
-    /*
-     * After the FollowerHeartbeat tells us to start an election, this
-     * process now starts a CandidateElection process in attempt to become
-     * the new leader.
-     */
-    transition startElection(
-        me : Node,
-        n : Int,
-        term : Int,
-        candId : Int,
-        lastIdx : Int,
-        lastTerm : Int
-    ) {
-        guard:
-            & startElection
-            & me = self
-            & n = length(cluster)
-            & term = currentTerm
-            & candId = self.id
-            & lastIdx = length(log)
-            & lastTerm = lastLogTermVar
-        transit:
-            startElection := false
-    }
-
-    /*
-     * Received a vote from another node--record it to see if we can garner a quorum.
-     */
-    transition recordVote(peerId : Int, term : Int, granted : Boolean) {
+    provider transition handleRequestVoteResponse(peerId : Int, term : Int, granted : Boolean) {
         guard:
             & state = "Candidate"
             & term = currentTerm
-            & peerId >= 0
-            & peerId < length(cluster)
         transit:
             votesGranted := if (granted) { votesGranted + {peerId} } else { votesGranted }
-            voteCount := if (granted) { voteCount + 1 } else { voteCount }
+            votesResponded := votesResponded + {Node { id := peerId, url := "" }} // TODO fix this
     }
 
-    /*
-     * CandidateElection failed to win quorum; spawn a new FollowerHeartbeat.
-     */
-    transition candidateElectionLost() {
-        guard:
-            state = "Candidate"
-        transit:
-            startFollowerHeartbeat := true
-    }
-
-    /*
-     * We have received enough votes to become the leader!
-     */
-    transition becomeLeader() {
-        guard:
-            & state = "Candidate"
-            & voteCount * 2 > length(cluster)
-        transit:
-            state := "Leader"
-            knownLeaderId := self.id
-            electionEpoch := electionEpoch + 1
-            startLeaderHeartbeat := true
-    }
-
-    /*
-     * Spawn LeaderHeartbeat after winning an election.
-     */
-    transition startLeaderHeartbeat(me : Node, n : Int) {
-        guard:
-            & startLeaderHeartbeat
-            & me = self
-            & n = length(cluster)
-        transit:
-            startLeaderHeartbeat := false
-    }
-
-    /*
-     * LeaderHeartbeat detected demotion; spawn a new FollowerHeartbeat.
-     */
-    transition lostLeadership() {
-        guard:
-            state ~= "Leader"
-        transit:
-            startFollowerHeartbeat := true
-    }
-
-    /*
-     * A ClientRequest message--add it to the log
-     */
-    transition clientAppendRequest(value : String, ok : Boolean, idx : Int) {
-        guard:
-            let (newLogLen : Int := length(log) + 1) {
-                | (state = "Leader" & ok & idx = newLogLen)
-                | (state ~= "Leader" & ~ok & idx = 0)
-            }
-        transit:
-            log := if (state = "Leader") {
-                log + [Entry { term := currentTerm, value := value }]
-            } else {
-                log
-            }
-            lastLogTermVar := if (state = "Leader") { currentTerm } else { lastLogTermVar }
-            commitIndex := if (state = "Leader") {
-                let (newLogLen : Int := length(log) + 1) { newLogLen }
-            } else {
-                commitIndex
-            }
-    }
-
-    /*
-     * Send an AppendEntries message to a follower.
-     * Pairwise with OutgoingAppendEntriesRPC (Heartbeat advances via endOutgoingAppendEntries).
-     */
-    transition sendAppendEntries(
-        peerId : Int,
-        inTerm : Int,
-        success : Boolean,
-        matchIdx : Int
-    ) {
-        guard:
-            & state = "Leader"
-            & peerId >= 0
-            & peerId < length(cluster)
-            & inTerm = currentTerm
-        transit:
-            commitIndex := if (success & matchIdx > commitIndex) { matchIdx } else { commitIndex }
-    }
-
-    /*
-     * Receive an AppendEntries message from a leader.
-     */
-    transition receiveAppendEntries(
+    provider transition handleAppendEntriesRequest(
         inTerm : Int,
         leaderId : Int,
         prevLogIndex : Int,
@@ -278,101 +221,162 @@ export proc RaftCore {
         matchIdx : Int
     ) {
         guard:
-            & leaderId >= 0
-            & leaderId < length(cluster)
+            & inTerm <= currentTerm
+            & outTerm = currentTerm
+            & (entriesLen = 0 | entriesLen = 1)
             & (
-                | (inTerm < currentTerm & outTerm = currentTerm & ~success & matchIdx = 0)
                 | (
-                    & inTerm >= currentTerm
-                    & outTerm = inTerm
+                    & ~success
+                    & matchIdx = 0
+                    & (
+                        | (inTerm < currentTerm)
+                        | (
+                            & inTerm = currentTerm
+                            & (
+                                | (prevLogIndex > length(log))
+                                | (
+                                    & prevLogIndex > 0
+                                    & prevLogIndex <= length(log)
+                                    & entryTermAt(log, prevLogIndex - 1) ~= prevLogTerm
+                                )
+                            )
+                        )
+                    )
+                )
+                | (
                     & success
-                    & matchIdx = length(log)
-                    & entriesLen = 0
+                    & inTerm = currentTerm
+                    & (
+                        | (prevLogIndex = 0)
+                        | (
+                            & prevLogIndex > 0
+                            & prevLogIndex <= length(log)
+                            & entryTermAt(log, prevLogIndex - 1) = prevLogTerm
+                        )
+                    )
+                    & (
+                        | (entriesLen = 0 & matchIdx = prevLogIndex)
+                        | (entriesLen = 1 & matchIdx = prevLogIndex + 1)
+                    )
                 )
             )
         transit:
-            votedFor := if (inTerm > currentTerm) { -1 } else { votedFor }
-            state := if (inTerm >= currentTerm) { "Follower" } else { state }
-            knownLeaderId := if (inTerm >= currentTerm) { leaderId } else { knownLeaderId }
-            electionEpoch := if (inTerm >= currentTerm) { electionEpoch + 1 } else { electionEpoch }
-            currentTerm := if (inTerm > currentTerm) { inTerm } else { currentTerm }
-            commitIndex := if (inTerm >= currentTerm & leaderCommit > commitIndex) {
-                leaderCommit
+            let _ : Boolean := gotHeartbeat()
+            knownLeaderId := if (success) { leaderId } else { knownLeaderId }
+            state := if (success & inTerm = currentTerm) { "Follower" } else { state }
+            log := if (success & entriesLen = 1) {
+                log[0:prevLogIndex] + [Entry { term := entryTerm, value := entryValue }]
+            } else {
+                log
+            }
+            lastLogTermVar := if (success & entriesLen = 1) {
+                entryTerm
+            } else {
+                lastLogTermVar
+            }
+            commitIndex := if (success & leaderCommit > commitIndex) {
+                let (lastNew : Int := if (entriesLen = 1) { prevLogIndex + 1 } else { length(log) }) {
+                    if (leaderCommit < lastNew) { leaderCommit } else { lastNew }
+                }
             } else {
                 commitIndex
             }
     }
 
-    internal transition applyEntryToStateMachine() {
+    provider transition handleAppendEntriesResponse(
+        peerId : Int,
+        inTerm : Int,
+        success : Boolean,
+        matchIdx : Int
+    ) {
         guard:
-            & lastApplied < commitIndex
-            & lastApplied < length(log)
+            & state = "Leader"
+            & inTerm = currentTerm
         transit:
-            stateMachine := stateMachine + [entryValueAt(log, lastApplied)]
-            lastApplied := lastApplied + 1
+            matchIndex[peerId] := if (success) { matchIdx } else {
+                if (peerId in matchIndex) { matchIndex[peerId] } else { 0 }
+            }
+            nextIndex[peerId] := if (success) {
+                matchIdx + 1
+            } else {
+                let (cur : Int := if (peerId in nextIndex) { nextIndex[peerId] } else { length(log) + 1 }) {
+                    if (cur > 1) { cur - 1 } else { 1 }
+                }
+            }
+    }
+
+    /*
+     * Any RPC with a newer term advances us first.
+     * Always syncable; no-op when inTerm <= currentTerm.
+     */
+    /* provider: procfun clients keep public channel keys (no remap on procfun StaticInfo). */
+    provider transition updateTerm(inTerm : Int) {
+        guard: true
+        transit:
+            let advance : Boolean := inTerm > currentTerm
+            let _ : Boolean := if (advance) {
+                startElectionTimeout(self, inTerm)
+            } else { true }
+            currentTerm := if (advance) { inTerm } else { currentTerm }
+            state := if (advance) { "Follower" } else { state }
+            votedFor := if (advance) { -1 } else { votedFor }
+            knownLeaderId := if (advance) { -1 } else { knownLeaderId }
+            votesGranted := if (advance) { votesGranted - votesGranted } else { votesGranted }
+    }
+
+    provider transition dropStaleResponse(respTerm : Int, drop : Boolean) {
+        guard:
+            drop <=> (respTerm < currentTerm)
     }
 
 
+    
     /*
-     * The provider transitions that RaftCore offers for accessing its info.
-     * Essentially, the transitions below are getters.
-     */
+     * Getter actions that are not technically part of the protocol.
+    */
+
+    provider transition committed(value : String, idx : Int) {
+        guard:
+            & state = "Leader"
+            & idx > 0
+            & idx <= commitIndex
+            & idx <= length(log)
+            & value = entryValueAt(log, idx - 1)
+    }
+
+    provider transition noLeader() {
+        guard:
+            & state ~= "Leader"
+            & knownLeaderId < 0
+    }
+
+    provider transition getCommitted(stateMachine : List<String>) {
+        guard: stateMachine = sm
+    }
+
+    provider transition staleTerm(term : Int) {
+        guard: term < currentTerm
+    }
 
     provider transition getIsLeader(isLeader : Boolean) {
         guard: isLeader <=> (state = "Leader")
     }
 
-    provider transition hasQuorum(flag : Boolean) {
-        guard:
-            & state = "Candidate"
-            & ((flag & voteCount * 2 > length(cluster)) | (~flag & voteCount * 2 <= length(cluster)))
+    provider transition getIsCandidate(isCandidate : Boolean) {
+        guard: isCandidate <=> (state = "Candidate")
     }
 
-    provider transition getElectionSnapshot(
-        epoch : Int,
-        term : Int,
-        candId : Int,
-        lastIdx : Int,
-        lastT : Int,
-        role : String
-    ) {
-        guard:
-            & epoch = electionEpoch
-            & term = currentTerm
-            & candId = self.id
-            & lastIdx = length(log)
-            & lastT = lastLogTermVar
-            & role = state
+    provider transition getCurrentTerm(term : Int) {
+        guard: term = currentTerm
     }
 
-    provider transition getSerializedStateMachine(serializedSM : String, isLeader : Boolean) {
-        guard:
-            | (state = "Leader" & isLeader & serializedSM = stateMachine + "")
-            | (state ~= "Leader" & ~isLeader & serializedSM = "")
-    }
-
-    /* Follower redirect: known leader id, or hasLeader false when unknown. */
-    provider transition getRedirectLeader(leaderIdOut : Int, hasLeader : Boolean) {
+    // TODO should be able to delete this
+    provider transition leaderRedirect(leader : Node) {
         guard:
             & state ~= "Leader"
-            & (
-                | (hasLeader & leaderIdOut = knownLeaderId & knownLeaderId >= 0)
-                | (~hasLeader & leaderIdOut = -1 & knownLeaderId < 0)
-            )
-    }
-
-    provider transition getLogMetadata(data : AppendEntriesData) {
-        guard:
-            & state = "Leader"
-            & data = AppendEntriesData {
-                term := currentTerm,
-                leaderId := self.id,
-                prevLogIndex := length(log),
-                prevLogTerm := lastLogTermVar,
-                entryTerm := 0,
-                entryValue := "",
-                entriesLen := 0,
-                leaderCommit := commitIndex
-            }
+            & knownLeaderId >= 0
+            & leader.id = knownLeaderId
+            & knownLeaderId < length(cluster)
+            & cluster[knownLeaderId] = leader
     }
 }

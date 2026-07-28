@@ -16,13 +16,6 @@ export obj Node {
     url : String
 }
 
-export obj VoteRequestData {
-    term : Int
-    candidateId : Int
-    lastLogIndex : Int
-    lastLogTerm : Int
-}
-
 /*
  * AppendEntries payload. entriesLen is 0 (heartbeat) or 1 (single entry).
  * Multi-entry batches can be added later; one-at-a-time replication is enough
@@ -33,7 +26,8 @@ export obj AppendEntriesData {
     leaderId : Int
     prevLogIndex : Int
     prevLogTerm : Int
-    entry : Entry
+    entryTerm : Int
+    entryValue : String
     entriesLen : Int
     leaderCommit : Int
 }
@@ -50,8 +44,8 @@ fun isQuorum(n : Int, granted : Set<Int>) : Boolean =
 export fun fieldValue(line : String) : String =
     split(line, "=")[1]
 
-export fun encodeRequestVote(data : VoteRequestData) : String =
-    "term=" + data.term + "|candidateId=" + data.candidateId + "|lastLogIndex=" + data.lastLogIndex + "|lastLogTerm=" + data.lastLogTerm
+export fun encodeRequestVote(term : Int, candidateId : Int, lastLogIndex : Int, lastLogTerm : Int) : String =
+    "term=" + term + "|candidateId=" + candidateId + "|lastLogIndex=" + lastLogIndex + "|lastLogTerm=" + lastLogTerm
 
 export fun encodeRequestVoteResp(term : Int, voteGranted : Boolean) : String =
     "term=" + term + "|voteGranted=" + if (voteGranted) { "true" } else { "false" }
@@ -62,8 +56,8 @@ export fun encodeAppendEntries(data : AppendEntriesData) : String =
         + "|prevLogIndex=" + data.prevLogIndex
         + "|prevLogTerm=" + data.prevLogTerm
         + "|entriesLen=" + data.entriesLen
-        + "|entryTerm=" + data.entry.term
-        + "|entryValue=" + data.entry.value
+        + "|entryTerm=" + data.entryTerm
+        + "|entryValue=" + data.entryValue
         + "|leaderCommit=" + data.leaderCommit
 
 export fun encodeAppendEntriesResp(term : Int, success : Boolean, matchIndex : Int) : String =

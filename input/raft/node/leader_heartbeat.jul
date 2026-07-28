@@ -1,170 +1,58 @@
-import node.lib.AppendEntriesData
-import node.lib.Node
+import julay.funlib.length
 import julay.funlib.delaySeconds
+import node.lib.Node
+import node.lib.AppendEntriesData
+import node.rpc_out.outAppendEntriesRPC
 
-/*
- * Leader heartbeat / AppendEntries orchestration (outgoing AppendEntries requests only).
- * LeaderHeartbeatTarget owns the peer cursor and resolves peers; LeaderHeartbeat sends AEs.
- * RaftCore spawns this driver via startLeaderHeartbeat(me, n); on demotion this driver reports
- * lostLeadership to RaftCore, which then spawns FollowerHeartbeat.
- */
+export procfun startLeaderHeartbeat(self : Node, leaderTerm : Int, theCluster : List<Node>) : Boolean {
+    transition startLeaderHeartbeat(me : Node, term : Int, cluster : List<Node>) {
+        guard:
+            & me = self
+            & term = leaderTerm
+            & cluster = theCluster
+        return: true
+    }
+}
 
 export proc LeaderHeartbeat {
     const me : Node
-    const clusterSize : Int
+    const leaderTerm : Int
+    const cluster : List<Node>
     var step : String
-    var target : Node
-    var ae : AppendEntriesData
+    var sentThisRound : Set<Node>
 
-    constructor startLeaderHeartbeat(me : Node, n : Int) {
+    constructor startLeaderHeartbeat(me : Node, term : Int, cluster : List<Node>) {
         transit:
             me := me
-            clusterSize := n
-            step := "initTarget"
-            target := Node { id := 0, url := "" }
-            ae := AppendEntriesData {
-                term := 0,
-                leaderId := 0,
-                prevLogIndex := 0,
-                prevLogTerm := 0,
-                entryTerm := 0,
-                entryValue := "",
-                entriesLen := 0,
-                leaderCommit := 0
-            }
-    }
-
-    transition startLeaderHeartbeatTarget(me : Node, n : Int) {
-        guard: step = "initTarget" & me = me & n = clusterSize
-        transit: step := "sleep"
+            leaderTerm := term
+            cluster := cluster
+            step := "sleep"
+            sentThisRound := {me}
     }
 
     internal transition sleep() {
         guard: step = "sleep"
-        transit: step := "checkIsLeader"
+        transit: step := "pickTarget"
         after: delaySeconds(1)
     }
 
-    client transition getIsLeader(isLeader : Boolean) {
-        guard: step = "checkIsLeader"
-        transit: step := if (isLeader) { "beginRound" } else { "stopTarget" }
-    }
-
-    transition beginHeartbeatRound() {
-        guard: step = "beginRound"
-        transit: step := "pickTarget"
-    }
-
-    transition heartbeatTargetDone() {
-        guard: step = "pickTarget"
-        transit: step := "sleep"
-    }
-
-    transition pickLeaderHeartbeatTarget(node : Node) {
-        guard: step = "pickTarget"
-        transit:
-            target := node
-            step := "needMeta"
-    }
-
-    client transition getLogMetadata(data : AppendEntriesData) {
-        guard: step = "needMeta"
-        transit:
-            ae := data
-            step := "sendAppendEntries"
-    }
-
-    transition beginOutgoingAppendEntries(peer : Node, data : AppendEntriesData) {
-        guard: step = "sendAppendEntries" & peer = target & data = ae
-        transit: step := "awaitAppendEntries"
-    }
-
-    /* Pairwise with OutgoingAppendEntriesRPC after Core has applied the AppendEntries response. */
-    transition endOutgoingAppendEntries(peerId : Int) {
-        guard: step = "awaitAppendEntries" & peerId = target.id
-        transit: step := "pickTarget"
-    }
-
-    transition stopLeaderHeartbeatTarget() {
-        guard: step = "stopTarget"
-        transit: step := "handback"
-    }
-
-    /* Lost leadership: report to RaftCore so it can spawn FollowerHeartbeat. */
-    transition lostLeadership() {
-        guard: step = "handback"
-        transit: step := "done"
-    }
-}
-
-/*
- * Tracks which cluster member should receive the next heartbeat in the current round.
- * Resolves peers via ClusterInfo.lookupNodeById; spawned with LeaderHeartbeat and stopped on demotion.
- *
- * Starts idle so it cannot lookupNodeById before LeaderHeartbeat begins a round (avoids deadlock
- * while the driver is in sleep). While ready, target.id is the next peer (never self).
- */
-export proc LeaderHeartbeatTarget {
-    const me : Node
-    const clusterSize : Int
-    var target : Node
-    var peersLeft : Int
-    var step : String
-
-    constructor startLeaderHeartbeatTarget(me : Node, n : Int) {
-        transit:
-            me := me
-            clusterSize := n
-            target := Node { id := 0, url := "" }
-            peersLeft := 0
-            step := "idle"
-    }
-
-    transition beginHeartbeatRound() {
-        guard: step = "idle"
-        transit:
-            target := Node { id := (me.id + 1) % clusterSize, url := "" }
-            peersLeft := clusterSize - 1
-            step := if (clusterSize <= 1) { "doneRound" } else { "ready" }
-    }
-
-    client transition lookupNodeById(id : Int, node : Node) {
-        guard: step = "ready" & id = target.id
-        transit:
-            target := node
-            step := "havePeer"
-    }
-
-    transition pickLeaderHeartbeatTarget(node : Node) {
-        guard: step = "havePeer" & node = target
-        transit: step := "advance"
-    }
-
-    /* Next peer after target.id, skipping self; wrap with %. */
-    internal transition advanceTarget() {
-        guard: step = "advance"
-        transit:
-            target := Node {
-                id := if (((target.id + 1) % clusterSize) = me.id) {
-                    (target.id + 2) % clusterSize
-                } else {
-                    (target.id + 1) % clusterSize
-                },
-                url := ""
-            }
-            peersLeft := peersLeft - 1
-            step := if (peersLeft - 1 = 0) { "doneRound" } else { "ready" }
-    }
-
-    transition heartbeatTargetDone() {
-        guard: step = "doneRound"
-        transit: step := "idle"
-    }
-
-    transition stopLeaderHeartbeatTarget() {
+    transition appendEntries(target : Node, payload : AppendEntriesData) {
         guard:
-            step = "idle" | step = "ready" | step = "havePeer"
-            | step = "advance" | step = "doneRound"
-        transit: step := "done"
+            & step = "pickTarget"
+            & ~(target in sentThisRound)
+        transit:
+            // TODO this should probably be asynchronous
+            let _ : Boolean := outAppendEntriesRPC(target, payload)
+            let newSentThisRound : Set<Node> := sentThisRound + {target}
+            sentThisRound := if (length(newSentThisRound) = length(cluster)) { {me} } else { newSentThisRound }
+            step := "sleep"
+    }
+
+    // terminate this proc once we detect a stale term
+    client transition staleTerm(term : Int) {
+        guard:
+            term = leaderTerm
+        transit:
+            step := "done"
     }
 }
