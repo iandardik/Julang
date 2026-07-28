@@ -25,7 +25,7 @@ Import as `julay.funlib.<name>`. Bare names are not available without an import.
 | Function | Role | Effects / IO? | OK in guards? |
 |----------|------|---------------|----------------|
 | `length` | Size of list, set, or map | No | Yes |
-| `map` | Apply a unary named `fun` or lambda to each element of a list or set (`map(xs, f)`); returns `List`/`Set` of results. Prefer method form [`.map`](higher-order-functions.md) | No | **No** (unless only concrete state; see HOF docs) |
+| `map` | Apply a unary named `fun` or lambda to each element of a list or set (`map(xs, f)`); returns `List`/`Set` of results. Prefer method form [`.map`](collections.md#methods-and-lambdas) | No | **No** (unless only concrete state; see [Collections](collections.md#guards)) |
 | `parseInt` | String → Int | No | Yes |
 | `startsWith` | String prefix test | No | Yes |
 | `split` | Split string | No | **No** |

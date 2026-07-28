@@ -23,7 +23,7 @@ Compact cheat sheet. For explanations, use the other chapters.
 | Assign | `:=` |
 | Models | `\|=` (system with guarantee) |
 | Parallel | `\|\|` |
-| Other | `.` `->` (map entries / lambdas), list/map/set literals; collection `.keys` / `.length` / `.filter` / `.map` / `.fold` — [Higher-order functions](higher-order-functions.md) |
+| Other | `.` `->` (map entries / lambdas), list/map/set literals; collection `.keys` / `.length` / `.filter` / `.map` / `.fold` — [Collections](collections.md) |
 
 ## Top-level declarations
 

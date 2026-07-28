@@ -1,0 +1,4 @@
+source: regression/input/list/list-whole-and-put.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected not to assign whole collection \"xs\" and update entries in the same action"

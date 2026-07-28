@@ -635,18 +635,35 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
                 transitApplyLines += copyAssignmentString(rootVar, rootType, fieldPath, temp)
                 assignIndex++
             }
-            is TransitUpdate.MapPut -> {
-                val mapVar = update.mapVar.toKotlinIdent()
-                val mapType = stateVarTypes.getValue(update.mapVar) as MapType
-                val keyTemp = "__transitRhs_${assignIndex}_key"
+            is TransitUpdate.IndexPut -> {
+                val collectionVar = update.collectionVar.toKotlinIdent()
+                val collectionType = stateVarTypes.getValue(update.collectionVar)
+                val idxTemp = "__transitRhs_${assignIndex}_key"
                 val valTemp = "__transitRhs_${assignIndex}_val"
-                transitEvalSnapshots +=
-                    "val $keyTemp: ${mapType.keyType.toKotlinTypeString()} = ${substTransitLets(update.key).toTransitString(transitSymbolTypes, transitArgSymbols)}"
-                transitEvalSnapshots +=
-                    "val $valTemp: ${mapType.valueType.toKotlinTypeString()} = ${substTransitLets(update.value).toTransitString(transitSymbolTypes, transitArgSymbols)}"
-                // Key/value are pre-state; applying puts in order composes multiple updates
-                // to the same map (TLA+-style EXCEPT with several fields).
-                transitApplyLines += "$mapVar = $mapVar + ($keyTemp to $valTemp)"
+                when (collectionType) {
+                    is MapType -> {
+                        transitEvalSnapshots +=
+                            "val $idxTemp: ${collectionType.keyType.toKotlinTypeString()} = ${substTransitLets(update.index).toTransitString(transitSymbolTypes, transitArgSymbols)}"
+                        transitEvalSnapshots +=
+                            "val $valTemp: ${collectionType.valueType.toKotlinTypeString()} = ${substTransitLets(update.value).toTransitString(transitSymbolTypes, transitArgSymbols)}"
+                        // Index/value are pre-state; applying puts in order composes multiple updates
+                        // to the same map (TLA+-style EXCEPT with several fields).
+                        transitApplyLines += "$collectionVar = $collectionVar + ($idxTemp to $valTemp)"
+                    }
+                    is ListType -> {
+                        transitEvalSnapshots +=
+                            "val $idxTemp: Int = ${substTransitLets(update.index).toTransitString(transitSymbolTypes, transitArgSymbols)}"
+                        transitEvalSnapshots +=
+                            "val $valTemp: ${collectionType.elementType.toKotlinTypeString()} = ${substTransitLets(update.value).toTransitString(transitSymbolTypes, transitArgSymbols)}"
+                        // Index/value are pre-state; applying sets in order composes multiple updates
+                        // to the same list (TLA+-style EXCEPT with several fields).
+                        transitApplyLines +=
+                            "$collectionVar = $collectionVar.toMutableList().also { it[$idxTemp] = $valTemp }"
+                    }
+                    else -> throw RuntimeException(
+                        "IndexPut expected map or list state var but \"${update.collectionVar}\" has type $collectionType",
+                    )
+                }
                 assignIndex++
             }
         }

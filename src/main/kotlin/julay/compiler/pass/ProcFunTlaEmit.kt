@@ -187,11 +187,11 @@ internal fun emitProcFunCallAndRet(
                 retParts += "/\\ ${assignVal(v, hostBinder, rhs)}"
                 retChanged += v
             }
-            is TransitUpdate.MapPut -> {
+            is TransitUpdate.IndexPut -> {
                 val valueExpr = substLets(update.value)
                 if (valueExpr is FunCallExprNode && valueExpr.resolvedProcFunOrNull() != null) return@forEach
-                val v = stateTlaName(hostLeaf.tlaName, update.mapVar, stateVarNames)
-                val k = exprToTla(substLets(update.key), hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)
+                val v = stateTlaName(hostLeaf.tlaName, update.collectionVar, stateVarNames)
+                val k = exprToTla(substLets(update.index), hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)
                 val vv = exprToTla(valueExpr, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)
                 if (hostBinder != null) {
                     retParts += "/\\ $v' = [$v EXCEPT ![$hostBinder] = [@ EXCEPT ![$k] = $vv]]"

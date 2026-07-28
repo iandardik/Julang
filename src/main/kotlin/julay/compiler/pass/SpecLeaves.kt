@@ -384,8 +384,8 @@ internal fun collectProcFunCallsInProc(pc: ProcClassNode): List<FunCallExprNode>
         decl.transits.forEach { update ->
             when (update) {
                 is julay.compiler.decl.TransitUpdate.Assign -> walkExpr(update.expr)
-                is julay.compiler.decl.TransitUpdate.MapPut -> {
-                    walkExpr(update.key)
+                is julay.compiler.decl.TransitUpdate.IndexPut -> {
+                    walkExpr(update.index)
                     walkExpr(update.value)
                 }
                 is julay.compiler.decl.TransitUpdate.Let -> walkExpr(update.init)

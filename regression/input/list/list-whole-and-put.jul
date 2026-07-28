@@ -1,0 +1,20 @@
+proc BadListTransit {
+    var xs : List<Int>
+
+    constructor initially(args : List<String>) {
+        transit:
+            xs := [1, 2]
+    }
+
+    internal transition bad() {
+        guard:
+            true
+        transit:
+            xs := [3, 4]
+            xs[0] := 5
+    }
+}
+
+proc P := BadListTransit
+
+compile P

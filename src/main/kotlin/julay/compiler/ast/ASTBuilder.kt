@@ -518,13 +518,13 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             return LetTransitNode(name, typeExpr, init, sourceLocation(ctx))
         }
         if (ctx.ID() != null && ctx.LBRACK() != null) {
-            val mapVar = ctx.ID().text
-            val key = visit(ctx.expr(0))
+            val collectionVar = ctx.ID().text
+            val index = visit(ctx.expr(0))
             val value = visit(ctx.expr(1))
-            if (key !is ExprNode || value !is ExprNode) {
-                throw RuntimeException("Expected expressions in map transit assignment")
+            if (index !is ExprNode || value !is ExprNode) {
+                throw RuntimeException("Expected expressions in index transit assignment")
             }
-            return MapIndexTransitNode(mapVar, key, value, sourceLocation(ctx))
+            return IndexTransitNode(collectionVar, index, value, sourceLocation(ctx))
         }
         val lhs = visit(ctx.field_access())
         val transit = visit(ctx.expr(0))

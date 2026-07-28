@@ -10,8 +10,8 @@ sealed class TransitUpdate {
         override fun transitRootVar(): String = julay.program.type.transitRootVar(key)
     }
 
-    data class MapPut(val mapVar: String, val key: ExprNode, val value: ExprNode) : TransitUpdate() {
-        override fun transitRootVar(): String = mapVar
+    data class IndexPut(val collectionVar: String, val index: ExprNode, val value: ExprNode) : TransitUpdate() {
+        override fun transitRootVar(): String = collectionVar
     }
 
     /** Transit-scoped temporary; evaluated against pre-state (+ earlier lets), not process state. */

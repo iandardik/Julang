@@ -6,11 +6,7 @@
 
 ## Collections
 
-| Type | Literals / notes |
-|------|------------------|
-| `List<T>` | `[]`, `[a, b]`, concatenation with `+`, indexing |
-| `Map<K, V>` | `[k -> v, ...]`; update with `m[k] := v` in `transit` |
-| `Set<T>` | `{...}`; set operations as supported by the language |
+`List<T>`, `Map<K, V>`, and `Set<T>` — literals, operators, indexing, updates, methods, and lambdas: [Collections](collections.md).
 
 `length` from `julay.funlib` works on lists, sets, and maps (see [Standard library](standard-library.md)).
 
@@ -80,19 +76,11 @@ fun add(x : Int, y : Int) : Int {
 
 Recursive user functions are rejected. Prefer `julay.funlib.*` for common helpers.
 
-Higher-order collection methods (`.filter`, `.map`, `.fold`), `.keys`, `.length`, and inline lambdas: [Higher-order functions](higher-order-functions.md).
-
-Freestanding `map` (from `julay.funlib.map`) also accepts a **named** unary `fun` or a lambda:
-
-```jul
-fun double(n : Int) : Int = n + n
-ys := map([1, 2, 3], double)   // List<Int>
-ts := map({1, 2}, i -> i + 1)  // Set<Int>
-```
+Collection methods (`.filter`, `.map`, `.fold`), properties (`.keys`, `.length`), and inline lambdas: [Collections](collections.md).
 
 ## See also
 
 - [Reference](reference.md)
-- [Higher-order functions](higher-order-functions.md)
+- [Collections](collections.md)
 - [Standard library](standard-library.md) — funlib catalog including `map`
 - Regression coverage under [`regression/input/list/`](../../regression/input/list/), [`map/`](../../regression/input/map/), [`set/`](../../regression/input/set/), [`oclass/`](../../regression/input/oclass/), [`expr/`](../../regression/input/expr/)

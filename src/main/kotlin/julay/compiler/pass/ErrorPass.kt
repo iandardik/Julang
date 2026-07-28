@@ -716,8 +716,8 @@ private fun constAssignmentErrors(transNode: TransitionNode, constVarNames: Set<
     if (constVarNames.isEmpty()) return emptyList()
     val assignments = transNode.transitVars() +
         transitAssignmentNodes(transNode.body())
-            .filterIsInstance<MapIndexTransitNode>()
-            .map { it.mapVar to it.programLocation() }
+            .filterIsInstance<IndexTransitNode>()
+            .map { it.collectionVar to it.programLocation() }
     return assignments.flatMap { (key, loc) ->
         val root = transitRootVar(key)
         assertOrCompileError(
@@ -787,11 +787,11 @@ private fun actionBodyAssignmentErrors(body: List<ActionBodyNode>): List<Compile
                     )
                 }
             }
-            is MapIndexTransitNode -> {
-                if (node.mapVar in seenLets) {
+            is IndexTransitNode -> {
+                if (node.collectionVar in seenLets) {
                     assignToLetErrors += OneLocCompileError(
                         node.programLocation(),
-                        "Cannot assign to transit let binding \"${node.mapVar}\"",
+                        "Cannot assign to transit let binding \"${node.collectionVar}\"",
                     )
                 }
             }
@@ -799,16 +799,16 @@ private fun actionBodyAssignmentErrors(body: List<ActionBodyNode>): List<Compile
         }
     }
     val varTransitAssignments = transitNodes.flatMap { it.transitVars() }
-    val wholeMapAssigns = transitNodes.filterIsInstance<VarTransitNode>()
+    val wholeCollectionAssigns = transitNodes.filterIsInstance<VarTransitNode>()
         .filter { it.fieldPath.isEmpty() }
         .map { it.varName to it.programLocation() }
-    val mapPutNodes = transitNodes.filterIsInstance<MapIndexTransitNode>()
-    val overlapErrors = wholeMapAssigns.flatMap { (varName, loc) ->
-        mapPutNodes.filter { it.mapVar == varName }.map { put ->
+    val indexPutNodes = transitNodes.filterIsInstance<IndexTransitNode>()
+    val overlapErrors = wholeCollectionAssigns.flatMap { (varName, loc) ->
+        indexPutNodes.filter { it.collectionVar == varName }.map { put ->
             TwoLocsCompileError(
                 loc,
                 put.programLocation(),
-                "Expected not to assign whole map \"$varName\" and update entries in the same action",
+                "Expected not to assign whole collection \"$varName\" and update entries in the same action",
             )
         }
     }

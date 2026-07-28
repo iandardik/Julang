@@ -1,0 +1,11 @@
+proc ListIndexAssignBadIndex {
+    var xs : List<Int>
+
+    constructor initially(args : List<String>) {
+        transit:
+            xs := [1, 2]
+            xs[1.0] := 3
+    }
+}
+
+compile ListIndexAssignBadIndex

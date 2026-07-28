@@ -87,7 +87,7 @@ fun ASTNode.typePass(
     is TransitNode -> typePassTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is LetTransitNode -> typePassLetTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is VarTransitNode -> typePassVarTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
-    is MapIndexTransitNode -> typePassMapIndexTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is IndexTransitNode -> typePassIndexTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is ErrorNode -> typePassError(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is BeforeNode -> typePassBefore(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is AfterNode -> typePassAfter(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
@@ -271,8 +271,8 @@ private fun TransitNode.typePassTransit(
                     symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv, rhsEnv,
                 )
             }
-            is MapIndexTransitNode -> {
-                errors += item.typePassMapIndexTransit(
+            is IndexTransitNode -> {
+                errors += item.typePassIndexTransit(
                     symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv, rhsEnv,
                 )
             }
@@ -1805,7 +1805,7 @@ private fun IndexExprNode.typePassIndex(
     return errors
 }
 
-private fun MapIndexTransitNode.typePassMapIndexTransit(
+private fun IndexTransitNode.typePassIndexTransit(
     symbolEnv: Map<String, Type>,
     registry: ObjClassRegistry,
     funEnv: Map<String, FunNode>,
@@ -1814,38 +1814,64 @@ private fun MapIndexTransitNode.typePassMapIndexTransit(
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
     rhsEnv: Map<String, Type> = symbolEnv,
 ): List<CompileError> {
-    val mapVarType = symbolEnv[mapVar]
-    if (mapVarType == null) {
-        return listOf(OneLocCompileError(programLocation(), "Unknown variable \"$mapVar\" in transit assignment"))
+    val collectionType = symbolEnv[collectionVar]
+    if (collectionType == null) {
+        return listOf(OneLocCompileError(programLocation(), "Unknown variable \"$collectionVar\" in transit assignment"))
     }
-    if (mapVarType !is MapType) {
-        return listOf(
-            OneLocCompileError(
-                programLocation(),
-                "Expected map variable for index assignment but \"$mapVar\" has type $mapVarType",
-            ),
-        )
+    when (collectionType) {
+        is MapType, is ListType -> {}
+        else -> {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected map or list variable for index assignment but \"$collectionVar\" has type $collectionType",
+                ),
+            )
+        }
     }
     val childErrors = children.flatMap { it.typePass(rhsEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (childErrors.isNotEmpty()) {
         return childErrors
     }
     val errors = mutableListOf<CompileError>()
-    if (key.getType() != mapVarType.keyType) {
-        errors.add(
-            OneLocCompileError(
-                key.programLocation(),
-                "Expected map key type ${mapVarType.keyType} but got ${key.getType()}",
-            ),
-        )
-    }
-    if (value.getType() != mapVarType.valueType) {
-        errors.add(
-            OneLocCompileError(
-                value.programLocation(),
-                "Expected map value type ${mapVarType.valueType} but got ${value.getType()}",
-            ),
-        )
+    when (collectionType) {
+        is MapType -> {
+            if (index.getType() != collectionType.keyType) {
+                errors.add(
+                    OneLocCompileError(
+                        index.programLocation(),
+                        "Expected map key type ${collectionType.keyType} but got ${index.getType()}",
+                    ),
+                )
+            }
+            if (value.getType() != collectionType.valueType) {
+                errors.add(
+                    OneLocCompileError(
+                        value.programLocation(),
+                        "Expected map value type ${collectionType.valueType} but got ${value.getType()}",
+                    ),
+                )
+            }
+        }
+        is ListType -> {
+            if (index.getType() !is IntType) {
+                errors.add(
+                    OneLocCompileError(
+                        index.programLocation(),
+                        "Expected Int index but got ${index.getType()}",
+                    ),
+                )
+            }
+            if (value.getType() != collectionType.elementType) {
+                errors.add(
+                    OneLocCompileError(
+                        value.programLocation(),
+                        "Expected list element type ${collectionType.elementType} but got ${value.getType()}",
+                    ),
+                )
+            }
+        }
+        else -> {}
     }
     return errors
 }

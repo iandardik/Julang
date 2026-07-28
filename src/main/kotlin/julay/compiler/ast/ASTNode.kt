@@ -799,20 +799,20 @@ class AfterNode(
     }
 }
 
-class MapIndexTransitNode(
-    val mapVar: String,
-    val key: ExprNode,
+class IndexTransitNode(
+    val collectionVar: String,
+    val index: ExprNode,
     val value: ExprNode,
     private val loc: ProgramLoc,
-) : ActionBodyNode(listOf(), listOf(key, value)) {
+) : ActionBodyNode(listOf(), listOf(index, value)) {
     override fun programLocation() = loc
 
     override fun transitVars(): List<Pair<String, ProgramLoc>> = emptyList()
 
     override fun transits(): List<TransitUpdate> =
-        listOf(TransitUpdate.MapPut(mapVar, key, value))
+        listOf(TransitUpdate.IndexPut(collectionVar, index, value))
 
-    override fun toString(): String = "$mapVar[$key] := $value"
+    override fun toString(): String = "$collectionVar[$index] := $value"
 }
 
 class LetTransitNode(

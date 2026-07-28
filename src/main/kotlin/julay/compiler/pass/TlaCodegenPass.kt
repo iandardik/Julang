@@ -1184,8 +1184,8 @@ private fun emitConjoined(
                 offer.decl.transits.any { update ->
                     when (update) {
                         is TransitUpdate.Assign -> exprReferencesSymbol(update.expr, argName)
-                        is TransitUpdate.MapPut ->
-                            exprReferencesSymbol(update.key, argName) || exprReferencesSymbol(update.value, argName)
+                        is TransitUpdate.IndexPut ->
+                            exprReferencesSymbol(update.index, argName) || exprReferencesSymbol(update.value, argName)
                         is TransitUpdate.Let -> exprReferencesSymbol(update.init, argName)
                     }
                 }
@@ -1280,11 +1280,11 @@ private fun emitConjoined(
                         }
                     }
                 }
-                is TransitUpdate.MapPut -> {
-                    val v = stateTlaName(offer.leaf.tlaName, update.mapVar, stateVarNames)
+                is TransitUpdate.IndexPut -> {
+                    val v = stateTlaName(offer.leaf.tlaName, update.collectionVar, stateVarNames)
                     targetChanged += v
                     val bare = stateVarsByLeaf[offer.leaf.tlaName].orEmpty()
-                    val keyExpr = substLets(update.key)
+                    val keyExpr = substLets(update.index)
                     val valueExpr = substLets(update.value)
                     val k = exprToTla(keyExpr, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames)
                     if (exprContainsIoHavoc(valueExpr)) {
@@ -1371,8 +1371,8 @@ private fun emitConjoined(
                 offer.decl.transits.any { update ->
                     when (update) {
                         is TransitUpdate.Assign -> exprReferencesSymbol(update.expr, argName)
-                        is TransitUpdate.MapPut ->
-                            exprReferencesSymbol(update.key, argName) || exprReferencesSymbol(update.value, argName)
+                        is TransitUpdate.IndexPut ->
+                            exprReferencesSymbol(update.index, argName) || exprReferencesSymbol(update.value, argName)
                         is TransitUpdate.Let -> exprReferencesSymbol(update.init, argName)
                     }
                 }
@@ -1702,8 +1702,8 @@ private fun collectIntLiteralsFromLeaves(
                 action.transits.forEach { update ->
                     when (update) {
                         is TransitUpdate.Assign -> collectIntLiteralsFromExpr(update.expr, into)
-                        is TransitUpdate.MapPut -> {
-                            collectIntLiteralsFromExpr(update.key, into)
+                        is TransitUpdate.IndexPut -> {
+                            collectIntLiteralsFromExpr(update.index, into)
                             collectIntLiteralsFromExpr(update.value, into)
                         }
                         is TransitUpdate.Let -> collectIntLiteralsFromExpr(update.init, into)
@@ -1806,7 +1806,7 @@ private fun collectIoHavocDomainModels(
                             } catch (_: RuntimeException) {
                             }
                         }
-                        is TransitUpdate.MapPut -> if (exprContainsIoHavoc(update.value)) {
+                        is TransitUpdate.IndexPut -> if (exprContainsIoHavoc(update.value)) {
                             try {
                                 collectDomainModelNames(update.value.getType(), into)
                             } catch (_: RuntimeException) {

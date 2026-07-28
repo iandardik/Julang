@@ -1,0 +1,5 @@
+source: regression/input/type-errors/list-index-assign-bad-value.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected list element type Int but got Boolean"
+  - "Found type errors; exiting."

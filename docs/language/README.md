@@ -49,7 +49,7 @@ How-to: [Getting started](../getting-started.md). Specs: [Specifications](specif
 1. [Processes](processes.md) — state, `initially`, constructors vs transitions
 2. [Composition and actions](composition-and-actions.md) — `||`, modifiers, synchronization
 3. [Types and expressions](types-and-expressions.md)
-4. [Higher-order functions](higher-order-functions.md) — `.keys`, `.length`, `.filter` / `.map` / `.fold`, lambdas
+4. [Collections](collections.md) — `List` / `Map` / `Set`, methods, lambdas
 5. [Procfuns](procfun.md) — process-backed blocking calls
 6. [Modules](modules.md) — `import` and search path
 7. [Sessions](sessions.md) — sticky pairwise protocols

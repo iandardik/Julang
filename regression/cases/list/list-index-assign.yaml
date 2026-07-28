@@ -1,0 +1,8 @@
+source: regression/input/list/list-index-assign.jul
+programs:
+  - name: ListIndexAssignTest
+    run:
+      timeoutMs: 60000
+      args:
+        - "cli"
+      expectStdout: regression/expected/list-list-index-assign.stdout
