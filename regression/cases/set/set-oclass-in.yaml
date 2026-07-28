@@ -1,0 +1,8 @@
+source: regression/input/set/set-oclass-in.jul
+programs:
+  - name: SetOclassInTest
+    run:
+      timeoutMs: 60000
+      args:
+        - "cli"
+      expectStdout: regression/expected/set-set-oclass-in.stdout

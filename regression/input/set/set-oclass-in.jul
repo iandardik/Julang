@@ -1,0 +1,67 @@
+import julay.funlib.println
+import julay.funlib.exitProcess
+
+obj Point {
+    x : Int
+    y : Int
+}
+
+/*
+ * Membership (`in`) with obj LHS against Set, List, and Map.
+ */
+proc SetOclassInDemo {
+    var s : Set<Point>
+    var xs : List<Point>
+    var m : Map<Point, Int>
+    var p : Point
+    var q : Point
+    var ok : Boolean
+    var print : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            p := Point { x := 1, y := 2 }
+            q := Point { x := 9, y := 9 }
+            s := {Point { x := 1, y := 2 }}
+            xs := [Point { x := 1, y := 2 }]
+            m := [Point { x := 1, y := 2 } -> 7]
+            ok := false
+            print := false
+        after:
+            println(args[0])
+    }
+
+    internal transition check() {
+        guard:
+            & ~ok
+            & p in s
+            & ~(q in s)
+            & p in xs
+            & ~(q in xs)
+            & p in m
+            & ~(q in m)
+        transit:
+            ok := true
+            print := true
+    }
+
+    internal transition println(msg : String) {
+        guard:
+            print & ok & (msg = "ok")
+        transit:
+            print := false
+        after:
+            println(msg)
+    }
+
+    internal transition exitSystem() {
+        guard:
+            ~print & ok
+        after:
+            exitProcess()
+    }
+}
+
+proc SetOclassInTest := SetOclassInDemo
+
+compile SetOclassInTest

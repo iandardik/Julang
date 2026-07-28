@@ -503,8 +503,35 @@ private fun BinaryOpExprNode.typePassBinaryOp(
     }
     val lhsType = lhsOperand().getType()
     val rhsType = rhsOperand().getType()
-    // If either side of "+" is String, coerce the other via toString (string concat).
-    val structOpErrors = if (op() == "+" && (lhsType is StringType || rhsType is StringType)) {
+    // Membership is about the RHS collection; handle before obj/list/set/map branches
+    // so obj elements/keys (e.g. Node in Set<Node>) are not rejected as invalid obj ops.
+    val structOpErrors = if (op() == "in") {
+        when (rhsType) {
+            is ListType -> assertOrCompileError(
+                lhsType == rhsType.elementType,
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected \"in\" list element type $lhsType to match ${rhsType.elementType}",
+                ),
+            )
+            is SetType -> assertOrCompileError(
+                lhsType == rhsType.elementType,
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected \"in\" set element type $lhsType to match ${rhsType.elementType}",
+                ),
+            )
+            is MapType -> assertOrCompileError(
+                lhsType == rhsType.keyType,
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected \"in\" map key type $lhsType to match ${rhsType.keyType}",
+                ),
+            )
+            else -> listOf(OneLocCompileError(programLocation(), "Cannot apply \"in\" to types $lhsType and $rhsType"))
+        }
+    } else if (op() == "+" && (lhsType is StringType || rhsType is StringType)) {
+        // If either side of "+" is String, coerce the other via toString (string concat).
         emptyList()
     } else if (lhsType is ObjClassType || rhsType is ObjClassType) {
         when (op()) {
@@ -533,13 +560,6 @@ private fun BinaryOpExprNode.typePassBinaryOp(
                     "Expected both sides of \"+\" to have the same list type, got $lhsType and $rhsType",
                 ),
             )
-            "in" -> assertOrCompileError(
-                rhsType is ListType && lhsType == (rhsType as ListType).elementType,
-                OneLocCompileError(
-                    programLocation(),
-                    "Expected \"in\" list element type $lhsType to match ${(rhsType as ListType).elementType}",
-                ),
-            )
             else -> listOf(OneLocCompileError(programLocation(), "Cannot apply \"${op()}\" to list type $lhsType"))
         }
     } else if (lhsType is SetType || rhsType is SetType) {
@@ -558,13 +578,6 @@ private fun BinaryOpExprNode.typePassBinaryOp(
                     "Expected both sides of \"${op()}\" to have the same set type, got $lhsType and $rhsType",
                 ),
             )
-            "in" -> assertOrCompileError(
-                rhsType is SetType && lhsType == (rhsType as SetType).elementType,
-                OneLocCompileError(
-                    programLocation(),
-                    "Expected \"in\" set element type $lhsType to match ${(rhsType as SetType).elementType}",
-                ),
-            )
             else -> listOf(OneLocCompileError(programLocation(), "Cannot apply \"${op()}\" to set type $lhsType"))
         }
     } else if (lhsType is MapType || rhsType is MapType) {
@@ -576,17 +589,8 @@ private fun BinaryOpExprNode.typePassBinaryOp(
                     "Expected both sides of \"${op()}\" to have the same map type, got $lhsType and $rhsType",
                 ),
             )
-            "in" -> assertOrCompileError(
-                rhsType is MapType && lhsType == (rhsType as MapType).keyType,
-                OneLocCompileError(
-                    programLocation(),
-                    "Expected \"in\" map key type $lhsType to match ${(rhsType as MapType).keyType}",
-                ),
-            )
             else -> listOf(OneLocCompileError(programLocation(), "Cannot apply \"${op()}\" to map type $lhsType"))
         }
-    } else if (op() == "in") {
-        listOf(OneLocCompileError(programLocation(), "Cannot apply \"in\" to types $lhsType and $rhsType"))
     } else {
         emptyList()
     }
