@@ -372,34 +372,62 @@ private fun RootNode.actionConsistencyWarnings(
     program: ProcDecl?,
     procDecls: List<ProcDecl>,
 ): List<CompileWarning> {
-    val offers = collectActionOffers(procs, librariesInUse)
-    val providerDeadlock = offers.groupBy { it.decl.action.name }.entries.flatMap { (name, namedOffers) ->
-        if (name == "initially") return@flatMap emptyList()
-        val transitions = namedOffers.filter { !it.isConstructor }
-        val providers = transitions.filter { it.decl.modifier == TSAction.SyncRole.Provider }
-        val clients = transitions.filter { it.decl.modifier == TSAction.SyncRole.Client }
-        if (providers.size == 1 && clients.isEmpty()) {
-            listOf(
-                OneLocCompileWarning(
-                    providers[0].decl.loc,
-                    "action \"$name\" is a provider with no clients and will never synchronize (intentional deadlock)",
-                ),
-            )
-        } else {
-            emptyList()
+    val leafMap = leafActionMap(this, procs, librariesInUse)
+    val procFunNames = collectProcFunNames(this)
+    val alphabetResult = if (program != null) {
+        computeCompositionAlphabet(program, procDecls, leafMap, procFunNames, this)
+    } else {
+        null
+    }
+
+    // Prefer composition alphabet (includes call-folded procfun clients). Flat leaf scans
+    // miss rpc_in/rpc_out helpers and falsely warn that providers have no clients.
+    val providerDeadlock = if (alphabetResult != null) {
+        alphabetResult.allOffers
+            .filter { !it.isConstructor && !it.sourceInternal }
+            .groupBy { it.name }
+            .entries
+            .flatMap { (name, named) ->
+                if (name == "initially") return@flatMap emptyList()
+                val providers = named.filter { it.isProvider }
+                val clients = named.filter { it.isClient }
+                if (providers.size == 1 && clients.isEmpty()) {
+                    listOf(
+                        OneLocCompileWarning(
+                            providers[0].loc,
+                            "action \"$name\" is a provider with no clients and will never synchronize (intentional deadlock)",
+                        ),
+                    )
+                } else {
+                    emptyList()
+                }
+            }
+    } else {
+        val offers = collectActionOffers(procs, librariesInUse)
+        offers.groupBy { it.decl.action.name }.entries.flatMap { (name, namedOffers) ->
+            if (name == "initially") return@flatMap emptyList()
+            val transitions = namedOffers.filter { !it.isConstructor }
+            val providers = transitions.filter { it.decl.modifier == TSAction.SyncRole.Provider }
+            val clients = transitions.filter { it.decl.modifier == TSAction.SyncRole.Client }
+            if (providers.size == 1 && clients.isEmpty()) {
+                listOf(
+                    OneLocCompileWarning(
+                        providers[0].decl.loc,
+                        "action \"$name\" is a provider with no clients and will never synchronize (intentional deadlock)",
+                    ),
+                )
+            } else {
+                emptyList()
+            }
         }
     }
 
     // With a compile target, prefer the external-alphabet unsynced message.
     // Without one (plain analyze), warn on peer-count mismatches across the CU.
-    val syncWarnings = if (program != null) {
-        val leafMap = leafActionMap(this, procs, librariesInUse)
-        val alphabetResult = computeCompositionAlphabet(
-            program, procDecls, leafMap, collectProcFunNames(this), this,
-        )
+    val syncWarnings = if (alphabetResult != null) {
         unsyncedOrdinaryWarnings(alphabetResult.external)
     } else {
-        missingSyncPeerWarnings(offers)
+        missingSyncPeerWarnings(collectActionOffers(procs, librariesInUse))
     }
 
     return providerDeadlock + syncWarnings + procFunHavocWarnings(program, procDecls)
