@@ -1,0 +1,69 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+import julay.funlib.map
+import julay.funlib.length
+
+fun double(n : Int) : Int = n + n
+
+fun addOne(n : Int) : Int = n + 1
+
+proc MapListSetTest {
+    var step : String
+    var xs : List<Int>
+    var ys : List<Int>
+    var s : Set<Int>
+    var t : Set<Int>
+
+    constructor initially(args : List<String>) {
+        transit:
+            step := "mapList"
+            xs := [1, 2, 3]
+            ys := []
+            s := {10, 20}
+            t := {}
+    }
+
+    internal transition doMapList() {
+        guard: step = "mapList"
+        transit:
+            ys := map(xs, double)
+            step := "printList"
+    }
+
+    internal transition printlnList(msg : String) {
+        guard:
+            & step = "printList"
+            & length(ys) = 3
+            & msg = ys + ""
+        transit:
+            step := "mapSet"
+        after:
+            println(msg)
+    }
+
+    internal transition doMapSet() {
+        guard: step = "mapSet"
+        transit:
+            t := map(s, addOne)
+            step := "printSet"
+    }
+
+    internal transition printlnSet(msg : String) {
+        guard:
+            & step = "printSet"
+            & length(t) = 2
+            & msg = t + ""
+        transit:
+            step := "done"
+        after:
+            println(msg)
+    }
+
+    internal transition exitSystem() {
+        guard: step = "done"
+        after:
+            exitProcess()
+    }
+}
+
+compile MapListSetTest

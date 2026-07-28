@@ -1,0 +1,14 @@
+import julay.funlib.map
+
+fun add(a : Int, b : Int) : Int = a + b
+
+proc MapBadFun {
+    var xs : List<Int>
+
+    constructor initially(args : List<String>) {
+        transit:
+            xs := map([1, 2], add)
+    }
+}
+
+compile MapBadFun

@@ -454,8 +454,14 @@ private fun collectTlaActionOffers(
             return@forEach
         }
         val pc = pclasses[leaf.name] ?: return@forEach
+        val inlineAssigns = pc.localDecls().filterIsInstance<VarNode>().mapNotNull { v ->
+            val init = v.initExpr ?: return@mapNotNull null
+            julay.compiler.decl.TransitUpdate.Assign(v.name, init)
+        }
         pc.localDecls().flatMap { it.constructors() }.forEach { ctor ->
-            offers += TlaActionOffer(leaf, ctor, TSAction.SyncRole.Internal, isConstructor = true)
+            val decl = if (inlineAssigns.isEmpty()) ctor
+            else ctor.copy(transits = inlineAssigns + ctor.transits)
+            offers += TlaActionOffer(leaf, decl, TSAction.SyncRole.Internal, isConstructor = true)
         }
         pc.localDecls().flatMap { it.transitions() }.forEach { tr ->
             offers += TlaActionOffer(leaf, tr, tr.modifier, isConstructor = false)

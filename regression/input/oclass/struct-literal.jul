@@ -8,9 +8,15 @@ obj Line {
     end : Point
 }
 
+obj Mixed {
+    label : String
+    count : Int
+}
+
 proc Worker {
     var pos : Point
     var segment : Line
+    var mixed : Mixed
 
     constructor initially(args : List<String>) {
         transit:
@@ -18,6 +24,11 @@ proc Worker {
             segment := Line {
                 start := Point { x := 1, y := 2 },
                 end := Point { x := 3, y := 4 }
+            }
+            // Fields written out of declaration order; codegen must still emit by name.
+            mixed := Mixed {
+                count := 7,
+                label := "ok"
             }
     }
 

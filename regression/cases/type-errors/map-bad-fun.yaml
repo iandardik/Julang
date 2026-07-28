@@ -1,0 +1,5 @@
+source: regression/input/type-errors/map-bad-fun.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected function \"add\" to take 1 argument(s) but got 2"
+  - "Found type errors; exiting."

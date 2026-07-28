@@ -1,0 +1,6 @@
+source: regression/input/expr/map-list-set.jul
+programs:
+  - name: MapListSetTest
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/expr-map-list-set.stdout

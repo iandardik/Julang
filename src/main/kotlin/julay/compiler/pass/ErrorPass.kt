@@ -665,13 +665,17 @@ private fun ProcFunNode.errorPassProcFun(procs: Set<String>, librariesInUse: Set
         ctorErrors + noCtorMissing + constAssignErrors + returnOutsideProcFunOnOrdinary + returnInOrdinaryProc
 }
 
-/** Validate exitSession(Peer) / killSessionPeer(Peer): leaf proc class, not self. */
 private fun sessionPeerClassNameErrors(
     transNode: TransitionNode,
     selfName: String,
     leafProcNames: Set<String>,
-): List<CompileError> =
-    transNode.body().flatMap { it.befores() + it.afters() }.flatMap { stmt ->
+): List<CompileError> {
+    // Skip when this proc is not a leaf of the current compile target (e.g. Timer
+    // loaded transitively while compiling an unrelated JAR root).
+    if (selfName !in leafProcNames) {
+        return emptyList()
+    }
+    return transNode.body().flatMap { it.befores() + it.afters() }.flatMap { stmt ->
         val effectName = stmt.callName()
         if (effectName !in EffectBuiltinRegistry.sessionPeerClassNameEffects) {
             return@flatMap emptyList()
@@ -706,6 +710,7 @@ private fun sessionPeerClassNameErrors(
             ),
         )
     }
+}
 
 private fun constAssignmentErrors(transNode: TransitionNode, constVarNames: Set<String>): List<CompileError> {
     if (constVarNames.isEmpty()) return emptyList()

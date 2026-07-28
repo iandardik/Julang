@@ -107,8 +107,21 @@ fun substituteExpr(expr: ExprNode, name: String, replacement: ExprNode): ExprNod
             typeArgs = expr.callTypeArgs(),
         ).also { copy ->
             expr.resolvedBuiltinOrNull()?.let { copy.resolveBuiltin(it) }
+            expr.resolvedProcFunOrNull()?.let { copy.resolveProcFun(it) }
             expr.specializedBodyOrNull()?.let { body ->
                 copy.resolveSpecializedBody(substituteExpr(body, name, replacement))
+            }
+            val namedFun = expr.namedFunArgNodeOrNull()
+            val namedParam = expr.namedFunParamNameOrNull()
+            val namedBody = expr.namedFunBodyOrNull()
+            val namedElem = expr.namedFunElemTypeOrNull()
+            if (namedFun != null && namedParam != null && namedBody != null && namedElem != null) {
+                copy.resolveNamedFunArg(
+                    namedFun,
+                    namedParam,
+                    substituteExpr(namedBody, name, replacement),
+                    namedElem,
+                )
             }
             try {
                 copy.resolveInstantiatedReturnType(expr.getType())

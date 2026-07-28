@@ -26,6 +26,11 @@ data class FunBuiltin(
     val z3Codegen: (List<String>) -> String,
     /** Session teardown: argument is a bare leaf proc-class name, not a typed value. */
     val sessionPeerClassArg: Boolean = false,
+    /**
+     * Second argument is a bare unary user-fun name (named-fun HOF), not a typed value.
+     * Typing and codegen are handled specially in TypePass / FunCallExprNode.
+     */
+    val namedFunArg: Boolean = false,
     /** May only appear on transitions (not constructors). */
     val transitionOnly: Boolean = false,
     /** Transit RHS involving this call is havoc'd in TLA+. */
@@ -240,6 +245,29 @@ object FunBuiltinRegistry {
         transitionOnly = true,
     )
 
+    /**
+     * Higher-order map over List or Set: `map(xs, f)` where `f` is a unary user `fun` name.
+     * Return type and codegen are specialized in TypePass / FunCallExprNode.
+     */
+    private val mapBuiltin = FunBuiltin(
+        name = "map",
+        arity = 2,
+        returnType = listType(stringType), // placeholder; real return set via resolveInstantiatedReturnType
+        checkArgs = { argTypes ->
+            when {
+                argTypes.size != 2 -> "Expected function \"map\" to take 2 argument(s) but got ${argTypes.size}"
+                else -> null
+            }
+        },
+        kotlinCodegen = { _ ->
+            throw RuntimeException("Function \"map\" requires named-fun codegen")
+        },
+        z3Codegen = { _ ->
+            throw RuntimeException("Function \"map\" cannot be used in guards")
+        },
+        namedFunArg = true,
+    )
+
     private val builtins = mapOf(
         lengthBuiltin.name to lengthBuiltin,
         parseIntBuiltin.name to parseIntBuiltin,
@@ -254,7 +282,11 @@ object FunBuiltinRegistry {
         delaySecondsBuiltin.name to delaySecondsBuiltin,
         exitSessionBuiltin.name to exitSessionBuiltin,
         killSessionPeerBuiltin.name to killSessionPeerBuiltin,
+        mapBuiltin.name to mapBuiltin,
     )
+
+    val namedFunArgEffects: Set<String> =
+        builtins.values.filter { it.namedFunArg }.map { it.name }.toSet()
 
     val all: Collection<FunBuiltin> get() = builtins.values
 

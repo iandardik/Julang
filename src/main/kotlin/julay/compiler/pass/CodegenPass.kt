@@ -95,18 +95,37 @@ fun codegenPass(
         "import julay.tools.mapMkCellExpr\n"
     val dataClassCode = objClassDecls.joinToString("\n\n") { it.kotlinDataClassString() }
     val dataClassSection = if (dataClassCode.isEmpty()) "" else "$dataClassCode\n\n"
-    val conversionHelpers = objClassDecls.joinToString("\n\n") { it.kotlinConversionHelpersString() }
-    val objClassCode = objClassDecls.joinToString("\n\n") { it.kotlinTypeValWithConvertersString() }
-    val objClassSection = when {
-        objClassCode.isEmpty() -> ""
-        else -> buildString {
-            append(conversionHelpers)
+    val (simpleObjDecls, complexObjDecls) = objClassDecls.partition { decl ->
+        decl.fields.none { field ->
+            field.type is ListType || field.type is SetType || field.type is MapType
+        }
+    }
+    val simpleHelpers = simpleObjDecls.joinToString("\n\n") { it.kotlinConversionHelpersString() }
+    val simpleObjCode = simpleObjDecls.joinToString("\n\n") { it.kotlinTypeValWithConvertersString() }
+    val parametricTypeSection = parametricTypeValsSection(procClasses + procFunClasses, objClassDecls)
+    val complexHelpers = complexObjDecls.joinToString("\n\n") { it.kotlinConversionHelpersString() }
+    val complexObjCode = complexObjDecls.joinToString("\n\n") { it.kotlinTypeValWithConvertersString() }
+    val objClassSection = buildString {
+        if (simpleHelpers.isNotEmpty()) {
+            append(simpleHelpers)
             append("\n\n")
-            append(objClassCode)
+        }
+        if (simpleObjCode.isNotEmpty()) {
+            append(simpleObjCode)
+            append("\n\n")
+        }
+        if (parametricTypeSection.isNotEmpty()) {
+            append(parametricTypeSection)
+        }
+        if (complexHelpers.isNotEmpty()) {
+            append(complexHelpers)
+            append("\n\n")
+        }
+        if (complexObjCode.isNotEmpty()) {
+            append(complexObjCode)
             append("\n\n")
         }
     }
-    val parametricTypeSection = parametricTypeValsSection(procClasses + procFunClasses, objClassDecls)
     val mainClassName = program.name.replaceFirstChar { it.uppercase() }
     val effectImports = if ((procClasses + procFunClasses).any { it.usesEffects() }) {
         EffectBuiltinRegistry.kotlinCodegenImports().joinToString("\n") { "import $it" } + "\n"
@@ -130,7 +149,6 @@ fun codegenPass(
     val sourceText = "$imports$effectImports\n" +
         dataClassSection +
         objClassSection +
-        parametricTypeSection +
         allClasses.joinToString("\n\n") { it.kotlinClassString(objClassDecls, classBodyKeys) } +
         "\n\n" +
         mainFunction

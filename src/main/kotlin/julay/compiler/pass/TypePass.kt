@@ -997,6 +997,135 @@ private fun SymbolValueExprNode.typePassSymbol(
     return emptyList()
 }
 
+/**
+ * Type `map(xs, f)` where `f` is a bare unary user-fun name (not a value expression).
+ */
+private fun FunCallExprNode.typePassNamedFunMap(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode>,
+    builtin: FunBuiltin,
+): List<CompileError> {
+    resolveBuiltin(builtin)
+    if (callTypeArgs().isNotEmpty()) {
+        return listOf(
+            OneLocCompileError(
+                programLocation(),
+                "Expected function \"${callName()}\" not to take type arguments",
+            ),
+        )
+    }
+    if (callArgs().size != 2) {
+        return listOf(
+            OneLocCompileError(
+                programLocation(),
+                "Expected function \"map\" to take 2 argument(s) but got ${callArgs().size}",
+            ),
+        )
+    }
+    val collArg = callArgs()[0]
+    val funArg = callArgs()[1]
+    val collErrors = collArg.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    if (collErrors.isNotEmpty()) {
+        return collErrors
+    }
+    val collType = collArg.getType()
+    val elemType = when (collType) {
+        is ListType -> collType.elementType
+        is SetType -> collType.elementType
+        else -> return listOf(
+            OneLocCompileError(
+                collArg.programLocation(),
+                "Expected first argument of \"map\" to have a List or Set type but got $collType",
+            ),
+        )
+    }
+    if (funArg !is SymbolValueExprNode) {
+        return listOf(
+            OneLocCompileError(
+                funArg.programLocation(),
+                "Expected second argument of \"map\" to be a unary function name",
+            ),
+        )
+    }
+    val mappedFun = funEnv[funArg.symbol]
+        ?: return listOf(
+            OneLocCompileError(
+                funArg.programLocation(),
+                "Unknown function \"${funArg.symbol}\"",
+            ),
+        )
+    val params = try {
+        mappedFun.funArgs().actionArgs()
+    } catch (_: RuntimeException) {
+        return listOf(
+            OneLocCompileError(
+                funArg.programLocation(),
+                "Parameter types not resolved for function \"${funArg.symbol}\"",
+            ),
+        )
+    }
+    if (params.size != 1) {
+        return listOf(
+            OneLocCompileError(
+                funArg.programLocation(),
+                "Expected function \"${funArg.symbol}\" to take 1 argument(s) but got ${params.size}",
+            ),
+        )
+    }
+    val param = params.single()
+    val subst = mutableMapOf<String, Type>()
+    when (val unify = unifyTypes(param.type, elemType, subst)) {
+        is UnifyResult.Fail ->
+            return listOf(
+                OneLocCompileError(
+                    funArg.programLocation(),
+                    "Expected argument \"${param.name}\" of \"${funArg.symbol}\" to have type ${param.type} but got $elemType: ${unify.message}",
+                ),
+            )
+        is UnifyResult.Ok -> {}
+    }
+    if (mappedFun.typeParams.isNotEmpty()) {
+        val unbound = mappedFun.typeParams.filter { it !in subst }
+        if (unbound.isNotEmpty()) {
+            return listOf(
+                OneLocCompileError(
+                    funArg.programLocation(),
+                    "Cannot infer type parameter(s) ${unbound.joinToString(", ")} for function \"${funArg.symbol}\"",
+                ),
+            )
+        }
+    }
+    return when (val ret = registry.resolveTypeExpr(mappedFun.funReturnTypeExpr(), subst, programLocation())) {
+        is TypeResolveResult.Found -> {
+            val resultType = when (collType) {
+                is ListType -> listType(ret.type)
+                is SetType -> setType(ret.type)
+                else -> error("unreachable")
+            }
+            val specialized = if (mappedFun.typeParams.isNotEmpty()) {
+                val valueInlined = mappedFun.funBody()
+                val specializeErrors = valueInlined.typePass(symbolEnv + (param.name to elemType), registry, funEnv, subst)
+                if (specializeErrors.isNotEmpty()) {
+                    return specializeErrors
+                }
+                valueInlined
+            } else {
+                mappedFun.funBody()
+            }
+            resolveNamedFunArg(mappedFun, param.name, specialized, elemType)
+            resolveInstantiatedReturnType(resultType)
+            inferExprType(symbolEnv)
+            emptyList()
+        }
+        is TypeResolveResult.Error ->
+            listOf(OneLocCompileError(programLocation(), ret.message))
+    }
+}
+
 private fun FunCallExprNode.typePassFunCall(
     symbolEnv: Map<String, Type>,
     registry: ObjClassRegistry,
@@ -1005,6 +1134,11 @@ private fun FunCallExprNode.typePassFunCall(
     funBuiltinEnv: Map<String, FunBuiltin>,
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
+    funBuiltinEnv[callName()]?.let { builtin ->
+        if (builtin.namedFunArg) {
+            return typePassNamedFunMap(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv, builtin)
+        }
+    }
     val argErrors = callArgs().flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (argErrors.isNotEmpty()) {
         return argErrors

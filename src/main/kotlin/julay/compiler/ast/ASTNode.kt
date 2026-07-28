@@ -357,6 +357,11 @@ class FunCallExprNode(
     private var resolvedBuiltin: FunBuiltin? = null
     private var resolvedProcFun: ProcFunNode? = null
     private var specializedBody: ExprNode? = null
+    /** For named-fun HOFs like map: the unary user fun being applied. */
+    private var namedFunArgNode: FunNode? = null
+    private var namedFunParamName: String? = null
+    private var namedFunBody: ExprNode? = null
+    private var namedFunElemType: Type? = null
 
     override fun programLocation() = loc
     fun callName(): String = name
@@ -365,6 +370,10 @@ class FunCallExprNode(
     internal fun resolvedFunOrNull(): FunNode? = resolvedFun
     internal fun resolvedBuiltinOrNull(): FunBuiltin? = resolvedBuiltin
     internal fun resolvedProcFunOrNull(): ProcFunNode? = resolvedProcFun
+    internal fun namedFunArgNodeOrNull(): FunNode? = namedFunArgNode
+    internal fun namedFunParamNameOrNull(): String? = namedFunParamName
+    internal fun namedFunBodyOrNull(): ExprNode? = namedFunBody
+    internal fun namedFunElemTypeOrNull(): Type? = namedFunElemType
     internal fun resolveFun(funNode: FunNode) {
         resolvedFun = funNode
         resolvedBuiltin = null
@@ -379,6 +388,12 @@ class FunCallExprNode(
         resolvedProcFun = procFun
         resolvedFun = null
         resolvedBuiltin = null
+    }
+    internal fun resolveNamedFunArg(funNode: FunNode, paramName: String, body: ExprNode, elemType: Type) {
+        namedFunArgNode = funNode
+        namedFunParamName = paramName
+        namedFunBody = body
+        namedFunElemType = elemType
     }
     internal fun resolveInstantiatedReturnType(type: Type) {
         instantiatedReturnType = type
@@ -398,6 +413,25 @@ class FunCallExprNode(
         }
     }
 
+    private fun mapKotlinCodegen(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        val coll = args[0].toTransitString(symbolTypes, argSymbols)
+        val paramName = namedFunParamName
+            ?: throw RuntimeException("map named-fun param not resolved at $loc")
+        val body = namedFunBody
+            ?: throw RuntimeException("map named-fun body not resolved at $loc")
+        val elemType = namedFunElemType
+            ?: throw RuntimeException("map element type not resolved at $loc")
+        val elemIdent = "__julay_map_elem"
+        val elemSym = SymbolValueExprNode(elemIdent, loc)
+        val inlined = substituteExpr(body, paramName, elemSym)
+        val bodyStr = inlined.toTransitString(symbolTypes + (elemIdent to elemType), argSymbols)
+        return when (val collType = args[0].getType()) {
+            is ListType -> "$coll.map { $elemIdent -> $bodyStr }"
+            is SetType -> "$coll.map { $elemIdent -> $bodyStr }.toSet()"
+            else -> throw RuntimeException("map expected List or Set at $loc but got $collType")
+        }
+    }
+
     override fun toZ3GuardString(
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
@@ -407,6 +441,9 @@ class FunCallExprNode(
             throw RuntimeException("Procfun \"$name\" cannot be used in guards at $loc")
         }
         resolvedBuiltin?.let { builtin ->
+            if (builtin.namedFunArg) {
+                throw RuntimeException("Function \"${builtin.name}\" cannot be used in guards")
+            }
             if (builtin.returnType == null) {
                 throw RuntimeException("Function \"${builtin.name}\" cannot be used in guards")
             }
@@ -442,6 +479,9 @@ class FunCallExprNode(
             return "(hostProc.invokeProcFun(\"${pf.procFunName()}\", $argsList) as $retTy)"
         }
         resolvedBuiltin?.let { builtin ->
+            if (builtin.namedFunArg) {
+                return mapKotlinCodegen(symbolTypes, argSymbols)
+            }
             val argStrs = args.map { it.toTransitString(symbolTypes, argSymbols) }
             return builtin.kotlinCodegen(argStrs)
         }
@@ -1369,12 +1409,16 @@ class ObjClassLiteralExprNode(
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
-        val fieldExprs = fieldEntries.map { it.second.toZ3GuardString(symbolTypes, argSymbols) }
+        val fieldExprs = structType.fields.map { field ->
+            fieldAssignments.getValue(field.name).toZ3GuardString(symbolTypes, argSymbols)
+        }
         return structType.literalToZ3Codegen(fieldExprs)
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
-        val fieldExprs = fieldEntries.map { it.second.toTransitString(symbolTypes, argSymbols) }
+        val fieldExprs = structType.fields.map { field ->
+            fieldAssignments.getValue(field.name).toTransitString(symbolTypes, argSymbols)
+        }
         return structType.literalToTransit(fieldExprs)
     }
 
