@@ -31,7 +31,10 @@ fun codegenPass(
     val channelKeys = alphabet.channelKeys
     val procFunNames = collectProcFunNames(ast)
     // Procfuns in || are spec metadata only — do not SyncChannel-start them as JAR peers.
+    // Their leaf occurrences still carry composition channel keys for procFunInfo / class bodies.
     val occurrences = alphabet.leafOccurrences.filter { it.pclassName !in procFunNames }
+    val procFunOccurrences = alphabet.leafOccurrences.filter { it.pclassName in procFunNames }
+    val procFunOccByName = procFunOccurrences.associateBy { it.pclassName }
 
     val distinctPclasses = occurrences.map { it.pclassName }.toSet()
     val kotlinLibProcs = distinctPclasses.filter { it in libPClassNames && LibraryRegistry.isKotlinLibrary(it) }
@@ -51,7 +54,8 @@ fun codegenPass(
     val staticInfoBody = staticInfoExprs.joinToString(",\n") { it }
     val staticInfo = "val tsInfo = setOf(\n" + staticInfoBody.prependIndent() + "\n)"
     val procFunStaticInfos = procFunClasses.joinToString(",\n") { pc ->
-        pc.kotlinStaticInfoString(occurrenceId = pc.name, channelKeys = emptyMap())
+        val occId = procFunOccByName[pc.name]?.occurrenceId ?: pc.name
+        pc.kotlinStaticInfoString(occurrenceId = occId, channelKeys = channelKeys)
     }
     val procFunInfoBlock = if (procFunClasses.isEmpty()) {
         "emptySet<TransitionSystemStaticInfo>()"
@@ -133,10 +137,11 @@ fun codegenPass(
         ""
     }
     // Class bodies use channel keys from the first occurrence of each class (remap still
-    // handles further occurrences via StaticInfo.resolveAction).
+    // handles further occurrences via StaticInfo.resolveAction). Include folded procfuns so
+    // their actions share composition-hidden keys with leaf peers (e.g. startElectionTimeout).
     val classBodyKeys = LinkedHashMap<LeafActionId, String>()
     val seenClass = mutableSetOf<String>()
-    for (occ in occurrences) {
+    for (occ in occurrences + procFunOccurrences) {
         if (!seenClass.add(occ.pclassName)) continue
         channelKeys.forEach { (id, key) ->
             if (id.occurrenceId == occ.occurrenceId && id.pclassKey == occ.pclassName) {
