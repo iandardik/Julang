@@ -52,7 +52,7 @@ Procfuns may appear in `||` as **TLA+ metadata** (couple vs havoc). Parent **alp
 
 ## Funlib (`import julay.funlib.<name>`)
 
-Pure / expression helpers: `length` · `parseInt` · `startsWith` · `split` · `trim` · `portFromUrl`  
+Pure / expression helpers: `length` · `max` · `min` · `parseInt` · `startsWith` · `split` · `trim` · `portFromUrl`  
 (`split` / `trim` / `portFromUrl`: not for guards)
 
 Effectful: `println` · `readln` · `readFile` · `exitProcess` · `delaySeconds` · `exitSession(Peer)` · `killSessionPeer(Peer)`  

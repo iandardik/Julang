@@ -1,0 +1,46 @@
+import julay.funlib.max
+import julay.funlib.min
+import julay.funlib.exitProcess
+import julay.funlib.println
+
+proc S {
+    var x : Int
+    var print : Boolean
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            x := 0
+            print := false
+            done := false
+    }
+
+    internal transition step() {
+        guard:
+            ~print & ~done
+        transit:
+            x := max(min(3, 5), 2)
+            print := true
+    }
+
+    internal transition println(msg : String) {
+        guard:
+            print & (msg = x + "")
+        transit:
+            print := false
+            done := true
+        after:
+            println(msg)
+    }
+
+    internal transition exitSystem() {
+        guard:
+            ~print & done & x = 3
+        after:
+            exitProcess()
+    }
+}
+
+proc FunlibMathTest := S
+
+compile FunlibMathTest

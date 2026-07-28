@@ -26,6 +26,8 @@ Import as `julay.funlib.<name>`. Bare names are not available without an import.
 |----------|------|---------------|----------------|
 | `length` | Size of list, set, or map | No | Yes |
 | `map` | Apply a unary named `fun` or lambda to each element of a list or set (`map(xs, f)`); returns `List`/`Set` of results. Prefer method form [`.map`](collections.md#methods-and-lambdas) | No | **No** (unless only concrete state; see [Collections](collections.md#guards)) |
+| `max` | Larger of two `Int`s | No | Yes |
+| `min` | Smaller of two `Int`s | No | Yes |
 | `parseInt` | String → Int | No | Yes |
 | `startsWith` | String prefix test | No | Yes |
 | `split` | Split string | No | **No** |

@@ -24,7 +24,7 @@ Write normal `proc` / `fun` / `spec` declarations. Use `exports` when the module
 
 ### Funlib-style functions
 
-Pure or effectful functions in `.jul` are declared with `fun` and imported as `julay.funlib.<name>` when placed under that package path. Effectful functions must follow the same `before` / `transit` / `after` rules as the rest of the language ([Side effects](effects.md)).
+Pure or effectful functions in `.jul` are declared with `export fun` under `stdlib/julay/funlib/` and imported as `julay.funlib.<funName>`. A module may export several funs (e.g. [`math.jul`](../../src/main/resources/stdlib/julay/funlib/math.jul) exports `max` / `min`); callers still import each by function name. Effectful functions must follow the same `before` / `transit` / `after` rules as the rest of the language ([Side effects](effects.md)).
 
 ### Example pattern (proclib)
 

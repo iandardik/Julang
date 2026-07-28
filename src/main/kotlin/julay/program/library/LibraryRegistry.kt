@@ -7,6 +7,9 @@ const val JULAY_FUNLIB = "funlib"
 object LibraryRegistry {
     val julayStdlibNames: Set<String> = setOf("Timer")
 
+    /** `.jul` funlib modules under stdlib/julay/funlib/ (may export multiple funs). */
+    val julayFunlibJulModules: Set<String> = setOf("math")
+
     val kotlinLibraries: List<JulLibrary> = listOf(
         JulHttpServer,
         JulHttpClient,
@@ -27,8 +30,15 @@ object LibraryRegistry {
     fun isProclibImport(parts: List<String>): Boolean =
         parts.size == 3 && parts[0] == JULAY_MODULE && parts[1] == JULAY_PROCLIB
 
+    /** True for imports like julay.funlib.max or julay.funlib.println. */
+    fun isFunlibImport(parts: List<String>): Boolean =
+        parts.size == 3 && parts[0] == JULAY_MODULE && parts[1] == JULAY_FUNLIB
+
     fun proclibModulePath(name: String): String =
         listOf(JULAY_MODULE, JULAY_PROCLIB, name).joinToString(".")
+
+    fun funlibModulePath(name: String): String =
+        listOf(JULAY_MODULE, JULAY_FUNLIB, name).joinToString(".")
 
     fun resolve(module: String, symbol: String): JulLibrary? {
         if (!isJulayModule(module)) return null

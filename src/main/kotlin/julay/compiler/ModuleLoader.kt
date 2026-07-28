@@ -44,10 +44,15 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
             if (decl is CompileNode) return@forEach
             // Non-entry modules only expose `export`ed decls to importers.
             if (!module.isEntry && !decl.isExported) return@forEach
-            val key = if (module.modulePath.startsWith("$JULAY_MODULE.")) {
-                module.modulePath
-            } else {
-                qualifiedKey(listOf(module.modulePath, decl.name()))
+            val key = when {
+                // Funlib .jul modules may export several funs; import as julay.funlib.<funName>.
+                module.modulePath.startsWith("$JULAY_MODULE.$JULAY_FUNLIB.") ->
+                    LibraryRegistry.funlibModulePath(decl.name())
+                // Proclib: one primary export matching the module file (e.g. Timer).
+                module.modulePath.startsWith("$JULAY_MODULE.") ->
+                    module.modulePath
+                else ->
+                    qualifiedKey(listOf(module.modulePath, decl.name()))
             }
             symbols[key] = if (module.isEntry) {
                 ResolvedSymbol.LocalDecl(decl, module.sourcePath)
@@ -118,6 +123,18 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
                     return@forEach
                 }
                 if (LibraryRegistry.isProclibImport(parts) && LibraryRegistry.isKotlinLibrary(parts[2])) {
+                    return@forEach
+                }
+                // Funlib .jul: import julay.funlib.<funName>. Load a same-named file if present,
+                // and always load packaged funlib modules (e.g. math.jul exporting max/min).
+                if (LibraryRegistry.isFunlibImport(parts)) {
+                    val directModule = parts.joinToString(".")
+                    if (resolveModuleSourcePath(directModule, searchPath) != null) {
+                        loadModule(directModule, isEntry = false)
+                    }
+                    LibraryRegistry.julayFunlibJulModules.forEach { name ->
+                        loadModule(LibraryRegistry.funlibModulePath(name), isEntry = false)
+                    }
                     return@forEach
                 }
                 val importedModule = if (parts.first() == JULAY_MODULE) {

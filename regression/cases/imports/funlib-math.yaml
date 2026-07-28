@@ -1,0 +1,6 @@
+source: regression/input/imports/funlib-math.jul
+programs:
+  - name: FunlibMathTest
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/imports-funlib-math.stdout
