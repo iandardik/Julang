@@ -73,7 +73,7 @@ On open, on save, or **Julay: Re-check**, the extension runs:
 java -jar build/libs/julayc.jar check --json path/to/file.jul
 ```
 
-Errors appear as red squiggles; soft sync-peer / unsynced-ordinary messages as yellow warnings. Hover a squiggle or open the **Problems** panel to read the full message. The open/saved file is the check entry (same as alphabet analyze) — use **Julay: Compile entry** for project-entry compile.
+Errors appear as red squiggles; soft sync-peer / unsynced-ordinary messages as yellow warnings. Hover a squiggle or open the **Problems** panel to read the full message. The check entry is the configured `julay.entryFile`, else a nearby `main.jul`, else the open file (same resolution as alphabet analyze). Composition sync warnings use `compile` targets or, if none, maximal `proc` aliases such as `P := A || B`.
 
 ## Settings
 

@@ -51,7 +51,10 @@ class CheckJulFileTest {
         assertTrue(
             result.diagnostics.any {
                 it.severity == DiagnosticSeverity.Warning &&
-                    it.message.contains("exactly two sync peers")
+                    (
+                        it.message.contains("exactly two sync peers") ||
+                            it.message.contains("not synchronized with any peer")
+                    )
             },
             result.diagnostics.toString(),
         )
@@ -81,6 +84,45 @@ class CheckJulFileTest {
         val result = checkJulFile(file)
         assertFalse(result.hasErrors)
         assertEquals(emptyList(), result.diagnostics.filter { it.severity == DiagnosticSeverity.Error })
+    }
+
+    @Test
+    fun checkWithoutCompileUsesCompositionAliasForSyncWarnings() {
+        val dir = Files.createTempDirectory("julay-check-composition-root")
+        val file = dir.resolve("main.jul")
+        file.toFile().writeText(
+            """
+            procfun helper() : Int {
+                client transition bump() {
+                    return: 0
+                }
+            }
+            proc Host {
+                var out : Int
+                constructor initially(args : List<String>) {
+                    transit: out := helper()
+                }
+                transition startCore() { transit: }
+            }
+            proc Core {
+                constructor initially(args : List<String>) { transit: }
+                constructor startCore() { transit: }
+                provider transition bump() { transit: }
+            }
+            proc P := Host || Core
+            """.trimIndent(),
+        )
+
+        val result = checkJulFile(file)
+        assertFalse(result.hasErrors, result.diagnostics.toString())
+        assertFalse(
+            result.diagnostics.any { it.message.contains("startCore") && it.message.contains("exactly two") },
+            "composition alias should pair transition+ctor; got: ${result.diagnostics}",
+        )
+        assertFalse(
+            result.diagnostics.any { it.message.contains("provider with no clients") },
+            "folded procfun clients should count; got: ${result.diagnostics}",
+        )
     }
 
     @Test

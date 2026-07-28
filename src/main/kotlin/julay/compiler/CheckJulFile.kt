@@ -52,19 +52,51 @@ fun checkJulFile(
         return CheckResult(diagnostics)
     }
 
-    val librariesInUse = unit.librariesInUse(jarTargets, procDecls)
+    // Without `compile`, prefer maximal composition aliases (e.g. `P := A || B`) so
+    // sync warnings match the composed alphabet — same view as JAR compile / analyze -s.
+    // Flat CU scans miss call-folded procfun peers and cross-module sync partners.
+    val checkRoots = jarTargets.ifEmpty {
+        maximalCompositionRoots(procDecls, unit.entryDeclNames)
+    }
+    val librariesInUse = unit.librariesInUse(checkRoots, procDecls)
 
-    if (jarTargets.isEmpty()) {
+    if (checkRoots.isEmpty()) {
         val components = unit.allPClassNames + librariesInUse
         collectPassDiagnostics(ast, components, librariesInUse, null, procDecls, entry, diagnostics)
     } else {
-        for (program in jarTargets) {
+        for (program in checkRoots) {
             val components = program.allProcNames(procDecls)
             collectPassDiagnostics(ast, components, librariesInUse, program, procDecls, entry, diagnostics)
         }
     }
 
     return CheckResult(diagnostics)
+}
+
+/**
+ * Proc aliases with a non-empty `||` / rename body that are not themselves a
+ * component of another alias. Spec assemblies (e.g. stdlib `TimerSpec`) are
+ * excluded — check/analyze sync warnings follow the executable composition.
+ *
+ * When [entryDeclNames] is non-empty, prefer roots declared in the entry module
+ * so imported library assemblies are not checked in isolation.
+ */
+fun maximalCompositionRoots(
+    procDecls: List<ProcDecl>,
+    entryDeclNames: Set<String> = emptySet(),
+): List<ProcDecl> {
+    val usedAsComponent = procDecls.flatMap { root -> root.components.map { it.name } }.toSet()
+    val candidates = procDecls.filter {
+        it.type == ProcDeclType.Proc &&
+            it.components.isNotEmpty() &&
+            it.name !in usedAsComponent
+    }
+    if (entryDeclNames.isEmpty()) {
+        return candidates
+    }
+    // Do not fall back to imported assemblies (e.g. RpcOut pulled in via a
+    // procfun import) — those look unsynced when checked without their peers.
+    return candidates.filter { it.name in entryDeclNames }
 }
 
 private fun collectPassDiagnostics(

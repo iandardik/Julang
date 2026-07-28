@@ -5,6 +5,7 @@ const vscode = require("vscode");
 const {
   getJavaPath,
   libraryPathArgs,
+  resolveEntryFile,
   resolveJulaycJar,
 } = require("./config");
 
@@ -143,7 +144,9 @@ async function runCheckOnDocument(document) {
     return;
   }
 
-  const entryFile = document.uri.fsPath;
+  // Prefer configured / nearby entry (main.jul or julay.entryFile) so checking a
+  // leaf module still sees the full composition, matching alphabet analyze.
+  const entryFile = resolveEntryFile(document);
   const generation = ++checkGeneration;
   const args = [
     "-jar",
