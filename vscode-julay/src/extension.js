@@ -12,6 +12,12 @@ function activate(context) {
   const codeLens = new JulayCodeLensProvider();
   registerDiagnostics(context);
 
+  function checkJulayDocument(doc) {
+    if (doc && doc.languageId === "julay") {
+      runCheckOnDocument(doc);
+    }
+  }
+
   context.subscriptions.push(
     vscode.languages.registerHoverProvider("julay", new JulayHoverProvider()),
     vscode.languages.registerDefinitionProvider(
@@ -36,10 +42,18 @@ function activate(context) {
       if (doc.languageId === "julay") {
         clearAlphabetCache();
         codeLens.refresh();
-        runCheckOnDocument(doc);
+        checkJulayDocument(doc);
       }
     }),
+    vscode.workspace.onDidOpenTextDocument((doc) => {
+      checkJulayDocument(doc);
+    }),
   );
+
+  // Documents already open when the extension activates (e.g. restored editors).
+  for (const doc of vscode.workspace.textDocuments) {
+    checkJulayDocument(doc);
+  }
 }
 
 function deactivate() {}

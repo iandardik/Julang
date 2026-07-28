@@ -43,7 +43,7 @@ code --install-extension julay-0.1.0.vsix
 | Hover alphabet | Hover a proc / spec / **procfun** name → external alphabet |
 | Alphabet panel | Command **Julay: Show External Alphabet** |
 | CodeLens | Above `proc` / `spec` / **procfun** declarations |
-| On-save diagnostics | Save a `.jul` file → Problems panel + squiggles (full error/warning messages) |
+| On-open / on-save diagnostics | Open or save a `.jul` file → Problems panel + squiggles (full error/warning messages) |
 | Re-check | Command **Julay: Re-check** |
 | Tasks | **Terminal → Run Task…** → Julay: Compile / Compile entry / Analyze alphabet |
 
@@ -65,15 +65,15 @@ java -jar build/libs/julayc.jar analyze -s Name --json path/to/entry.jul
 
 The JSON includes `compositionGraph` (`nodes` ordered to reduce edge crossings + `edges` with `actions`) plus `external` / `sourceInternal` / `compositionHidden`.
 
-### On-save diagnostics
+### Diagnostics
 
-On save (or **Julay: Re-check**), the extension runs:
+On open, on save, or **Julay: Re-check**, the extension runs:
 
 ```bash
-java -jar build/libs/julayc.jar check --json path/to/saved.jul
+java -jar build/libs/julayc.jar check --json path/to/file.jul
 ```
 
-Errors appear as red squiggles; soft sync-peer / unsynced-ordinary messages as yellow warnings. Hover a squiggle or open the **Problems** panel to read the full message. The saved file is the check entry (same as alphabet analyze) — use **Julay: Compile entry** for project-entry compile.
+Errors appear as red squiggles; soft sync-peer / unsynced-ordinary messages as yellow warnings. Hover a squiggle or open the **Problems** panel to read the full message. The open/saved file is the check entry (same as alphabet analyze) — use **Julay: Compile entry** for project-entry compile.
 
 ## Settings
 

@@ -20,6 +20,10 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
     val errors = mutableListOf<CompileError>()
     val loaded = mutableMapOf<String, LoadedModule>()
     val loadingStack = mutableListOf<String>()
+    val reportedMissingModules = mutableSetOf<String>()
+    val dirtyModules = mutableSetOf<String>()
+    val dirtyLeafLocs = mutableMapOf<String, ProgramLoc>()
+    val entryFallbackLoc: ProgramLoc = SourceLoc(Pair(1, 1), entryPath)
 
     fun parseFile(path: Path): ParseResult {
         val input = CharStreams.fromFileName(path.pathString)
@@ -74,11 +78,29 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
         return stub
     }
 
-    fun loadModule(modulePath: String, isEntry: Boolean): LoadedModule {
+    fun markDirty(modulePath: String, leaf: ProgramLoc) {
+        dirtyModules.add(modulePath)
+        dirtyLeafLocs.putIfAbsent(modulePath, leaf)
+    }
+
+    fun noteChildDependency(parentModule: String, child: LoadedModule, importLoc: ProgramLoc) {
+        if (child.isStub || child.modulePath in dirtyModules) {
+            val leaf = dirtyLeafLocs[child.modulePath] ?: importLoc
+            markDirty(parentModule, leaf)
+        }
+    }
+
+    fun loadModule(
+        modulePath: String,
+        isEntry: Boolean,
+        requestedFrom: ProgramLoc? = null,
+    ): LoadedModule {
         if (modulePath in loaded) return loaded.getValue(modulePath)
+        val errorLoc = requestedFrom ?: entryFallbackLoc
         if (modulePath in loadingStack) {
             val cycle = (loadingStack + modulePath).joinToString(" -> ") { "$it.jul" }
-            errors.add(OneLocCompileError(SourceLoc(Pair(1, 1), entryPath), "Circular import: $cycle"))
+            errors.add(OneLocCompileError(errorLoc, "Circular import: $cycle"))
+            reportedMissingModules.add(modulePath)
             return cacheStub(modulePath, entryPath, isEntry)
         }
 
@@ -88,10 +110,11 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
             resolveModuleSourcePath(modulePath, searchPath) ?: run {
                 errors.add(
                     OneLocCompileError(
-                        SourceLoc(Pair(1, 1), entryPath),
+                        errorLoc,
                         "Cannot find module \"$modulePath\" (looked for ${moduleFileName(modulePath)} on module path)",
                     ),
                 )
+                reportedMissingModules.add(modulePath)
                 return cacheStub(modulePath, entryPath, isEntry)
             }
         }
@@ -101,9 +124,12 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
         val parseResult = parseFile(sourcePath)
         if (!parseResult.ok) {
             loadingStack.removeLast()
+            markDirty(modulePath, SourceLoc(Pair(1, 1), sourcePath))
             return cacheStub(modulePath, sourcePath, isEntry)
         }
         val root = parseResult.root
+
+        val errorsBefore = errors.size
 
         if (!isEntry) {
             root.declNodes().filterIsInstance<CompileNode>().forEach { compile ->
@@ -125,15 +151,22 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
                 if (LibraryRegistry.isProclibImport(parts) && LibraryRegistry.isKotlinLibrary(parts[2])) {
                     return@forEach
                 }
+                val importLoc = importNode.programLocation()
                 // Funlib .jul: import julay.funlib.<funName>. Load a same-named file if present,
                 // and always load packaged funlib modules (e.g. math.jul exporting max/min).
                 if (LibraryRegistry.isFunlibImport(parts)) {
                     val directModule = parts.joinToString(".")
                     if (resolveModuleSourcePath(directModule, searchPath) != null) {
-                        loadModule(directModule, isEntry = false)
+                        val child = loadModule(directModule, isEntry = false, requestedFrom = importLoc)
+                        noteChildDependency(modulePath, child, importLoc)
                     }
                     LibraryRegistry.julayFunlibJulModules.forEach { name ->
-                        loadModule(LibraryRegistry.funlibModulePath(name), isEntry = false)
+                        val child = loadModule(
+                            LibraryRegistry.funlibModulePath(name),
+                            isEntry = false,
+                            requestedFrom = importLoc,
+                        )
+                        noteChildDependency(modulePath, child, importLoc)
                     }
                     return@forEach
                 }
@@ -142,17 +175,24 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
                 } else {
                     parts.dropLast(1).joinToString(".")
                 }
-                loadModule(importedModule, isEntry = false)
+                val child = loadModule(importedModule, isEntry = false, requestedFrom = importLoc)
+                noteChildDependency(modulePath, child, importLoc)
             }
         }
 
-        collectJulayStdlibModulePaths(root).forEach { modulePath ->
-            loadModule(modulePath, isEntry = false)
+        collectJulayStdlibModulePaths(root).forEach { stdlibPath ->
+            val child = loadModule(stdlibPath, isEntry = false, requestedFrom = null)
+            noteChildDependency(modulePath, child, entryFallbackLoc)
         }
 
         val moduleSymbolsSnapshot = mutableMapOf<String, ResolvedSymbol>()
         loaded.values.forEach { registerModuleSymbols(it, moduleSymbolsSnapshot) }
-        val (moduleImportTable, importErrors) = buildImportTable(root, sourcePath, moduleSymbolsSnapshot)
+        val (moduleImportTable, importErrors) = buildImportTable(
+            root,
+            sourcePath,
+            moduleSymbolsSnapshot,
+            reportedMissingModules,
+        )
         errors.addAll(importErrors)
 
         val moduleDeclNames = collectDeclNames(root)
@@ -169,6 +209,34 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
                 collectProcFunNames(root),
             ),
         )
+
+        // Bubble dirty-module diagnostics onto successful imports of modules that themselves failed.
+        root.importNodes().forEach { importNode ->
+            val qn = importNode.qualifiedName()
+            val parts = qn.parts()
+            if (parts.size < 2) return@forEach
+            val resolved = resolveImportTarget(qn, sourcePath, moduleSymbolsSnapshot) ?: return@forEach
+            val importedModulePath = resolvedImportModulePath(resolved) ?: return@forEach
+            if (importedModulePath !in dirtyModules) return@forEach
+            val leaf = dirtyLeafLocs[importedModulePath] ?: importNode.programLocation()
+            errors.add(
+                TwoLocsCompileError(
+                    importNode.programLocation(),
+                    leaf,
+                    "Module \"$importedModulePath\" has load errors",
+                ),
+            )
+            markDirty(modulePath, importNode.programLocation())
+        }
+
+        if (errors.size > errorsBefore) {
+            val leaf = errors.asSequence()
+                .drop(errorsBefore)
+                .mapNotNull { it.primaryLoc() }
+                .firstOrNull()
+                ?: SourceLoc(Pair(1, 1), sourcePath)
+            markDirty(modulePath, leaf)
+        }
 
         val module = LoadedModule(modulePath, sourcePath, root, isEntry, moduleImportTable)
         loaded[modulePath] = module

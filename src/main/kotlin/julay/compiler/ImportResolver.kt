@@ -59,6 +59,8 @@ fun buildImportTable(
     entryRoot: RootNode,
     entryPath: Path,
     moduleSymbols: Map<String, ResolvedSymbol>,
+    /** Modules for which [loadCompilationUnit] already reported file-not-found / cycle. */
+    reportedMissingModules: Set<String> = emptySet(),
 ): Pair<ImportTable, List<CompileError>> {
     val shortNames = mutableMapOf<String, ResolvedSymbol>()
     val errors = mutableListOf<CompileError>()
@@ -73,11 +75,13 @@ fun buildImportTable(
                 "Unknown library ${qualifiedKey(parts)}"
             } else {
                 val modulePath = parts.dropLast(1).joinToString(".")
-                val symbol = parts.last()
                 val modulePrefix = "$modulePath."
                 val moduleHasDecls = moduleSymbols.keys.any { it.startsWith(modulePrefix) }
                 if (moduleHasDecls) {
                     "Module \"${modulePath.replace('.', '/')}.jul\" has no export named \"$symbol\""
+                } else if (modulePath in reportedMissingModules) {
+                    // loadModule already emitted the missing-module / cycle error at this import.
+                    return@forEach
                 } else {
                     "Cannot find module \"$modulePath\" (looked for ${modulePath.replace('.', '/')}.jul on module path)"
                 }
@@ -98,6 +102,18 @@ fun buildImportTable(
     }
 
     return ImportTable(shortNames) to errors
+}
+
+/** Module path for a successfully resolved user/stdlib .jul import, if any. */
+fun resolvedImportModulePath(symbol: ResolvedSymbol): String? = when (symbol) {
+    is ResolvedSymbol.ImportedDecl -> symbol.modulePath
+    else -> null
+}
+
+fun CompileError.primaryLoc(): ProgramLoc? = when (this) {
+    is OneLocCompileError -> loc
+    is TwoLocsCompileError -> locA
+    else -> null
 }
 
 data class ResolvedProcRef(
