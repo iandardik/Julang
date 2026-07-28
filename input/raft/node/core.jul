@@ -1,18 +1,13 @@
 import julay.funlib.length
-import node.leader_heartbeat.gotHeartbeat
+import julay.funlib.max
+import node.election_timeout.gotHeartbeat
+import node.election_timeout.startElectionTimeout
 import node.leader_heartbeat.startLeaderHeartbeat
 import node.lib.Entry
 import node.lib.Node
 import node.lib.AppendEntriesData
 import node.lib.entryValueAt
 import node.lib.entryTermAt
-
-/*
- * Local Raft state for one node (Ongaro-shaped action surface).
- * RaftCore is a singleton per node and the sole constructor of
- * ElectionTimeout, CandidateElection, and LeaderHeartbeat — at most one
- * of those three drivers is alive at a time.
- */
 
 export proc RaftCore {
     const self : Node
@@ -23,13 +18,11 @@ export proc RaftCore {
     var log : List<Entry>
     var lastLogTermVar : Int
     var commitIndex : Int
-    var lastApplied : Int
-    var sm : List<String>
     var votesGranted : Set<Int>
-    var votesResponded : Set<Node>
+    var votesResponded : Set<Int> //Set<Node>
     var knownLeaderId : Int
-    var nextIndex : Map<Int, Int>
-    var matchIndex : Map<Int, Int>
+    var nextIndex : List<Int> // Map<Int, Int>
+    var matchIndex : List<Int> // Map<Int, Int>
 
     constructor startRaftCore(me : Node, cluster : List<Node>) {
         transit:
@@ -41,14 +34,12 @@ export proc RaftCore {
             votedFor := -1
             log := []
             lastLogTermVar := 0
-            commitIndex := 0
-            lastApplied := 0
-            sm := []
+            commitIndex := -1
             votesGranted := {}
             votesResponded := {}
             knownLeaderId := -1
-            nextIndex := []
-            matchIndex := []
+            nextIndex := cluster.map(n -> 0)
+            matchIndex := cluster.map(n -> -1)
     }
 
     /*
@@ -63,7 +54,7 @@ export proc RaftCore {
             currentTerm := currentTerm + 1
             votedFor := self.id
             votesGranted := {self.id}
-            votesResponded := {self}
+            votesResponded := {self.id}
             knownLeaderId := -1
     }
 
@@ -73,7 +64,7 @@ export proc RaftCore {
     transition requestVote(target : Node, payload : VoteRequestData) {
         guard:
             & state = "Candidate"
-            & ~(target in votesResponded)
+            & ~(target.id in votesResponded)
             & payload = VoteRequestData {
                 term := currentTerm,
                 candidateId := self.id,
@@ -125,9 +116,8 @@ export proc RaftCore {
             let _ : Boolean := startLeaderHeartbeat(self, currentTerm, cluster)
             state := "Leader"
             knownLeaderId := self.id
-            nextIndex := [] // TODO fix this
-            matchIndex := []
-            //spawnLeaderHeartbeat := true
+            nextIndex := cluster.map(n -> log.length)
+            matchIndex := cluster.map(n -> -1)
     }
 
     // TODO do we really need to send back the idx to the client?
@@ -146,21 +136,11 @@ export proc RaftCore {
             & commitIndex < newCommitIndex
             & newCommitIndex <= length(log)
             & entryTermAt(log, newCommitIndex) = currentTerm
-            // TODO add this backin
-            /*& let (numAgree : Int := matchIndex.values.filter(i -> i >= commitIndex).length) {
+            & let (numAgree : Int := matchIndex.filter(i -> i >= commitIndex).length) {
                 numAgree * 2 > length(cluster)
-            }*/
+            }
         transit:
-            commitIndex := commitIndex + 1
-    }
-
-    internal transition applyEntryToStateMachine() {
-        guard:
-            & lastApplied < commitIndex
-            & lastApplied < length(log)
-        transit:
-            sm := sm + [entryValueAt(log, lastApplied)]
-            lastApplied := lastApplied + 1
+            commitIndex := newCommitIndex
     }
 
     provider transition handleRequestVoteRequest(
@@ -204,7 +184,7 @@ export proc RaftCore {
             & term = currentTerm
         transit:
             votesGranted := if (granted) { votesGranted + {peerId} } else { votesGranted }
-            votesResponded := votesResponded + {Node { id := peerId, url := "" }} // TODO fix this
+            votesResponded := votesResponded + {peerId}
     }
 
     provider transition handleAppendEntriesRequest(
@@ -293,25 +273,15 @@ export proc RaftCore {
             & state = "Leader"
             & inTerm = currentTerm
         transit:
-            matchIndex[peerId] := if (success) { matchIdx } else {
-                if (peerId in matchIndex) { matchIndex[peerId] } else { 0 }
-            }
-            nextIndex[peerId] := if (success) {
-                matchIdx + 1
-            } else {
-                let (cur : Int := if (peerId in nextIndex) { nextIndex[peerId] } else { length(log) + 1 }) {
-                    if (cur > 1) { cur - 1 } else { 1 }
-                }
-            }
+            nextIndex[peerId] := if (success) { matchIdx + 1 } else { max(matchIdx - 1, 0) }
+            matchIndex[peerId] := if (success) { matchIdx } else { matchIndex[peerId] }
     }
 
     /*
      * Any RPC with a newer term advances us first.
      * Always syncable; no-op when inTerm <= currentTerm.
      */
-    /* provider: procfun clients keep public channel keys (no remap on procfun StaticInfo). */
     provider transition updateTerm(inTerm : Int) {
-        guard: true
         transit:
             let advance : Boolean := inTerm > currentTerm
             let _ : Boolean := if (advance) {
@@ -321,7 +291,10 @@ export proc RaftCore {
             state := if (advance) { "Follower" } else { state }
             votedFor := if (advance) { -1 } else { votedFor }
             knownLeaderId := if (advance) { -1 } else { knownLeaderId }
-            votesGranted := if (advance) { votesGranted - votesGranted } else { votesGranted }
+            votesGranted := if (advance) {
+                // TODO hack to get an empty set, since that doesn't compile for some reason
+                votesGranted - votesGranted
+            } else { votesGranted }
     }
 
     provider transition dropStaleResponse(respTerm : Int, drop : Boolean) {
@@ -351,7 +324,7 @@ export proc RaftCore {
     }
 
     provider transition getCommitted(stateMachine : List<String>) {
-        guard: stateMachine = sm
+        guard: stateMachine = log[0:commitIndex+1].map(e -> e.value)
     }
 
     provider transition staleTerm(term : Int) {
