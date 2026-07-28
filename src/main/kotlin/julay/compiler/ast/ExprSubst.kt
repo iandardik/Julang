@@ -60,6 +60,24 @@ fun substituteExpr(expr: ExprNode, name: String, replacement: ExprNode): ExprNod
             expr.fieldName,
             expr.programLocation(),
         ).withTypeOf(expr)
+        is MethodCallExprNode -> MethodCallExprNode(
+            substituteExpr(expr.baseExpr, name, replacement),
+            expr.methodName,
+            expr.args.map { substituteExpr(it, name, replacement) },
+            expr.programLocation(),
+        ).also { copy ->
+            val body = expr.hofBodyOrNull()
+            val params = expr.hofParamNamesOrNull()
+            val types = expr.hofParamTypesOrNull()
+            if (body != null && params != null && types != null) {
+                copy.resolveHof(substituteExpr(body, name, replacement), params, types)
+            }
+        }.withTypeOf(expr)
+        is LambdaExprNode -> LambdaExprNode(
+            expr.params,
+            if (expr.params.contains(name)) expr.body else substituteExpr(expr.body, name, replacement),
+            expr.programLocation(),
+        )
         is FieldAccessOnExprNode -> FieldAccessOnExprNode(
             substituteExpr(expr.baseExpr, name, replacement),
             expr.fieldPath,
@@ -115,7 +133,7 @@ fun substituteExpr(expr: ExprNode, name: String, replacement: ExprNode): ExprNod
             val namedParam = expr.namedFunParamNameOrNull()
             val namedBody = expr.namedFunBodyOrNull()
             val namedElem = expr.namedFunElemTypeOrNull()
-            if (namedFun != null && namedParam != null && namedBody != null && namedElem != null) {
+            if (namedParam != null && namedBody != null && namedElem != null) {
                 copy.resolveNamedFunArg(
                     namedFun,
                     namedParam,
@@ -188,6 +206,16 @@ fun exprReferencesSymbol(expr: ExprNode, symbol: String): Boolean {
         is LiteralValueExprNode -> false
         is FieldAccessExprNode -> expr.baseSymbol == symbol
         is MemberAccessExprNode -> exprReferencesSymbol(expr.baseExpr, symbol)
+        is MethodCallExprNode ->
+            exprReferencesSymbol(expr.baseExpr, symbol) ||
+                expr.args.any { exprReferencesSymbol(it, symbol) } ||
+                (expr.hofBodyOrNull()?.let { exprReferencesSymbol(it, symbol) } == true)
+        is LambdaExprNode ->
+            if (expr.params.contains(symbol)) {
+                false
+            } else {
+                exprReferencesSymbol(expr.body, symbol)
+            }
         is FieldAccessOnExprNode -> exprReferencesSymbol(expr.baseExpr, symbol)
         is ObjClassLiteralExprNode -> expr.fieldEntries.any { exprReferencesSymbol(it.second, symbol) }
         is ListLiteralExprNode -> expr.elements.any { exprReferencesSymbol(it, symbol) }
@@ -242,6 +270,11 @@ fun collectFunCallNames(expr: ExprNode): Set<String> {
         is LiteralValueExprNode -> emptySet()
         is FieldAccessExprNode -> emptySet()
         is MemberAccessExprNode -> collectFunCallNames(expr.baseExpr)
+        is MethodCallExprNode ->
+            collectFunCallNames(expr.baseExpr) +
+                expr.args.flatMap { collectFunCallNames(it) } +
+                (expr.hofBodyOrNull()?.let { collectFunCallNames(it) } ?: emptySet())
+        is LambdaExprNode -> collectFunCallNames(expr.body)
         is FieldAccessOnExprNode -> collectFunCallNames(expr.baseExpr)
         is ObjClassLiteralExprNode -> expr.fieldEntries.flatMap { collectFunCallNames(it.second) }.toSet()
         is ListLiteralExprNode -> expr.elements.flatMap { collectFunCallNames(it) }.toSet()

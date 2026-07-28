@@ -1,0 +1,5 @@
+source: regression/input/type-errors/hof-filter-binary-lambda.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected unary lambda"
+  - "Found type errors; exiting."

@@ -80,16 +80,19 @@ fun add(x : Int, y : Int) : Int {
 
 Recursive user functions are rejected. Prefer `julay.funlib.*` for common helpers.
 
-Higher-order `map` (from `julay.funlib.map`) takes a collection and a **named** unary `fun` (not a lambda):
+Higher-order collection methods (`.filter`, `.map`, `.fold`), `.keys`, `.length`, and inline lambdas: [Higher-order functions](higher-order-functions.md).
+
+Freestanding `map` (from `julay.funlib.map`) also accepts a **named** unary `fun` or a lambda:
 
 ```jul
 fun double(n : Int) : Int = n + n
 ys := map([1, 2, 3], double)   // List<Int>
-ts := map({1, 2}, double)      // Set<Int>
+ts := map({1, 2}, i -> i + 1)  // Set<Int>
 ```
 
 ## See also
 
 - [Reference](reference.md)
+- [Higher-order functions](higher-order-functions.md)
 - [Standard library](standard-library.md) — funlib catalog including `map`
 - Regression coverage under [`regression/input/list/`](../../regression/input/list/), [`map/`](../../regression/input/map/), [`set/`](../../regression/input/set/), [`oclass/`](../../regression/input/oclass/), [`expr/`](../../regression/input/expr/)

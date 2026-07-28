@@ -100,6 +100,13 @@ fun ASTNode.typePass(
     is ObjClassLiteralExprNode -> typePassObjClassLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is FieldAccessExprNode -> typePassFieldAccess(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is MemberAccessExprNode -> typePassMemberAccess(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is MethodCallExprNode -> typePassMethodCall(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is LambdaExprNode -> listOf(
+        OneLocCompileError(
+            programLocation(),
+            "Lambda may only appear as an argument to a higher-order function",
+        ),
+    )
     is ListLiteralExprNode -> typePassListLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is EmptyBracketLiteralExprNode -> typePassEmptyBracketLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is SetLiteralExprNode -> typePassSetLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
@@ -941,6 +948,16 @@ private fun FieldAccessExprNode.typePassFieldAccess(
     if (baseType == null) {
         return listOf(OneLocCompileError(programLocation(), "Unknown variable \"$baseSymbol\" in field access"))
     }
+    when (val coll = resolveCollectionPropertyPath(baseType, fieldPath)) {
+        is CollectionPropResult.Resolved -> {
+            resolveFieldAccess(coll.type, fieldPath.joinToString("."))
+            inferExprType(symbolEnv)
+            return emptyList()
+        }
+        is CollectionPropResult.Error ->
+            return listOf(OneLocCompileError(programLocation(), coll.message))
+        is CollectionPropResult.NotCollectionProp -> {}
+    }
     return when (val result = resolveFieldPath(baseType, fieldPath)) {
         is FieldPathResult.Error -> listOf(OneLocCompileError(programLocation(), result.message))
         is FieldPathResult.Resolved -> {
@@ -969,12 +986,272 @@ private fun MemberAccessExprNode.typePassMemberAccess(
     } catch (_: RuntimeException) {
         return listOf(OneLocCompileError(programLocation(), "Cannot resolve type of member-access base"))
     }
+    when (val coll = resolveCollectionProperty(baseType, fieldName)) {
+        is CollectionPropResult.Resolved -> {
+            setInferredType(TypePassType.Inferred(coll.type))
+            return emptyList()
+        }
+        is CollectionPropResult.Error ->
+            return listOf(OneLocCompileError(programLocation(), coll.message))
+        is CollectionPropResult.NotCollectionProp -> {}
+    }
     return when (val result = resolveFieldPath(baseType, listOf(fieldName))) {
         is FieldPathResult.Error -> listOf(OneLocCompileError(programLocation(), result.message))
         is FieldPathResult.Resolved -> {
             setInferredType(TypePassType.Inferred(result.type))
             emptyList()
         }
+    }
+}
+
+private fun MethodCallExprNode.typePassMethodCall(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
+): List<CompileError> {
+    val kind = collectionMethodKind(methodName)
+        ?: return listOf(
+            OneLocCompileError(
+                programLocation(),
+                "Unknown method \"$methodName\"",
+            ),
+        )
+    val baseErrors = baseExpr.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    if (baseErrors.isNotEmpty()) {
+        return baseErrors
+    }
+    val collType = try {
+        baseExpr.getType()
+    } catch (_: RuntimeException) {
+        return listOf(OneLocCompileError(programLocation(), "Cannot resolve type of method-call receiver"))
+    }
+    return when (kind) {
+        CollectionMethodKind.Filter -> typePassFilter(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv, collType)
+        CollectionMethodKind.Map -> typePassMapMethod(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv, collType)
+        CollectionMethodKind.Fold -> typePassFold(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv, collType)
+    }
+}
+
+private fun MethodCallExprNode.typePassFilter(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode>,
+    collType: Type,
+): List<CompileError> {
+    val elemType = collectionElementType(collType)
+        ?: return listOf(
+            OneLocCompileError(programLocation(), "Expected receiver of \"filter\" to have a List or Set type but got $collType"),
+        )
+    if (args.size != 1) {
+        return listOf(OneLocCompileError(programLocation(), "Expected method \"filter\" to take 1 argument(s) but got ${args.size}"))
+    }
+    val resultType = sameCollectionType(collType)!!
+    return typePassUnaryHofArg(
+        symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv,
+        args[0], elemType, expectedBodyType = boolType, resultType = resultType,
+    )
+}
+
+private fun MethodCallExprNode.typePassMapMethod(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode>,
+    collType: Type,
+): List<CompileError> {
+    val elemType = collectionElementType(collType)
+        ?: return listOf(
+            OneLocCompileError(programLocation(), "Expected receiver of \"map\" to have a List or Set type but got $collType"),
+        )
+    if (args.size != 1) {
+        return listOf(OneLocCompileError(programLocation(), "Expected method \"map\" to take 1 argument(s) but got ${args.size}"))
+    }
+    return typePassUnaryHofArg(
+        symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv,
+        args[0], elemType, expectedBodyType = null, resultType = null, mapCollType = collType,
+    )
+}
+
+private fun MethodCallExprNode.typePassFold(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode>,
+    collType: Type,
+): List<CompileError> {
+    val elemType = collectionElementType(collType)
+        ?: return listOf(
+            OneLocCompileError(programLocation(), "Expected receiver of \"fold\" to have a List or Set type but got $collType"),
+        )
+    if (args.size != 2) {
+        return listOf(OneLocCompileError(programLocation(), "Expected method \"fold\" to take 2 argument(s) but got ${args.size}"))
+    }
+    val initErrors = args[0].typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    if (initErrors.isNotEmpty()) {
+        return initErrors
+    }
+    val accType = args[0].getType()
+    val lambda = args[1]
+    if (lambda !is LambdaExprNode) {
+        return listOf(
+            OneLocCompileError(
+                lambda.programLocation(),
+                "Expected second argument of \"fold\" to be a binary lambda (acc, elem) -> expr",
+            ),
+        )
+    }
+    if (lambda.params.size != 2) {
+        return listOf(
+            OneLocCompileError(
+                lambda.programLocation(),
+                "Expected fold lambda to take 2 parameter(s) but got ${lambda.params.size}",
+            ),
+        )
+    }
+    val (accName, elemName) = lambda.params
+    val bodyEnv = symbolEnv + (accName to accType) + (elemName to elemType)
+    val bodyErrors = lambda.body.typePass(bodyEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    if (bodyErrors.isNotEmpty()) {
+        return bodyErrors
+    }
+    val bodyType = lambda.body.getType()
+    if (bodyType != accType) {
+        return listOf(
+            OneLocCompileError(
+                lambda.body.programLocation(),
+                "Expected fold lambda body to have type $accType but got $bodyType",
+            ),
+        )
+    }
+    resolveHof(lambda.body, listOf(accName, elemName), listOf(accType, elemType))
+    setInferredType(TypePassType.Inferred(accType))
+    return emptyList()
+}
+
+/**
+ * @param expectedBodyType if non-null, body must have this type (filter → Boolean)
+ * @param resultType if non-null, method result type (filter)
+ * @param mapCollType if non-null, result is mapped collection of body type
+ */
+private fun MethodCallExprNode.typePassUnaryHofArg(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode>,
+    funArg: ExprNode,
+    elemType: Type,
+    expectedBodyType: Type?,
+    resultType: Type?,
+    mapCollType: Type? = null,
+): List<CompileError> {
+    return when (funArg) {
+        is LambdaExprNode -> {
+            if (funArg.params.size != 1) {
+                return listOf(
+                    OneLocCompileError(
+                        funArg.programLocation(),
+                        "Expected unary lambda but got ${funArg.params.size} parameter(s)",
+                    ),
+                )
+            }
+            val param = funArg.params.single()
+            val bodyEnv = symbolEnv + (param to elemType)
+            val bodyErrors = funArg.body.typePass(bodyEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+            if (bodyErrors.isNotEmpty()) {
+                return bodyErrors
+            }
+            val bodyType = funArg.body.getType()
+            if (expectedBodyType != null && bodyType != expectedBodyType) {
+                return listOf(
+                    OneLocCompileError(
+                        funArg.body.programLocation(),
+                        "Expected lambda body to have type $expectedBodyType but got $bodyType",
+                    ),
+                )
+            }
+            val outType = when {
+                resultType != null -> resultType
+                mapCollType != null -> mapResultCollectionType(mapCollType, bodyType)
+                    ?: return listOf(OneLocCompileError(programLocation(), "map expected List or Set"))
+                else -> error("unreachable")
+            }
+            resolveHof(funArg.body, listOf(param), listOf(elemType))
+            setInferredType(TypePassType.Inferred(outType))
+            emptyList()
+        }
+        is SymbolValueExprNode -> {
+            // Named unary fun, same as freestanding map(xs, f)
+            val mappedFun = funEnv[funArg.symbol]
+                ?: return listOf(OneLocCompileError(funArg.programLocation(), "Unknown function \"${funArg.symbol}\""))
+            val params = try {
+                mappedFun.funArgs().actionArgs()
+            } catch (_: RuntimeException) {
+                return listOf(
+                    OneLocCompileError(funArg.programLocation(), "Parameter types not resolved for function \"${funArg.symbol}\""),
+                )
+            }
+            if (params.size != 1) {
+                return listOf(
+                    OneLocCompileError(
+                        funArg.programLocation(),
+                        "Expected function \"${funArg.symbol}\" to take 1 argument(s) but got ${params.size}",
+                    ),
+                )
+            }
+            val param = params.single()
+            val subst = mutableMapOf<String, Type>()
+            when (val unify = unifyTypes(param.type, elemType, subst)) {
+                is UnifyResult.Fail ->
+                    return listOf(
+                        OneLocCompileError(
+                            funArg.programLocation(),
+                            "Expected argument \"${param.name}\" of \"${funArg.symbol}\" to have type ${param.type} but got $elemType: ${unify.message}",
+                        ),
+                    )
+                is UnifyResult.Ok -> {}
+            }
+            when (val ret = registry.resolveTypeExpr(mappedFun.funReturnTypeExpr(), subst, programLocation())) {
+                is TypeResolveResult.Found -> {
+                    if (expectedBodyType != null && ret.type != expectedBodyType) {
+                        return listOf(
+                            OneLocCompileError(
+                                funArg.programLocation(),
+                                "Expected function \"${funArg.symbol}\" to return $expectedBodyType but got ${ret.type}",
+                            ),
+                        )
+                    }
+                    val outType = when {
+                        resultType != null -> resultType
+                        mapCollType != null -> mapResultCollectionType(mapCollType, ret.type)
+                            ?: return listOf(OneLocCompileError(programLocation(), "map expected List or Set"))
+                        else -> error("unreachable")
+                    }
+                    val body = mappedFun.funBody()
+                    resolveHof(body, listOf(param.name), listOf(elemType))
+                    setInferredType(TypePassType.Inferred(outType))
+                    emptyList()
+                }
+                is TypeResolveResult.Error -> listOf(OneLocCompileError(programLocation(), ret.message))
+            }
+        }
+        else -> listOf(
+            OneLocCompileError(
+                funArg.programLocation(),
+                "Expected a unary lambda or function name",
+            ),
+        )
     }
 }
 
@@ -1047,11 +1324,36 @@ private fun FunCallExprNode.typePassNamedFunMap(
             ),
         )
     }
+    if (funArg is LambdaExprNode) {
+        if (funArg.params.size != 1) {
+            return listOf(
+                OneLocCompileError(
+                    funArg.programLocation(),
+                    "Expected unary lambda but got ${funArg.params.size} parameter(s)",
+                ),
+            )
+        }
+        val param = funArg.params.single()
+        val bodyEnv = symbolEnv + (param to elemType)
+        val bodyErrors = funArg.body.typePass(bodyEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+        if (bodyErrors.isNotEmpty()) {
+            return bodyErrors
+        }
+        val resultType = when (collType) {
+            is ListType -> listType(funArg.body.getType())
+            is SetType -> setType(funArg.body.getType())
+            else -> error("unreachable")
+        }
+        resolveNamedFunArg(null, param, funArg.body, elemType)
+        resolveInstantiatedReturnType(resultType)
+        inferExprType(symbolEnv)
+        return emptyList()
+    }
     if (funArg !is SymbolValueExprNode) {
         return listOf(
             OneLocCompileError(
                 funArg.programLocation(),
-                "Expected second argument of \"map\" to be a unary function name",
+                "Expected second argument of \"map\" to be a unary function name or lambda",
             ),
         )
     }

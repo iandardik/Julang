@@ -1,0 +1,6 @@
+source: regression/input/expr/hof-methods.jul
+programs:
+  - name: HofTest
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/expr-hof-methods.stdout

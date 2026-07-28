@@ -389,7 +389,7 @@ class FunCallExprNode(
         resolvedFun = null
         resolvedBuiltin = null
     }
-    internal fun resolveNamedFunArg(funNode: FunNode, paramName: String, body: ExprNode, elemType: Type) {
+    internal fun resolveNamedFunArg(funNode: FunNode?, paramName: String, body: ExprNode, elemType: Type) {
         namedFunArgNode = funNode
         namedFunParamName = paramName
         namedFunBody = body
@@ -1839,6 +1839,10 @@ class FieldAccessExprNode(
         forceString: Boolean,
     ): String {
         val resolution = fieldResolution as FieldAccessResolution.Resolved
+        val rootType = symbolTypes[baseSymbol]
+        if (rootType is ListType || rootType is SetType || rootType is MapType) {
+            return collectionPropToZ3(symbolTypes, argSymbols, forceString, resolution.leafType)
+        }
         if (forceString && (resolution.leafType is ListType || resolution.leafType is ObjClassType)) {
             if (baseSymbol in argSymbols) {
                 throw RuntimeException("Cannot convert symbolic ${resolution.leafType} to string")
@@ -1852,7 +1856,36 @@ class FieldAccessExprNode(
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        val rootType = symbolTypes[baseSymbol]
+        if (rootType is ListType || rootType is SetType || rootType is MapType) {
+            return collectionPropToTransit(symbolTypes, argSymbols)
+        }
         return ObjClassType.fieldAccessTransitString(baseSymbol, fieldPath, symbolTypes, argSymbols)
+    }
+
+    private fun collectionPropToTransit(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        var expr = SymbolValueExprNode(baseSymbol, loc).toTransitString(symbolTypes, argSymbols)
+        for (seg in fieldPath) {
+            expr = when (seg) {
+                "keys" -> "($expr).keys"
+                "length" -> "($expr).size"
+                else -> throw RuntimeException("Unknown collection property \"$seg\" at $loc")
+            }
+        }
+        return expr
+    }
+
+    private fun collectionPropToZ3(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+        forceString: Boolean,
+        leafType: Type,
+    ): String {
+        if (baseSymbol in argSymbols) {
+            throw RuntimeException("Collection property access on symbolic argument \"$baseSymbol\" is not supported in guards at $loc")
+        }
+        val kotlinExpr = collectionPropToTransit(symbolTypes, argSymbols)
+        return embedKotlinValueAsZ3(kotlinExpr, leafType, forceString, loc)
     }
 
     private fun recordZ3Expr(baseSymbol: String, baseType: ObjClassType, argSymbols: Set<String>): String {
@@ -1889,18 +1922,30 @@ class MemberAccessExprNode(
         forceString: Boolean,
     ): String {
         val leafType = getType()
+        val baseType = baseExpr.getType()
+        if (baseType is ListType || baseType is SetType || baseType is MapType) {
+            val kotlinExpr = toTransitString(symbolTypes, argSymbols)
+            if (exprReferencesAnyArg(baseExpr, argSymbols)) {
+                throw RuntimeException("Collection property \"$fieldName\" on symbolic value is not supported in guards at $loc")
+            }
+            return embedKotlinValueAsZ3(kotlinExpr, leafType, forceString, loc)
+        }
         if (forceString && (leafType is ListType || leafType is ObjClassType)) {
             return "ctx.mkString((${toTransitString(symbolTypes, argSymbols)}).toString())"
         }
-        val baseType = baseExpr.getType() as ObjClassType
+        val objType = baseType as ObjClassType
         val baseZ3 = baseExpr.toZ3GuardString(symbolTypes, argSymbols)
-        val fieldZ3 = ObjClassType.fieldAccessZ3Codegen(baseType, baseZ3, listOf(fieldName))
+        val fieldZ3 = ObjClassType.fieldAccessZ3Codegen(objType, baseZ3, listOf(fieldName))
         return castFieldZ3(fieldZ3, leafType, forceString)
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
         val base = baseExpr.toTransitString(symbolTypes, argSymbols)
-        return "($base).$fieldName"
+        return when (fieldName) {
+            "keys" -> "($base).keys"
+            "length" -> "($base).size"
+            else -> "($base).$fieldName"
+        }
     }
 
     override fun inferType(symbolEnv: Map<String, Type>): Type {
@@ -1913,6 +1958,157 @@ class MemberAccessExprNode(
 
     override fun toString(): String = "$baseExpr.$fieldName"
 }
+
+/**
+ * Inline lambda used only as a higher-order function argument: `x -> e` or `(acc, x) -> e`.
+ * Not a first-class value; typing happens in the enclosing HOF call.
+ */
+class LambdaExprNode(
+    val params: List<String>,
+    val body: ExprNode,
+    private val loc: ProgramLoc,
+) : ExprNode(listOf(body)) {
+    override fun programLocation() = loc
+
+    override fun toZ3GuardString(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+        forceString: Boolean,
+    ): String {
+        throw RuntimeException("Lambda cannot be used as a standalone expression in guards at $loc")
+    }
+
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        throw RuntimeException("Lambda cannot be used as a standalone expression at $loc")
+    }
+
+    override fun inferType(symbolEnv: Map<String, Type>): Type {
+        throw RuntimeException("Lambda type is determined by the enclosing higher-order call at $loc")
+    }
+
+    override fun toString(): String = when (params.size) {
+        1 -> "${params[0]} -> $body"
+        else -> "(${params.joinToString(", ")}) -> $body"
+    }
+}
+
+/** Intrinsic collection method call: `xs.filter(...)`, `xs.map(...)`, `xs.fold(init, ...)`. */
+class MethodCallExprNode(
+    val baseExpr: ExprNode,
+    val methodName: String,
+    val args: List<ExprNode>,
+    private val loc: ProgramLoc,
+) : ExprNode(listOf(baseExpr) + args) {
+    private var hofBody: ExprNode? = null
+    private var hofParamNames: List<String>? = null
+    private var hofParamTypes: List<Type>? = null
+
+    override fun programLocation() = loc
+
+    internal fun resolveHof(body: ExprNode, paramNames: List<String>, paramTypes: List<Type>) {
+        hofBody = body
+        hofParamNames = paramNames
+        hofParamTypes = paramTypes
+    }
+
+    internal fun hofBodyOrNull(): ExprNode? = hofBody
+    internal fun hofParamNamesOrNull(): List<String>? = hofParamNames
+    internal fun hofParamTypesOrNull(): List<Type>? = hofParamTypes
+
+    override fun toZ3GuardString(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+        forceString: Boolean,
+    ): String {
+        if (exprReferencesAnyArg(this, argSymbols)) {
+            throw RuntimeException(
+                "Method \"$methodName\" cannot be used in guards when it depends on action arguments at $loc",
+            )
+        }
+        // Prefer Kotlin evaluation + embed for concrete state (Julay guards bind state as Kotlin values).
+        val kotlinExpr = toTransitString(symbolTypes, argSymbols)
+        return embedKotlinValueAsZ3(kotlinExpr, getType(), forceString, loc)
+    }
+
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        val base = baseExpr.toTransitString(symbolTypes, argSymbols)
+        val body = hofBody ?: throw RuntimeException("HOF body not resolved for \"$methodName\" at $loc")
+        val paramNames = hofParamNames ?: throw RuntimeException("HOF params not resolved for \"$methodName\" at $loc")
+        val paramTypes = hofParamTypes ?: throw RuntimeException("HOF param types not resolved for \"$methodName\" at $loc")
+        val extendedTypes = symbolTypes + paramNames.zip(paramTypes).toMap()
+        return when (methodName) {
+            "filter" -> {
+                val p = paramNames.single()
+                val bodyStr = body.toTransitString(extendedTypes, argSymbols)
+                when (baseExpr.getType()) {
+                    is ListType -> "$base.filter { $p -> $bodyStr }"
+                    is SetType -> "$base.filter { $p -> $bodyStr }.toSet()"
+                    else -> throw RuntimeException("filter expected List or Set at $loc")
+                }
+            }
+            "map" -> {
+                val p = paramNames.single()
+                val bodyStr = body.toTransitString(extendedTypes, argSymbols)
+                when (baseExpr.getType()) {
+                    is ListType -> "$base.map { $p -> $bodyStr }"
+                    is SetType -> "$base.map { $p -> $bodyStr }.toSet()"
+                    else -> throw RuntimeException("map expected List or Set at $loc")
+                }
+            }
+            "fold" -> {
+                val init = args[0].toTransitString(symbolTypes, argSymbols)
+                val acc = paramNames[0]
+                val elem = paramNames[1]
+                val bodyStr = body.toTransitString(extendedTypes, argSymbols)
+                "$base.fold($init) { $acc, $elem -> $bodyStr }"
+            }
+            else -> throw RuntimeException("Unknown collection method \"$methodName\" at $loc")
+        }
+    }
+
+    override fun inferType(symbolEnv: Map<String, Type>): Type {
+        return try {
+            getType()
+        } catch (_: RuntimeException) {
+            throw RuntimeException("Method call not typed at $loc")
+        }
+    }
+
+    override fun toString(): String = "$baseExpr.$methodName(${args.joinToString(", ")})"
+}
+
+internal fun embedKotlinValueAsZ3(
+    kotlinExpr: String,
+    type: Type,
+    forceString: Boolean,
+    loc: ProgramLoc,
+): String {
+    if (forceString) {
+        return "ctx.mkString(($kotlinExpr).toString())"
+    }
+    return when (type) {
+        is BoolType -> "ctx.mkBool($kotlinExpr)"
+        is IntType -> "ctx.mkInt($kotlinExpr)"
+        is RealType -> "ctx.mkReal(($kotlinExpr).toString())"
+        is StringType -> "ctx.mkString($kotlinExpr)"
+        is ListType -> {
+            val tv = type.toCodegenTypeVal()
+            "$tv.toZ3Expr(Value($kotlinExpr, $tv), ctx)"
+        }
+        is SetType -> {
+            val tv = type.toCodegenTypeVal()
+            "$tv.toZ3Expr(Value($kotlinExpr, $tv), ctx)"
+        }
+        is MapType -> {
+            val tv = type.toCodegenTypeVal()
+            "$tv.toZ3Expr(Value($kotlinExpr, $tv), ctx)"
+        }
+        else -> throw RuntimeException("Cannot embed type $type as Z3 at $loc")
+    }
+}
+
+internal fun exprReferencesAnyArg(expr: ExprNode, argSymbols: Set<String>): Boolean =
+    argSymbols.any { exprReferencesSymbol(expr, it) }
 
 class FieldAccessOnExprNode(
     val baseExpr: ExprNode,

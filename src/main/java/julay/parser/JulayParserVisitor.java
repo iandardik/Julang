@@ -317,17 +317,41 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitIndex_expr(JulayParser.Index_exprContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#method_prop_expr}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitMethod_prop_expr(JulayParser.Method_prop_exprContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#index_or_slice}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
 	T visitIndex_or_slice(JulayParser.Index_or_sliceContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#method_call}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitMethod_call(JulayParser.Method_callContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#fun_call}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
 	T visitFun_call(JulayParser.Fun_callContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#call_arg}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitCall_arg(JulayParser.Call_argContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#lambda_expr}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitLambda_expr(JulayParser.Lambda_exprContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link JulayParser#oclass_literal}.
 	 * @param ctx the parse tree

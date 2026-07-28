@@ -206,6 +206,7 @@ expr
     | LPAREN expr RPAREN
     | bracket_literal
     | set_literal
+    | method_prop_expr
     | index_expr
     | field_access
     | oclass_literal
@@ -286,8 +287,17 @@ set_literal
 
 index_expr
     : index_expr LBRACK index_or_slice RBRACK
+    | index_expr DOT ID LPAREN (call_arg (COMMA call_arg)*)? RPAREN
     | index_expr DOT ID
     | (fun_call | field_access | bracket_literal | set_literal | LPAREN expr RPAREN) LBRACK index_or_slice RBRACK
+    | (fun_call | field_access | bracket_literal | set_literal | LPAREN expr RPAREN) DOT ID LPAREN (call_arg (COMMA call_arg)*)? RPAREN
+    // Do NOT include field_access here: ID.DOT.ID must stay field_access (Leaf.var / obj fields).
+    | (fun_call | bracket_literal | set_literal | LPAREN expr RPAREN) DOT ID
+    ;
+
+// method call (requires LPAREN) with optional trailing property access: xs.filter(...).length
+method_prop_expr
+    : method_call (DOT ID)*
     ;
 
 index_or_slice
@@ -295,8 +305,23 @@ index_or_slice
     | expr
     ;
 
+// method_call requires at least one DOT so bare ID(...) stays fun_call; LPAREN is mandatory
+method_call
+    : ID (DOT ID)+ LPAREN (call_arg (COMMA call_arg)*)? RPAREN
+    ;
+
 fun_call
-    : ID typeArgs? LPAREN (expr (COMMA expr)*)? RPAREN
+    : ID typeArgs? LPAREN (call_arg (COMMA call_arg)*)? RPAREN
+    ;
+
+call_arg
+    : lambda_expr
+    | expr
+    ;
+
+lambda_expr
+    : ID ARROW expr
+    | LPAREN ID COMMA ID RPAREN ARROW expr
     ;
 
 oclass_literal

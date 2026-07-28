@@ -86,6 +86,27 @@ The [`vscode-julay/`](../vscode-julay/) extension adds `.jul` highlighting, snip
 
 End-to-end cases: [regression/README.md](../regression/README.md).
 
+### `GradleWorkerMain` / ClassNotFoundException
+
+If `./gradlew test` fails with `Could not find or load main class worker.org.gradle.process.internal.worker.GradleWorkerMain`, the Gradle test-worker cache is broken. Cursor often sets `GRADLE_USER_HOME` to a sandbox under `/var/folders/.../cursor-sandbox-cache/`, which is where this shows up.
+
+Repair (forces `~/.gradle`):
+
+```bash
+./scripts/fix-gradle-worker.sh
+export GRADLE_USER_HOME="$HOME/.gradle"
+./gradlew test
+```
+
+Or manually:
+
+```bash
+export GRADLE_USER_HOME="$HOME/.gradle"
+./gradlew --stop
+rm -rf ~/.gradle/caches/8.5/workerMain
+./gradlew test --tests julay.compiler.ParseTreeSmokeTest --rerun-tasks
+```
+
 ## See also
 
 - [Getting started](getting-started.md)

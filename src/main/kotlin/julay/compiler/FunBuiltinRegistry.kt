@@ -246,7 +246,7 @@ object FunBuiltinRegistry {
     )
 
     /**
-     * Higher-order map over List or Set: `map(xs, f)` where `f` is a unary user `fun` name.
+     * Higher-order map over List or Set: `map(xs, f)` where `f` is a unary user `fun` name or lambda.
      * Return type and codegen are specialized in TypePass / FunCallExprNode.
      */
     private val mapBuiltin = FunBuiltin(

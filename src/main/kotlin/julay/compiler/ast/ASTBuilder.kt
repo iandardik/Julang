@@ -148,13 +148,39 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     override fun visitFun_call(ctx: JulayParser.Fun_callContext?): ASTNode {
         val name = ctx!!.ID().text
         val typeArgs = ctx.typeArgs()?.typeExpr()?.map { parseTypeExpr(it) } ?: emptyList()
-        val args = ctx.expr().map { visit(it) }.map {
-            if (it !is ExprNode) {
-                throw RuntimeException("Expected function call arguments to be expressions")
-            }
-            it
-        }
+        val args = ctx.call_arg().map { visitCallArg(it) }
         return FunCallExprNode(name, args, sourceLocation(ctx), typeArgs = typeArgs)
+    }
+
+    override fun visitMethod_call(ctx: JulayParser.Method_callContext?): ASTNode {
+        val ids = ctx!!.ID().map { it.text }
+        require(ids.size >= 2) { "method_call requires a dotted receiver at ${ctx.text}" }
+        val methodName = ids.last()
+        val baseIds = ids.dropLast(1)
+        val base: ExprNode = if (baseIds.size == 1) {
+            SymbolValueExprNode(baseIds[0], sourceLocation(ctx))
+        } else {
+            FieldAccessExprNode(baseIds[0], baseIds.drop(1), sourceLocation(ctx))
+        }
+        val args = ctx.call_arg().map { visitCallArg(it) }
+        return MethodCallExprNode(base, methodName, args, sourceLocation(ctx))
+    }
+
+    override fun visitLambda_expr(ctx: JulayParser.Lambda_exprContext?): ASTNode {
+        val params = ctx!!.ID().map { it.text }
+        val body = visit(ctx.expr()) as ExprNode
+        return LambdaExprNode(params, body, sourceLocation(ctx))
+    }
+
+    private fun visitCallArg(ctx: JulayParser.Call_argContext): ExprNode {
+        if (ctx.lambda_expr() != null) {
+            return visit(ctx.lambda_expr()) as ExprNode
+        }
+        val e = visit(ctx.expr())
+        if (e !is ExprNode) {
+            throw RuntimeException("Expected call argument to be an expression")
+        }
+        return e
     }
 
     override fun visitObj(ctx: JulayParser.ObjContext?): ASTNode {
@@ -558,6 +584,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             }
             ctx.bracket_literal() != null -> visit(ctx.bracket_literal())
             ctx.set_literal() != null -> visit(ctx.set_literal())
+            ctx.method_prop_expr() != null -> visit(ctx.method_prop_expr())
             ctx.index_expr() != null -> visit(ctx.index_expr())
             ctx.field_access() != null -> visit(ctx.field_access())
             ctx.oclass_literal() != null -> visit(ctx.oclass_literal())
@@ -788,10 +815,41 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         return SetLiteralExprNode(elements, sourceLocation(ctx))
     }
 
+    override fun visitMethod_prop_expr(ctx: JulayParser.Method_prop_exprContext?): ASTNode {
+        var expr: ExprNode = visit(ctx!!.method_call()) as ExprNode
+        for (id in ctx.ID()) {
+            expr = MemberAccessExprNode(expr, id.text, sourceLocation(ctx))
+        }
+        return expr
+    }
+
     override fun visitIndex_expr(ctx: JulayParser.Index_exprContext?): ASTNode {
-        // Postfix .field: index_expr DOT ID
-        if (ctx!!.DOT() != null && ctx.ID() != null) {
-            val base = visit(ctx.index_expr()) as ExprNode
+        // Postfix method call: base DOT ID LPAREN ...
+        // Note: LPAREN() returns List<TerminalNode> (never null); check isNotEmpty().
+        if (ctx!!.DOT() != null && ctx.ID() != null && ctx.LPAREN().isNotEmpty()) {
+            val base: ExprNode = when {
+                ctx.index_expr() != null -> visit(ctx.index_expr()) as ExprNode
+                ctx.fun_call() != null -> visit(ctx.fun_call()) as ExprNode
+                ctx.field_access() != null -> visit(ctx.field_access()) as ExprNode
+                ctx.bracket_literal() != null -> visit(ctx.bracket_literal()) as ExprNode
+                ctx.set_literal() != null -> visit(ctx.set_literal()) as ExprNode
+                ctx.expr() != null -> visit(ctx.expr()) as ExprNode
+                else -> throw RuntimeException("Invalid method call base at ${ctx.text}")
+            }
+            val args = ctx.call_arg().map { visitCallArg(it) }
+            return MethodCallExprNode(base, ctx.ID().text, args, sourceLocation(ctx))
+        }
+        // Postfix .field: ... DOT ID
+        if (ctx.DOT() != null && ctx.ID() != null) {
+            val base: ExprNode = when {
+                ctx.index_expr() != null -> visit(ctx.index_expr()) as ExprNode
+                ctx.fun_call() != null -> visit(ctx.fun_call()) as ExprNode
+                ctx.field_access() != null -> visit(ctx.field_access()) as ExprNode
+                ctx.bracket_literal() != null -> visit(ctx.bracket_literal()) as ExprNode
+                ctx.set_literal() != null -> visit(ctx.set_literal()) as ExprNode
+                ctx.expr() != null -> visit(ctx.expr()) as ExprNode
+                else -> throw RuntimeException("Invalid member-access base at ${ctx.text}")
+            }
             return MemberAccessExprNode(base, ctx.ID().text, sourceLocation(ctx))
         }
         val indexOrSlice = ctx.index_or_slice()

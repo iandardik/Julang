@@ -518,6 +518,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitIndex_expr(JulayParser.Index_exprContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#method_prop_expr}.
+	 * @param ctx the parse tree
+	 */
+	void enterMethod_prop_expr(JulayParser.Method_prop_exprContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#method_prop_expr}.
+	 * @param ctx the parse tree
+	 */
+	void exitMethod_prop_expr(JulayParser.Method_prop_exprContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#index_or_slice}.
 	 * @param ctx the parse tree
 	 */
@@ -528,6 +538,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitIndex_or_slice(JulayParser.Index_or_sliceContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#method_call}.
+	 * @param ctx the parse tree
+	 */
+	void enterMethod_call(JulayParser.Method_callContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#method_call}.
+	 * @param ctx the parse tree
+	 */
+	void exitMethod_call(JulayParser.Method_callContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#fun_call}.
 	 * @param ctx the parse tree
 	 */
@@ -537,6 +557,26 @@ public interface JulayParserListener extends ParseTreeListener {
 	 * @param ctx the parse tree
 	 */
 	void exitFun_call(JulayParser.Fun_callContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#call_arg}.
+	 * @param ctx the parse tree
+	 */
+	void enterCall_arg(JulayParser.Call_argContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#call_arg}.
+	 * @param ctx the parse tree
+	 */
+	void exitCall_arg(JulayParser.Call_argContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#lambda_expr}.
+	 * @param ctx the parse tree
+	 */
+	void enterLambda_expr(JulayParser.Lambda_exprContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#lambda_expr}.
+	 * @param ctx the parse tree
+	 */
+	void exitLambda_expr(JulayParser.Lambda_exprContext ctx);
 	/**
 	 * Enter a parse tree produced by {@link JulayParser#oclass_literal}.
 	 * @param ctx the parse tree

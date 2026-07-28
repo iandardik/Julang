@@ -1,0 +1,10 @@
+proc HofLambdaArity {
+    var xs : List<Int>
+
+    constructor initially(args : List<String>) {
+        transit:
+            xs := [1, 2].filter((a, b) -> a > 0)
+    }
+}
+
+compile HofLambdaArity

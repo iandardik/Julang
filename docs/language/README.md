@@ -49,14 +49,15 @@ How-to: [Getting started](../getting-started.md). Specs: [Specifications](specif
 1. [Processes](processes.md) — state, `initially`, constructors vs transitions
 2. [Composition and actions](composition-and-actions.md) — `||`, modifiers, synchronization
 3. [Types and expressions](types-and-expressions.md)
-4. [Procfuns](procfun.md) — process-backed blocking calls
-5. [Modules](modules.md) — `import` and search path
-6. [Sessions](sessions.md) — sticky pairwise protocols
-7. [Side effects](effects.md) — library procs vs funlib functions; `before` / `after` / transit IO
-8. [Standard library](standard-library.md) — proclib and funlib (including which have effects)
-9. [Creating libraries](creating-libraries.md) — authoring `.jul` and Kotlin-native libs
-10. [Specifications](specifications.md) — invariants, specs, TLC
-11. [Reference](reference.md) — keywords, operators, builtins
+4. [Higher-order functions](higher-order-functions.md) — `.keys`, `.length`, `.filter` / `.map` / `.fold`, lambdas
+5. [Procfuns](procfun.md) — process-backed blocking calls
+6. [Modules](modules.md) — `import` and search path
+7. [Sessions](sessions.md) — sticky pairwise protocols
+8. [Side effects](effects.md) — library procs vs funlib functions; `before` / `after` / transit IO
+9. [Standard library](standard-library.md) — proclib and funlib (including which have effects)
+10. [Creating libraries](creating-libraries.md) — authoring `.jul` and Kotlin-native libs
+11. [Specifications](specifications.md) — invariants, specs, TLC
+12. [Reference](reference.md) — keywords, operators, builtins
 
 ## Examples
 

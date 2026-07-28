@@ -1,0 +1,118 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+import julay.funlib.map
+
+fun double(n : Int) : Int = n + n
+
+proc HofTest {
+    var step : String
+    var xs : List<Int>
+    var ys : List<Int>
+    var s : Set<Int>
+    var m : Map<Int, Int>
+    var n : Int
+    var keysFiltered : Set<Int>
+
+    constructor initially(args : List<String>) {
+        transit:
+            step := "props"
+            xs := [1, 2, 3, 4]
+            ys := []
+            s := {1, 2, 3}
+            m := [1 -> 10, 2 -> 20, 3 -> 5]
+            n := 0
+            keysFiltered := {}
+    }
+
+    internal transition checkProps() {
+        guard:
+            & step = "props"
+            & xs.length = 4
+            & s.length = 3
+            & m.length = 3
+            & m.keys.length = 3
+        transit:
+            step := "filterMap"
+    }
+
+    internal transition doFilterMap() {
+        guard: step = "filterMap"
+        transit:
+            ys := xs.filter(i -> i >= 3)
+            s := s.map(x -> x + 1)
+            step := "printFilter"
+    }
+
+    internal transition printlnFilter(msg : String) {
+        guard:
+            & step = "printFilter"
+            & ys.length = 2
+            & msg = ys + ""
+        transit:
+            step := "fold"
+        after:
+            println(msg)
+    }
+
+    internal transition doFold() {
+        guard: step = "fold"
+        transit:
+            n := xs.fold(0, (acc, x) -> acc + x)
+            step := "printFold"
+    }
+
+    internal transition printlnFold(msg : String) {
+        guard:
+            & step = "printFold"
+            & n = 10
+            & msg = n + ""
+        transit:
+            step := "keysFilter"
+        after:
+            println(msg)
+    }
+
+    internal transition doKeysFilter() {
+        guard: step = "keysFilter"
+        transit:
+            keysFiltered := m.keys.filter(k -> m[k] >= 10)
+            step := "printKeys"
+    }
+
+    internal transition printlnKeys(msg : String) {
+        guard:
+            & step = "printKeys"
+            & keysFiltered.length = 2
+            & msg = keysFiltered.length + ""
+        transit:
+            step := "namedMap"
+        after:
+            println(msg)
+    }
+
+    internal transition doNamedMap() {
+        guard: step = "namedMap"
+        transit:
+            ys := map(xs, i -> i + 1)
+            step := "printNamed"
+    }
+
+    internal transition printlnNamed(msg : String) {
+        guard:
+            & step = "printNamed"
+            & ys.length = 4
+            & msg = ys + ""
+        transit:
+            step := "done"
+        after:
+            println(msg)
+    }
+
+    internal transition exitSystem() {
+        guard: step = "done"
+        after:
+            exitProcess()
+    }
+}
+
+compile HofTest
