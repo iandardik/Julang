@@ -64,6 +64,9 @@ export proc RaftCore {
     transition requestVote(target : Node, payload : VoteRequestData) {
         guard:
             & state = "Candidate"
+            & target.id >= 0
+            & target.id < length(cluster)
+            & cluster[target.id] = target
             & ~(target.id in votesResponded)
             & payload = VoteRequestData {
                 term := currentTerm,
@@ -75,6 +78,9 @@ export proc RaftCore {
 
     transition appendEntries(target : Node, payload : AppendEntriesData) {
         guard:
+            & target.id >= 0
+            & target.id < length(cluster)
+            & cluster[target.id] = target
             & target ~= self
             & state = "Leader"
             & payload = if (nextIndex[target.id] < length(log)) {

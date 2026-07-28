@@ -94,6 +94,13 @@ proc RaftNodeMain {
             & me = self
             & cluster = theCluster
         transit:
+            step := "startVoteRequester"
+    }
+
+    transition startVoteRequester() {
+        guard:
+            step = "startVoteRequester"
+        transit:
             step := "done"
     }
 }

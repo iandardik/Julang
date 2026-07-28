@@ -1,10 +1,37 @@
-import node.lib.Node
 import node.rpc_out.outRequestVoteRPC
 
 export proc VoteRequester {
-    constructor requestVote(target : Node, payload : VoteRequestData) {
+    var step : String := "idle"
+    var targetNode : Node := Node {
+        id := 0,
+        url := ""
+    }
+    var targetPayload : VoteRequestData := VoteRequestData {
+        term := 0,
+        candidateId := 0,
+        lastLogIndex := 0,
+        lastLogTerm := 0
+    }
+
+    constructor startVoteRequester() {}
+
+    transition requestVote(target : Node, payload : VoteRequestData) {
+        guard:
+            step = "idle"
+        transit:
+            step := "sendRpc"
+            targetNode := target
+            targetPayload := payload
+    }
+
+    internal transition sendRpc() {
+        guard:
+            step = "sendRpc"
         transit:
             // it's safe to ignore the response because outRequestVoteRPC handles it
-            let _ignored : Boolean := outRequestVoteRPC(target, payload)
+            let _ignored : Boolean := outRequestVoteRPC(targetNode, targetPayload)
+            step := "idle"
     }
+
+    // TODO move update term and handle response to here
 }
