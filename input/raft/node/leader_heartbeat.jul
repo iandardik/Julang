@@ -2,9 +2,9 @@ import julay.funlib.length
 import julay.funlib.delaySeconds
 import node.lib.Node
 import node.lib.AppendEntriesData
-import node.rpc_out.outAppendEntriesRPC
+import node.rpc_out.RpcOut
 
-export procfun startLeaderHeartbeat(self : Node, leaderTerm : Int, theCluster : List<Node>) : Boolean {
+procfun startLeaderHeartbeat(self : Node, leaderTerm : Int, theCluster : List<Node>) : Boolean {
     transition startLeaderHeartbeat(me : Node, term : Int, cluster : List<Node>) {
         guard:
             & me = self
@@ -14,8 +14,7 @@ export procfun startLeaderHeartbeat(self : Node, leaderTerm : Int, theCluster : 
     }
 }
 
-// TODO shouldn't need to export this
-export proc LeaderHeartbeat {
+proc LeaderHeartbeatImpl {
     const me : Node
     const leaderTerm : Int
     const cluster : List<Node>
@@ -43,7 +42,7 @@ export proc LeaderHeartbeat {
             & ~(target in sentThisRound)
         transit:
             // TODO this should probably be asynchronous
-            let _ : Boolean := outAppendEntriesRPC(target, payload)
+            let _ : Boolean := RpcOut.outAppendEntriesRPC(target, payload)
             let newSentThisRound : Set<Node> := sentThisRound + {target}
             sentThisRound := if (length(newSentThisRound) = length(cluster)) { {me} } else { newSentThisRound }
             step := "sleep"
@@ -56,4 +55,9 @@ export proc LeaderHeartbeat {
         transit:
             step := "done"
     }
+}
+
+export api LeaderHeartbeat {
+    proc: LeaderHeartbeatImpl
+    calls: startLeaderHeartbeat
 }

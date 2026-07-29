@@ -88,7 +88,12 @@ procfun rpcOutClientCaller(rpcReq : HttpClientRequest) : HttpClientResponse {
     }
 }
 
-export procfun outRequestVoteRPC(
+api RpcOutCaller {
+    proc: RpcOutClient
+    calls: rpcOutClientCaller
+}
+
+procfun outRequestVoteRPC(
     peer : Node,
     payload : VoteRequestData
 ) : Boolean {
@@ -98,7 +103,7 @@ export procfun outRequestVoteRPC(
 
     constructor sendRpc() {
         transit:
-            let resp : HttpClientResponse := rpcOutClientCaller(HttpClientRequest {
+            let resp : HttpClientResponse := RpcOutCaller.rpcOutClientCaller(HttpClientRequest {
                 url := peer.url + "/raft/requestVote",
                 method := "POST",
                 body := encodeRequestVote(payload)
@@ -136,7 +141,7 @@ export procfun outRequestVoteRPC(
     }
 }
 
-export procfun outAppendEntriesRPC(peer : Node, data : AppendEntriesData) : Boolean {
+procfun outAppendEntriesRPC(peer : Node, data : AppendEntriesData) : Boolean {
     var step : String
     var responseTerm : Int
     var successFlag : Boolean
@@ -144,7 +149,7 @@ export procfun outAppendEntriesRPC(peer : Node, data : AppendEntriesData) : Bool
 
     constructor sendRpc() {
         transit:
-            let resp : HttpClientResponse := rpcOutClientCaller(HttpClientRequest {
+            let resp : HttpClientResponse := RpcOutCaller.rpcOutClientCaller(HttpClientRequest {
                 url := peer.url + "/raft/appendEntries",
                 method := "POST",
                 body := encodeAppendEntries(data)
@@ -189,5 +194,7 @@ export procfun outAppendEntriesRPC(peer : Node, data : AppendEntriesData) : Bool
     }
 }
 
-// TODO this should not be needed
-export proc RpcOut := RpcOutClient || HttpClient
+export api RpcOut {
+    proc: RpcOutCaller || HttpClient
+    calls: outRequestVoteRPC, outAppendEntriesRPC
+}

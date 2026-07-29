@@ -1,6 +1,7 @@
 import node.lib.Node
+import julay.proclib.Timer
 
-export procfun startElectionTimeout(self : Node, leaderTerm : Int) : Boolean {
+procfun startElectionTimeout(self : Node, leaderTerm : Int) : Boolean {
     transition startElectionTimeout(me : Node, term : Int) {
         guard:
             & me = self
@@ -9,14 +10,13 @@ export procfun startElectionTimeout(self : Node, leaderTerm : Int) : Boolean {
     }
 }
 
-export procfun gotHeartbeat() : Boolean {
+procfun gotHeartbeat() : Boolean {
     transition resetElectionTimer() {
         return: true
     }
 }
 
-// TODO shouldn't need to export this
-export proc ElectionTimeout {
+proc ElectionTimeoutImpl {
     const selfNode : Node
     const leaderTerm : Int
     const electTimeout : Int
@@ -80,4 +80,9 @@ export proc ElectionTimeout {
         transit:
             step := "done"
     }
+}
+
+export api ElectionTimeout {
+    proc: ElectionTimeoutImpl || Timer
+    calls: gotHeartbeat, startElectionTimeout
 }

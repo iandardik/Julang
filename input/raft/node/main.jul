@@ -105,7 +105,6 @@ proc RaftNodeMain {
     }
 }
 
-export proc Raft := RaftNodeMain || RaftCore || RpcIn || RpcOut
-    || ElectionTimeout || Timer || VoteRequester || LeaderHeartbeat
+export proc Raft := RaftNodeMain || RaftCore
 
 export proc NodeLogic := Raft

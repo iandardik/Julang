@@ -1,0 +1,7 @@
+# Api.fn inside if/let after a prior transit let (substituteExpr must keep resolveApiProcFun).
+source: regression/input/imports/api-import-calls-after-let.jul
+programs:
+  - name: System
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/imports-api-import-calls-after-let.stdout

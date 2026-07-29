@@ -1,0 +1,6 @@
+source: regression/input/imports/api-import-calls.jul
+programs:
+  - name: System
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/imports-api-import-calls.stdout

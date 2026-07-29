@@ -1,15 +1,17 @@
 import julay.funlib.length
 import julay.funlib.max
-import node.election_timeout.gotHeartbeat
-import node.election_timeout.startElectionTimeout
-import node.leader_heartbeat.startLeaderHeartbeat
+import node.election_timeout.ElectionTimeout
+import node.leader_heartbeat.LeaderHeartbeat
 import node.lib.Entry
 import node.lib.Node
 import node.lib.AppendEntriesData
 import node.lib.entryValueAt
 import node.lib.entryTermAt
+import node.rpc_in.RpcIn
+import node.rpc_out.RpcOut
+import node.vote_requester.VoteRequester
 
-export proc RaftCore {
+proc RaftProtocol {
     const self : Node
     const cluster : List<Node>
     var currentTerm : Int
@@ -26,7 +28,7 @@ export proc RaftCore {
 
     constructor startRaftCore(me : Node, cluster : List<Node>) {
         transit:
-            let _ : Boolean := startElectionTimeout(me, 0)
+            let _ : Boolean := ElectionTimeout.startElectionTimeout(me, 0)
             self := me
             cluster := cluster
             currentTerm := 0
@@ -49,7 +51,7 @@ export proc RaftCore {
         guard:
             state = "Follower" | state = "Candidate"
         transit:
-            let _ : Boolean := startElectionTimeout(self, currentTerm + 1)
+            let _ : Boolean := ElectionTimeout.startElectionTimeout(self, currentTerm + 1)
             state := "Candidate"
             currentTerm := currentTerm + 1
             votedFor := self.id
@@ -119,7 +121,7 @@ export proc RaftCore {
             & state = "Candidate"
             & length(votesGranted) * 2 > length(cluster)
         transit:
-            let _ : Boolean := startLeaderHeartbeat(self, currentTerm, cluster)
+            let _ : Boolean := LeaderHeartbeat.startLeaderHeartbeat(self, currentTerm, cluster)
             state := "Leader"
             knownLeaderId := self.id
             nextIndex := cluster.map(n -> log.length)
@@ -248,7 +250,7 @@ export proc RaftCore {
             )
         transit:
             // TODO this most likely can cause a deadlock, in the case that a leader receives a heartbeat
-            let _ : Boolean := gotHeartbeat()
+            let _ : Boolean := ElectionTimeout.gotHeartbeat()
             knownLeaderId := if (success) { leaderId } else { knownLeaderId }
             state := if (success & inTerm = currentTerm) { "Follower" } else { state }
             log := if (success & entriesLen = 1) {
@@ -292,7 +294,7 @@ export proc RaftCore {
         transit:
             let advance : Boolean := inTerm > currentTerm
             let _ : Boolean := if (advance) {
-                startElectionTimeout(self, inTerm)
+                ElectionTimeout.startElectionTimeout(self, inTerm)
             } else { true }
             currentTerm := if (advance) { inTerm } else { currentTerm }
             state := if (advance) { "Follower" } else { state }
@@ -338,18 +340,6 @@ export proc RaftCore {
         guard: term < currentTerm
     }
 
-    provider transition getIsLeader(isLeader : Boolean) {
-        guard: isLeader <=> (state = "Leader")
-    }
-
-    provider transition getIsCandidate(isCandidate : Boolean) {
-        guard: isCandidate <=> (state = "Candidate")
-    }
-
-    provider transition getCurrentTerm(term : Int) {
-        guard: term = currentTerm
-    }
-
     // TODO should be able to delete this
     provider transition leaderRedirect(leader : Node) {
         guard:
@@ -359,4 +349,8 @@ export proc RaftCore {
             & knownLeaderId < length(cluster)
             & cluster[knownLeaderId] = leader
     }
+}
+
+export api RaftCore {
+    proc: RaftProtocol || ElectionTimeout || VoteRequester || LeaderHeartbeat || RpcIn || RpcOut
 }

@@ -104,10 +104,17 @@ Consumers treat an api as:
 2. Qualified call entry points: `RpcOut.outRequestVoteRPC(...)`
 
 ```jul
+import node.rpc_out.RpcOut
+
+// compose
+proc System := Client || RpcOut
+
+// call — no separate import of outRequestVoteRPC required
 transit:
     let ok : Boolean := RpcOut.outRequestVoteRPC(peer, payload)
 ```
 
+- `import path.Api` is enough to compose that api and to call every procfun listed in its `calls:` as `Api.fn(...)`. Those procfuns need not be `export`ed (and usually should not be — the api is the public surface).
 - Outside the api, listed procfuns **must** be called as `ApiName.fn(...)` (not bare `fn(...)`).
 - Inside other procfuns of the same module, bare calls to siblings remain allowed (e.g. `outRequestVoteRPC` calling `rpcOutClientCaller`).
 - `ApiName.fn(...)` requires a **unique** occurrence of that api in the enclosing composition (error if missing or duplicated).

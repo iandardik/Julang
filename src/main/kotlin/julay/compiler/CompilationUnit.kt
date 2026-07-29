@@ -117,13 +117,45 @@ fun callableFuns(module: LoadedModule): Map<String, FunNode> {
     return local + imported
 }
 
-fun callableProcFuns(module: LoadedModule): Map<String, ProcFunNode> {
+/**
+ * Procfuns callable from [module]: locals, explicitly imported procfuns, and
+ * every name in `calls:` of a local/imported api (resolved from that api's defining
+ * module, including non-exported helpers — no separate procfun import required).
+ */
+fun callableProcFuns(
+    module: LoadedModule,
+    modulesByPath: Map<String, LoadedModule> = emptyMap(),
+): Map<String, ProcFunNode> {
     val local = module.root.declNodes().filterIsInstance<ProcFunNode>().associateBy { it.name() }
     val imported = module.importTable.shortNames.mapNotNull { (name, symbol) ->
         val decl = declFromResolvedSymbol(symbol)
         if (decl is ProcFunNode) name to decl else null
     }.toMap()
-    return local + imported
+    val viaApi = mutableMapOf<String, ProcFunNode>()
+    callableApis(module).forEach { (apiShortName, api) ->
+        val home = homeModuleForApi(apiShortName, module, modulesByPath) ?: return@forEach
+        val homePfs = home.root.declNodes().filterIsInstance<ProcFunNode>().associateBy { it.name() }
+        api.apiCallNames().forEach { call ->
+            homePfs[call]?.let { viaApi.putIfAbsent(call, it) }
+        }
+    }
+    return local + imported + viaApi
+}
+
+/** Defining module for a local or imported api short name in [module]'s scope. */
+fun homeModuleForApi(
+    apiShortName: String,
+    module: LoadedModule,
+    modulesByPath: Map<String, LoadedModule>,
+): LoadedModule? {
+    val localApi = module.root.declNodes().filterIsInstance<ApiNode>().find { it.name() == apiShortName }
+    if (localApi != null) return module
+    val symbol = module.importTable.shortNames[apiShortName] ?: return null
+    return when (symbol) {
+        is ResolvedSymbol.ImportedDecl -> modulesByPath[symbol.modulePath]
+        is ResolvedSymbol.LocalDecl -> module
+        else -> null
+    }
 }
 
 fun callableFunBuiltins(module: LoadedModule): Map<String, FunBuiltin> =

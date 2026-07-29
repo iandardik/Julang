@@ -1,0 +1,11 @@
+import api_calls_provider.helper
+
+proc Main {
+    var x : Int
+
+    constructor initially(args : List<String>) {
+        transit: x := 0
+    }
+}
+
+compile Main

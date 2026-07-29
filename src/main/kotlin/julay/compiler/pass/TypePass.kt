@@ -44,18 +44,8 @@ fun RootNode.typePass(
     val prevCallToApi = typePassCallToApi
     val prevInside = typePassInsideProcFun
     try {
-        val allApis = unit.modules
-            .flatMap { it.root.declNodes().filterIsInstance<ApiNode>() }
-            .associateBy { it.name() }
-        typePassApiEnv = allApis
-        typePassCallToApi = buildMap {
-            allApis.values.forEach { api ->
-                api.apiCallNames().forEach { call ->
-                    putIfAbsent(call, api.apiName())
-                }
-            }
-        }
         typePassInsideProcFun = false
+        val modulesByPath = unit.modules.associateBy { it.modulePath }
 
         val allFuns = unit.modules
             .flatMap { it.root.declNodes().filterIsInstance<FunNode>() }
@@ -67,29 +57,38 @@ fun RootNode.typePass(
         val procFunSigErrors = allProcFuns.values.flatMap { it.typePassProcFunSignature(built) }
         val recursionErrors = funRecursionErrors(allFuns) + procFunRecursionErrors(allProcFuns)
         val funBodyErrors = unit.modules.flatMap { module ->
+            val moduleApis = callableApis(module)
+            typePassApiEnv = moduleApis
+            typePassCallToApi = buildMap {
+                moduleApis.values.forEach { api ->
+                    api.apiCallNames().forEach { call ->
+                        putIfAbsent(call, api.apiName())
+                    }
+                }
+            }
             val callable = callableFuns(module)
             val builtins = callableFunBuiltins(module)
-            val procFuns = callableProcFuns(module)
+            val procFuns = callableProcFuns(module, modulesByPath)
             module.root.declNodes().filterIsInstance<FunNode>().flatMap { funNode ->
                 funNode.typePassFunBody(callable, built, builtins, procFuns)
             }
         }
         // Typecheck each module with that module's imports so julay.funlib.* (and imported
         // user funs) resolve in dependency modules, not only in the entry file.
+        // Api.fn(...) only resolves for local/imported apis (not every transitively loaded api).
         val otherErrors = unit.modules.flatMap { module ->
-            val callable = callableFuns(module)
-            val builtins = callableFunBuiltins(module)
-            val procFuns = callableProcFuns(module)
-            // Prefer module-local + imported apis for qualified calls
             val moduleApis = callableApis(module)
-            typePassApiEnv = allApis + moduleApis
+            typePassApiEnv = moduleApis
             typePassCallToApi = buildMap {
-                typePassApiEnv.values.forEach { api ->
+                moduleApis.values.forEach { api ->
                     api.apiCallNames().forEach { call ->
                         putIfAbsent(call, api.apiName())
                     }
                 }
             }
+            val callable = callableFuns(module)
+            val builtins = callableFunBuiltins(module)
+            val procFuns = callableProcFuns(module, modulesByPath)
             module.root.declNodes()
                 .filter { it !is FunNode && it !is SpecNode && it !is InvariantNode && it !is ApiNode }
                 .flatMap { it.typePass(emptyMap(), built, callable, emptyMap(), builtins, procFuns) }

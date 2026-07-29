@@ -1,0 +1,5 @@
+# After importing an api, listed calls must use Api.fn(...), not bare fn(...).
+source: regression/input/imports/api-import-bare-call.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - 'call it as HelperApi.helper'

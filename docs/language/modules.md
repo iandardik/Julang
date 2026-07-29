@@ -25,6 +25,8 @@ import julay.funlib.parseInt
 
 Same-file references never need `export`. Cross-file use without `export` on the defining declaration is a compile error.
 
+Importing an **api** (`import path.Api`) is enough to compose it and to call every procfun listed in its `calls:` as `Api.fn(...)`. Those listed procfuns need not be exported; exporting the api is the public surface. Standalone procfuns (not reached via an api) still require their own `export` to be imported by name.
+
 ## Search order
 
 When compiling `file.jul`, modules are searched in this order:

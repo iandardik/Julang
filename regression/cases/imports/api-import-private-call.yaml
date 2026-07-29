@@ -1,0 +1,5 @@
+# Non-exported api calls: procfun cannot be imported by leaf name.
+source: regression/input/imports/api-import-private-call.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - 'has no export named "helper"'

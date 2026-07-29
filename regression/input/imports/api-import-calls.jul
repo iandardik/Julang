@@ -1,0 +1,26 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+import api_calls_provider.HelperApi
+
+proc Main {
+    var out : Int
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            out := HelperApi.helper(1)
+            done := false
+    }
+
+    internal transition finish() {
+        guard: ~done
+        transit: done := true
+        after:
+            println(out + "")
+            exitProcess()
+    }
+}
+
+proc System := Main || HelperApi
+
+compile System

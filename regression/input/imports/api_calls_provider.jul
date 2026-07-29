@@ -1,0 +1,18 @@
+procfun helper(x : Int) : Int {
+    internal transition done() {
+        return: x + 1
+    }
+}
+
+proc Peer {
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit: n := 0
+    }
+}
+
+export api HelperApi {
+    proc: Peer
+    calls: helper
+}

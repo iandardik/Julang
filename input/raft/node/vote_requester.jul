@@ -1,4 +1,4 @@
-import node.rpc_out.outRequestVoteRPC
+import node.rpc_out.RpcOut
 
 export proc VoteRequester {
     var step : String := "idle"
@@ -29,7 +29,7 @@ export proc VoteRequester {
             step = "sendRpc"
         transit:
             // it's safe to ignore the response because outRequestVoteRPC handles it
-            let _ignored : Boolean := outRequestVoteRPC(targetNode, targetPayload)
+            let _ignored : Boolean := RpcOut.outRequestVoteRPC(targetNode, targetPayload)
             step := "idle"
     }
 

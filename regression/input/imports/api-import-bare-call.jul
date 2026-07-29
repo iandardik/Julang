@@ -1,0 +1,14 @@
+import api_calls_provider.HelperApi
+
+proc Main {
+    var out : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            out := helper(1)
+    }
+}
+
+proc System := Main || HelperApi
+
+compile System
