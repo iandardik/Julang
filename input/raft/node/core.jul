@@ -116,7 +116,7 @@ proc RaftProtocol {
             }
     }
 
-    transition becomeLeader() {
+    internal transition becomeLeader() {
         guard:
             & state = "Candidate"
             & length(votesGranted) * 2 > length(cluster)
