@@ -13,3 +13,5 @@ build
 *.jar
 *.tla
 *.cfg
+*.bin
+states

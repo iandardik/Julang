@@ -9,7 +9,7 @@ const {
 
 const KEYWORDS = new Set([
   "if", "else", "let", "when", "in", "all", "exists",
-  "import", "export", "obj", "sort", "proc", "procfun", "compile", "spec", "invariant",
+  "import", "export", "obj", "sort", "proc", "api", "calls", "procfun", "compile", "spec", "invariant",
   "var", "const", "constructor", "transition", "internal", "provider", "client",
   "session", "guard", "transit", "error", "before", "after", "return", "fun",
   "true", "false",
@@ -17,7 +17,7 @@ const KEYWORDS = new Set([
 
 function looksLikeProcReference(document, position, name) {
   const line = document.lineAt(position.line).text;
-  if (/\b(proc|spec|procfun)\s+\w/.test(line) && line.includes(name)) {
+  if (/\b(proc|spec|procfun|api)\s+\w/.test(line) && line.includes(name)) {
     return true;
   }
   if (line.includes("||") || /:=/.test(line)) {

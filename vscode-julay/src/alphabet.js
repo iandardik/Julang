@@ -158,7 +158,7 @@ function identifierAt(document, position) {
 function declaredProcNames(document) {
   const text = document.getText();
   const names = new Set();
-  const re = /^\s*(?:export\s+)?(?:proc|spec|procfun)\s+([A-Za-z_][A-Za-z0-9_]*)/gm;
+  const re = /^\s*(?:export\s+)?(?:proc|spec|procfun|api)\s+([A-Za-z_][A-Za-z0-9_]*)/gm;
   let m;
   while ((m = re.exec(text)) !== null) {
     names.add(m[1]);

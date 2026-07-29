@@ -24,6 +24,7 @@ name_id
 
 decl
     : EXPORT? proc
+    | EXPORT? api_decl
     | EXPORT? obj
     | EXPORT? sort_decl
     | compile_decl
@@ -58,6 +59,14 @@ procfun_body
     : var
     | constructor
     | transition
+    ;
+
+api_decl
+    : API ID LCURLY PROC COLON proc_expr (CALLS COLON api_call_list)? RCURLY
+    ;
+
+api_call_list
+    : ID (COMMA ID)*
     ;
 
 proc

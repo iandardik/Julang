@@ -25,6 +25,9 @@ fun RootNode.specTypePass(
     val specAliases = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<SpecNode>() }
         .associateBy { it.name() }
+    val apiAliases = unit.modules
+        .flatMap { it.root.declNodes().filterIsInstance<ApiNode>() }
+        .associateBy { it.name() }
 
     val errors = mutableListOf<CompileError>()
     val warnings = mutableListOf<CompileWarning>()
@@ -35,6 +38,7 @@ fun RootNode.specTypePass(
             pclassNodes,
             procAliases,
             specAliases,
+            apiAliases,
             unit,
             registry,
             allowUnindexedSpec,
@@ -64,6 +68,7 @@ private fun typePassSpec(
     pclassNodes: Map<String, ProcClassNode>,
     procAliases: Map<String, ProcNode>,
     specAliases: Map<String, SpecNode>,
+    apiAliases: Map<String, ApiNode>,
     unit: CompilationUnit,
     registry: ObjClassRegistry,
     allowUnindexedSpec: Boolean,
@@ -102,6 +107,7 @@ private fun typePassSpec(
             pclassNodes,
             procAliases,
             specAliases,
+            apiAliases,
         )
         expanded.forEach { leaf ->
             val pc = pclassNodes[leaf.name] ?: return@forEach
@@ -141,6 +147,7 @@ private fun typePassSpec(
                     pclassNodes,
                     procAliases,
                     specAliases,
+                    apiAliases,
                 )
                 val systemPclasses = expandedSystem.mapNotNull { leaf ->
                     pclassNodes[leaf.name]?.let { leaf.name to it }

@@ -47,7 +47,7 @@ How-to: [Getting started](../getting-started.md). Specs: [Specifications](specif
 ## Chapters
 
 1. [Processes](processes.md) — state, `initially`, constructors vs transitions
-2. [Composition and actions](composition-and-actions.md) — `||`, modifiers, synchronization
+2. [Composition and actions](composition-and-actions.md) — `||`, **apis**, modifiers, synchronization
 3. [Types and expressions](types-and-expressions.md)
 4. [Collections](collections.md) — `List` / `Map` / `Set`, methods, lambdas
 5. [Procfuns](procfun.md) — process-backed blocking calls

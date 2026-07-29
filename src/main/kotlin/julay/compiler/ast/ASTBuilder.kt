@@ -80,6 +80,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     override fun visitDecl(ctx: JulayParser.DeclContext?): ASTNode {
         val decl = oneChoice(
             ctx!!.proc(),
+            ctx.api_decl(),
             ctx.obj(),
             ctx.sort_decl(),
             ctx.compile_decl(),
@@ -222,6 +223,13 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         }
         val value = visit(ctx.proc_expr())
         return ProcNode(name, value, sourceLocation(ctx))
+    }
+
+    override fun visitApi_decl(ctx: JulayParser.Api_declContext?): ASTNode {
+        val name = ctx!!.ID().text
+        val procExpr = visit(ctx.proc_expr())
+        val callNames = ctx.api_call_list()?.ID()?.map { it.text } ?: emptyList()
+        return ApiNode(name, procExpr, callNames, sourceLocation(ctx))
     }
 
     override fun visitCompile_decl(ctx: JulayParser.Compile_declContext?): ASTNode {

@@ -118,6 +118,26 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitProcfun_body(JulayParser.Procfun_bodyContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#api_decl}.
+	 * @param ctx the parse tree
+	 */
+	void enterApi_decl(JulayParser.Api_declContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#api_decl}.
+	 * @param ctx the parse tree
+	 */
+	void exitApi_decl(JulayParser.Api_declContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#api_call_list}.
+	 * @param ctx the parse tree
+	 */
+	void enterApi_call_list(JulayParser.Api_call_listContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#api_call_list}.
+	 * @param ctx the parse tree
+	 */
+	void exitApi_call_list(JulayParser.Api_call_listContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#proc}.
 	 * @param ctx the parse tree
 	 */

@@ -38,11 +38,11 @@ code --install-extension julay-0.1.0.vsix
 | Feature | How |
 |---------|-----|
 | Syntax highlighting | Automatic for `*.jul` |
-| Snippets | Prefixes: `proc`, `procclass`, `procfun`, `transition`, `internal`, `provider`, `client`, `session`, `spec`, … |
+| Snippets | Prefixes: `proc`, `api`, `procclass`, `procfun`, `transition`, `internal`, `provider`, `client`, `session`, `spec`, … |
 | Go to definition | `F12` / Cmd-click on proc names, actions, and `import path.Name` (not jar stdlib) |
-| Hover alphabet | Hover a proc / spec / **procfun** name → external alphabet |
+| Hover alphabet | Hover a proc / spec / **procfun** / **api** name → external alphabet |
 | Alphabet panel | Command **Julay: Show External Alphabet** |
-| CodeLens | Above `proc` / `spec` / **procfun** declarations |
+| CodeLens | Above `proc` / `spec` / **procfun** / **api** declarations |
 | On-open / on-save diagnostics | Open or save a `.jul` file → Problems panel + squiggles (full error/warning messages) |
 | Re-check | Command **Julay: Re-check** |
 | Tasks | **Terminal → Run Task…** → Julay: Compile / Compile entry / Analyze alphabet |
@@ -55,7 +55,9 @@ code --install-extension julay-0.1.0.vsix
   1. **Source-internal** — tagged `internal` in the proc definition
   2. **Synchronized (composition-hidden)** — internalized by `||`, listing the synced peers (e.g. `S ‖ T`)
 
-**Procfun scopes:** analyzing a `procfun` alone lists its user actions under **external** (including `internal` / bare-return steps). Synthetic `F_call` / `F_ret` are hidden. **Parent procs** also show non-synthetic actions from any procfun **called** under them, even if that helper is not listed in `||` (see [Procfuns](../docs/language/procfun.md)).
+**Procfun scopes:** analyzing a `procfun` alone lists its user actions under **external** (including `internal` / bare-return steps). Synthetic `F_call` / `F_ret` are hidden. **Parent procs / apis** also show non-synthetic actions from any procfun **called** under them (see [Procfuns](../docs/language/procfun.md) and [APIs](../docs/language/composition-and-actions.md#apis)).
+
+**Api scopes:** analyzing an `api` shows the external alphabet of its `proc:` composition (plus listed `calls` in the composition graph). Call listed entry points as `ApiName.fn(...)`.
 
 Backed by:
 

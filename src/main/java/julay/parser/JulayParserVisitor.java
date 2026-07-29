@@ -77,6 +77,18 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitProcfun_body(JulayParser.Procfun_bodyContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#api_decl}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitApi_decl(JulayParser.Api_declContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#api_call_list}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitApi_call_list(JulayParser.Api_call_listContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#proc}.
 	 * @param ctx the parse tree
 	 * @return the visitor result

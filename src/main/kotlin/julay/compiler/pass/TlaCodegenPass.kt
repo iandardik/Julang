@@ -45,13 +45,15 @@ fun tlaCodegenPass(
     val specAliases = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<SpecNode>() }
         .associateBy { it.name() }
+    val apiAliases = unit.modules
+        .flatMap { it.root.declNodes().filterIsInstance<ApiNode>() }
+        .associateBy { it.name() }
     val sortModels = ast.cachedObjClassRegistry()?.sorts
         ?.mapValues { (_, sort) -> "{${sort.cfgElements.joinToString(", ")}}" }
         ?: emptyMap()
 
     val compositionLeaves = compositionLeavesOfSpec(spec)
     val procFunNameSet = procFunNodes.keys
-    val composedProcFuns = compositionLeaves.map { it.name }.filter { it in procFunNameSet }.toSet()
     // Composition listings of procfuns are metadata (whitelist), not free-standing SyncChannel peers —
     // except when the entire system is a standalone procfun (compile F).
     val standaloneProcFun = compositionLeaves.size == 1 && compositionLeaves.single().name in procFunNameSet
@@ -60,9 +62,17 @@ fun tlaCodegenPass(
         pclassNodes + procFunNodes.mapValues { (_, pf) -> pf.asSyntheticProcClass() },
         procAliases,
         specAliases,
+        apiAliases,
     ).map { leaf ->
         if (leaf.name in procFunNameSet) leaf.copy(isProcFun = true) else leaf
     }
+    // Coupled via api calls: reachable from the spec's composition (including nested apis).
+    val composedProcFuns = collectApiCallsInComposition(
+        compositionLeaves.filter { it.name !in procFunNameSet || standaloneProcFun },
+        apiAliases,
+        procAliases,
+        specAliases,
+    )
     val callSiteDraftsAll = discoverProcFunCallSiteDrafts(
         hostLeavesRaw.filter { !it.isProcFun },
         pclassNodes,

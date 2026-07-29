@@ -22,10 +22,10 @@ spec SafeInc := <Env> Counter <Bound>       // full assume-guarantee
 ```
 
 - Left of the system (`<Env>`): assumption / environment (`true` means none)
-- Middle: system expression (procs, indexing, `||`)
+- Middle: system expression (procs, **apis**, indexing, `||`)
 - Right / `|=` side: guarantee — a named invariant, an inline Boolean formula, or `true` (no guarantee)
 
-Plain `spec Name := System` is also what `--compile-tla Name` synthesizes for a proc.
+Plain `spec Name := System` is also what `--compile-tla Name` synthesizes for a proc or api. Apis work like procs in all three forms; procfuns listed in an api's `calls:` are coupled in TLA+ (see [Composition and actions — APIs](composition-and-actions.md#apis)).
 
 ### Indexed procs
 

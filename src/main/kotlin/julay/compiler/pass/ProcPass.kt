@@ -6,6 +6,11 @@ import julay.compiler.decl.*
 
 fun ASTNode.procPass(): List<ProcDecl> = when (this) {
     is ProcNode -> listOf(ProcDecl(procNodeName(), procNodeValue().procPass(), ProcDeclType.Proc))
+    is ApiNode -> {
+        val procParts = apiProcExpr().procPass()
+        val callParts = apiCallNames().map { ProcDecl(it, listOf(), ProcDeclType.Proc) }
+        listOf(ProcDecl(apiName(), procParts + callParts, ProcDeclType.Proc))
+    }
     is SpecNode -> listOf(ProcDecl(specNodeName(), specNodeValue().procPass(), ProcDeclType.Spec))
     is AgSpecExprNode -> {
         val assumeParts = assumeExpr()?.procPass() ?: emptyList()
@@ -22,6 +27,11 @@ fun ASTNode.resolvedProcPass(unit: CompilationUnit): List<ProcDecl> = when (this
     is ProcNode -> listOf(
         ProcDecl(procNodeName(), procNodeValue().resolvedProcPass(unit), ProcDeclType.Proc),
     )
+    is ApiNode -> {
+        val procParts = apiProcExpr().resolvedProcPass(unit)
+        val callParts = apiCallNames().map { ProcDecl(it, listOf(), ProcDeclType.Proc) }
+        listOf(ProcDecl(apiName(), procParts + callParts, ProcDeclType.Proc))
+    }
     is SpecNode -> listOf(
         ProcDecl(specNodeName(), specNodeValue().resolvedProcPass(unit), ProcDeclType.Spec),
     )

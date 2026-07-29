@@ -128,30 +128,25 @@ procfun parseCfg(cfg : String) : Set<Node> {
 | Call sites | Only in **transit RHS** (like value-returning effectful funlib). Not in guards or pure `fun` bodies. |
 | Recursion | Direct/mutual recursion among procfuns is rejected (loop with `internal` transitions instead). |
 
-## Composition = spec / analyze metadata
+## Composition and TLA coupling
 
-Procfun instances are **spawned from the caller** and block until completion — they are **not** SyncChannel-started as peers just because they appear in `||`.
+Procfun instances are **spawned from the caller** and block until completion — they are **not** SyncChannel peers.
 
-| Target | Behavior |
-|--------|----------|
-| JAR `Main` or `Main \|\| F` | Same runtime: calls still spawn-and-await. Composition does **not** start F as a SyncChannel peer. |
-| Spec `Main` | Call sites to F **havoc** the result: one host step with `out' \in Ret`. **Warning** suggests adding `\|\| F`. |
-| Spec `Main \|\| F` | Full coupling: host `act_call` / `act_ret` + child occurrence. |
-| `compile F` / analyze F | Standalone helper TLA + alphabet. |
+**Procfuns cannot appear in `||`** (compile error). To couple a procfun in TLA+, list it in an [api](composition-and-actions.md#apis)'s `calls:` and include that api in the spec.
 
-**Alphabet (analyze / IDE):** If a host under assembly `P` calls procfun `F`, `F`'s non-synthetic offers fold into `P`'s alphabet automatically. You do **not** need `P := … \|\| F` for that. Example: `RpcIn := RpcReqHandler \|\| HttpServer` still exposes `noLeader` from `clientAppendRPC` when `RpcReqHandler` calls it.
+| Situation | TLA |
+|-----------|-----|
+| `F` listed in `calls` of an api in the composition | Full coupling: host `act_call` / `act_ret` + child occurrence |
+| `F` called but not listed in any composed api's `calls` | Havoc return (`out' ∈ Ret`) + warning |
+| `Main \|\| F` | **Compile error** |
 
-**`||` whitelist (TLA+ only):** Listing `\|\| F` selects full spawn-await coupling vs havoc. It does **not** gate alphabet folding.
+**Alphabet (analyze / IDE):** If a host under assembly `P` calls procfun `F`, `F`'s non-synthetic offers fold into `P`'s alphabet automatically. Listing `F` in an api's `calls` is for TLA coupling and packaging, not for alphabet folding.
 
-**Orphan:** `Foo || F` when Foo never calls F → **error**. The check walks nested transit exprs (e.g. calls under `when` / `if`), not only whole-RHS `x := F(...)`.
-
-**TLA coupling shape:** Coupled call sites still need a whole-RHS form (`x := F(...)`) for the spawn-await split. Nested-only calls are enough for orphan/alphabet, but stay havoc/ignore for coupling.
-
-**Duplicate:** `Main || F || F` → **error**. Listing F once whitelists the helper for TLA; call-site multiplicity still comes from the call graph.
+**TLA coupling shape:** Coupled call sites still need a whole-RHS form (`x := F(...)` or `x := Api.F(...)`) for the spawn-await split. Nested-only calls are enough for alphabet, but stay havoc for coupling.
 
 ### Soundness of havoc
 
-Havocing an uncomposed procfun is a **weaker** model than including it. A proof on the havoced spec still implies correctness of the refined (`|| F`) system. The converse may have false alarms (errors only under havoc). Prefer composing helpers you care about; the compiler warns when a call site would be havoced.
+Havocing an uncoupled procfun is a **weaker** model than including it via api `calls`. A proof on the havoced spec still implies correctness of the refined system. Prefer listing helpers you care about in an api's `calls:`.
 
 ## Caller example
 
@@ -164,15 +159,22 @@ proc RaftNodeMain {
     constructor initially(args : List<String>) {
         transit:
             let id : Int := parseInt(args[1])
-            let cfg : CfgPair := parseCfg(args[0], id)
+            let cfg : CfgPair := ParseApi.parseCfg(args[0], id)
             self := cfg.me
             cluster := cfg.cluster
             listenPort := portFromUrl(cfg.me.url)
     }
 }
 
-spec FullNode := RaftNodeMain || parseCfg
+api ParseApi {
+    proc: RaftNodeMain
+    calls: parseCfg
+}
+
+spec FullNode := ParseApi
 ```
+
+Outside an api, call listed procfuns as `ApiName.fn(...)`. See [Composition and actions — APIs](composition-and-actions.md#apis).
 
 ## Client steps with return
 
@@ -204,10 +206,10 @@ transition done() {
 // ERROR: reserved name
 transition initially() { return: 0 }
 
-// ERROR: orphan composition
-proc Bad := Other || parseCfg   // Other never calls parseCfg
+// ERROR: orphan composition — use an api's calls: instead
+proc Bad := Other || parseCfg
 
-// ERROR: duplicate listing
+// ERROR: procfun in parallel composition
 spec S := Main || countUp || countUp
 
 // ERROR: compile a procfun as a JAR root is rejected; use compile for TLA/analyze only
@@ -265,7 +267,12 @@ proc Main {
     }
 }
 
-spec CountUpSpec := Main || countUp
+api CountUpApi {
+    proc: Main
+    calls: countUp
+}
+
+spec CountUpSpec := CountUpApi
 ```
 
 Schematic TLA:

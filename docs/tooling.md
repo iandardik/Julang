@@ -54,7 +54,7 @@ Common options (see `--help` for the full list):
 | `--procs` / `--procs-detail` | List procs |
 | `--intersect` / `--mutual` | How multiple scopes combine for action views |
 | `--include-internal` | Include `internal` and composition-hidden synced actions; with `--actions-detail`, each occurrence and hidden `scope=` channel key is listed separately |
-| `--json` | Emit machine-readable alphabet JSON for the scope: `compositionGraph` (top-level `||` children, called procfuns, sync edges with action labels, and unlabeled call edges), `external`, `sourceInternal`, and `compositionHidden` sync groups. For a **procfun** scope, `external` lists user actions (synthetics omitted). Parent scopes include called procfuns' non-synthetic actions even without `||`. Used by the VS Code extension; suppresses human-readable views |
+| `--json` | Emit machine-readable alphabet JSON for the scope: `compositionGraph` (top-level `||` children, called / api-listed procfuns, sync edges with action labels, and unlabeled call edges), `external`, `sourceInternal`, and `compositionHidden` sync groups. For a **procfun** scope, `external` lists user actions (synthetics omitted). Parent scopes include called procfuns' non-synthetic actions. **Api** scopes analyze like proc assemblies (including `calls:`). Used by the VS Code extension; suppresses human-readable views |
 | `-L` | Module search path (same as compile) |
 
 ## `julayc check`

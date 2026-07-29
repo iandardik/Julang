@@ -44,6 +44,8 @@ EXPORT : 'export' ;
 OBJ : 'obj' ;
 SORT : 'sort' ;
 PROC : 'proc' ;
+API : 'api' ;
+CALLS : 'calls' ;
 COMPILE : 'compile' ;
 SPEC : 'spec' ;
 INVARIANT : 'invariant' ;

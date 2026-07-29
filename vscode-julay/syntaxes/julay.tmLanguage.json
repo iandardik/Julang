@@ -41,7 +41,7 @@
         },
         {
           "name": "keyword.other.julay",
-          "match": "\\b(import|export|obj|sort|proc|procfun|compile|spec|invariant|var|const|constructor|transition|internal|provider|client|session|guard|transit|error|before|after|return|fun)\\b"
+          "match": "\\b(import|export|obj|sort|proc|api|calls|procfun|compile|spec|invariant|var|const|constructor|transition|internal|provider|client|session|guard|transit|error|before|after|return|fun)\\b"
         },
         {
           "name": "constant.language.boolean.julay",

@@ -22,10 +22,15 @@ proc Main {
 
     constructor initially(args : List<String>) {
         transit:
-            out := countUp(1)
+            out := CountUpApi.countUp(1)
     }
 }
 
-spec CountUpIndexed := Main[k : Idx] || countUp
+api CountUpApi {
+    proc: Main
+    calls: countUp
+}
+
+spec CountUpIndexed := CountUpApi[k : Idx]
 
 compile CountUpIndexed

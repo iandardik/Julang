@@ -27,6 +27,16 @@
     ],
     "description": "Proc class with initially and a transition"
   },
+  "api": {
+    "prefix": "api",
+    "body": [
+      "export api ${1:Name} {",
+      "\tproc: ${2:PeerA} || ${3:PeerB}",
+      "\tcalls: ${4:entryProcFun}",
+      "}"
+    ],
+    "description": "Api: resident proc composition + procfun calls"
+  },
   "procfun": {
     "prefix": "procfun",
     "body": [

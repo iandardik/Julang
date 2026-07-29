@@ -91,7 +91,7 @@ internal fun emitProcFunCallAndRet(
 
     // Call-arg → child param binds + inline inits + constructed (folded former F_call ctor).
     val argNodes = procFun.procFunArgs().children.filterIsInstance<ArgNode>()
-    val callArgs = site.call.callArgs()
+    val callArgs = site.callArgs
     require(argNodes.size == callArgs.size) {
         "procfun ${site.procFunName} arity mismatch at call site"
     }

@@ -113,16 +113,18 @@ fun compositionLeavesOfSpec(spec: SpecNode): List<SpecLeaf> {
 }
 
 /**
- * Expand named `proc` / `spec` aliases to their nested proc-class leaves (by occurrence).
+ * Expand named `proc` / `spec` / `api` aliases to their nested proc-class leaves (by occurrence).
  * Parameterization on an outer leaf is pushed down onto non-parameterized children.
  *
  * Nested AG specs contribute only their system expression (not assume/guarantee).
+ * Api `calls:` are not expanded as SpecLeaves (call-site occurrences come from the call graph).
  */
 fun expandLeavesToPclasses(
     leaves: List<SpecLeaf>,
     pclasses: Map<String, ProcClassNode>,
     procAliases: Map<String, ProcNode>,
     specAliases: Map<String, SpecNode> = emptyMap(),
+    apiAliases: Map<String, ApiNode> = emptyMap(),
 ): List<SpecLeaf> {
     val out = mutableListOf<SpecLeaf>()
     val visiting = mutableSetOf<String>()
@@ -145,6 +147,14 @@ fun expandLeavesToPclasses(
     fun expand(leaf: SpecLeaf) {
         when {
             leaf.name in pclasses -> out += leaf
+            leaf.name in apiAliases -> {
+                val api = apiAliases.getValue(leaf.name)
+                flattenSpecLeaves(api.apiProcExpr(), leaf.name).forEach { child ->
+                    expand(pushDown(leaf, child.copy(introducingAssembly = leaf.name)))
+                }
+                // calls: are TLA coupling metadata / alphabet peers, not SpecLeaf hosts here;
+                // call-site occurrences come from discoverProcFunCallSiteDrafts.
+            }
             leaf.name in procAliases -> {
                 val proc = procAliases.getValue(leaf.name)
                 // Expand the alias body with introducing assembly = this proc's name.
@@ -170,6 +180,46 @@ fun expandLeavesToPclasses(
     }
     leaves.forEach { expand(it) }
     return assignTlaLeafNames(out)
+}
+
+/** Union of `calls:` from every api reachable by expanding [leaves]. */
+fun collectApiCallsInComposition(
+    leaves: List<SpecLeaf>,
+    apiAliases: Map<String, ApiNode>,
+    procAliases: Map<String, ProcNode>,
+    specAliases: Map<String, SpecNode>,
+): Set<String> {
+    val calls = linkedSetOf<String>()
+    val visiting = mutableSetOf<String>()
+    fun walk(leaf: SpecLeaf) {
+        when {
+            leaf.name in apiAliases -> {
+                val api = apiAliases.getValue(leaf.name)
+                calls += api.apiCallNames()
+                flattenSpecLeaves(api.apiProcExpr(), leaf.name).forEach { walk(it) }
+            }
+            leaf.name in procAliases -> {
+                flattenSpecLeaves(procAliases.getValue(leaf.name).procNodeValue(), leaf.name)
+                    .forEach { walk(it) }
+            }
+            leaf.name in specAliases -> {
+                if (!visiting.add(leaf.name)) return
+                try {
+                    val spec = specAliases.getValue(leaf.name)
+                    val value = spec.specNodeValue()
+                    val children = when (value) {
+                        is AgSpecExprNode -> flattenSpecLeaves(value.systemExpr(), spec.specNodeName())
+                        else -> flattenSpecLeaves(value, spec.specNodeName())
+                    }
+                    children.forEach { walk(it) }
+                } finally {
+                    visiting.remove(leaf.name)
+                }
+            }
+        }
+    }
+    leaves.forEach { walk(it) }
+    return calls
 }
 
 /**
@@ -217,7 +267,7 @@ data class ProcFunCallSite(
     val hostActionName: String,
     val isHostConstructor: Boolean,
     val procFunName: String,
-    val call: FunCallExprNode,
+    val callArgs: List<ExprNode>,
     val assignVars: List<String>,
     val occurrence: SpecLeaf,
 )
@@ -230,7 +280,7 @@ data class ProcFunCallSiteDraft(
     val hostActionName: String,
     val isHostConstructor: Boolean,
     val procFunName: String,
-    val call: FunCallExprNode,
+    val callArgs: List<ExprNode>,
     val assignVars: List<String>,
     val occurrenceId: String,
 )
@@ -246,15 +296,14 @@ fun discoverProcFunCallSiteDrafts(
     hostLeaves.forEach { host ->
         val pc = pclasses[host.name] ?: return@forEach
         collectWholeRhsProcFunCalls(pc).forEach { hit ->
-            val pfName = hit.call.resolvedProcFunOrNull()?.procFunName() ?: return@forEach
             out += ProcFunCallSiteDraft(
                 host = host,
                 hostActionName = hit.actionName,
                 isHostConstructor = hit.isCtor,
-                procFunName = pfName,
-                call = hit.call,
+                procFunName = hit.procFunName,
+                callArgs = hit.callArgs,
                 assignVars = hit.assignVars,
-                occurrenceId = freshSpecOccurrenceId(pfName),
+                occurrenceId = freshSpecOccurrenceId(hit.procFunName),
             )
         }
     }
@@ -304,7 +353,7 @@ fun resolveProcFunCallSites(
             hostActionName = draft.hostActionName,
             isHostConstructor = draft.isHostConstructor,
             procFunName = draft.procFunName,
-            call = draft.call,
+            callArgs = draft.callArgs,
             assignVars = draft.assignVars,
             occurrence = occ,
         )
@@ -328,7 +377,7 @@ fun resolveHavocProcFunCallSites(
             hostActionName = draft.hostActionName,
             isHostConstructor = draft.isHostConstructor,
             procFunName = draft.procFunName,
-            call = draft.call,
+            callArgs = draft.callArgs,
             assignVars = draft.assignVars,
             occurrence = SpecLeaf(
                 name = draft.procFunName,
@@ -348,14 +397,14 @@ internal fun collectWholeRhsProcFunCalls(pc: ProcClassNode): List<WholeRhsHit> {
     val out = mutableListOf<WholeRhsHit>()
     pc.localDecls().filterIsInstance<ConstructorNode>().forEach { ctor ->
         val decl = ctor.constructors().single()
-        wholeRhsProcFunCall(decl)?.let { (call, vars) ->
-            out += WholeRhsHit(decl.action.name, true, call, vars)
+        wholeRhsProcFunCall(decl)?.let { hit ->
+            out += hit.copy(actionName = decl.action.name, isCtor = true)
         }
     }
     pc.localDecls().filterIsInstance<TransitionNode>().forEach { tr ->
         val decl = tr.transitions().single()
-        wholeRhsProcFunCall(decl)?.let { (call, vars) ->
-            out += WholeRhsHit(decl.action.name, false, call, vars)
+        wholeRhsProcFunCall(decl)?.let { hit ->
+            out += hit.copy(actionName = decl.action.name, isCtor = false)
         }
     }
     return out
@@ -364,13 +413,13 @@ internal fun collectWholeRhsProcFunCalls(pc: ProcClassNode): List<WholeRhsHit> {
 internal data class WholeRhsHit(
     val actionName: String,
     val isCtor: Boolean,
-    val call: FunCallExprNode,
+    val procFunName: String,
+    val callArgs: List<ExprNode>,
     val assignVars: List<String>,
 )
 
 /**
- * All resolved procfun calls appearing anywhere in constructor/transition transit exprs
- * (including nested under `when` / `if` / etc.). Used for orphan and havoc warnings.
+ * All resolved bare procfun calls appearing anywhere in constructor/transition transit exprs.
  */
 internal fun collectProcFunCallsInProc(pc: ProcClassNode): List<FunCallExprNode> {
     val out = mutableListOf<FunCallExprNode>()
@@ -397,24 +446,71 @@ internal fun collectProcFunCallsInProc(pc: ProcClassNode): List<FunCallExprNode>
     return out
 }
 
+/** Api-qualified procfun calls (`Api.fn(...)`) in a proc. */
+internal fun collectApiQualifiedProcFunCallsInProc(pc: ProcClassNode): List<MethodCallExprNode> {
+    val out = mutableListOf<MethodCallExprNode>()
+    fun walkExpr(expr: ExprNode) {
+        if (expr is MethodCallExprNode && expr.resolvedProcFunOrNull() != null) {
+            out += expr
+        }
+        expr.children.filterIsInstance<ExprNode>().forEach { walkExpr(it) }
+    }
+    fun walkDecl(decl: julay.compiler.decl.ActionDecl) {
+        decl.transits.forEach { update ->
+            when (update) {
+                is julay.compiler.decl.TransitUpdate.Assign -> walkExpr(update.expr)
+                is julay.compiler.decl.TransitUpdate.IndexPut -> {
+                    walkExpr(update.index)
+                    walkExpr(update.value)
+                }
+                is julay.compiler.decl.TransitUpdate.Let -> walkExpr(update.init)
+            }
+        }
+    }
+    pc.localDecls().filterIsInstance<ConstructorNode>().forEach { walkDecl(it.constructors().single()) }
+    pc.localDecls().filterIsInstance<TransitionNode>().forEach { walkDecl(it.transitions().single()) }
+    return out
+}
+
 private fun wholeRhsProcFunCall(
     decl: julay.compiler.decl.ActionDecl,
-): Pair<FunCallExprNode, List<String>>? {
+): WholeRhsHit? {
     val hits = decl.transits.mapNotNull { update ->
         when (update) {
             is julay.compiler.decl.TransitUpdate.Assign -> {
-                val call = update.expr as? FunCallExprNode ?: return@mapNotNull null
-                if (call.resolvedProcFunOrNull() == null) return@mapNotNull null
-                julay.program.type.transitRootVar(update.key) to call
+                when (val expr = update.expr) {
+                    is FunCallExprNode -> {
+                        val pf = expr.resolvedProcFunOrNull() ?: return@mapNotNull null
+                        Triple(
+                            pf.procFunName(),
+                            expr.callArgs(),
+                            julay.program.type.transitRootVar(update.key),
+                        )
+                    }
+                    is MethodCallExprNode -> {
+                        val pf = expr.resolvedProcFunOrNull() ?: return@mapNotNull null
+                        Triple(
+                            pf.procFunName(),
+                            expr.args,
+                            julay.program.type.transitRootVar(update.key),
+                        )
+                    }
+                    else -> null
+                }
             }
             else -> null
         }
     }
     if (hits.isEmpty()) return null
-    val calls = hits.map { it.second }.distinct()
-    // v1: exactly one distinct procfun call in the action
-    if (calls.size != 1) return null
-    return calls.single() to hits.map { it.first }
+    val names = hits.map { it.first }.distinct()
+    if (names.size != 1) return null
+    return WholeRhsHit(
+        actionName = "",
+        isCtor = false,
+        procFunName = names.single(),
+        callArgs = hits.first().second,
+        assignVars = hits.map { it.third },
+    )
 }
 
 /** Build a synthetic [ProcClassNode] view of a procfun for TLA leaf lookup. */

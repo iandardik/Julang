@@ -6,6 +6,10 @@ Top-level declarations are **file-private by default**. Mark names that other fi
 
 ```jul
 export proc Server { ... }
+export api RpcOut {
+    proc: RpcOutClient || HttpClient
+    calls: rpcOutClientCaller
+}
 export fun add(x : Int, y : Int) : Int = x + y
 ```
 
@@ -37,6 +41,7 @@ Details: [Getting started](../getting-started.md), [Tooling](../tooling.md).
 | Kind | Example | Notes |
 |------|---------|--------|
 | Your modules | `server.ServerLogic` | Next to the entry file or on `-L` / `JULAY_PATH` |
+| Apis | `node.rpc_out.RpcOut` | Composition units: resident `proc:` + `calls:` procfuns; see [Composition and actions](composition-and-actions.md#apis) |
 | Proclib | `julay.proclib.Timer`, `HttpServer`, … | Process APIs; some are Kotlin-native under the hood |
 | Funlib | `julay.funlib.length`, `julay.funlib.println`, … | Functions; effectful ones require import like the rest |
 

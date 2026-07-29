@@ -48,18 +48,127 @@ Same-class ordinary offers never sync: when two occurrences of class `X` both ex
 
 These checks apply to the **compile/spec target** (same rules for JAR and TLA+):
 
-- External `client` of `w` with no `provider` `w` → error, **except** when every external client offer for `w` comes from a **procfun** (call-folded or listed in `||`). Those surfaces stay visible on the parent until a provider peer is composed.
+- External `client` of `w` with no `provider` `w` → error, **except** when every external client offer for `w` comes from a **procfun** (call-folded or listed in an api's `calls:`). Those surfaces stay visible on the parent until a provider peer is composed.
 - At most one `provider` per action name.
 
 JAR `compile` targets **warn** (but still succeed) when unsynced ordinary or session actions remain in their external alphabet — those offers simply never enable at runtime. Tag them `internal` if a solo step is intentional. Specs may still use unilateral assume/system actions.
 
 ### Procfuns and alphabets
 
-Procfuns are not SyncChannel-started by `||` (see [Procfuns](procfun.md)). For **analyze / IDE alphabets**, any procfun **called** by a host under an assembly contributes its non-synthetic actions to that assembly — with or without `|| F`. Listing `|| F` only whitelists TLA+ coupling vs havoc.
+Procfuns are **not** allowed in `||` (compile error). They are not SyncChannel-started peers. For **analyze / IDE alphabets**, any procfun **called** by a host under an assembly contributes its non-synthetic actions to that assembly. To **couple** a procfun in TLA+, list it in an [api](#apis)'s `calls:` (see below).
 
 ### TLA+ occurrence names
 
 When emitting TLA+, a unique leaf class keeps its name. If class `X` appears more than once, every occurrence is renamed using the introducing assembly: `proc P := A || X` and `proc Q := B || X` composed together become `X_P` and `X_Q`. Same-parent ties (`proc P := X || X`) use `X_P_1`, `X_P_2`, …. Renamed state variables get `(* ... *)` comments. Julay invariants still write `X.n`; the compiler expands them per occurrence in TLA+.
+
+## APIs
+
+An **api** packages a resident parallel composition (`proc:`) with optional procfun entry points (`calls:`). Conceptually it is one composition unit:
+
+```jul
+api RpcOut := <proc-field> || <call₁> || <call₂> || …
+```
+
+Operationally, only `proc:` leaves are SyncChannel-started; `calls` participate in alphabet, channel keys, and TLA coupling, and are still spawn-awaited when invoked.
+
+### Syntax
+
+```jul
+export api RpcOut {
+    proc: RpcOutClient || HttpClient
+    calls: rpcOutClientCaller, outRequestVoteRPC, outAppendEntriesRPC
+}
+```
+
+- `proc:` — required; parallel composition of **procs and/or apis** only (procfun names are illegal here, as in any `||`).
+- `calls:` — optional; comma-separated procfun names owned by this api.
+
+### Author mental model
+
+As the api author, treat everything in the api as one parallel composition: the `proc:` peers plus each `calls` procfun. Matching actions sync and may become internal to the api. Incomplete wiring is allowed at declaration time:
+
+```jul
+export api RpcOut {
+    proc: HttpClient
+    calls: rpcOutClientCaller
+}
+```
+
+This is legal. `rpcOutClientCaller`'s `sendRpcOut` / `responseRpcOut` do not meet a peer inside the api, so they remain **external actions of `RpcOut`** (visible in `analyze -s RpcOut` and the VS Code alphabet panel). A parent may still compose a partner that syncs those actions. `compile RpcOut` yields the usual unsynced ordinary/session **warning** (same as proc assemblies), not a hard error.
+
+### Consumer mental model
+
+Consumers treat an api as:
+
+1. A process-like unit to compose: `… || RpcOut || …`
+2. Qualified call entry points: `RpcOut.outRequestVoteRPC(...)`
+
+```jul
+transit:
+    let ok : Boolean := RpcOut.outRequestVoteRPC(peer, payload)
+```
+
+- Outside the api, listed procfuns **must** be called as `ApiName.fn(...)` (not bare `fn(...)`).
+- Inside other procfuns of the same module, bare calls to siblings remain allowed (e.g. `outRequestVoteRPC` calling `rpcOutClientCaller`).
+- `ApiName.fn(...)` requires a **unique** occurrence of that api in the enclosing composition (error if missing or duplicated).
+
+### Nesting
+
+Apis may appear in other apis' `proc:` fields and in ordinary `||`:
+
+```jul
+export api RaftNode {
+    proc: RaftNodeMain || RaftCore || RpcOut || RpcIn
+        || ElectionTimeout || Timer || VoteRequester || LeaderHeartbeat
+}
+```
+
+Nested api `calls` stay in the nested scope; a parent does not automatically re-export child calls.
+
+### Specs and TLA+
+
+Apis are valid systems wherever procs are:
+
+```jul
+api RpcOut1 {
+    proc: RpcOutClient
+    calls: rpcOutClientCaller
+}
+spec RpcOutSpec1 := RpcOut1
+// TLA models RpcOutClient || rpcOutClientCaller (caller coupled)
+
+api RpcOut2 {
+    proc: RpcOutClient
+}
+spec RpcOutSpec2 := RpcOut2
+// TLA models RpcOutClient only
+
+spec WithInv := RpcOut1 |= SomeInv
+spec AG := <Env> RpcOut1 <Guarantees>
+```
+
+| Situation | TLA |
+|-----------|-----|
+| Procfun listed in `calls` of an api in the composition | **Coupled** |
+| Procfun called but not listed in any composed api's `calls` | **Havoc** + warning |
+| Procfun name written in `\|\|` | **Compile error** |
+
+### Parallel composition may only use procs and apis
+
+```jul
+// ERROR
+proc Bad := Main || countUp
+```
+
+Use an api instead:
+
+```jul
+api CountUpApi {
+    proc: Main
+    calls: countUp
+}
+spec CountUpSpec := CountUpApi
+```
 
 ## Synchronization (language level)
 
@@ -116,6 +225,6 @@ For ordinary sync, different classes declare the same action name. For a shared 
 ## See also
 
 - [Processes](processes.md)
-- [Procfuns](procfun.md) — call-site alphabet folding; `||` as TLA metadata
+- [Procfuns](procfun.md) — call-site alphabet folding; packaging via [apis](#apis)
 - [Sessions](sessions.md)
 - [Creating libraries](creating-libraries.md)

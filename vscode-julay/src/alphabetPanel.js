@@ -33,11 +33,11 @@ async function showExternalAlphabet(args) {
   if (!scope) {
     const names = declaredProcNames(document);
     if (names.length === 0) {
-      vscode.window.showErrorMessage("No proc/spec/procfun declarations found in this file.");
+      vscode.window.showErrorMessage("No proc/spec/procfun/api declarations found in this file.");
       return;
     }
     scope = await vscode.window.showQuickPick(names, {
-      placeHolder: "Select a proc, spec, or procfun",
+      placeHolder: "Select a proc, spec, procfun, or api",
     });
   }
   if (!scope) {

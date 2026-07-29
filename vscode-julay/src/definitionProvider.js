@@ -9,7 +9,7 @@ const {
 } = require("./config");
 
 const PROC_DECL =
-  /^\s*(?:export\s+)?(?:proc|spec|procfun)\s+([A-Za-z_][A-Za-z0-9_]*)\b/;
+  /^\s*(?:export\s+)?(?:proc|spec|procfun|api)\s+([A-Za-z_][A-Za-z0-9_]*)\b/;
 const ACTION_DECL =
   /^\s*(?:internal\s+|provider\s+|client\s+|session\s+)*(?:transition|constructor)\s+([A-Za-z_][A-Za-z0-9_]*)\b/;
 const IMPORT_RE =

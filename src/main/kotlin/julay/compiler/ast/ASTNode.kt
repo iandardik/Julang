@@ -151,6 +151,30 @@ class ProcNode(
     }
 }
 
+/**
+ * Composition unit: resident [procExpr] peers plus optional [callNames] (procfuns).
+ * Conceptually `proc Name := procExpr || call1 || …`; calls are not SyncChannel-started.
+ */
+class ApiNode(
+    private val name: String,
+    private val procExpr: ASTNode,
+    private val callNames: List<String>,
+    private val loc: ProgramLoc,
+) : DeclNode(listOf(procExpr)) {
+    override fun programLocation() = loc
+    override fun name() = name
+    internal fun apiName() = name
+    internal fun apiProcExpr() = procExpr
+    internal fun apiCallNames() = callNames
+    override fun toString(): String {
+        val export = if (isExported) "export " else ""
+        val calls = if (callNames.isEmpty()) "" else {
+            "\n    calls: ${callNames.joinToString(", ")}"
+        }
+        return "${export}api $name {\n    proc: $procExpr$calls\n}"
+    }
+}
+
 class CompileNode(
     private val names: List<String>,
     private val loc: ProgramLoc,
@@ -1997,7 +2021,7 @@ class LambdaExprNode(
     }
 }
 
-/** Intrinsic collection method call: `xs.filter(...)`, `xs.map(...)`, `xs.fold(init, ...)`. */
+/** Intrinsic collection method call or api-qualified procfun call: `xs.filter(...)` / `RpcOut.fn(...)`. */
 class MethodCallExprNode(
     val baseExpr: ExprNode,
     val methodName: String,
@@ -2007,6 +2031,8 @@ class MethodCallExprNode(
     private var hofBody: ExprNode? = null
     private var hofParamNames: List<String>? = null
     private var hofParamTypes: List<Type>? = null
+    private var resolvedProcFun: ProcFunNode? = null
+    private var resolvedApiName: String? = null
 
     override fun programLocation() = loc
 
@@ -2014,28 +2040,54 @@ class MethodCallExprNode(
         hofBody = body
         hofParamNames = paramNames
         hofParamTypes = paramTypes
+        resolvedProcFun = null
+        resolvedApiName = null
+    }
+
+    internal fun resolveApiProcFun(apiName: String, procFun: ProcFunNode) {
+        resolvedApiName = apiName
+        resolvedProcFun = procFun
+        hofBody = null
+        hofParamNames = null
+        hofParamTypes = null
     }
 
     internal fun hofBodyOrNull(): ExprNode? = hofBody
     internal fun hofParamNamesOrNull(): List<String>? = hofParamNames
     internal fun hofParamTypesOrNull(): List<Type>? = hofParamTypes
+    internal fun resolvedProcFunOrNull(): ProcFunNode? = resolvedProcFun
+    internal fun resolvedApiNameOrNull(): String? = resolvedApiName
 
     override fun toZ3GuardString(
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
+        if (resolvedProcFun != null) {
+            throw RuntimeException(
+                "Api procfun call \"$resolvedApiName.$methodName\" cannot be used in guards at $loc",
+            )
+        }
         if (exprReferencesAnyArg(this, argSymbols)) {
             throw RuntimeException(
                 "Method \"$methodName\" cannot be used in guards when it depends on action arguments at $loc",
             )
         }
-        // Prefer Kotlin evaluation + embed for concrete state (Julay guards bind state as Kotlin values).
         val kotlinExpr = toTransitString(symbolTypes, argSymbols)
         return embedKotlinValueAsZ3(kotlinExpr, getType(), forceString, loc)
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        resolvedProcFun?.let { pf ->
+            val argStrs = args.map { it.toTransitString(symbolTypes, argSymbols) }
+            val argsList = if (argStrs.isEmpty()) {
+                "emptyList()"
+            } else {
+                "listOf(${argStrs.joinToString(", ")})"
+            }
+            val retTy = pf.returnType.toKotlinTypeString()
+            return "(hostProc.invokeProcFun(\"${pf.procFunName()}\", $argsList) as $retTy)"
+        }
         val base = baseExpr.toTransitString(symbolTypes, argSymbols)
         val body = hofBody ?: throw RuntimeException("HOF body not resolved for \"$methodName\" at $loc")
         val paramNames = hofParamNames ?: throw RuntimeException("HOF params not resolved for \"$methodName\" at $loc")
@@ -2072,14 +2124,18 @@ class MethodCallExprNode(
     }
 
     override fun inferType(symbolEnv: Map<String, Type>): Type {
-        return try {
-            getType()
-        } catch (_: RuntimeException) {
-            throw RuntimeException("Method call not typed at $loc")
-        }
+        resolvedProcFun?.let { return it.returnType }
+        // HOF path — type should already be set via setInferredType during typePass
+        return getType()
     }
 
-    override fun toString(): String = "$baseExpr.$methodName(${args.joinToString(", ")})"
+    override fun toString(): String {
+        val argStr = args.joinToString(", ")
+        return when (val api = resolvedApiName) {
+            null -> "$baseExpr.$methodName($argStr)"
+            else -> "$api.$methodName($argStr)"
+        }
+    }
 }
 
 internal fun embedKotlinValueAsZ3(

@@ -20,7 +20,7 @@ Project-local libraries can sit on `JULAY_PATH` or `-L` the same way as any othe
 
 ### What to export
 
-Write normal `proc` / `fun` / `spec` declarations. Use `exports` when the module should expose a stable public surface (see [Modules](modules.md)). Specs are useful for libraries that ship TLC checks (Timer’s `TimerSpec` is an example).
+Write normal `proc` / `api` / `fun` / `spec` declarations. Use `export` when the module should expose a stable public surface (see [Modules](modules.md)). Prefer an **api** when callables (procfuns) need resident peers — see [Composition and actions — APIs](composition-and-actions.md#apis). Specs are useful for libraries that ship TLC checks (Timer’s `TimerSpec` is an example).
 
 ### Funlib-style functions
 

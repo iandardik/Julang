@@ -17,6 +17,12 @@ data class TypePassResult(
     val warnings: List<CompileWarning> = emptyList(),
 )
 
+/** Set for the duration of [RootNode.typePass] — api-qualified procfun resolution. */
+private var typePassApiEnv: Map<String, ApiNode> = emptyMap()
+/** procfun name → api that lists it in calls: (first wins if overlapping). */
+private var typePassCallToApi: Map<String, String> = emptyMap()
+private var typePassInsideProcFun: Boolean = false
+
 fun RootNode.typePass(
     unit: CompilationUnit,
     allowUnindexedSpec: Boolean = false,
@@ -34,38 +40,70 @@ fun RootNode.typePass(
     if (built.errors.isNotEmpty()) {
         return TypePassResult(built.errors)
     }
-    val allFuns = unit.modules
-        .flatMap { it.root.declNodes().filterIsInstance<FunNode>() }
-        .associateBy { it.name() }
-    val allProcFuns = unit.modules
-        .flatMap { it.root.declNodes().filterIsInstance<ProcFunNode>() }
-        .associateBy { it.name() }
-    val signatureErrors = allFuns.values.flatMap { it.typePassFunSignature(built) }
-    val procFunSigErrors = allProcFuns.values.flatMap { it.typePassProcFunSignature(built) }
-    val recursionErrors = funRecursionErrors(allFuns) + procFunRecursionErrors(allProcFuns)
-    val funBodyErrors = unit.modules.flatMap { module ->
-        val callable = callableFuns(module)
-        val builtins = callableFunBuiltins(module)
-        val procFuns = callableProcFuns(module)
-        module.root.declNodes().filterIsInstance<FunNode>().flatMap { funNode ->
-            funNode.typePassFunBody(callable, built, builtins, procFuns)
+    val prevApiEnv = typePassApiEnv
+    val prevCallToApi = typePassCallToApi
+    val prevInside = typePassInsideProcFun
+    try {
+        val allApis = unit.modules
+            .flatMap { it.root.declNodes().filterIsInstance<ApiNode>() }
+            .associateBy { it.name() }
+        typePassApiEnv = allApis
+        typePassCallToApi = buildMap {
+            allApis.values.forEach { api ->
+                api.apiCallNames().forEach { call ->
+                    putIfAbsent(call, api.apiName())
+                }
+            }
         }
+        typePassInsideProcFun = false
+
+        val allFuns = unit.modules
+            .flatMap { it.root.declNodes().filterIsInstance<FunNode>() }
+            .associateBy { it.name() }
+        val allProcFuns = unit.modules
+            .flatMap { it.root.declNodes().filterIsInstance<ProcFunNode>() }
+            .associateBy { it.name() }
+        val signatureErrors = allFuns.values.flatMap { it.typePassFunSignature(built) }
+        val procFunSigErrors = allProcFuns.values.flatMap { it.typePassProcFunSignature(built) }
+        val recursionErrors = funRecursionErrors(allFuns) + procFunRecursionErrors(allProcFuns)
+        val funBodyErrors = unit.modules.flatMap { module ->
+            val callable = callableFuns(module)
+            val builtins = callableFunBuiltins(module)
+            val procFuns = callableProcFuns(module)
+            module.root.declNodes().filterIsInstance<FunNode>().flatMap { funNode ->
+                funNode.typePassFunBody(callable, built, builtins, procFuns)
+            }
+        }
+        // Typecheck each module with that module's imports so julay.funlib.* (and imported
+        // user funs) resolve in dependency modules, not only in the entry file.
+        val otherErrors = unit.modules.flatMap { module ->
+            val callable = callableFuns(module)
+            val builtins = callableFunBuiltins(module)
+            val procFuns = callableProcFuns(module)
+            // Prefer module-local + imported apis for qualified calls
+            val moduleApis = callableApis(module)
+            typePassApiEnv = allApis + moduleApis
+            typePassCallToApi = buildMap {
+                typePassApiEnv.values.forEach { api ->
+                    api.apiCallNames().forEach { call ->
+                        putIfAbsent(call, api.apiName())
+                    }
+                }
+            }
+            module.root.declNodes()
+                .filter { it !is FunNode && it !is SpecNode && it !is InvariantNode && it !is ApiNode }
+                .flatMap { it.typePass(emptyMap(), built, callable, emptyMap(), builtins, procFuns) }
+        }
+        val specResult = unit.root.specTypePass(unit, allowUnindexedSpec)
+        return TypePassResult(
+            errors = built.errors + signatureErrors + procFunSigErrors + recursionErrors + funBodyErrors + otherErrors + specResult.errors,
+            warnings = specResult.warnings,
+        )
+    } finally {
+        typePassApiEnv = prevApiEnv
+        typePassCallToApi = prevCallToApi
+        typePassInsideProcFun = prevInside
     }
-    // Typecheck each module with that module's imports so julay.funlib.* (and imported
-    // user funs) resolve in dependency modules, not only in the entry file.
-    val otherErrors = unit.modules.flatMap { module ->
-        val callable = callableFuns(module)
-        val builtins = callableFunBuiltins(module)
-        val procFuns = callableProcFuns(module)
-        module.root.declNodes()
-            .filter { it !is FunNode && it !is SpecNode && it !is InvariantNode }
-            .flatMap { it.typePass(emptyMap(), built, callable, emptyMap(), builtins, procFuns) }
-    }
-    val specResult = unit.root.specTypePass(unit, allowUnindexedSpec)
-    return TypePassResult(
-        errors = built.errors + signatureErrors + procFunSigErrors + recursionErrors + funBodyErrors + otherErrors + specResult.errors,
-        warnings = specResult.warnings,
-    )
 }
 
 fun ASTNode.typePass(
@@ -1012,6 +1050,62 @@ private fun MethodCallExprNode.typePassMethodCall(
     funBuiltinEnv: Map<String, FunBuiltin>,
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
+    // Api-qualified procfun: ApiName.fn(...)
+    val apiBase = (baseExpr as? SymbolValueExprNode)?.symbol
+    if (apiBase != null) {
+        val api = typePassApiEnv[apiBase]
+        if (api != null) {
+            if (methodName !in api.apiCallNames()) {
+                return listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "Procfun \"$methodName\" is not listed in api \"$apiBase\" calls:",
+                    ),
+                )
+            }
+            val procFun = procFunEnv[methodName]
+                ?: return listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "Unknown procfun \"$methodName\"",
+                    ),
+                )
+            val argErrors = args.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
+            if (argErrors.isNotEmpty()) return argErrors
+            resolveApiProcFun(apiBase, procFun)
+            val params = try {
+                procFun.procFunArgs().actionArgs()
+            } catch (_: RuntimeException) {
+                return listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "Parameter types not resolved for procfun \"$methodName\"",
+                    ),
+                )
+            }
+            if (params.size != args.size) {
+                return listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "Expected procfun \"$methodName\" to take ${params.size} argument(s) but got ${args.size}",
+                    ),
+                )
+            }
+            val typeMismatchErrors = args.zip(params).flatMap { (arg, param) ->
+                assertOrCompileError(
+                    arg.getType() == param.type,
+                    OneLocCompileError(
+                        arg.programLocation(),
+                        "Expected argument of type ${param.type} but got ${arg.getType()}",
+                    ),
+                )
+            }
+            if (typeMismatchErrors.isNotEmpty()) return typeMismatchErrors
+            setInferredType(TypePassType.Inferred(procFun.returnType))
+            return emptyList()
+        }
+    }
+
     val kind = collectionMethodKind(methodName)
         ?: return listOf(
             OneLocCompileError(
@@ -1484,6 +1578,17 @@ private fun FunCallExprNode.typePassFunCall(
     }
     procFunEnv[callName()]?.let { procFun ->
         resolveProcFun(procFun)
+        typePassCallToApi[callName()]?.let { apiName ->
+            if (!typePassInsideProcFun) {
+                return listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "Procfun \"${callName()}\" is listed in api \"$apiName\" calls:; " +
+                            "call it as $apiName.${callName()}(...)",
+                    ),
+                )
+            }
+        }
         if (callTypeArgs().isNotEmpty()) {
             return listOf(
                 OneLocCompileError(
@@ -2061,6 +2166,23 @@ private fun ProcFunNode.typePassProcFunSignature(registry: ObjClassRegistry): Li
 }
 
 private fun ProcFunNode.typePassProcFun(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode>,
+): List<CompileError> {
+    val prevInside = typePassInsideProcFun
+    typePassInsideProcFun = true
+    try {
+        return typePassProcFunBody(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    } finally {
+        typePassInsideProcFun = prevInside
+    }
+}
+
+private fun ProcFunNode.typePassProcFunBody(
     symbolEnv: Map<String, Type>,
     registry: ObjClassRegistry,
     funEnv: Map<String, FunNode>,

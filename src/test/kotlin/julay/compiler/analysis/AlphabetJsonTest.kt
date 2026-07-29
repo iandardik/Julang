@@ -422,21 +422,24 @@ class AlphabetJsonTest {
 
                 transition dispatch() {
                     transit:
-                        out := when (path) {
-                            "a" -> clientAppendRPC(1)
-                            else -> 0
-                        }
+            out := when (path) {
+                "a" -> RpcIn.clientAppendRPC(1)
+                else -> 0
+            }
                 }
             }
 
-            proc RpcIn := Handler || clientAppendRPC
+            api RpcIn {
+                proc: Handler
+                calls: clientAppendRPC
+            }
             compile RpcIn
             """.trimIndent(),
         )
         val checked = prepareCheckedCompilation(file)
         assertNotNull(checked)
 
-        // Orphan check sees when-nested calls.
+        // Api-listed calls need not be called by the interior (external entry points).
         val components = checked.unit.allPClassNames + checked.librariesInUse
         val ok = julay.compiler.runErrorAndWarningPasses(
             checked.ast,
@@ -446,7 +449,7 @@ class AlphabetJsonTest {
             program = null,
             procDecls = checked.procDecls,
         )
-        assertTrue(ok, "when-nested composed procfun must not orphan")
+        assertTrue(ok, "api-listed procfun must not fail composition checks")
 
         val scope = resolveAnalyzeScope(
             scopeNames = listOf("RpcIn"),

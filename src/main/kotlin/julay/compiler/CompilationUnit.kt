@@ -79,13 +79,28 @@ fun collectPClassNames(root: RootNode): Set<String> =
 
 fun collectProcAliasNames(root: RootNode): Set<String> =
     root.declNodes()
-        .filter { it is ProcNode || it is SpecNode }
+        .filter { it is ProcNode || it is SpecNode || it is ApiNode }
         .map { it.name() }
         .toSet()
+
+fun collectApiNames(root: RootNode): Set<String> =
+    root.declNodes().filterIsInstance<ApiNode>().map { it.name() }.toSet()
 
 fun collectProcFunNames(root: RootNode): Set<String> =
     root.declNodes().filterIsInstance<ProcFunNode>().map { it.name() }.toSet()
 
+/** Map api name → listed call (procfun) names. */
+fun collectApiCalls(root: RootNode): Map<String, List<String>> =
+    root.declNodes().filterIsInstance<ApiNode>().associate { it.apiName() to it.apiCallNames() }
+
+fun callableApis(module: LoadedModule): Map<String, ApiNode> {
+    val local = module.root.declNodes().filterIsInstance<ApiNode>().associateBy { it.name() }
+    val imported = module.importTable.shortNames.mapNotNull { (name, symbol) ->
+        val decl = declFromResolvedSymbol(symbol)
+        if (decl is ApiNode) name to decl else null
+    }.toMap()
+    return local + imported
+}
 fun declFromResolvedSymbol(symbol: ResolvedSymbol): DeclNode? = when (symbol) {
     is ResolvedSymbol.LocalDecl -> symbol.decl
     is ResolvedSymbol.ImportedDecl -> symbol.decl

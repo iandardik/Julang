@@ -25,7 +25,7 @@ proc Handler {
         guard: ~finished
         transit:
             out := when (path) {
-                "a" -> helper(1)
+                "a" -> P.helper(1)
                 else -> 0
             }
             finished := true
@@ -44,6 +44,9 @@ proc Handler {
     }
 }
 
-proc P := Handler || helper
+api P {
+    proc: Handler
+    calls: helper
+}
 
 compile P
