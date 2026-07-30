@@ -88,9 +88,8 @@ proc RaftProtocol {
             & payload = if (nextIndex[target.id] < length(log)) {
                 // if there's at least one entry to send
                 let (nextLogIndex : Int := nextIndex[target.id]) {
-                // prevLogIndex=0 means "no previous entry" (matches follower success guard);
-                // never send -1 when nextLogIndex=0.
-                let (prevLogIndex : Int := max(nextLogIndex - 1, 0)) {
+                // prevLogIndex is the previous entry's index, or -1 if none
+                let (prevLogIndex : Int := nextLogIndex - 1) {
                 let (prevLogTerm : Int := if (nextLogIndex > 0) { entryTermAt(log, prevLogIndex) } else { 0 }) {
                     AppendEntriesData {
                         term := currentTerm,
@@ -104,12 +103,12 @@ proc RaftProtocol {
                 }}}
             }
             else {
-                // if there's no entry to send, then send a heartbeat
+                // The log is caught up so send a heartbeat. prevLogIndex = last log index, or -1 if empty.
                 // TODO make a fun for a heartbeat AE
                 AppendEntriesData {
                     term := currentTerm,
                     leaderId := self.id,
-                    prevLogIndex := max(length(log) - 1, 0),
+                    prevLogIndex := length(log) - 1,
                     prevLogTerm := lastLogTermVar,
                     entry := Entry { term := 0, value := "" },
                     entriesLen := 0,
@@ -145,7 +144,7 @@ proc RaftProtocol {
         guard:
             & state = "Leader"
             & commitIndex < newCommitIndex
-            & newCommitIndex <= length(log)
+            & newCommitIndex < length(log)
             & entryTermAt(log, newCommitIndex) = currentTerm
             & let (numAgree : Int := matchIndex.filter(i -> i >= commitIndex).length) {
                 numAgree * 2 > length(cluster)
@@ -224,11 +223,11 @@ proc RaftProtocol {
                         | (
                             & inTerm = currentTerm
                             & (
-                                | (prevLogIndex > length(log))
+                                | (prevLogIndex >= length(log))
                                 | (
-                                    & prevLogIndex > 0
-                                    & prevLogIndex <= length(log)
-                                    & entryTermAt(log, prevLogIndex - 1) ~= prevLogTerm
+                                    & prevLogIndex >= 0
+                                    & prevLogIndex < length(log)
+                                    & entryTermAt(log, prevLogIndex) ~= prevLogTerm
                                 )
                             )
                         )
@@ -238,13 +237,14 @@ proc RaftProtocol {
                     & success
                     & inTerm = currentTerm
                     & (
-                        | (prevLogIndex = 0)
+                        | (prevLogIndex = -1)
                         | (
-                            & prevLogIndex > 0
-                            & prevLogIndex <= length(log)
-                            & entryTermAt(log, prevLogIndex - 1) = prevLogTerm
+                            & prevLogIndex >= 0
+                            & prevLogIndex < length(log)
+                            & entryTermAt(log, prevLogIndex) = prevLogTerm
                         )
                     )
+                    // matchIdx = last replicated index (paper: prevLogIndex + len(entries))
                     & (
                         | (entriesLen = 0 & matchIdx = prevLogIndex)
                         | (entriesLen = 1 & matchIdx = prevLogIndex + 1)
@@ -259,7 +259,7 @@ proc RaftProtocol {
             knownLeaderId := if (success) { leaderId } else { knownLeaderId }
             state := if (success & inTerm = currentTerm) { "Follower" } else { state }
             log := if (success & entriesLen = 1) {
-                log[0:prevLogIndex] + [Entry { term := entryTerm, value := entryValue }]
+                log[0:prevLogIndex + 1] + [Entry { term := entryTerm, value := entryValue }]
             } else {
                 log
             }
@@ -269,7 +269,7 @@ proc RaftProtocol {
                 lastLogTermVar
             }
             commitIndex := if (success & leaderCommit > commitIndex) {
-                let (lastNew : Int := if (entriesLen = 1) { prevLogIndex + 1 } else { length(log) }) {
+                let (lastNew : Int := if (entriesLen = 1) { prevLogIndex + 1 } else { length(log) - 1 }) {
                     if (leaderCommit < lastNew) { leaderCommit } else { lastNew }
                 }
             } else {
@@ -288,7 +288,7 @@ proc RaftProtocol {
             & inTerm = currentTerm
         transit:
             nextIndex[peerId] := if (success) {
-                max(matchIdx, nextIndex[peerId]) // ensure that nextIndex increases monotonically
+                max(matchIdx + 1, nextIndex[peerId]) // ensure that nextIndex increases monotonically
             } else { max(nextIndex[peerId] - 1, 0) }
             matchIndex[peerId] := if (success) {
                 max(matchIdx, matchIndex[peerId]) // ensure that matchIndex increases monotonically
@@ -330,8 +330,9 @@ proc RaftProtocol {
         guard:
             & state = "Leader"
             & idx > 0
-            & idx <= commitIndex
             & idx <= length(log)
+            // client idx is 1-based; commitIndex is 0-based last committed index
+            & idx - 1 <= commitIndex
             & value = entryValueAt(log, idx - 1)
     }
 
