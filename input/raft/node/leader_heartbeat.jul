@@ -44,14 +44,17 @@ proc LeaderHeartbeatImpl {
             // TODO this should probably be asynchronous
             let _ : Boolean := RpcOut.outAppendEntriesRPC(target, payload)
             let newSentThisRound : Set<Node> := sentThisRound + {target}
+            // Finish the full heartbeat round before sleeping so every follower
+            // is contacted within one election-timeout window.
             sentThisRound := if (length(newSentThisRound) = length(cluster)) { {me} } else { newSentThisRound }
-            step := "sleep"
+            step := if (length(newSentThisRound) = length(cluster)) { "sleep" } else { "pickTarget" }
     }
 
     // terminate this proc once we detect a stale term
     client transition staleTerm(term : Int) {
         guard:
-            term = leaderTerm
+            & term = leaderTerm
+            & step ~= "done"
         transit:
             step := "done"
     }

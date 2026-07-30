@@ -88,8 +88,10 @@ proc RaftProtocol {
             & payload = if (nextIndex[target.id] < length(log)) {
                 // if there's at least one entry to send
                 let (nextLogIndex : Int := nextIndex[target.id]) {
-                let (prevLogIndex : Int := nextLogIndex - 1) {
-                let (prevLogTerm : Int := if (prevLogIndex > 0) { entryTermAt(log, prevLogIndex) } else { 0 }) {
+                // prevLogIndex=0 means "no previous entry" (matches follower success guard);
+                // never send -1 when nextLogIndex=0.
+                let (prevLogIndex : Int := max(nextLogIndex - 1, 0)) {
+                let (prevLogTerm : Int := if (nextLogIndex > 0) { entryTermAt(log, prevLogIndex) } else { 0 }) {
                     AppendEntriesData {
                         term := currentTerm,
                         leaderId := self.id,
@@ -107,7 +109,7 @@ proc RaftProtocol {
                 AppendEntriesData {
                     term := currentTerm,
                     leaderId := self.id,
-                    prevLogIndex := length(log),
+                    prevLogIndex := max(length(log) - 1, 0),
                     prevLogTerm := lastLogTermVar,
                     entry := Entry { term := 0, value := "" },
                     entriesLen := 0,
@@ -122,6 +124,7 @@ proc RaftProtocol {
             & length(votesGranted) * 2 > length(cluster)
         transit:
             let _ : Boolean := LeaderHeartbeat.startLeaderHeartbeat(self, currentTerm, cluster)
+            let _ : Boolean := ElectionTimeout.stopElectionTimeout(currentTerm)
             state := "Leader"
             knownLeaderId := self.id
             nextIndex := cluster.map(n -> log.length)
@@ -249,8 +252,10 @@ proc RaftProtocol {
                 )
             )
         transit:
-            // TODO this most likely can cause a deadlock, in the case that a leader receives a heartbeat
-            let _ : Boolean := ElectionTimeout.gotHeartbeat()
+            // Reset only on accepted AE; avoids blocking gotHeartbeat when leader has stopped its timer.
+            let _ : Boolean := if (success) {
+                ElectionTimeout.gotHeartbeat()
+            } else { true }
             knownLeaderId := if (success) { leaderId } else { knownLeaderId }
             state := if (success & inTerm = currentTerm) { "Follower" } else { state }
             log := if (success & entriesLen = 1) {
@@ -282,8 +287,12 @@ proc RaftProtocol {
             & state = "Leader"
             & inTerm = currentTerm
         transit:
-            nextIndex[peerId] := if (success) { matchIdx + 1 } else { max(matchIdx - 1, 0) }
-            matchIndex[peerId] := if (success) { matchIdx } else { matchIndex[peerId] }
+            nextIndex[peerId] := if (success) {
+                max(matchIdx, nextIndex[peerId]) // ensure that nextIndex increases monotonically
+            } else { max(nextIndex[peerId] - 1, 0) }
+            matchIndex[peerId] := if (success) {
+                max(matchIdx, matchIndex[peerId]) // ensure that matchIndex increases monotonically
+            } else { matchIndex[peerId] }
     }
 
     /*

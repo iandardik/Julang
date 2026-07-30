@@ -16,6 +16,14 @@ procfun gotHeartbeat() : Boolean {
     }
 }
 
+procfun stopElectionTimeout(term : Int) : Boolean {
+    transition stopElectionTimeout(t : Int) {
+        guard:
+            & t = term
+        return: true
+    }
+}
+
 proc ElectionTimeoutImpl {
     const selfNode : Node
     const leaderTerm : Int
@@ -26,7 +34,7 @@ proc ElectionTimeoutImpl {
         transit:
             selfNode := me
             leaderTerm := term
-            electTimeout := 2 + me.id
+            electTimeout := 6 + (2 * me.id)
             step := "createTimer"
     }
 
@@ -54,9 +62,17 @@ proc ElectionTimeoutImpl {
 
     transition resetElectionTimer() {
         guard:
-            step = "wait"
+            step ~= "done"
         transit:
-            step := "cancel"
+            step := if (step = "wait") { "cancel" } else { step }
+    }
+
+    transition stopElectionTimeout(t : Int) {
+        guard:
+            & t = leaderTerm
+            & step ~= "done"
+        transit:
+            step := "done"
     }
 
     session transition cancelTimer() {
@@ -76,7 +92,8 @@ proc ElectionTimeoutImpl {
     // terminate this proc once we detect a stale term
     client transition staleTerm(term : Int) {
         guard:
-            term = leaderTerm
+            & term = leaderTerm
+            & step ~= "done"
         transit:
             step := "done"
     }
@@ -84,5 +101,5 @@ proc ElectionTimeoutImpl {
 
 export api ElectionTimeout {
     proc: ElectionTimeoutImpl || Timer
-    calls: gotHeartbeat, startElectionTimeout
+    calls: gotHeartbeat, startElectionTimeout, stopElectionTimeout
 }
