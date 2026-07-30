@@ -614,20 +614,29 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
     val transitEvalSnapshots = mutableListOf<String>()
     val transitApplyLines = mutableListOf<String>()
     var assignIndex = 0
+    var discardIndex = 0
     for (update in transits) {
         when (update) {
             is TransitUpdate.Let -> {
-                val localBind = "${update.name.toKotlinIdent()}__transitLet"
+                // Discard bindings (`_`) may repeat; give each a unique Kotlin temp and never
+                // register them for later substitution (they cannot be referenced).
+                val localBind = if (update.name.isDiscardBinding()) {
+                    "__discard_${discardIndex++}__transitLet"
+                } else {
+                    "${update.name.toKotlinIdent()}__transitLet"
+                }
                 val init = substTransitLets(update.init)
                 val initStr = init.toTransitString(transitSymbolTypes, transitArgSymbols)
                 transitEvalSnapshots +=
                     "val $localBind: ${update.type.toKotlinTypeString()} = $initStr"
-                val replacement = SymbolValueExprNode(localBind, update.init.programLocation()).also {
-                    it.setInferredType(TypePassType.Inferred(update.type))
-                }
-                letReplacements = letReplacements + (update.name to replacement)
                 transitSymbolTypes = transitSymbolTypes + (localBind to update.type)
-                transitArgSymbols = transitArgSymbols - update.name
+                if (!update.name.isDiscardBinding()) {
+                    val replacement = SymbolValueExprNode(localBind, update.init.programLocation()).also {
+                        it.setInferredType(TypePassType.Inferred(update.type))
+                    }
+                    letReplacements = letReplacements + (update.name to replacement)
+                    transitArgSymbols = transitArgSymbols - update.name
+                }
             }
             is TransitUpdate.Assign -> {
                 val rootVar = transitRootVar(update.key)

@@ -1,0 +1,6 @@
+source: regression/input/expr/discard-let-transit.jul
+programs:
+  - name: P
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/expr-discard-let-transit.stdout

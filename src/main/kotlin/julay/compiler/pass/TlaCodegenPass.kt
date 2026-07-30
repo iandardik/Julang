@@ -5,6 +5,7 @@ import julay.compiler.FunBuiltinRegistry
 import julay.compiler.TypeExpr
 import julay.compiler.ast.*
 import julay.compiler.decl.*
+import julay.compiler.isDiscardBinding
 import julay.program.action.TSAction
 import julay.program.type.*
 import java.io.File
@@ -1263,7 +1264,10 @@ private fun emitConjoined(
         offer.decl.transits.forEach { update ->
             when (update) {
                 is TransitUpdate.Let -> {
-                    letBindings = letBindings + (update.name to substLets(update.init))
+                    // Discard `_` is never substituted into later transit expressions.
+                    if (!update.name.isDiscardBinding()) {
+                        letBindings = letBindings + (update.name to substLets(update.init))
+                    }
                 }
                 is TransitUpdate.Assign -> {
                     val root = update.key.substringBefore('.')

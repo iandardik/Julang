@@ -1,0 +1,35 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+
+proc S {
+    var x : Int
+    var print : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            let _ : Int := 1
+            let _ : Int := 2
+            x := 3
+            print := true
+    }
+
+    internal transition println(msg : String) {
+        guard:
+            print & (msg = x + "")
+        transit:
+            print := false
+        after:
+            println(msg)
+    }
+
+    internal transition exitSystem() {
+        guard:
+            ~print
+        after:
+            exitProcess()
+    }
+}
+
+proc P := S
+
+compile P

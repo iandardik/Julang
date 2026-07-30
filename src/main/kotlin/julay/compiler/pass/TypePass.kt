@@ -219,7 +219,8 @@ private fun ConstructorNode.typePassConstructor(
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
     val argErrors = constructorArgs().typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
-    val actionEnv = symbolEnv + constructorArgs().argsTypeMap() + constructorArgs().actionArgs().associate { it.name to it.type }
+    val actionEnv = symbolEnv + constructorArgs().argsTypeMap() +
+        constructorArgs().actionArgs().filter { !it.name.isDiscardBinding() }.associate { it.name to it.type }
     return argErrors + body().flatMap { it.typePass(actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
 }
 
@@ -232,7 +233,8 @@ private fun TransitionNode.typePassTransition(
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
     val argErrors = transitionArgs().typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
-    val actionEnv = symbolEnv + transitionArgs().argsTypeMap() + transitionArgs().actionArgs().associate { it.name to it.type }
+    val actionEnv = symbolEnv + transitionArgs().argsTypeMap() +
+        transitionArgs().actionArgs().filter { !it.name.isDiscardBinding() }.associate { it.name to it.type }
     return argErrors + body().flatMap { it.typePass(actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
 }
 
@@ -299,7 +301,8 @@ private fun TransitNode.typePassTransit(
             is LetTransitNode -> {
                 val itemErrors = item.typePassLetTransit(rhsEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
                 errors += itemErrors
-                if (itemErrors.isEmpty()) {
+                // Discard `_` may be rebound freely but is never in scope for later expressions.
+                if (itemErrors.isEmpty() && !item.letName().isDiscardBinding()) {
                     letEnv = letEnv + (item.letName() to item.resolvedLetType)
                 }
             }
@@ -728,10 +731,17 @@ private fun LetExprNode.typePassLet(symbolEnv: Map<String, Type>, registry: ObjC
         return initTypeErrors
     }
 
-    val bodyEnv = symbolEnv + (letName() to declaredType)
+    val bodyEnv = if (letName().isDiscardBinding()) {
+        symbolEnv
+    } else {
+        symbolEnv + (letName() to declaredType)
+    }
     val bodyErrors = bodyExpr().typePass(bodyEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    if (bodyErrors.isNotEmpty()) {
+        return bodyErrors
+    }
     inferExprType(bodyEnv)
-    return bodyErrors
+    return emptyList()
 }
 
 private fun WhenExprNode.typePassWhen(symbolEnv: Map<String, Type>, registry: ObjClassRegistry, funEnv: Map<String, FunNode>, typeParamEnv: Map<String, Type>,
@@ -1212,7 +1222,7 @@ private fun MethodCallExprNode.typePassFold(
         )
     }
     val (accName, elemName) = lambda.params
-    val bodyEnv = symbolEnv + (accName to accType) + (elemName to elemType)
+    val bodyEnv = symbolEnv + listOf(accName to accType, elemName to elemType).filter { !it.first.isDiscardBinding() }
     val bodyErrors = lambda.body.typePass(bodyEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     if (bodyErrors.isNotEmpty()) {
         return bodyErrors
@@ -1260,7 +1270,7 @@ private fun MethodCallExprNode.typePassUnaryHofArg(
                 )
             }
             val param = funArg.params.single()
-            val bodyEnv = symbolEnv + (param to elemType)
+            val bodyEnv = if (param.isDiscardBinding()) symbolEnv else symbolEnv + (param to elemType)
             val bodyErrors = funArg.body.typePass(bodyEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
             if (bodyErrors.isNotEmpty()) {
                 return bodyErrors
@@ -1364,6 +1374,11 @@ private fun SymbolValueExprNode.typePassSymbol(
     funBuiltinEnv: Map<String, FunBuiltin>,
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
+    if (symbol.isDiscardBinding()) {
+        return listOf(
+            OneLocCompileError(programLocation(), "Cannot reference discard binding \"_\""),
+        )
+    }
     if (symbol !in symbolEnv) {
         return listOf(OneLocCompileError(programLocation(), "Unknown variable \"$symbol\""))
     }
@@ -1427,7 +1442,7 @@ private fun FunCallExprNode.typePassNamedFunMap(
             )
         }
         val param = funArg.params.single()
-        val bodyEnv = symbolEnv + (param to elemType)
+        val bodyEnv = if (param.isDiscardBinding()) symbolEnv else symbolEnv + (param to elemType)
         val bodyErrors = funArg.body.typePass(bodyEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
         if (bodyErrors.isNotEmpty()) {
             return bodyErrors
@@ -2116,7 +2131,7 @@ private fun FunNode.typePassFunBody(
     } catch (_: RuntimeException) {
         return emptyList()
     }
-    val paramEnv = params.associate { it.name to it.type }
+    val paramEnv = params.filter { !it.name.isDiscardBinding() }.associate { it.name to it.type }
     val typeParamEnv: Map<String, Type> = typeParams.associateWith { TypeVar(it) }
     val bodyErrors = funBody().typePass(paramEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     if (bodyErrors.isNotEmpty()) {

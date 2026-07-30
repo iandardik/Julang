@@ -1,0 +1,5 @@
+source: regression/input/type-errors/discard-let-ref.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Cannot reference discard binding \"_\""
+  - "Found type errors; exiting."

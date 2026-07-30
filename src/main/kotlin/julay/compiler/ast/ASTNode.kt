@@ -40,7 +40,8 @@ open class ArgsNode(
 ) : ASTNode(args) {
     override fun programLocation() = loc
     open fun actionArgs() : List<Variable> = args.flatMap { it.actionArgs() }
-    fun argsTypeMap() : Map<String, Type> = actionArgs().associate { it.name to it.type }
+    fun argsTypeMap() : Map<String, Type> =
+        actionArgs().filter { !it.name.isDiscardBinding() }.associate { it.name to it.type }
     override fun toString(): String {
         return children.joinToString(", ") { it.toString() }
     }
@@ -1241,15 +1242,23 @@ class LetExprNode(
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
-        val localBind = "${name.toKotlinIdent()}__let"
-        val initStr = letInitExpr.toTransitString(symbolTypes, argSymbols)
-        val replacement = SymbolValueExprNode(localBind, programLocation()).also {
-            it.setInferredType(TypePassType.Inferred(resolvedLetType))
+        val localBind = if (name.isDiscardBinding()) {
+            "__discard__let"
+        } else {
+            "${name.toKotlinIdent()}__let"
         }
-        val localBody = substituteExpr(bodyExpr, name, replacement)
+        val initStr = letInitExpr.toTransitString(symbolTypes, argSymbols)
+        val localBody = if (name.isDiscardBinding()) {
+            bodyExpr
+        } else {
+            val replacement = SymbolValueExprNode(localBind, programLocation()).also {
+                it.setInferredType(TypePassType.Inferred(resolvedLetType))
+            }
+            substituteExpr(bodyExpr, name, replacement)
+        }
         val bodyStr = localBody.toTransitString(
             symbolTypes + (localBind to resolvedLetType),
-            argSymbols - name,
+            if (name.isDiscardBinding()) argSymbols else argSymbols - name,
         )
         return "run { val $localBind = $initStr; $bodyStr }"
     }
