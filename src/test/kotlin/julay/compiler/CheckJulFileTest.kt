@@ -36,6 +36,8 @@ class CheckJulFileTest {
     fun checkJsonReportsSoftSyncAsWarningOnly() {
         val dir = Files.createTempDirectory("julay-check-warn")
         val file = dir.resolve("solo.jul")
+        // Soft sync warnings require a named `compile` target; without one,
+        // incomplete session/ordinary sync is allowed for intermediate assemblies.
         file.toFile().writeText(
             """
             proc Solo {
@@ -43,6 +45,7 @@ class CheckJulFileTest {
                 session transition ping() { transit: }
             }
             proc P := Solo
+            compile P
             """.trimIndent(),
         )
 
