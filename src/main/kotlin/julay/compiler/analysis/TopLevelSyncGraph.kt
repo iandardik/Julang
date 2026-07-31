@@ -13,8 +13,8 @@ import julay.compiler.pass.computeCompositionAlphabet
 /**
  * Immediate children of [root] as diagram nodes, with edges for actions that
  * composition-hide while folding those children (not nested syncs inside a child).
- * Also includes provider↔client meetings (clients leave the external alphabet;
- * providers keep a public action name as channel key).
+ * Also includes provider↔client meetings (each client leaves the external alphabet
+ * with the provider; clients never gain edges to each other).
  *
  * Called procfuns are added as nodes with unlabeled edges to their calling
  * top-level child (spawn-await, not SyncChannel peers).
@@ -113,22 +113,27 @@ fun computeTopLevelSyncGraph(
                     addEdgesBetween(leftNodes, rightNodes, action)
                 }
 
-            val leftByName = left.groupBy { it.name }
-            val rightByName = right.groupBy { it.name }
+            // Provider↔client meetings only involve offers that are still external at this
+            // compose step. Already-hidden clients must not gain edges to later clients
+            // (clients never sync with each other — only with the provider hub).
+            val leftExt = left.filter { !it.sourceInternal && !it.compositionHidden }
+            val rightExt = right.filter { !it.sourceInternal && !it.compositionHidden }
+            val leftByName = leftExt.groupBy { it.name }
+            val rightByName = rightExt.groupBy { it.name }
             for (name in leftByName.keys.intersect(rightByName.keys)) {
                 if (name == "initially") continue
                 val l = leftByName.getValue(name)
                 val r = rightByName.getValue(name)
-                val leftHasProvider = l.any { it.isProvider }
-                val rightHasProvider = r.any { it.isProvider }
-                val leftHasClient = l.any { it.isClient }
-                val rightHasClient = r.any { it.isClient }
-                if (!((leftHasProvider && rightHasClient) || (rightHasProvider && leftHasClient))) {
-                    continue
+                val leftProviders = l.filter { it.isProvider }.mapNotNull { tags[it.leafId] }.toSet()
+                val rightProviders = r.filter { it.isProvider }.mapNotNull { tags[it.leafId] }.toSet()
+                val leftClients = l.filter { it.isClient }.mapNotNull { tags[it.leafId] }.toSet()
+                val rightClients = r.filter { it.isClient }.mapNotNull { tags[it.leafId] }.toSet()
+                if (leftProviders.isNotEmpty() && rightClients.isNotEmpty()) {
+                    addEdgesBetween(leftProviders, rightClients, name)
                 }
-                val leftNodes = l.mapNotNull { tags[it.leafId] }.toSet()
-                val rightNodes = r.mapNotNull { tags[it.leafId] }.toSet()
-                addEdgesBetween(leftNodes, rightNodes, name)
+                if (rightProviders.isNotEmpty() && leftClients.isNotEmpty()) {
+                    addEdgesBetween(rightProviders, leftClients, name)
+                }
             }
         }
 

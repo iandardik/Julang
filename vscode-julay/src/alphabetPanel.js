@@ -509,11 +509,12 @@ function renderSyncGroups(groups) {
         .join(" ‖ ");
       const args = g.args && g.args.length ? `(${g.args.join(", ")})` : "()";
       const sample = (g.offers || [])[0];
-      const role = sample?.isConstructor
-        ? "constructor"
-        : sample?.isSession
-          ? "session"
-          : sample?.modifier || "ordinary";
+      const role = g.role
+        || (sample?.isConstructor
+          ? "constructor"
+          : sample?.isSession
+            ? "session"
+            : sample?.modifier || "ordinary");
       return `<li><code>${esc(g.name)}${esc(args)}</code> — ${esc(role)} — synchronized: ${peers}</li>`;
     })
     .join("\n");

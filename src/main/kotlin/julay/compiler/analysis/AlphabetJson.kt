@@ -75,8 +75,7 @@ private fun scopeAlphabetJson(
         external = alphabet.external.filterNot(::isSyntheticProcFunOffer)
         sourceInternal = alphabet.allOffers.filter { it.sourceInternal && !isSyntheticProcFunOffer(it) }
     }
-    val hidden = alphabet.allOffers.filter { it.compositionHidden && !it.sourceInternal }
-    val syncGroups = hidden.groupBy { it.channelKey }.entries.sortedBy { it.key }
+    val syncGroups = compositionHiddenSyncGroups(alphabet)
 
     return buildString {
         append("{\n")
@@ -93,6 +92,48 @@ private fun scopeAlphabetJson(
         append("  ]\n")
         append("}")
     }
+}
+
+/**
+ * Ordinary/session syncs share a private [AlphabetOffer.channelKey] and group together.
+ * Provider↔client meetings keep the public action name as channel key and hide only the
+ * clients; grouping those clients alone would wrongly look like they sync with each other.
+ * Emit one group per client that includes the matching provider peer.
+ */
+internal fun compositionHiddenSyncGroups(
+    alphabet: CompositionAlphabetResult,
+): List<Pair<String, List<AlphabetOffer>>> {
+    val hidden = alphabet.allOffers.filter { it.compositionHidden && !it.sourceInternal }
+    val providerByName = alphabet.allOffers
+        .filter { it.isProvider && !it.sourceInternal }
+        .groupBy { it.name }
+        .mapValues { (_, offers) -> offers.first() }
+
+    val providerClientClients = mutableListOf<AlphabetOffer>()
+    val ordinaryHidden = mutableListOf<AlphabetOffer>()
+    for (offer in hidden) {
+        val provider = providerByName[offer.name]
+        if (offer.isClient && provider != null && offer.channelKey == provider.channelKey) {
+            providerClientClients += offer
+        } else {
+            ordinaryHidden += offer
+        }
+    }
+
+    val ordinaryGroups = ordinaryHidden
+        .groupBy { it.channelKey }
+        .entries
+        .map { (key, offers) -> key to offers }
+
+    val providerClientGroups = providerClientClients
+        .sortedWith(compareBy({ it.name }, { it.pclassKey }, { it.occurrenceId }))
+        .map { client ->
+            val provider = providerByName.getValue(client.name)
+            // Distinct key so multiple clients of the same provider are separate list entries.
+            "${client.channelKey}@${client.occurrenceId}" to listOf(provider, client)
+        }
+
+    return (ordinaryGroups + providerClientGroups).sortedBy { it.first }
 }
 
 private fun compositionGraphJson(graph: TopLevelSyncGraph): String {
@@ -122,11 +163,26 @@ private fun compositionGraphJson(graph: TopLevelSyncGraph): String {
 }
 
 private fun syncGroupJson(channelKey: String, offers: List<AlphabetOffer>): String {
+    // Provider before clients so hub‖client listings read naturally in the IDE panel.
     val sorted = offers.sortedWith(
-        compareBy({ it.pclassKey }, { it.occurrenceId }, { it.introducingAssembly }),
+        compareBy(
+            { if (it.isProvider) 0 else 1 },
+            { it.pclassKey },
+            { it.occurrenceId },
+            { it.introducingAssembly },
+        ),
     )
     val actionName = sorted.firstOrNull()?.name ?: ""
     val sample = sorted.firstOrNull()
+    val hasProvider = sorted.any { it.isProvider }
+    val hasClient = sorted.any { it.isClient }
+    val roleLabel = when {
+        sample == null -> "ordinary"
+        sample.isConstructor -> "constructor"
+        sample.isSession -> "session"
+        hasProvider && hasClient -> "provider/client"
+        else -> modifierLabel(sample)
+    }
     return buildString {
         append("{\n")
         append("  \"name\": ").append(jsonString(actionName)).append(",\n")
@@ -135,6 +191,7 @@ private fun syncGroupJson(channelKey: String, offers: List<AlphabetOffer>): Stri
             append("  \"args\": ").append(argsJson(sample)).append(",\n")
             append("  \"isSession\": ").append(sample.isSession).append(",\n")
             append("  \"isConstructor\": ").append(sample.isConstructor).append(",\n")
+            append("  \"role\": ").append(jsonString(roleLabel)).append(",\n")
         }
         append("  \"peers\": [\n")
         sorted.forEachIndexed { i, o ->

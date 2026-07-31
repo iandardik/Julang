@@ -159,6 +159,76 @@ class AlphabetJsonTest {
     }
 
     @Test
+    fun multipleClientsDoNotSyncWithEachOtherOnProviderAction() {
+        // Hub || CliA || CliB: each client meets Hub; clients must not share a graph edge
+        // or a compositionHidden peer list with each other.
+        val dir = Files.createTempDirectory("julay-multi-client-graph")
+        val file = dir.resolve("main.jul")
+        file.writeText(
+            """
+            proc Hub {
+                constructor initially(args : List<String>) { transit: }
+                provider transition staleTerm(term : Int) { transit: }
+            }
+            proc CliA {
+                constructor initially(args : List<String>) { transit: }
+                client transition staleTerm(term : Int) { transit: }
+            }
+            proc CliB {
+                constructor initially(args : List<String>) { transit: }
+                client transition staleTerm(term : Int) { transit: }
+            }
+            proc P := Hub || CliA || CliB
+            compile P
+            """.trimIndent(),
+        )
+        val checked = prepareCheckedCompilation(file)
+        assertNotNull(checked)
+        val scope = resolveAnalyzeScope(
+            scopeNames = listOf("P"),
+            procDecls = checked.procDecls,
+            allPClassNames = checked.unit.allPClassNames,
+            allProcAliasNames = checked.unit.allProcNames,
+            librariesInUse = checked.librariesInUse,
+        )
+        assertNotNull(scope)
+        val json = buildAlphabetJsonDocument(
+            checked.ast as RootNode,
+            scope,
+            checked.librariesInUse,
+            checked.procDecls,
+        )
+        val graphIdx = json.indexOf("\"compositionGraph\"")
+        val externalIdx = json.indexOf("\"external\"")
+        assertTrue(graphIdx >= 0 && externalIdx > graphIdx, json)
+        val graphBlock = json.substring(graphIdx, externalIdx)
+        assertTrue(graphBlock.contains("\"a\": \"CliA\"") && graphBlock.contains("\"b\": \"Hub\""), graphBlock)
+        assertTrue(graphBlock.contains("\"a\": \"CliB\"") && graphBlock.contains("\"b\": \"Hub\""), graphBlock)
+        assertTrue(
+            !Regex(""""a": "CliA",\s*"b": "CliB"""").containsMatchIn(graphBlock) &&
+                !Regex(""""a": "CliB",\s*"b": "CliA"""").containsMatchIn(graphBlock),
+            "clients must not share a sync edge:\n$graphBlock",
+        )
+
+        val hiddenIdx = json.indexOf("\"compositionHidden\"")
+        assertTrue(hiddenIdx >= 0, json)
+        val hiddenBlock = json.substring(hiddenIdx)
+        // Each client pairs with Hub separately; Hub appears as a peer in each group.
+        assertTrue(hiddenBlock.contains("\"role\": \"provider/client\""), hiddenBlock)
+        assertTrue(
+            hiddenBlock.contains("\"pclassKey\": \"Hub\""),
+            "provider must appear in compositionHidden peers:\n$hiddenBlock",
+        )
+        // Clients must not be listed as the only peers of one shared group.
+        assertTrue(
+            !Regex(
+                """"peers": \[[^\]]*\"pclassKey\": \"CliA\"[^\]]*\"pclassKey\": \"CliB\""""
+            ).containsMatchIn(hiddenBlock.replace("\n", " ")),
+            "clients must not share one sync group:\n$hiddenBlock",
+        )
+    }
+
+    @Test
     fun compositionGraphIncludesProcFunCallEdgesWithoutActions() {
         val dir = Files.createTempDirectory("julay-procfun-graph")
         val file = dir.resolve("main.jul")
