@@ -59,14 +59,23 @@ fun checkJulFile(
         maximalCompositionRoots(procDecls, unit.entryDeclNames)
     }
     val librariesInUse = unit.librariesInUse(checkRoots, procDecls)
+    // Incomplete client / ordinary / session sync is an error/warning only for named
+    // `compile` targets; intermediate apis/procs may leave actions for a parent to sync.
+    val requireCompleteSync = jarTargets.isNotEmpty()
 
     if (checkRoots.isEmpty()) {
         val components = unit.allPClassNames + librariesInUse
-        collectPassDiagnostics(ast, components, librariesInUse, null, procDecls, entry, diagnostics)
+        collectPassDiagnostics(
+            ast, components, librariesInUse, null, procDecls, entry, diagnostics,
+            requireCompleteSync,
+        )
     } else {
         for (program in checkRoots) {
             val components = program.allProcNames(procDecls)
-            collectPassDiagnostics(ast, components, librariesInUse, program, procDecls, entry, diagnostics)
+            collectPassDiagnostics(
+                ast, components, librariesInUse, program, procDecls, entry, diagnostics,
+                requireCompleteSync,
+            )
         }
     }
 
@@ -107,18 +116,26 @@ private fun collectPassDiagnostics(
     procDecls: List<ProcDecl>,
     entry: Path,
     out: MutableList<StructuredDiagnostic>,
+    requireCompleteSync: Boolean,
 ) {
     val errors = ast.errorPass(
         components,
         librariesInUse,
         program = program,
         procDecls = procDecls,
+        requireCompleteSync = requireCompleteSync,
     )
     out += errors.map { it.toStructuredDiagnostic(entry) }
     if (errors.isNotEmpty()) {
         return
     }
-    val warnings = ast.warningPass(components, librariesInUse, program, procDecls)
+    val warnings = ast.warningPass(
+        components,
+        librariesInUse,
+        program,
+        procDecls,
+        requireCompleteSync = requireCompleteSync,
+    )
     out += warnings.map { it.toStructuredDiagnostic(entry) }
 }
 

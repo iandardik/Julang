@@ -46,12 +46,15 @@ Same-class ordinary offers never sync: when two occurrences of class `X` both ex
 
 ### Alphabet integrity (JAR and TLA+)
 
-These checks apply to the **compile/spec target** (same rules for JAR and TLA+):
+**Complete sync** of `client`, ordinary (default), and `session` actions is required only on the **top-level `compile` / TLA+ target** — not on intermediate apis or procs that a parent will compose later.
+
+On that top-level target:
 
 - External `client` of `w` with no `provider` `w` → error, **except** when every external client offer for `w` comes from a **procfun** (call-folded or listed in an api's `calls:`). Those surfaces stay visible on the parent until a provider peer is composed.
-- At most one `provider` per action name.
+- At most one `provider` per action name (always checked, including intermediate analyze).
+- Unsynced ordinary or session actions in the external alphabet → **warn** (JAR still succeeds). Tag them `internal` if a solo step is intentional. Specs may still use unilateral assume/system actions.
 
-JAR `compile` targets **warn** (but still succeed) when unsynced ordinary or session actions remain in their external alphabet — those offers simply never enable at runtime. Tag them `internal` if a solo step is intentional. Specs may still use unilateral assume/system actions.
+`analyze`, IDE alphabet panels, and `check` without a `compile` directive do not require incomplete client / ordinary / session wiring to be resolved yet.
 
 ### Procfuns and alphabets
 

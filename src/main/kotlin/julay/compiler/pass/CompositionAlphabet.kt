@@ -491,18 +491,23 @@ fun unsyncedOrdinaryWarnings(external: List<AlphabetOffer>): List<CompileWarning
         }
 
 /**
- * Alphabet integrity for JAR and TLA+ targets (same checks):
- * - at most one provider per action name
- * - every external client must have a provider of the same name
- *   (except clients whose only offers come from composed procfuns —
- *   those surface in the parent alphabet for analyze/IDE, matched later
- *   when a provider peer is composed)
+ * Alphabet integrity for composition roots:
+ * - at most one provider per action name (always)
+ * - when [requireCompleteSync] is true (top-level JAR / TLA+ `compile` target only):
+ *   every external client must have a provider of the same name, except when
+ *   every external client offer for that name comes from a composed procfun —
+ *   those stay visible on the parent until a provider peer is composed.
+ *
+ * Incomplete sync of `client`, ordinary (default), and `session` actions is allowed on
+ * intermediate assemblies; only the compiled top-level process must be fully synced
+ * (dangling clients → error; leftover ordinary/session → warning via [unsyncedOrdinaryWarnings]).
  *
  * Same-class ordinary duplicates are reported eagerly in [composeAlphabets].
  */
 fun alphabetIntegrityErrors(
     alphabet: CompositionAlphabetResult,
     procFunNames: Set<String> = emptySet(),
+    requireCompleteSync: Boolean = true,
 ): List<CompileError> {
     val external = alphabet.external
     val errors = mutableListOf<CompileError>()
@@ -526,6 +531,8 @@ fun alphabetIntegrityErrors(
             }
         }
     }
+
+    if (!requireCompleteSync) return errors
 
     val providerNames = providerCountByName.keys
     for ((name, clients) in external.filter { it.isClient }.groupBy { it.name }) {

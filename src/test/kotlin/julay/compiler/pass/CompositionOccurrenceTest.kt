@@ -194,6 +194,10 @@ class CompositionOccurrenceTest {
         val root = ProcDecl("P", listOf(ProcDecl("C", emptyList(), ProcDeclType.Proc)), ProcDeclType.Proc)
         val result = computeCompositionAlphabet(root, listOf(root), leafMap)
         assertTrue(alphabetIntegrityErrors(result).any { it.toString().contains("no `provider`") })
+        assertTrue(
+            alphabetIntegrityErrors(result, requireCompleteSync = false).isEmpty(),
+            "intermediate analyze/check must allow unmatched clients",
+        )
     }
 
     @Test

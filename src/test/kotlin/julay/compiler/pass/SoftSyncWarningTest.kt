@@ -16,7 +16,7 @@ import kotlin.test.assertTrue
 class SoftSyncWarningTest {
 
     @Test
-    fun analyzeUnilateralSessionWarnsButEmitsAlphabet() {
+    fun analyzeUnilateralSessionEmitsAlphabetWithoutSyncRequirement() {
         val dir = Files.createTempDirectory("julay-soft-sync-analyze")
         val file = dir.resolve("solo.jul")
         file.toFile().writeText(
@@ -33,13 +33,32 @@ class SoftSyncWarningTest {
         assertNotNull(checked)
 
         val components = checked.unit.allPClassNames + checked.librariesInUse
-        val ok = runErrorAndWarningPasses(checked.ast, components, checked.librariesInUse)
-        assertTrue(ok, "missing sync peers must not abort analyze")
+        val ok = runErrorAndWarningPasses(
+            checked.ast,
+            components,
+            checked.librariesInUse,
+            requireCompleteSync = false,
+        )
+        assertTrue(ok, "incomplete session sync must not abort intermediate analyze")
 
-        val warnings = checked.ast.warningPass(components, checked.librariesInUse)
+        val intermediateWarnings = checked.ast.warningPass(
+            components,
+            checked.librariesInUse,
+            requireCompleteSync = false,
+        )
+        assertFalse(
+            intermediateWarnings.any { it.toString().contains("exactly two sync peers") },
+            "intermediate analyze must not require session sync; got: $intermediateWarnings",
+        )
+
+        val compileWarnings = checked.ast.warningPass(
+            components,
+            checked.librariesInUse,
+            requireCompleteSync = true,
+        )
         assertTrue(
-            warnings.any { it.toString().contains("exactly two sync peers") },
-            "expected peer-count warning; got: $warnings",
+            compileWarnings.any { it.toString().contains("exactly two sync peers") },
+            "top-level compile must still warn on unilateral session; got: $compileWarnings",
         )
 
         val scope = resolveAnalyzeScope(
@@ -174,6 +193,89 @@ class SoftSyncWarningTest {
             warnings.any { it.toString().contains("provider with no clients") },
             "expected provider-deadlock warning; got: $warnings",
         )
+    }
+
+    @Test
+    fun intermediateApiDanglingClientAnalyzesAlphabet() {
+        val dir = Files.createTempDirectory("julay-intermediate-client")
+        val file = dir.resolve("hb.jul")
+        file.toFile().writeText(
+            """
+            proc HeartbeatImpl {
+                constructor start() { transit: }
+                client transition staleTerm(term : Int) { transit: }
+            }
+            api Heartbeat {
+                proc: HeartbeatImpl
+            }
+            """.trimIndent(),
+        )
+
+        val checked = prepareCheckedCompilation(file)
+        assertNotNull(checked)
+        assertTrue(checked.jarTargets.isEmpty(), "no compile directive")
+
+        val roots = julay.compiler.maximalCompositionRoots(
+            checked.procDecls,
+            checked.unit.entryDeclNames,
+        )
+        assertEquals(listOf("Heartbeat"), roots.map { it.name })
+        val program = roots.single()
+        val components = program.allProcNames(checked.procDecls)
+        val ok = runErrorAndWarningPasses(
+            checked.ast,
+            components,
+            checked.librariesInUse,
+            program.name,
+            program = program,
+            procDecls = checked.procDecls,
+            requireCompleteSync = false,
+        )
+        assertTrue(ok, "unmatched client must not abort intermediate analyze")
+
+        val intermediateWarnings = checked.ast.warningPass(
+            components,
+            checked.librariesInUse,
+            program,
+            checked.procDecls,
+            requireCompleteSync = false,
+        )
+        assertTrue(
+            intermediateWarnings.none {
+                it.toString().contains("not synchronized") ||
+                    it.toString().contains("exactly two sync peers") ||
+                    it.toString().contains("no `provider`")
+            },
+            "intermediate must not require complete sync; got: $intermediateWarnings",
+        )
+
+        val compileOk = runErrorAndWarningPasses(
+            checked.ast,
+            components,
+            checked.librariesInUse,
+            program.name,
+            program = program,
+            procDecls = checked.procDecls,
+            requireCompleteSync = true,
+        )
+        assertFalse(compileOk, "direct compile must still reject unmatched client")
+
+        val scope = resolveAnalyzeScope(
+            scopeNames = listOf("Heartbeat"),
+            procDecls = checked.procDecls,
+            allPClassNames = checked.unit.allPClassNames,
+            allProcAliasNames = checked.unit.allProcNames,
+            librariesInUse = checked.librariesInUse,
+        )
+        assertNotNull(scope)
+        val json = buildAlphabetJsonDocument(
+            checked.ast as RootNode,
+            scope,
+            checked.librariesInUse,
+            checked.procDecls,
+        )
+        assertTrue(json.contains("\"name\": \"staleTerm\""), json)
+        assertTrue(json.contains("\"modifier\": \"client\""), json)
     }
 
     @Test

@@ -16,10 +16,19 @@ fun analyzeJulFile(
         maximalCompositionRoots(procDecls, unit.entryDeclNames)
     }
     val librariesInUse = unit.librariesInUse(checkRoots, procDecls)
+    // Alphabet viewing must not hard-fail (or warn) on incomplete client / ordinary /
+    // session sync in intermediate assemblies; that applies only to `compile` targets.
+    val requireCompleteSync = false
 
     if (checkRoots.isEmpty()) {
         val components = unit.allPClassNames + librariesInUse
-        if (!runErrorAndWarningPasses(ast, components, librariesInUse)) {
+        if (!runErrorAndWarningPasses(
+                ast,
+                components,
+                librariesInUse,
+                requireCompleteSync = requireCompleteSync,
+            )
+        ) {
             return
         }
     } else {
@@ -32,6 +41,7 @@ fun analyzeJulFile(
                     program.name,
                     program = program,
                     procDecls = procDecls,
+                    requireCompleteSync = requireCompleteSync,
                 )
             ) {
                 return

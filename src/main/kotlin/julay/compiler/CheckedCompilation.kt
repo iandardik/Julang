@@ -182,12 +182,18 @@ fun runErrorAndWarningPasses(
     programName: String? = null,
     program: ProcDecl? = null,
     procDecls: List<ProcDecl> = emptyList(),
+    /**
+     * When false (analyze / check of intermediate assemblies), unmatched client /
+     * ordinary / session sync is not required. True only for the top-level `compile` target.
+     */
+    requireCompleteSync: Boolean = true,
 ): Boolean {
     val errors = ast.errorPass(
         components,
         librariesInUse,
         program = program,
         procDecls = procDecls,
+        requireCompleteSync = requireCompleteSync,
     )
     if (errors.isNotEmpty()) {
         errors.forEach { println(it) }
@@ -198,6 +204,12 @@ fun runErrorAndWarningPasses(
         }
         return false
     }
-    ast.warningPass(components, librariesInUse, program, procDecls).forEach { System.err.println(it) }
+    ast.warningPass(
+        components,
+        librariesInUse,
+        program,
+        procDecls,
+        requireCompleteSync = requireCompleteSync,
+    ).forEach { System.err.println(it) }
     return true
 }

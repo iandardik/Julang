@@ -13,14 +13,18 @@ fun ASTNode.errorPass(
     librariesInUse: Set<String> = emptySet(),
     program: ProcDecl? = null,
     procDecls: List<ProcDecl> = emptyList(),
+    /** True only for the top-level `compile` / TLA target. */
+    requireCompleteSync: Boolean = true,
 ): List<CompileError> = when (this) {
-    is RootNode -> errorPassRoot(procs, librariesInUse, program, procDecls)
+    is RootNode -> errorPassRoot(procs, librariesInUse, program, procDecls, requireCompleteSync)
     is ProcClassNode -> errorPassProcClass(procs, librariesInUse)
     is ProcFunNode -> errorPassProcFun(procs, librariesInUse)
     is ObjClassNode -> errorPassObjClass(procs, librariesInUse)
     is ConstructorNode -> errorPassConstructor(procs, librariesInUse)
     is TransitionNode -> errorPassTransition(procs, librariesInUse)
-    else -> children.flatMap { it.errorPass(procs, librariesInUse, program, procDecls) }
+    else -> children.flatMap {
+        it.errorPass(procs, librariesInUse, program, procDecls, requireCompleteSync)
+    }
 }
 
 fun ASTNode.warningPass(
@@ -28,9 +32,13 @@ fun ASTNode.warningPass(
     librariesInUse: Set<String> = emptySet(),
     program: ProcDecl? = null,
     procDecls: List<ProcDecl> = emptyList(),
+    /** True only for the top-level `compile` / TLA target. */
+    requireCompleteSync: Boolean = true,
 ): List<CompileWarning> =
     if (this is RootNode) {
-        actionConsistencyWarnings(procs, librariesInUse, program, procDecls)
+        actionConsistencyWarnings(
+            procs, librariesInUse, program, procDecls, requireCompleteSync,
+        )
     } else {
         emptyList()
     }
@@ -74,9 +82,12 @@ private fun RootNode.errorPassRoot(
     librariesInUse: Set<String>,
     program: ProcDecl? = null,
     procDecls: List<ProcDecl> = emptyList(),
+    requireCompleteSync: Boolean = true,
 ): List<CompileError> =
     children.flatMap { it.errorPass(procs, librariesInUse) } +
-        actionConsistencyErrors(procs, librariesInUse, program, procDecls) +
+        actionConsistencyErrors(
+            procs, librariesInUse, program, procDecls, requireCompleteSync,
+        ) +
         overlappingDeclNamesErrors() +
         procFunCompositionErrors(procDecls)
 
@@ -85,6 +96,7 @@ private fun RootNode.actionConsistencyErrors(
     librariesInUse: Set<String>,
     program: ProcDecl?,
     procDecls: List<ProcDecl>,
+    requireCompleteSync: Boolean,
 ): List<CompileError> {
     val leafMap = leafActionMap(this, procs, librariesInUse)
     val alphabetResult = if (program != null) {
@@ -297,7 +309,11 @@ private fun RootNode.actionConsistencyErrors(
     val sessionOrdinaryPairErrors = sessionOrdinaryPairMixErrors(offers)
 
     val integrity = if (program != null) {
-        alphabetIntegrityErrors(alphabetResult, collectProcFunNames(this))
+        alphabetIntegrityErrors(
+            alphabetResult,
+            collectProcFunNames(this),
+            requireCompleteSync = requireCompleteSync,
+        )
     } else {
         emptyList()
     }
@@ -371,6 +387,7 @@ private fun RootNode.actionConsistencyWarnings(
     librariesInUse: Set<String>,
     program: ProcDecl?,
     procDecls: List<ProcDecl>,
+    requireCompleteSync: Boolean,
 ): List<CompileWarning> {
     val leafMap = leafActionMap(this, procs, librariesInUse)
     val procFunNames = collectProcFunNames(this)
@@ -378,6 +395,12 @@ private fun RootNode.actionConsistencyWarnings(
         computeCompositionAlphabet(program, procDecls, leafMap, procFunNames, this)
     } else {
         null
+    }
+
+    // Sync-completeness (client / ordinary / session peer wiring, lone providers) is
+    // only required on the top-level `compile` target — not intermediate apis/procs.
+    if (!requireCompleteSync) {
+        return procFunHavocWarnings(program, procDecls)
     }
 
     // Prefer composition alphabet (includes call-folded procfun clients). Flat leaf scans
@@ -422,8 +445,8 @@ private fun RootNode.actionConsistencyWarnings(
         }
     }
 
-    // With a compile target, prefer the external-alphabet unsynced message.
-    // Without one (plain analyze), warn on peer-count mismatches across the CU.
+    // With a composition root, prefer the external-alphabet unsynced message.
+    // Without one, warn on peer-count mismatches across the CU.
     val syncWarnings = if (alphabetResult != null) {
         unsyncedOrdinaryWarnings(alphabetResult.external)
     } else {
