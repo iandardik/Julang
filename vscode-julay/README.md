@@ -49,7 +49,7 @@ code --install-extension julay-0.1.0.vsix
 
 ### Alphabet panel
 
-- **Composition sync** diagram (when the proc has `||` children and/or calls procfuns): immediate top-level components plus called procfuns as nodes (each with a checkbox, on by default). Unchecking hides that node and its edges/action labels. Sync edges are solid and labeled by composition-hidden actions; **procfun call** edges are dotted and unlabeled (spawn-await, not SyncChannel peers). Nested syncs under a child assembly are not shown.
+- **Composition sync** diagram (when the proc has `||` children, or a leaf calls procfuns): immediate top-level components as nodes; for a **leaf** scope, also procfuns that leaf calls (each with a checkbox, on by default). Unchecking hides that node and its edges/action labels. Sync edges are solid and labeled by composition-hidden actions; **procfun call** edges are dotted arrows from caller to callee (spawn-await, not SyncChannel peers). Nested syncs and nested procfun calls under a child assembly are not shown on the parent.
 - Default list view: **external** alphabet only.
 - Toggle **Show internal** to reveal two separate sections:
   1. **Source-internal** — tagged `internal` in the proc definition

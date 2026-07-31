@@ -5,7 +5,7 @@ import julay.compiler.ast.RootNode
 import julay.compiler.decl.ProcDecl
 import julay.compiler.pass.AlphabetOffer
 import julay.compiler.pass.LeafActionId
-import julay.compiler.pass.collectLeafOccurrences
+import julay.compiler.pass.collectApiQualifiedProcFunCallsInProc
 import julay.compiler.pass.collectProcFunCallsInProc
 import julay.compiler.pass.composeAlphabets
 import julay.compiler.pass.computeCompositionAlphabet
@@ -16,8 +16,9 @@ import julay.compiler.pass.computeCompositionAlphabet
  * Also includes provider↔client meetings (each client leaves the external alphabet
  * with the provider; clients never gain edges to each other).
  *
- * Called procfuns are added as nodes with unlabeled edges to their calling
- * top-level child (spawn-await, not SyncChannel peers).
+ * For a **leaf** analyze root only: called procfuns (bare and api-qualified) are
+ * added as nodes with unlabeled directed edges caller→callee (spawn-await, not
+ * SyncChannel peers). Composites never lift nested call edges onto their diagram.
  */
 data class TopLevelSyncGraph(
     val nodes: List<String>,
@@ -27,7 +28,10 @@ data class TopLevelSyncGraph(
 data class TopLevelSyncEdge(
     val a: String,
     val b: String,
-    /** Empty for procfun call edges; otherwise composition-hidden / provider-client action names. */
+    /**
+     * Empty for directed procfun call edges (`a` = caller, `b` = callee);
+     * otherwise undirected composition-hidden / provider-client action names.
+     */
     val actions: List<String>,
 )
 
@@ -147,21 +151,24 @@ fun computeTopLevelSyncGraph(
         }
     }
 
-    // Spawn-await call edges: top-level child → called procfun (no action labels).
+    // Spawn-await call edges only for leaf analyze roots (no action labels; directed).
     val pclasses = ast?.declNodes()?.filterIsInstance<ProcClassNode>()?.associateBy { it.name() }.orEmpty()
     val extraProcFunNodes = linkedSetOf<String>()
     val callerToCallees = mutableMapOf<String, MutableSet<String>>()
-    if (ast != null && procFunNames.isNotEmpty() && pclasses.isNotEmpty()) {
-        childDecls.forEachIndexed { index, child ->
-            val callerNode = childNodes[index]
-            val called = calledProcFunNamesUnderChild(child, procDecls, procFunNames, pclasses)
-            for (pf in called) {
-                val calleeNode = childNodes.firstOrNull { it == pf }
-                    ?: pf.also { extraProcFunNodes += it }
-                if (callerNode != calleeNode) {
-                    edgeActions.getOrPut(canonPair(callerNode, calleeNode)) { mutableSetOf() }
-                    callerToCallees.getOrPut(callerNode) { mutableSetOf() }.add(calleeNode)
-                }
+    val callEdgePairs = mutableListOf<Pair<String, String>>()
+    if (
+        resolvedRoot.components.isEmpty() &&
+        ast != null &&
+        procFunNames.isNotEmpty() &&
+        pclasses.isNotEmpty()
+    ) {
+        val callerNode = childNodes.single()
+        val called = calledProcFunNamesInLeaf(callerNode, procFunNames, pclasses)
+        for (pf in called) {
+            if (callerNode != pf) {
+                extraProcFunNodes += pf
+                callEdgePairs += callerNode to pf
+                callerToCallees.getOrPut(callerNode) { mutableSetOf() }.add(pf)
             }
         }
     }
@@ -171,7 +178,7 @@ fun computeTopLevelSyncGraph(
         return TopLevelSyncGraph(nodes = emptyList(), edges = emptyList())
     }
 
-    val edges = edgeActions.entries
+    val syncEdges = edgeActions.entries
         .map { (pair, actions) ->
             TopLevelSyncEdge(
                 a = pair.first,
@@ -179,7 +186,13 @@ fun computeTopLevelSyncGraph(
                 actions = actions.sorted(),
             )
         }
-        .sortedWith(compareBy({ it.a }, { it.b }))
+    val callEdges = callEdgePairs
+        .distinct()
+        .map { (caller, callee) ->
+            TopLevelSyncEdge(a = caller, b = callee, actions = emptyList())
+        }
+    val edges = (syncEdges + callEdges)
+        .sortedWith(compareBy({ it.a }, { it.b }, { it.actions.isEmpty() }))
 
     val nodes = orderDiagramNodes(
         childNodes = childNodes,
@@ -333,19 +346,16 @@ private fun permute(items: List<String>, visit: (List<String>) -> Unit) {
     go(0)
 }
 
-/** Procfun names called by non-procfun host leaves under [child]. */
-private fun calledProcFunNamesUnderChild(
-    child: ProcDecl,
-    procDecls: List<ProcDecl>,
+/** Procfun names called directly by leaf host [hostName] (bare and api-qualified). */
+private fun calledProcFunNamesInLeaf(
+    hostName: String,
     procFunNames: Set<String>,
     pclasses: Map<String, ProcClassNode>,
 ): Set<String> {
-    val hosts = collectLeafOccurrences(child, procDecls)
-        .map { it.pclassName }
-        .filter { it !in procFunNames }
-        .distinct()
-    return hosts.flatMap { host ->
-        val pc = pclasses[host] ?: return@flatMap emptyList()
-        collectProcFunCallsInProc(pc).mapNotNull { it.resolvedProcFunOrNull()?.procFunName() }
-    }.filter { it in procFunNames }.toSet()
+    if (hostName in procFunNames) return emptySet()
+    val pc = pclasses[hostName] ?: return emptySet()
+    val bare = collectProcFunCallsInProc(pc).mapNotNull { it.resolvedProcFunOrNull()?.procFunName() }
+    val qualified = collectApiQualifiedProcFunCallsInProc(pc)
+        .mapNotNull { it.resolvedProcFunOrNull()?.procFunName() }
+    return (bare + qualified).filter { it in procFunNames }.toSet()
 }

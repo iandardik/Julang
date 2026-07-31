@@ -177,7 +177,7 @@ function renderCompositionGraph(graph, scopeName) {
   }).replace(/</g, "\\u003c");
   return `
     <h2>Composition sync</h2>
-    <p class="hint">Immediate children, called procfuns, and actions internalized by <code>||</code> between children. Solid lines are composition syncs; dotted lines are spawn-await procfun calls. Uncheck a proc’s box to hide it and its edges.</p>
+    <p class="hint">Immediate <code>||</code> children and their composition syncs; for a leaf scope, also procfuns that leaf calls. Solid lines are syncs; dotted arrows are spawn-await procfun calls (caller→callee). Uncheck a proc’s box to hide it and its edges.</p>
     <script type="application/json" id="compositionGraphData">${payload}</script>
     <div class="diagram-wrap" id="compositionSvgWrap"></div>
     <div id="compositionFilters" class="diagram-filters"></div>
@@ -282,13 +282,16 @@ function buildCompositionDiagramContent(nodes, edges) {
       const left = Math.min(ia, ib);
       const right = Math.max(ia, ib);
       const actions = Array.isArray(edge.actions) ? edge.actions : [];
+      const isCallEdge = actions.length === 0;
       return {
         left,
         right,
-        aName: nodes[left],
-        bName: nodes[right],
+        aName: edge.a,
+        bName: edge.b,
+        callerIdx: ia,
+        calleeIdx: ib,
         actions,
-        isCallEdge: actions.length === 0,
+        isCallEdge,
         span: right - left,
       };
     })
@@ -346,9 +349,13 @@ function buildCompositionDiagramContent(nodes, edges) {
     const spanMin = Math.min(x1, x2);
     const spanMax = Math.max(x1, x2);
     if (edge.isCallEdge) {
+      // Caller→callee: start on the caller's port facing the callee, end on the callee.
+      const callerIsLeft = edge.callerIdx === edge.left;
+      const xStart = callerIsLeft ? x1 : x2;
+      const xEnd = callerIsLeft ? x2 : x1;
       return {
-        x1,
-        x2,
+        x1: xStart,
+        x2: xEnd,
         mid,
         lines: [],
         isCallEdge: true,
@@ -429,7 +436,7 @@ function buildCompositionDiagramContent(nodes, edges) {
     const railY = labelY + layout.labelH / 2;
     if (layout.isCallEdge) {
       pathParts.push(
-        `<path d="M ${layout.x1} ${yBox} V ${railY} H ${layout.x2} V ${yBox}" class="edge-line edge-line-call" fill="none"/>`,
+        `<path d="M ${layout.x1} ${yBox} V ${railY} H ${layout.x2} V ${yBox}" class="edge-line edge-line-call" fill="none" marker-end="url(#call-arrow)"/>`,
       );
       return;
     }
@@ -457,7 +464,7 @@ function buildCompositionDiagramContent(nodes, edges) {
       : `<ul class="edge-list">${normalized
           .map((e) => {
             if (e.isCallEdge) {
-              return `<li><code>${esc(e.aName)}</code> ― <code>${esc(e.bName)}</code> <span class="hint">(call)</span></li>`;
+              return `<li><code>${esc(e.aName)}</code> → <code>${esc(e.bName)}</code> <span class="hint">(call)</span></li>`;
             }
             const acts = e.actions.join(", ");
             return `<li><code>${esc(e.aName)}</code> ― <code>${esc(e.bName)}</code>: ${esc(acts)}</li>`;
@@ -466,6 +473,11 @@ function buildCompositionDiagramContent(nodes, edges) {
 
   return {
     svg: `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Composition sync diagram">
+        <defs>
+          <marker id="call-arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" class="edge-call-arrow"/>
+          </marker>
+        </defs>
         ${edgeParts.join("\n")}
         ${nodeRects}
       </svg>`,
@@ -597,6 +609,7 @@ function wrapHtml(body) {
   .node-label { fill: var(--vscode-foreground); font-family: var(--vscode-editor-font-family); font-size: 12px; }
   .edge-line { stroke: var(--vscode-descriptionForeground, #888); stroke-width: 1.25; }
   .edge-line-call { stroke-dasharray: 4 3; }
+  .edge-call-arrow { fill: var(--vscode-descriptionForeground, #888); }
   .edge-action-box {
     fill: var(--vscode-badge-background, #4d4d4d);
     stroke: var(--vscode-badge-background, #4d4d4d);

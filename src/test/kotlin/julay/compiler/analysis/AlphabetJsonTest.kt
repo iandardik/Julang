@@ -5,7 +5,6 @@ import julay.compiler.prepareCheckedCompilation
 import java.nio.file.Files
 import kotlin.io.path.writeText
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -229,7 +228,7 @@ class AlphabetJsonTest {
     }
 
     @Test
-    fun compositionGraphIncludesProcFunCallEdgesWithoutActions() {
+    fun compositionGraphOmitsNestedProcFunCallsOnComposite() {
         val dir = Files.createTempDirectory("julay-procfun-graph")
         val file = dir.resolve("main.jul")
         file.writeText(
@@ -282,25 +281,139 @@ class AlphabetJsonTest {
         val graphBlock = json.substring(graphIdx, externalIdx)
         assertTrue(graphBlock.contains("\"RpcReqHandler\""), graphBlock)
         assertTrue(graphBlock.contains("\"Peer\""), graphBlock)
-        assertTrue(graphBlock.contains("\"clientAppendRPC\""), graphBlock)
         assertTrue(
-            graphBlock.contains("\"a\": \"RpcReqHandler\"") &&
-                graphBlock.contains("\"b\": \"clientAppendRPC\"") &&
-                graphBlock.contains("\"actions\": []"),
-            "expected unlabeled call edge RpcReqHandler—clientAppendRPC:\n$graphBlock",
+            !graphBlock.contains("\"clientAppendRPC\""),
+            "composite must not lift nested procfun call nodes:\n$graphBlock",
         )
-        // Caller with procfuns is ordered at the end of the || spine, then callees.
         assertTrue(
-            graphBlock.contains("\"nodes\": [\"Peer\", \"RpcReqHandler\", \"clientAppendRPC\"]") ||
-                graphBlock.contains("\"nodes\": [\"RpcReqHandler\", \"Peer\", \"clientAppendRPC\"]"),
-            "expected procfun after caller on the spine:\n$graphBlock",
+            !graphBlock.contains("\"actions\": []"),
+            "composite must not emit call edges:\n$graphBlock",
         )
     }
 
     @Test
-    fun compositionGraphOrdersSyncSpineThenProcFuns() {
-        // ServerInitializer — HttpServer — RpcReqHandler — helpers minimizes crossings
-        // vs composition order RpcReqHandler || ServerInitializer || HttpServer.
+    fun leafCompositionGraphIncludesBareProcFunCallEdge() {
+        val dir = Files.createTempDirectory("julay-leaf-procfun-graph")
+        val file = dir.resolve("main.jul")
+        file.writeText(
+            """
+            procfun clientAppendRPC(n : Int) : Int {
+                client transition noLeader() {
+                    return: 0
+                }
+                transition done() {
+                    return: n
+                }
+            }
+
+            proc RpcReqHandler {
+                var out : Int
+                constructor initially(args : List<String>) {
+                    transit: out := clientAppendRPC(1)
+                }
+            }
+
+            compile RpcReqHandler
+            """.trimIndent(),
+        )
+        val checked = prepareCheckedCompilation(file)
+        assertNotNull(checked)
+        val scope = resolveAnalyzeScope(
+            scopeNames = listOf("RpcReqHandler"),
+            procDecls = checked.procDecls,
+            allPClassNames = checked.unit.allPClassNames,
+            allProcAliasNames = checked.unit.allProcNames,
+            librariesInUse = checked.librariesInUse,
+            procFunNames = julay.compiler.collectProcFunNames(checked.ast as RootNode),
+        )
+        assertNotNull(scope)
+        val json = buildAlphabetJsonDocument(
+            checked.ast as RootNode,
+            scope,
+            checked.librariesInUse,
+            checked.procDecls,
+        )
+        val graphIdx = json.indexOf("\"compositionGraph\"")
+        val externalIdx = json.indexOf("\"external\"")
+        assertTrue(graphIdx >= 0 && externalIdx > graphIdx, json)
+        val graphBlock = json.substring(graphIdx, externalIdx)
+        assertTrue(
+            graphBlock.contains("\"nodes\": [\"RpcReqHandler\", \"clientAppendRPC\"]"),
+            "leaf diagram should be caller then callee:\n$graphBlock",
+        )
+        assertTrue(
+            graphBlock.contains("\"a\": \"RpcReqHandler\"") &&
+                graphBlock.contains("\"b\": \"clientAppendRPC\"") &&
+                graphBlock.contains("\"actions\": []"),
+            "expected directed call edge RpcReqHandler→clientAppendRPC:\n$graphBlock",
+        )
+    }
+
+    @Test
+    fun leafCompositionGraphIncludesApiQualifiedProcFunCallEdge() {
+        val dir = Files.createTempDirectory("julay-leaf-api-call-graph")
+        val file = dir.resolve("main.jul")
+        file.writeText(
+            """
+            procfun startTimeout() : Boolean {
+                transition startTimeout() {
+                    return: true
+                }
+            }
+
+            proc TimeoutImpl {
+                constructor startTimeout() { transit: }
+            }
+
+            export api Timeout {
+                proc: TimeoutImpl
+                calls: startTimeout
+            }
+
+            proc Protocol {
+                var ok : Boolean
+                constructor initially(args : List<String>) {
+                    transit: ok := Timeout.startTimeout()
+                }
+            }
+
+            compile Protocol
+            """.trimIndent(),
+        )
+        val checked = prepareCheckedCompilation(file)
+        assertNotNull(checked)
+        val scope = resolveAnalyzeScope(
+            scopeNames = listOf("Protocol"),
+            procDecls = checked.procDecls,
+            allPClassNames = checked.unit.allPClassNames,
+            allProcAliasNames = checked.unit.allProcNames,
+            librariesInUse = checked.librariesInUse,
+            procFunNames = julay.compiler.collectProcFunNames(checked.ast as RootNode),
+        )
+        assertNotNull(scope)
+        val json = buildAlphabetJsonDocument(
+            checked.ast as RootNode,
+            scope,
+            checked.librariesInUse,
+            checked.procDecls,
+        )
+        val graphIdx = json.indexOf("\"compositionGraph\"")
+        val externalIdx = json.indexOf("\"external\"")
+        assertTrue(graphIdx >= 0 && externalIdx > graphIdx, json)
+        val graphBlock = json.substring(graphIdx, externalIdx)
+        assertTrue(graphBlock.contains("\"Protocol\""), graphBlock)
+        assertTrue(graphBlock.contains("\"startTimeout\""), graphBlock)
+        assertTrue(
+            graphBlock.contains("\"a\": \"Protocol\"") &&
+                graphBlock.contains("\"b\": \"startTimeout\"") &&
+                graphBlock.contains("\"actions\": []"),
+            "expected directed api-qualified call edge Protocol→startTimeout:\n$graphBlock",
+        )
+    }
+
+    @Test
+    fun compositionGraphCompositeShowsOnlySyncSpine() {
+        // Nested helper under RpcReqHandler must not appear on the composite diagram.
         val dir = Files.createTempDirectory("julay-graph-order")
         val file = dir.resolve("main.jul")
         file.writeText(
@@ -356,11 +469,11 @@ class AlphabetJsonTest {
         val nodes = nodesMatch!!.groupValues[1]
             .split(",")
             .map { it.trim().removeSurrounding("\"") }
-        assertEquals(
-            listOf("ServerInitializer", "HttpServer", "RpcReqHandler", "helper"),
-            nodes,
-            "sync spine then caller then procfun:\n$graphBlock",
+        assertTrue(
+            nodes.toSet() == setOf("ServerInitializer", "HttpServer", "RpcReqHandler"),
+            "composite sync spine only (no nested procfun):\n$graphBlock",
         )
+        assertTrue(!nodes.contains("helper"), graphBlock)
     }
 
     @Test

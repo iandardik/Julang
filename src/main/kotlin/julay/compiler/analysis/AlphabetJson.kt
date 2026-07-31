@@ -137,6 +137,8 @@ internal fun compositionHiddenSyncGroups(
 }
 
 private fun compositionGraphJson(graph: TopLevelSyncGraph): String {
+    // Call edges use empty actions with a=caller, b=callee (directed).
+    // Sync edges use non-empty actions; a/b are an undirected canonical pair.
     if (graph.nodes.isEmpty()) {
         return """{"nodes": [], "edges": []}"""
     }
