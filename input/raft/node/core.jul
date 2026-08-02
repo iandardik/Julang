@@ -11,6 +11,10 @@ import node.rpc_in.RpcIn
 import node.rpc_out.RpcOut
 import node.vote_requester.VoteRequester
 
+export api RaftCore {
+    proc: RaftProtocol || ElectionTimeout || VoteRequester || LeaderHeartbeat || RpcIn || RpcOut
+}
+
 proc RaftProtocol {
     const self : Node
     const cluster : List<Node>
@@ -373,8 +377,4 @@ proc RaftProtocol {
             & knownLeaderId < length(cluster)
             & cluster[knownLeaderId] = leader
     }
-}
-
-export api RaftCore {
-    proc: RaftProtocol || ElectionTimeout || VoteRequester || LeaderHeartbeat || RpcIn || RpcOut
 }

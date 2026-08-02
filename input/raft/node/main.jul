@@ -14,6 +14,9 @@ import node.election_timeout.ElectionTimeout
 import node.leader_heartbeat.LeaderHeartbeat
 import node.vote_requester.VoteRequester
 
+export proc Raft := RaftNodeMain || RaftCore
+export proc NodeLogic := Raft
+
 obj CfgPair {
     me : Node
     cluster : List<Node>
@@ -104,7 +107,3 @@ proc RaftNodeMain {
             step := "done"
     }
 }
-
-export proc Raft := RaftNodeMain || RaftCore
-
-export proc NodeLogic := Raft

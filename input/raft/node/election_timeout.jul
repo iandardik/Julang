@@ -1,6 +1,11 @@
 import node.lib.Node
 import julay.proclib.Timer
 
+export api ElectionTimeout {
+    proc: ElectionTimeoutImpl || Timer
+    calls: gotHeartbeat, startElectionTimeout, stopElectionTimeout
+}
+
 procfun startElectionTimeout(self : Node, leaderTerm : Int) : Boolean {
     transition startElectionTimeout(me : Node, term : Int) {
         guard:
@@ -97,9 +102,4 @@ proc ElectionTimeoutImpl {
         transit:
             step := "done"
     }
-}
-
-export api ElectionTimeout {
-    proc: ElectionTimeoutImpl || Timer
-    calls: gotHeartbeat, startElectionTimeout, stopElectionTimeout
 }

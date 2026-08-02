@@ -8,89 +8,9 @@ import node.lib.encodeRequestVote
 import node.lib.encodeAppendEntries
 import node.lib.parseBool
 
-proc RpcOutClient {
-    var step : String
-    var httpReq : HttpClientRequest
-    var httpResp : HttpClientResponse
-
-    constructor startRpcOut() {
-        transit:
-            step := "createHttpClient"
-            httpReq := HttpClientRequest {
-                url := "",
-                method := "",
-                body := ""
-            }
-            httpResp := HttpClientResponse {
-                code := 0,
-                body := ""
-            }
-    }
-
-    session transition createHttpClient() {
-        guard:
-            step = "createHttpClient"
-        transit:
-            step := "idle"
-    }
-
-    session transition closeHttpClient() {
-        guard: false
-    }
-
-    transition sendRpcOut(req : HttpClientRequest) {
-        guard:
-            step = "idle"
-        transit:
-            httpReq := req
-            step := "send"
-    }
-
-    session transition sendRequest(req : HttpClientRequest) {
-        guard:
-            & step = "send"
-            & req = httpReq
-        transit:
-            step := "recv"
-    }
-
-    session transition receiveResponse(resp : HttpClientResponse) {
-        guard:
-            step = "recv"
-        transit:
-            httpResp := resp
-            step := "end"
-    }
-
-    transition responseRpcOut(resp : HttpClientResponse) {
-        guard:
-            & step = "end"
-            & resp = httpResp
-        transit:
-            step := "idle"
-    }
-}
-
-procfun rpcOutClientCaller(rpcReq : HttpClientRequest) : HttpClientResponse {
-    var step : String := "send"
-    transition sendRpcOut(req : HttpClientRequest) {
-        guard:
-            & step = "send"
-            & req = rpcReq
-        transit:
-            step := "recv"
-    }
-    transition responseRpcOut(resp : HttpClientResponse) {
-        guard:
-            step = "recv"
-        return:
-            resp
-    }
-}
-
-api RpcOutCaller {
-    proc: RpcOutClient
-    calls: rpcOutClientCaller
+export api RpcOut {
+    proc: RpcOutCaller || HttpClient
+    calls: outRequestVoteRPC, outAppendEntriesRPC
 }
 
 procfun outRequestVoteRPC(
@@ -194,7 +114,92 @@ procfun outAppendEntriesRPC(peer : Node, data : AppendEntriesData) : Boolean {
     }
 }
 
-export api RpcOut {
-    proc: RpcOutCaller || HttpClient
-    calls: outRequestVoteRPC, outAppendEntriesRPC
+
+/*
+ * RpcOutCaller code.
+*/
+
+api RpcOutCaller {
+    proc: RpcOutClient
+    calls: rpcOutClientCaller
+}
+
+procfun rpcOutClientCaller(rpcReq : HttpClientRequest) : HttpClientResponse {
+    var step : String := "send"
+    transition sendRpcOut(req : HttpClientRequest) {
+        guard:
+            & step = "send"
+            & req = rpcReq
+        transit:
+            step := "recv"
+    }
+    transition responseRpcOut(resp : HttpClientResponse) {
+        guard:
+            step = "recv"
+        return:
+            resp
+    }
+}
+
+proc RpcOutClient {
+    var step : String
+    var httpReq : HttpClientRequest
+    var httpResp : HttpClientResponse
+
+    constructor startRpcOut() {
+        transit:
+            step := "createHttpClient"
+            httpReq := HttpClientRequest {
+                url := "",
+                method := "",
+                body := ""
+            }
+            httpResp := HttpClientResponse {
+                code := 0,
+                body := ""
+            }
+    }
+
+    session transition createHttpClient() {
+        guard:
+            step = "createHttpClient"
+        transit:
+            step := "idle"
+    }
+
+    session transition closeHttpClient() {
+        guard: false
+    }
+
+    transition sendRpcOut(req : HttpClientRequest) {
+        guard:
+            step = "idle"
+        transit:
+            httpReq := req
+            step := "send"
+    }
+
+    session transition sendRequest(req : HttpClientRequest) {
+        guard:
+            & step = "send"
+            & req = httpReq
+        transit:
+            step := "recv"
+    }
+
+    session transition receiveResponse(resp : HttpClientResponse) {
+        guard:
+            step = "recv"
+        transit:
+            httpResp := resp
+            step := "end"
+    }
+
+    transition responseRpcOut(resp : HttpClientResponse) {
+        guard:
+            & step = "end"
+            & resp = httpResp
+        transit:
+            step := "idle"
+    }
 }

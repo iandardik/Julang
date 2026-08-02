@@ -4,6 +4,11 @@ import node.lib.Node
 import node.lib.AppendEntriesData
 import node.rpc_out.RpcOut
 
+export api LeaderHeartbeat {
+    proc: LeaderHeartbeatImpl
+    calls: startLeaderHeartbeat
+}
+
 procfun startLeaderHeartbeat(self : Node, leaderTerm : Int, theCluster : List<Node>) : Boolean {
     transition startLeaderHeartbeat(me : Node, term : Int, cluster : List<Node>) {
         guard:
@@ -58,9 +63,4 @@ proc LeaderHeartbeatImpl {
         transit:
             step := "done"
     }
-}
-
-export api LeaderHeartbeat {
-    proc: LeaderHeartbeatImpl
-    calls: startLeaderHeartbeat
 }
