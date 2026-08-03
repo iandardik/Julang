@@ -15,7 +15,7 @@ export api RaftCore {
     proc: RaftProtocol || ElectionTimeout || VoteRequester || LeaderHeartbeat || RpcIn || RpcOut
 }
 
-proc RaftProtocol {
+export proc RaftProtocol {
     const self : Node
     const cluster : List<Node>
     var currentTerm : Int
@@ -168,27 +168,12 @@ proc RaftProtocol {
     ) {
         guard:
             let (logOk : Boolean :=
-                (lastLogTerm > lastLogTermVar) | (lastLogTerm = lastLogTermVar & lastLogIndex >= length(log))
-            ) {
+                (lastLogTerm > lastLogTermVar) | (lastLogTerm = lastLogTermVar & lastLogIndex >= length(log))) {
+            let (voteCondition : Boolean := inTerm = currentTerm & (votedFor = -1 | votedFor = candidateId) & logOk) {
                 & inTerm <= currentTerm
                 & outTerm = currentTerm
-                & (
-                    | (
-                        & voteGranted
-                        & inTerm = currentTerm
-                        & (votedFor = -1 | votedFor = candidateId)
-                        & logOk
-                    )
-                    | (
-                        & ~voteGranted
-                        & ~(
-                            & inTerm = currentTerm
-                            & (votedFor = -1 | votedFor = candidateId)
-                            & logOk
-                        )
-                    )
-                )
-            }
+                & (voteGranted <=> voteCondition)
+            }}
         transit:
             votedFor := if (voteGranted) { candidateId } else { votedFor }
     }
@@ -218,7 +203,7 @@ proc RaftProtocol {
         guard:
             & inTerm <= currentTerm
             & outTerm = currentTerm
-            & (entriesLen = 0 | entriesLen = 1)
+            & (entriesLen in {0, 1})
             & (
                 | (
                     & ~success
