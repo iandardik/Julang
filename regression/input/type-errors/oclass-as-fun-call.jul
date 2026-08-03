@@ -1,0 +1,17 @@
+obj Point {
+    x : Int
+    y : Int
+}
+
+proc Worker {
+    var pos : Point
+
+    constructor initially(args : List<String>) {
+        transit:
+            pos := Point(0, 0)
+    }
+}
+
+proc WorkerMain := Worker
+
+compile WorkerMain

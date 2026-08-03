@@ -1,0 +1,5 @@
+source: regression/input/syntax-errors/oclass-parens.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Object values use braces: Message { field := ... }, not Message(...)"
+  - "Found compile errors, exiting."

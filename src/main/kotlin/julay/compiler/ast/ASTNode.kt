@@ -1126,7 +1126,12 @@ class BinaryOpExprNode(
             }
             "&", "|", "=>" -> {
                 if (lhsType !is BoolType || rhsType !is BoolType) {
-                    throw RuntimeException("Cannot apply \"$op\" to types $lhsType and $rhsType")
+                    val hint = if (op == "=>") {
+                        " (\"=>\" is Boolean implication; for map entries use \"->\", e.g. [\"k\" -> v])"
+                    } else {
+                        ""
+                    }
+                    throw RuntimeException("Cannot apply \"$op\" to types $lhsType and $rhsType$hint")
                 }
                 boolType
             }

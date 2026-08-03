@@ -23,6 +23,14 @@ private var typePassApiEnv: Map<String, ApiNode> = emptyMap()
 private var typePassCallToApi: Map<String, String> = emptyMap()
 private var typePassInsideProcFun: Boolean = false
 
+/** Prefer an obj-literal hint when `Name(...)` names a known obj type rather than a function. */
+internal fun unknownFunctionMessage(name: String, registry: ObjClassRegistry): String =
+    if (registry.rawDecl(name) != null || ObjClassBuiltinRegistry.isBuiltin(name)) {
+        "\"$name\" is an obj type, not a function; write $name { field := ... }, not $name(...)"
+    } else {
+        "Unknown function \"$name\""
+    }
+
 fun RootNode.typePass(
     unit: CompilationUnit,
     allowUnindexedSpec: Boolean = false,
@@ -1653,7 +1661,12 @@ private fun FunCallExprNode.typePassFunCall(
         return typeMismatchErrors
     }
     val funNode = funEnv[callName()]
-        ?: return listOf(OneLocCompileError(programLocation(), "Unknown function \"${callName()}\""))
+        ?: return listOf(
+            OneLocCompileError(
+                programLocation(),
+                unknownFunctionMessage(callName(), registry),
+            ),
+        )
     resolveFun(funNode)
     val params = try {
         funNode.funArgs().actionArgs()

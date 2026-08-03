@@ -1,0 +1,6 @@
+source: regression/input/type-errors/map-implies-arrow.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "\"=>\" is Boolean implication"
+  - "for map entries use \"->\""
+  - "Found type errors; exiting."

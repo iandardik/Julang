@@ -1,0 +1,12 @@
+proc Worker {
+    var mp : Map<String, Int>
+
+    constructor initially(args : List<String>) {
+        transit:
+            mp := ["a" => 1]
+    }
+}
+
+proc WorkerMain := Worker
+
+compile WorkerMain

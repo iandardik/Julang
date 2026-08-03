@@ -1,0 +1,6 @@
+source: regression/input/syntax-errors/oclass-parens-assign.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Julay does not support Point(field := ...) with parentheses"
+  - "for object values write Point { field := ... }"
+  - "Found compile errors, exiting."

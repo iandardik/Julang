@@ -1,0 +1,20 @@
+obj Message {
+    msgType : String
+}
+
+proc Net {
+    var messages : Set<Message> := {}
+
+    constructor initially(args : List<String>) {}
+
+    internal transition send() {
+        transit:
+            messages := messages + {Message(
+                msgType := "RequestVote"
+            )}
+    }
+}
+
+proc NetMain := Net
+
+compile NetMain

@@ -55,7 +55,69 @@ internal fun rewriteSyntaxError(
             "Missing type declaration before \":=\"; expected \": Type\""
         }
     }
+
+    // `TypeName(field := ...)` — object literals use braces, not call parentheses.
+    // ANTLR often reports this as "no viable alternative at input '{Message(\n  field :='"
+    // (inside a set) or similar snippets that include both `Name(` and `:=`.
+    val oclassParensWithFields = Regex(
+        """no viable alternative at input '(?:\{)?([A-Za-z_][A-Za-z0-9_]*)\([\s\S]*?:=""",
+    )
+    oclassParensWithFields.find(msg)?.let { match ->
+        val name = match.groupValues[1]
+        return "Object values use braces: $name { field := ... }, not $name(...)"
+    }
+
+    // `pos := Point(x := 0)` — parser finishes `Point` as an expression, then `(` is
+    // "extraneous" at statement level. Same shape for invalid named call args.
+    if ((msg.contains("extraneous input '('") || msg.contains("mismatched input '('")) &&
+        looksLikeOclassFieldAssignAfterParen(offendingSymbol, recognizer)
+    ) {
+        val name = previousIdentifier(offendingSymbol, recognizer) ?: "Name"
+        return "Julay does not support $name(field := ...) with parentheses; " +
+            "for object values write $name { field := ... }"
+    }
+
+    // `(1, 2)` mistaken for a list / tuple
+    if (Regex("""no viable alternative at input '\([^']*,""").containsMatchIn(msg)) {
+        return "Unexpected \"(...)\"; list values use brackets: [a, b], not (a, b)"
+    }
+
+    // Trailing comma in `{1,}` / `[1,]` / etc.
+    if (Regex("""no viable alternative at input '[\[{][^']*,\s*[\]}]'""").containsMatchIn(msg)) {
+        return "Unexpected trailing comma in collection literal"
+    }
+
     return "Syntax error: $msg"
+}
+
+/**
+ * After an offending `(`, look ahead for `ID :=` (object field assign syntax).
+ */
+private fun looksLikeOclassFieldAssignAfterParen(
+    offendingSymbol: Any?,
+    recognizer: Recognizer<*, *>?,
+): Boolean {
+    val token = offendingSymbol as? Token ?: return false
+    val parser = recognizer as? Parser ?: return false
+    val stream = parser.tokenStream ?: return false
+    var i = token.tokenIndex + 1
+    var sawId = false
+    while (i < stream.size()) {
+        val next = stream.get(i)
+        if (next.channel != Token.DEFAULT_CHANNEL) {
+            i++
+            continue
+        }
+        if (next.type == Token.EOF) return false
+        if (!sawId) {
+            if (next.type != JulayLexer.ID) return false
+            sawId = true
+            i++
+            continue
+        }
+        return next.type == JulayLexer.ASGN_EQ
+    }
+    return false
 }
 
 private fun previousIdentifier(

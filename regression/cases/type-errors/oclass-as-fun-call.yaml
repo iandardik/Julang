@@ -1,0 +1,6 @@
+source: regression/input/type-errors/oclass-as-fun-call.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "\"Point\" is an obj type, not a function"
+  - "write Point { field := ... }, not Point(...)"
+  - "Found type errors; exiting."
