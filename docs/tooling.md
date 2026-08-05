@@ -26,6 +26,7 @@ java -jar build/libs/julayc.jar --compile-tla IncServer path/to/file.jul
 | `--compile-tla NAME` | Emit TLA+ for proc `NAME` as `<true> NAME <true>` (repeatable; no extra invariants) |
 | `--keep-build` | Keep generated `<name>-jul-build` dirs after success |
 | `--allow-unindexed-spec` | Warn instead of error when a multi-instance proc appears unindexed in a spec |
+| `--disable-opt` / `--disable-opt=ID,...` | Disable sync optimizations (bare `--disable-opt` = all). Ids: `eq-unify`, `arg-ownership`, `directed-eval`. Use `=` when passing ids. See [Compiler optimizations](language/compiler-optimizations.md) |
 
 ### Environment
 

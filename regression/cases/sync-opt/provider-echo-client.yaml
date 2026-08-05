@@ -1,0 +1,9 @@
+source: regression/input/sync-opt/provider-echo-client.jul
+tags: [sync-opt, sync-opt-parity]
+compileTwiceWithDisableOpt: true
+programs:
+  - name: ProviderEchoClient
+    run:
+      timeoutMs: 60000
+      expectStdoutContains:
+        - "echo 8"

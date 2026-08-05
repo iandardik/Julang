@@ -22,6 +22,7 @@ fun codegenPass(
     program: ProcDecl,
     procDecls: List<ProcDecl>,
     librariesInUse: Set<String> = emptySet(),
+    syncOptimizeConfig: SyncOptimizeConfig = SyncOptimizeConfig.ALL_ON,
 ): CodegenResult {
     val libPClassNames = librariesInUse
     val leafMap = leafActionMap(ast, program.allProcNames(procDecls), librariesInUse)
@@ -65,7 +66,8 @@ fun codegenPass(
     val procFunInfo = "val procFunInfo = $procFunInfoBlock"
     val objClassDecls = ast.resolvedObjClassDecls()
         .filterNot { ObjClassBuiltinRegistry.isBuiltin(it.name) }
-    val runProgram = "Program(tsInfo, args.toList(), procFunInfo).run()"
+    val runProgram =
+        "Program(tsInfo, args.toList(), procFunInfo, ${SyncOptimizeConfig.toKotlinExpr(syncOptimizeConfig)}).run()"
     val mainFunction = "suspend fun main(args : Array<String>) {" +
         "\n$staticInfo".prependIndent() +
         "\n$procFunInfo".prependIndent() +

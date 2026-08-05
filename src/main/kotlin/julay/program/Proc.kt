@@ -204,6 +204,8 @@ class Proc(
         scrubClosedSessionsAndAffinity()
         val solver = ctx.mkSolver()
         var nextPayload = Optional.empty<SyncPayload>()
+        // Enablement stays on Z3: local guards often mix equalities with embeddings
+        // (string concat, collection ops) where a wrong fast-path unsat skips needed steps.
         val enabledActions = transitionSystem.actions(ctx).filter { act ->
             solver.reset()
             solver.add(act.guard)

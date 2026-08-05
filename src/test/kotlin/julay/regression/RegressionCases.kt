@@ -30,6 +30,10 @@ object RegressionCases {
         val disabled = root["disabled"] as? Boolean ?: false
         val expectCompileOutputContains =
             (root["expectCompileOutputContains"] as? List<*>)?.map { it.toString() } ?: emptyList()
+        val compileArgs = (root["compileArgs"] as? List<*>)?.map { it.toString() } ?: emptyList()
+        val compileTwiceWithDisableOpt =
+            root["compileTwiceWithDisableOpt"] as? Boolean
+                ?: ("sync-opt-parity" in tags)
         @Suppress("UNCHECKED_CAST")
         val programsRaw = root["programs"] as? List<Map<String, Any>> ?: emptyList()
         val programs = programsRaw.map { parseProgram(it) }
@@ -42,6 +46,7 @@ object RegressionCases {
         return CaseFile(
             caseId(casesDir, file), source, tags, disabled,
             expectCompileFailure, expectCompileOutputContains, programs, expectJars,
+            compileArgs, compileTwiceWithDisableOpt,
         )
     }
 

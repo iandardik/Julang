@@ -1,0 +1,9 @@
+source: regression/input/sync-opt/relational-residual.jul
+tags: [sync-opt, sync-opt-parity]
+compileTwiceWithDisableOpt: true
+programs:
+  - name: RelationalResidual
+    run:
+      timeoutMs: 60000
+      expectStdoutContains:
+        - "high"

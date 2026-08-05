@@ -5,6 +5,7 @@ import julay.compiler.ast.ValueProcExprNode
 import julay.compiler.pass.compileSpecToTla
 import julay.compiler.pass.procFunCompositionErrors
 import julay.compiler.pass.procFunHavocWarnings
+import julay.program.SyncOptimizeConfig
 import java.nio.file.Path
 
 fun compileJulFile(
@@ -15,6 +16,7 @@ fun compileJulFile(
     allowUnindexedSpec: Boolean = false,
     compileNames: List<String> = emptyList(),
     compileTlaNames: List<String> = emptyList(),
+    syncOptimizeConfig: SyncOptimizeConfig = SyncOptimizeConfig.ALL_ON,
 ) {
     val checked = prepareCheckedCompilation(
         source,
@@ -46,7 +48,10 @@ fun compileJulFile(
     }
 
     jarTargets.forEach {
-        compileProgram(it, ast, procDecls, librariesInUse, keepBuild, compilerJar)
+        compileProgram(
+            it, ast, procDecls, librariesInUse, keepBuild, compilerJar,
+            syncOptimizeConfig = syncOptimizeConfig,
+        )
     }
 
     val specNodes = ast.declNodes().filterIsInstance<SpecNode>().associateBy { it.name() }

@@ -1,0 +1,48 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+
+/*
+ * Equality-only peer sync: both sides constrain handoff(x) with equalities.
+ */
+
+proc Sender {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    transition handoff(x : Int) {
+        guard: x = 7
+        // sender silent for deterministic stdout
+    }
+}
+
+proc Receiver {
+    var k : Int
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            k := 7
+            done := false
+    }
+
+    transition handoff(x : Int) {
+        guard:
+            & x = k
+            & ~done
+        transit:
+            done := true
+        after:
+            println("got " + x)
+    }
+
+    internal transition exitSystem() {
+        guard: done
+        after:
+            exitProcess()
+    }
+}
+
+proc EqOnlyPeerSync := Sender || Receiver
+
+compile EqOnlyPeerSync

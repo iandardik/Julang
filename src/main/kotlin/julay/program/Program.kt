@@ -44,6 +44,9 @@ class Program {
     val staticChannelTable: Map<SymbolicAction, ProgramAction>
     val godScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** Sync fast-path configuration baked in at compile time (see `--disable-opt`). */
+    val syncOptimizeConfig: SyncOptimizeConfig
+
     private val componentInfo: Set<TransitionSystemStaticInfo>
     private val constructorsByAction:
         Map<SymbolicAction, List<Pair<TransitionSystemStaticInfo, suspend (Program, ConcreteAction) -> TransitionSystem>>>
@@ -63,8 +66,10 @@ class Program {
         componentInfo: Set<TransitionSystemStaticInfo>,
         cliArgs: List<String> = emptyList(),
         procFunInfo: Set<TransitionSystemStaticInfo> = emptySet(),
+        syncOptimizeConfig: SyncOptimizeConfig = SyncOptimizeConfig.ALL_ON,
     ) {
         this.componentInfo = componentInfo
+        this.syncOptimizeConfig = syncOptimizeConfig
         this.procFunByName = procFunInfo.associateBy { it.name }
 
         val argsVar = Variable("args", listType(stringType))
@@ -204,9 +209,14 @@ class Program {
 
     private fun constraintsSatisfiable(constraints: Set<Constraint>): Boolean =
         withEphemeralContext { ctx ->
-            val solver = ctx.mkSolver()
-            constraints.forEach { c -> solver.add(c.expr.translate(ctx) as BoolExpr) }
-            solver.check() == Status.SATISFIABLE
+            when (val fast = julay.program.sync.SyncOptimize.trySatisfiable(constraints, syncOptimizeConfig, ctx)) {
+                null -> {
+                    val solver = ctx.mkSolver()
+                    constraints.forEach { c -> solver.add(c.expr.translate(ctx) as BoolExpr) }
+                    solver.check() == Status.SATISFIABLE
+                }
+                else -> fast
+            }
         }
 
     private fun extractSyncPayload(
@@ -215,16 +225,26 @@ class Program {
         installSession: Boolean,
     ): Optional<SyncPayload> =
         withEphemeralContext { ctx ->
-            val solver = ctx.mkSolver()
-            constraints.forEach { c -> solver.add(c.expr.translate(ctx) as BoolExpr) }
-            if (solver.check() != Status.SATISFIABLE) {
+            val fastConcrete =
+                julay.program.sync.SyncOptimize.tryConcreteAction(act, constraints, syncOptimizeConfig, ctx)
+            val concrete: ConcreteAction? = when {
+                fastConcrete == null -> {
+                    val solver = ctx.mkSolver()
+                    constraints.forEach { c -> solver.add(c.expr.translate(ctx) as BoolExpr) }
+                    if (solver.check() != Status.SATISFIABLE) {
+                        null
+                    } else if (act.args.isEmpty()) {
+                        ConcreteAction(act, emptyMap())
+                    } else {
+                        ConcreteAction(act, ctx, solver.model)
+                    }
+                }
+                fastConcrete.isEmpty -> null
+                else -> fastConcrete.get()
+            }
+            if (concrete == null) {
                 Optional.empty()
             } else {
-                val concrete = if (act.args.isEmpty()) {
-                    ConcreteAction(act, emptyMap())
-                } else {
-                    ConcreteAction(act, ctx, solver.model)
-                }
                 val syncPeers = constraints
                     .filter { it.procId >= 0 }
                     .map { c ->

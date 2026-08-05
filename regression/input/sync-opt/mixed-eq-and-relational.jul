@@ -1,0 +1,43 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+
+/*
+ * Mixed equality + relational on one action → residual Z3 for the whole action.
+ */
+
+proc P {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    transition mix(a : Int, b : Int) {
+        guard: a = 2 & b > a
+    }
+}
+
+proc Q {
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            done := false
+    }
+
+    transition mix(a : Int, b : Int) {
+        guard: b = 5 & ~done
+        transit:
+            done := true
+        after:
+            println("Q " + a + " " + b)
+    }
+
+    internal transition exitSystem() {
+        guard: done
+        after:
+            exitProcess()
+    }
+}
+
+proc MixedEqAndRelational := P || Q
+
+compile MixedEqAndRelational

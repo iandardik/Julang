@@ -8,7 +8,7 @@ Compose procs with `||`:
 proc IncServer := Counter || Printer || ServerLogic
 ```
 
-Each component keeps its own state. They interact only by **synchronizing on shared actions**.
+Each component keeps its own state. They interact only by **synchronizing on shared actions**. Rendezvous may use sync fast paths that avoid Z3 on simple equality guards; see [Compiler optimizations](compiler-optimizations.md).
 
 `||` is **occurrence-based** and **left-associative**: each mention of a proc class is a separate occurrence (`A || A` is two occurrences of `A`, not one). Do not confuse this with exchanging action arguments **by copy** (no shared references).
 

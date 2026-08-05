@@ -1,0 +1,46 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+
+/*
+ * Client binds n; provider leaves n unconstrained (ownership / unilateral).
+ */
+
+proc Hub {
+    var seen : Int
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            seen := -1
+            done := false
+    }
+
+    provider transition req(n : Int) {
+        guard: ~done
+        transit:
+            seen := n
+            done := true
+        after:
+            println("hub " + n)
+    }
+
+    internal transition exitSystem() {
+        guard: done & seen = 3
+        after:
+            exitProcess()
+    }
+}
+
+proc Client {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    client transition req(n : Int) {
+        guard: n = 3
+    }
+}
+
+proc UnilateralArgOwner := Hub || Client
+
+compile UnilateralArgOwner

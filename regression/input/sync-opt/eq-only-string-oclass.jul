@@ -1,0 +1,50 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+
+obj Point {
+    x : Int
+    y : Int
+}
+
+proc Left {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    transition handoff(p : Point) {
+        guard:
+            & p.x = 1
+            & p.y = 2
+        // no print — keep stdout deterministic across schedules
+    }
+}
+
+proc Right {
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            done := false
+    }
+
+    transition handoff(p : Point) {
+        guard:
+            & p.x = 1
+            & p.y = 2
+            & ~done
+        transit:
+            done := true
+        after:
+            println("R " + p.x + "," + p.y)
+    }
+
+    internal transition exitSystem() {
+        guard: done
+        after:
+            exitProcess()
+    }
+}
+
+proc EqOnlyStringOclass := Left || Right
+
+compile EqOnlyStringOclass

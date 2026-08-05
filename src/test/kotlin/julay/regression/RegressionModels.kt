@@ -12,6 +12,13 @@ data class CaseFile(
     val programs: List<ProgramCase>,
     /** Compile must produce at least one program JAR (compile-only success). */
     val expectJars: Boolean = false,
+    /** Extra args passed to `julayc` before the source path (e.g. `--disable-opt`). */
+    val compileArgs: List<String> = emptyList(),
+    /**
+     * When true, compile and run once with default opts and once with `--disable-opt`,
+     * requiring identical program stdout for each program that declares expectStdout*.
+     */
+    val compileTwiceWithDisableOpt: Boolean = false,
 )
 
 data class ProgramCase(

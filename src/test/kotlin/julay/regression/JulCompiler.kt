@@ -12,14 +12,16 @@ object JulCompiler {
         workspace: File,
         sourceJul: File,
         timeoutMs: Long = RegressionTimeouts.CASE_MS,
+        compileArgs: List<String> = emptyList(),
     ): CompileResult {
         val compilerJar = resolveCompilerJar(projectRoot)
         val dest = File(workspace, "julayc.jar")
         Files.copy(compilerJar.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING)
 
-        val proc = ProcessBuilder(
-            "java", "-jar", dest.absolutePath, sourceJul.absolutePath,
-        )
+        val cmd = mutableListOf("java", "-jar", dest.absolutePath)
+        cmd.addAll(compileArgs)
+        cmd.add(sourceJul.absolutePath)
+        val proc = ProcessBuilder(cmd)
             .directory(workspace)
             .redirectErrorStream(true)
             .start()

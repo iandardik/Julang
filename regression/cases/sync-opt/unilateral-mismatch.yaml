@@ -1,0 +1,7 @@
+source: regression/input/sync-opt/unilateral-mismatch.jul
+tags: [sync-opt]
+programs:
+  - name: UnilateralMismatch
+    expectFailure: true
+    run:
+      timeoutMs: 8000

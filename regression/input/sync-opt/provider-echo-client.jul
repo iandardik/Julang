@@ -1,0 +1,48 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+
+/*
+ * Client binds req; provider sets resp = req + 1 (directed-eval).
+ */
+
+proc Server {
+    var last : Int
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            last := 0
+            done := false
+    }
+
+    provider transition echo(req : Int, resp : Int) {
+        guard:
+            & ~done
+            & resp = req + 1
+        transit:
+            last := resp
+            done := true
+        after:
+            println("echo " + resp)
+    }
+
+    internal transition exitSystem() {
+        guard: done & last = 8
+        after:
+            exitProcess()
+    }
+}
+
+proc User {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    client transition echo(req : Int, resp : Int) {
+        guard: req = 7
+    }
+}
+
+proc ProviderEchoClient := Server || User
+
+compile ProviderEchoClient

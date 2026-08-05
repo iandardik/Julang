@@ -11,7 +11,10 @@ object RegressionRunner {
     fun runAll(projectRoot: File) {
         val caseFilter = System.getenv("REGRESSION_CASE")?.trim()?.takeIf { it.isNotEmpty() }
         val cases = RegressionCases.loadAll(projectRoot).filter { case ->
-            caseFilter == null || case.id == caseFilter || case.id.endsWith("/$caseFilter")
+            caseFilter == null ||
+                case.id == caseFilter ||
+                case.id.startsWith("$caseFilter/") ||
+                case.id.endsWith("/$caseFilter")
         }
         check(cases.isNotEmpty()) {
             "No regression cases matched REGRESSION_CASE=${caseFilter ?: "(unset)"}"
@@ -71,6 +74,7 @@ object RegressionRunner {
                 workspace,
                 source,
                 timeoutMs = RegressionTimeouts.capMs(RegressionTimeouts.CASE_MS, deadlineMs),
+                compileArgs = case.compileArgs,
             )
 
             if (case.expectCompileFailure) {
@@ -108,9 +112,49 @@ object RegressionRunner {
 
             stageWorkspaceFiles(projectRoot, workspace, case)
 
+            val stdoutByProgram = mutableMapOf<String, String>()
             case.programs.forEach { program ->
                 RegressionTimeouts.requireRemaining(case.id, deadlineMs)
-                background = runProgram(projectRoot, case, workspace, compileResult.jars, program, background, deadlineMs)
+                background = runProgram(
+                    projectRoot, case, workspace, compileResult.jars, program, background, deadlineMs,
+                    stdoutSink = if (case.compileTwiceWithDisableOpt) stdoutByProgram else null,
+                )
+            }
+
+            if (case.compileTwiceWithDisableOpt) {
+                background?.destroy()
+                background = null
+                // Drop program jars so the second compile's outputs are unambiguous.
+                compileResult.jars.values.forEach { it.delete() }
+                val disableArgs = case.compileArgs.filter { it != "--disable-opt" && !it.startsWith("--disable-opt=") } +
+                    listOf("--disable-opt")
+                val compileOff = JulCompiler.compile(
+                    projectRoot,
+                    workspace,
+                    source,
+                    timeoutMs = RegressionTimeouts.capMs(RegressionTimeouts.CASE_MS, deadlineMs),
+                    compileArgs = disableArgs,
+                )
+                check(compileOff.jars.isNotEmpty()) {
+                    "No program JARs for --disable-opt recompile of ${case.id}\n--- output ---\n${compileOff.output}"
+                }
+                case.programs.forEach { program ->
+                    RegressionTimeouts.requireRemaining(case.id, deadlineMs)
+                    val offStdout = mutableMapOf<String, String>()
+                    background = runProgram(
+                        projectRoot, case, workspace, compileOff.jars, program, background, deadlineMs,
+                        stdoutSink = offStdout,
+                    )
+                    val onOut = stdoutByProgram[program.name]
+                    val offOut = offStdout[program.name]
+                    if (onOut != null && offOut != null) {
+                        assertTrue(
+                            onOut == offOut,
+                            "Opt-on vs --disable-opt stdout mismatch for ${program.name} in ${case.id}\n" +
+                                "--- opts on ---\n$onOut\n--- disable-opt ---\n$offOut",
+                        )
+                    }
+                }
             }
         } finally {
             background?.destroy()
@@ -162,6 +206,7 @@ object RegressionRunner {
         program: ProgramCase,
         background: JulProcess.Running?,
         deadlineMs: Long,
+        stdoutSink: MutableMap<String, String>? = null,
     ): JulProcess.Running? {
         val jar = jars[program.name]
             ?: throw AssertionError("No JAR for program ${program.name} in case ${case.id}; have ${jars.keys}")
@@ -213,6 +258,7 @@ object RegressionRunner {
                     "Expected program ${program.name} in case ${case.id} to fail but it completed successfully",
                 )
             }
+            stdoutSink?.put(program.name, stdout)
             StdoutMatcher.assertMatches(projectRoot, stdout, capped)
         } catch (e: AssertionError) {
             if (!program.expectFailure) throw e

@@ -1,0 +1,9 @@
+source: regression/input/sync-opt/eq-only-string-oclass.jul
+tags: [sync-opt, sync-opt-parity]
+compileTwiceWithDisableOpt: true
+programs:
+  - name: EqOnlyStringOclass
+    run:
+      timeoutMs: 60000
+      expectStdoutContains:
+        - "R 1,2"

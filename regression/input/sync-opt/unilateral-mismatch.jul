@@ -1,0 +1,36 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+
+/*
+ * Conflicting equalities on n — must not sync (expect hang / timeout failure).
+ */
+
+proc A {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    transition handoff(n : Int) {
+        guard: n = 1
+        after:
+            println("A")
+            exitProcess()
+    }
+}
+
+proc B {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    transition handoff(n : Int) {
+        guard: n = 2
+        after:
+            println("B")
+            exitProcess()
+    }
+}
+
+proc UnilateralMismatch := A || B
+
+compile UnilateralMismatch

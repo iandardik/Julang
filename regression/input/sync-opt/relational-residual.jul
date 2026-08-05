@@ -1,0 +1,43 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+
+/*
+ * Relational residual Z3: x < y must still sync via solver.
+ */
+
+proc Low {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    transition pair(x : Int, y : Int) {
+        guard: x < y & x = 3
+    }
+}
+
+proc High {
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            done := false
+    }
+
+    transition pair(x : Int, y : Int) {
+        guard: y > 5 & ~done
+        transit:
+            done := true
+        after:
+            println("high " + x + " " + y)
+    }
+
+    internal transition exitSystem() {
+        guard: done
+        after:
+            exitProcess()
+    }
+}
+
+proc RelationalResidual := Low || High
+
+compile RelationalResidual
