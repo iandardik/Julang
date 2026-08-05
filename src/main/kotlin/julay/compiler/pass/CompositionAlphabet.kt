@@ -491,18 +491,19 @@ fun unsyncedOrdinaryWarnings(external: List<AlphabetOffer>): List<CompileWarning
         }
 
 /**
- * Alphabet integrity for composition roots:
- * - at most one provider per action name (always)
- * - when [requireCompleteSync] is true (top-level JAR / TLA+ `compile` target only):
+ * Alphabet integrity for JAR / analyze / check composition roots (not TLA+ compile):
+ * - at most one provider per action name (always when this pass runs)
+ * - when [requireCompleteSync] is true (top-level JAR `compile` target only):
  *   every external client must have a provider of the same name, except when
  *   every external client offer for that name comes from a composed procfun —
  *   those stay visible on the parent until a provider peer is composed.
  *
  * Incomplete sync of `client`, ordinary (default), and `session` actions is allowed on
- * intermediate assemblies; only the compiled top-level process must be fully synced
- * (dangling clients → error; leftover ordinary/session → warning via [unsyncedOrdinaryWarnings]).
+ * intermediate assemblies and on all TLA+ targets; only the compiled top-level JAR
+ * process must be fully synced (dangling clients → error; leftover ordinary/session →
+ * warning via [unsyncedOrdinaryWarnings]).
  *
- * Same-class ordinary duplicates are reported eagerly in [composeAlphabets].
+ * Same-class ordinary duplicates are reported eagerly in [composeAlphabets] (JAR path).
  */
 fun alphabetIntegrityErrors(
     alphabet: CompositionAlphabetResult,

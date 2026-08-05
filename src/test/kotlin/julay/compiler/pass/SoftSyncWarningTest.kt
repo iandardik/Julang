@@ -279,6 +279,70 @@ class SoftSyncWarningTest {
     }
 
     @Test
+    fun tlaCompileAllowsPartialAlphabetsJarStillRejectsUnmatchedClient() {
+        val dir = Files.createTempDirectory("julay-tla-partial-alphabet")
+        val file = dir.resolve("partial.jul")
+        file.toFile().writeText(
+            """
+            proc ClientOnly {
+                constructor initially(args : List<String>) { transit: }
+                client transition bump() { transit: }
+            }
+            proc OrdinarySolo {
+                constructor initially(args : List<String>) { transit: }
+                transition tick() { transit: }
+            }
+            spec ClientSpec := ClientOnly
+            spec OrdinarySpec := OrdinarySolo
+            compile ClientSpec, OrdinarySpec
+            """.trimIndent(),
+        )
+
+        val cwd = java.io.File(".").canonicalFile
+        val clientTla = java.io.File(cwd, "ClientSpec.tla")
+        val clientCfg = java.io.File(cwd, "ClientSpec.cfg")
+        val ordinaryTla = java.io.File(cwd, "OrdinarySpec.tla")
+        val ordinaryCfg = java.io.File(cwd, "OrdinarySpec.cfg")
+        listOf(clientTla, clientCfg, ordinaryTla, ordinaryCfg).forEach { it.delete() }
+
+        try {
+            julay.compiler.compileJulFile(file, keepBuild = false)
+            assertTrue(clientTla.exists(), "expected ClientSpec.tla for unmatched client")
+            assertTrue(clientCfg.exists(), "expected ClientSpec.cfg")
+            assertTrue(ordinaryTla.exists(), "expected OrdinarySpec.tla for unsynced ordinary")
+            assertTrue(ordinaryCfg.exists(), "expected OrdinarySpec.cfg")
+        } finally {
+            listOf(clientTla, clientCfg, ordinaryTla, ordinaryCfg).forEach { it.delete() }
+        }
+
+        // Same unmatched client as a JAR root must still fail alphabet integrity.
+        val jarFile = dir.resolve("jar.jul")
+        jarFile.toFile().writeText(
+            """
+            proc ClientOnly {
+                constructor initially(args : List<String>) { transit: }
+                client transition bump() { transit: }
+            }
+            proc P := ClientOnly
+            compile P
+            """.trimIndent(),
+        )
+        val checked = prepareCheckedCompilation(jarFile)
+        assertNotNull(checked)
+        val program = checked.jarTargets.single()
+        val ok = runErrorAndWarningPasses(
+            checked.ast,
+            program.allProcNames(checked.procDecls),
+            checked.librariesInUse,
+            program.name,
+            program = program,
+            procDecls = checked.procDecls,
+            requireCompleteSync = true,
+        )
+        assertFalse(ok, "JAR compile must still reject unmatched client")
+    }
+
+    @Test
     fun syncWarningsUnderlineSignatureLineOnly() {
         val dir = Files.createTempDirectory("julay-sync-warn-sig")
         val file = dir.resolve("solo.jul")

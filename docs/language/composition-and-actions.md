@@ -44,15 +44,17 @@ Here the two occurrences of `X` sync with `A` and `B` respectively on a shared a
 
 Same-class ordinary offers never sync: when two occurrences of class `X` both expose untagged `w` at a compose step (e.g. `(A || X) || (B || X)` with no peer syncing on `w`), that is a **compose-time** error. A later `provider` cannot redeem those offers (ordinary + provider is also illegal).
 
-### Alphabet integrity (JAR and TLA+)
+### Alphabet integrity (JAR only)
 
-**Complete sync** of `client`, ordinary (default), and `session` actions is required only on the **top-level `compile` / TLA+ target** — not on intermediate apis or procs that a parent will compose later.
+**Complete sync** of `client`, ordinary (default), and `session` actions is required only on the **top-level JAR `compile` target** — not on intermediate apis or procs that a parent will compose later, and not when compiling to TLA+ (`spec` or `--compile-tla`).
 
-On that top-level target:
+On that top-level JAR target:
 
 - External `client` of `w` with no `provider` `w` → error, **except** when every external client offer for `w` comes from a **procfun** (call-folded or listed in an api's `calls:`). Those surfaces stay visible on the parent until a provider peer is composed.
-- At most one `provider` per action name (always checked, including intermediate analyze).
-- Unsynced ordinary or session actions in the external alphabet → **warn** (JAR still succeeds). Tag them `internal` if a solo step is intentional. Specs may still use unilateral assume/system actions.
+- At most one `provider` per action name (always checked on the JAR / analyze path, including intermediate analyze).
+- Unsynced ordinary or session actions in the external alphabet → **warn** (JAR still succeeds). Tag them `internal` if a solo step is intentional.
+
+TLA+ compile skips composition-alphabet checks entirely, so partial specs (unmatched clients, unilateral ordinary/session actions, dual providers, etc.) are allowed.
 
 `analyze`, IDE alphabet panels, and `check` without a `compile` directive do not require incomplete client / ordinary / session wiring to be resolved yet.
 

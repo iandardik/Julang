@@ -68,16 +68,16 @@ fun compileJulFile(
             println("Internal error: missing SpecNode for \"${specDecl.name}\"")
             return
         }
-        // Specs allow unilateral assume/system actions; only shared alphabet-integrity
-        // checks (duplicate external / dual provider) must match JAR.
-        if (!runSpecAlphabetIntegrityPass(ast, specDecl, procDecls, librariesInUse)) {
+        // TLA+ allows incomplete alphabets (unmatched clients, unilateral ordinary/session,
+        // dual providers, etc.). SyncChannel completeness is JAR-only.
+        if (!runTlaStructuralPass(ast, specDecl, procDecls)) {
             return
         }
         compileSpecToTla(specNode, ast, unit)
     }
 
     for (proc in tlaProcTargets) {
-        if (!runSpecAlphabetIntegrityPass(ast, proc, procDecls, librariesInUse)) {
+        if (!runTlaStructuralPass(ast, proc, procDecls)) {
             return
         }
         // Synthetic plain-system spec: equivalent to <true> P <true> (no assume, no guarantee).
@@ -85,12 +85,14 @@ fun compileJulFile(
     }
 }
 
-/** Alphabet integrity shared by JAR and TLA+ (not full JAR peer-count / unsynced checks). */
-private fun runSpecAlphabetIntegrityPass(
+/**
+ * Non-alphabet preflight for TLA+ targets: procfuns must not appear in `||`, and
+ * call-site havoc warnings still print. Composition alphabet integrity is skipped.
+ */
+private fun runTlaStructuralPass(
     ast: julay.compiler.ast.RootNode,
     program: julay.compiler.decl.ProcDecl,
     procDecls: List<julay.compiler.decl.ProcDecl>,
-    librariesInUse: Set<String>,
 ): Boolean {
     val compositionErrors = ast.procFunCompositionErrors(procDecls)
     if (compositionErrors.isNotEmpty()) {
@@ -99,19 +101,7 @@ private fun runSpecAlphabetIntegrityPass(
         return false
     }
     ast.procFunHavocWarnings(program, procDecls).forEach { System.err.println(it) }
-    val components = program.allProcNames(procDecls)
-    val leafMap = julay.compiler.pass.leafActionMap(ast, components, librariesInUse)
-    val alphabet = julay.compiler.pass.computeCompositionAlphabet(
-        program, procDecls, leafMap, julay.compiler.collectProcFunNames(ast), ast,
-    )
-    val errors = alphabet.errors + julay.compiler.pass.alphabetIntegrityErrors(
-        alphabet,
-        julay.compiler.collectProcFunNames(ast),
-    )
-    if (errors.isEmpty()) return true
-    errors.forEach { System.err.println(it) }
-    System.err.println("Found errors while compiling \"${program.name}\"; exiting.")
-    return false
+    return true
 }
 
 /** Plain `spec Name := Name` — TLA with no assumption and no guarantee invariants. */
