@@ -3,6 +3,7 @@ package julay.program.action
 import com.microsoft.z3.BoolExpr
 import julay.concurrency.SyncChannel
 import julay.program.Constraint
+import julay.program.sync.BoolExprFast
 import julay.tools.assert
 
 /**
@@ -20,6 +21,11 @@ data class TSAction(
      * [Program.actionTable] channel.
      */
     val syncChannel: SyncChannel<SyncPayload, Constraint>? = null,
+    /**
+     * Optional [BoolExprFast] for this action (codegen / libraries). When non-null, Julay may
+     * use it instead of [guard] to avoid Z3 on sat/commit; null means BoolExpr/[guard] only.
+     */
+    val fastGuard: BoolExprFast? = null,
 ) {
     /**
      * [Default] / [Internal] come from source tags (untagged / `internal`).

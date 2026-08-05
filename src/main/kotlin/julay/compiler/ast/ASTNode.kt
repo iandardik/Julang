@@ -1012,7 +1012,16 @@ class BinaryOpExprNode(
                             "val __sz = ctx.mkAdd(setCellSizeExpr(ctx, __l, $meta.sizeAccessor), setCellSizeExpr(ctx, __r, $meta.sizeAccessor)); " +
                             "setMkCellExpr(ctx, $meta.constructorDecl, __arr, __sz) }"
                     }
-                    lhsType is StringType || rhsType is StringType -> "ctx.mkConcat($lhsGuardStr,$rhsGuardStr)"
+                    lhsType is StringType || rhsType is StringType -> {
+                        // Elide empty-string concat identity (int/other → string coerce via `+ ""`).
+                        when {
+                            isEmptyStringLiteral(lhsOperand) && isEmptyStringLiteral(rhsOperand) ->
+                                "ctx.mkString(\"\")"
+                            isEmptyStringLiteral(lhsOperand) -> rhsGuardStr
+                            isEmptyStringLiteral(rhsOperand) -> lhsGuardStr
+                            else -> "ctx.mkConcat($lhsGuardStr,$rhsGuardStr)"
+                        }
+                    }
                     else -> throw RuntimeException("Cannot add types: $lhsType and $rhsType")
                 }
             }

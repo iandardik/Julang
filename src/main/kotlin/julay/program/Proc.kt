@@ -125,8 +125,17 @@ class Proc(
                 }
                 while (true) {
                     if (silentlyKilled.get()) return
-                    val cont = withEphemeralContextSuspend { ctx ->
-                        runOneStep(ctx)
+                    scrubClosedSessionsAndAffinity()
+                    val cont = when {
+                        program.syncResolveConfig.anyEnabled() -> {
+                            when (val plan = transitionSystem.syncStepPlan()) {
+                                is julay.program.sync.SyncStepPlan.FastOnly ->
+                                    runOneStepFast(plan.offers)
+                                is julay.program.sync.SyncStepPlan.NeedsZ3 ->
+                                    withEphemeralContextSuspend { ctx -> runOneStep(ctx) }
+                            }
+                        }
+                        else -> withEphemeralContextSuspend { ctx -> runOneStep(ctx) }
                     }
                     // The Proc exits when no actions are enabled.
                     if (!cont) return
@@ -196,6 +205,57 @@ class Proc(
     }
 
     /**
+     * Select/transit for [julay.program.sync.SyncStepPlan.FastOnly]: offers already use
+     * grounded [BoolExprFast] on [Constraint.fast], so this step allocates no Z3 Context.
+     */
+    private suspend fun runOneStepFast(offers: List<julay.program.sync.FastOffer>): Boolean {
+        if (offers.isEmpty()) {
+            return false
+        }
+        var nextPayload = Optional.empty<SyncPayload>()
+        val cases = offers.map { offer ->
+            val syncChannel = resolveSyncChannel(offer)
+            val constraint = Constraint(
+                fast = offer.guard,
+                procId = procId,
+                classId = classId,
+                proc = this,
+            )
+            val anticonstraint = Constraint(
+                anti = julay.program.sync.SyncAnti.fromRole(offer.syncRole, tsInfo.classID()),
+                procId = procId,
+                classId = classId,
+                proc = this,
+            )
+            Select.SyncCase(syncChannel, constraint, anticonstraint) { payload: SyncPayload ->
+                nextPayload = Optional.of(payload)
+            }
+        }
+        Select(*cases.toTypedArray()).run()
+
+        if (nextPayload.isEmpty) {
+            scrubClosedSessionsAndAffinity()
+            return true
+        }
+
+        val payload = nextPayload.get()
+        applySessionPayload(payload)
+        val act = payload.action
+        val syncPeer = payload.syncPeers.firstOrNull { it.procId != procId }?.proc
+        withSessionPeer(syncPeer) {
+            transitionSystem.transit(act)
+        }
+        if (program.isConstructorAction(act.symAction)) {
+            program.spawn(act, parent = this)
+        }
+        transitionSystem.consumeProcFunReturn()?.let { value ->
+            program.completeProcFunReturn(procId, value)
+            return false
+        }
+        return !silentlyKilled.get()
+    }
+
+    /**
      * Runs one select/transit step using [ctx].
      * @return false only when no actions are enabled (Proc exits); true to continue the loop,
      * including after Select finishes without a winner (e.g. dedicated session channel closed).
@@ -221,7 +281,8 @@ class Proc(
                 val syncChannel = resolveSyncChannel(act)
                 val caseCtx = Context().also { caseCtxs.add(it) }
                 val constraint = Constraint(
-                    act.guard,
+                    expr = act.guard,
+                    fast = act.fastGuard,
                     procId = procId,
                     classId = classId,
                     proc = this,
@@ -237,7 +298,8 @@ class Proc(
                 // Affinity exclusivity is enforced by routing onto the dedicated session SyncChannel
                 // once affinity exists (see resolveSyncChannel). First contact may use the static channel.
                 val anticonstraint = Constraint(
-                    anticonstraintExpr,
+                    expr = anticonstraintExpr,
+                    anti = julay.program.sync.SyncAnti.fromRole(act.syncRole, tsInfo.classID()),
                     procId = procId,
                     classId = classId,
                     proc = this,
@@ -313,9 +375,15 @@ class Proc(
      * [Program.spawn] then installs dedicated channels for all shared follow-on session actions
      * before the child starts.
      */
-    private suspend fun resolveSyncChannel(act: TSAction): SyncChannel<SyncPayload, Constraint> {
-        act.syncChannel?.let { return it }
-        val resolvedSym = resolveSymbolicAction(act.symAction)
+    private suspend fun resolveSyncChannel(offer: julay.program.sync.FastOffer): SyncChannel<SyncPayload, Constraint> =
+        resolveSyncChannelForSym(offer.symAction, offer.syncChannel)
+
+    private suspend fun resolveSyncChannelForSym(
+        symAction: SymbolicAction,
+        syncChannel: SyncChannel<SyncPayload, Constraint>?,
+    ): SyncChannel<SyncPayload, Constraint> {
+        syncChannel?.let { return it }
+        val resolvedSym = resolveSymbolicAction(symAction)
         if (resolvedSym.isSession) {
             for ((_, peer) in affinity) {
                 val session = sessionChannelTable[peer.procId to resolvedSym.name]
@@ -336,6 +404,10 @@ class Proc(
                 "No SyncChannel for ${resolvedSym.name} (channelKey=${resolvedSym.channelKey}) " +
                     "on $className/$procId",
             )
+    }
+
+    private suspend fun resolveSyncChannel(act: TSAction): SyncChannel<SyncPayload, Constraint> {
+        return resolveSyncChannelForSym(act.symAction, act.syncChannel)
     }
 
     private fun applySessionPayload(payload: SyncPayload) {

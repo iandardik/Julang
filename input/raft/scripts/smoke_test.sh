@@ -192,25 +192,37 @@ echo "$append_out" | grep -q '200 OK' || {
   exit 1
 }
 
-echo "=== RaftClient get via $follower_url (≤${CLIENT_STEP_TIMEOUT_S}s) ==="
-set +e
-if command -v perl >/dev/null 2>&1; then
-  get_out="$(perl -e 'alarm shift; exec @ARGV' "$CLIENT_STEP_TIMEOUT_S" "$JAVA" -jar "$CLIENT_JAR" "$follower_url" get 2>&1)"
-  get_rc=$?
-else
-  get_out="$("$JAVA" -jar "$CLIENT_JAR" "$follower_url" get 2>&1)"
-  get_rc=$?
-fi
-set -e
-echo "$get_out"
-if [[ "$get_rc" -ne 0 ]]; then
-  echo "error: get timed out or failed (rc=$get_rc)" >&2
+# client/get reads the contacted node's local committed SM (no leader redirect).
+# After append-via-follower → leader commit, the entry node may briefly lag; poll.
+echo "=== RaftClient get via $follower_url (poll ≤${CLIENT_STEP_TIMEOUT_S}s) ==="
+GET_WAIT_S="${GET_WAIT_S:-$CLIENT_STEP_TIMEOUT_S}"
+get_out=""
+get_ok=0
+for ((t=0; t<GET_WAIT_S; t++)); do
+  set +e
+  if command -v perl >/dev/null 2>&1; then
+    get_out="$(perl -e 'alarm shift; exec @ARGV' "$CLIENT_STEP_TIMEOUT_S" "$JAVA" -jar "$CLIENT_JAR" "$follower_url" get 2>&1)"
+    get_rc=$?
+  else
+    get_out="$("$JAVA" -jar "$CLIENT_JAR" "$follower_url" get 2>&1)"
+    get_rc=$?
+  fi
+  set -e
+  if [[ "$get_rc" -eq 0 ]] && grep -Fq "$VALUE" <<<"$get_out"; then
+    get_ok=1
+    echo "$get_out"
+    if [[ "$t" -gt 0 ]]; then
+      echo "(value visible after ${t}s replication lag)"
+    fi
+    break
+  fi
+  sleep 1
+done
+if [[ "$get_ok" -ne 1 ]]; then
+  echo "$get_out"
+  echo "error: get did not contain appended value '$VALUE' within ${GET_WAIT_S}s" >&2
   exit 1
 fi
-echo "$get_out" | grep -Fq "$VALUE" || {
-  echo "error: get did not contain appended value '$VALUE'" >&2
-  exit 1
-}
 echo "$get_out" | grep -q '^200 ' || {
   echo "$get_out" | grep -q '200 \[' || {
     echo "error: get did not report 200" >&2

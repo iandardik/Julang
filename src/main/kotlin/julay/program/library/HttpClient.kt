@@ -1,8 +1,8 @@
 package julay.program.library
 
 import com.microsoft.z3.Context
-import julay.compiler.decl.ActionDecl
 import julay.compiler.LibraryLoc
+import julay.compiler.decl.ActionDecl
 import julay.program.Program
 import julay.program.TransitionSystem
 import julay.program.TransitionSystemStaticInfo
@@ -11,6 +11,9 @@ import julay.program.Variable
 import julay.program.action.ConcreteAction
 import julay.program.action.SymbolicAction
 import julay.program.action.TSAction
+import julay.program.sync.FastOffer
+import julay.program.sync.BoolExprFast
+import julay.program.sync.SyncStepPlan
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -86,8 +89,8 @@ class JulHttpClient(
         return when (phase) {
             Phase.Closed -> emptySet()
             Phase.Idle -> setOf(
-                TSAction(sendRequestAct, ctx.mkTrue()),
-                TSAction(closeHttpClientAct, ctx.mkTrue(), TSAction.SyncRole.Default),
+                TSAction(sendRequestAct, ctx.mkTrue(), fastGuard = BoolExprFast.True),
+                TSAction(closeHttpClientAct, ctx.mkTrue(), TSAction.SyncRole.Default, fastGuard = BoolExprFast.True),
             )
             Phase.HaveResponse -> {
                 val resp = response!!
@@ -101,6 +104,20 @@ class JulHttpClient(
                     ),
                 )
             }
+        }
+    }
+
+    override fun syncStepPlan(): SyncStepPlan {
+        return when (phase) {
+            Phase.Closed -> SyncStepPlan.FastOnly(emptyList())
+            Phase.Idle -> SyncStepPlan.FastOnly(
+                listOf(
+                    FastOffer(sendRequestAct, BoolExprFast.True),
+                    FastOffer(closeHttpClientAct, BoolExprFast.True),
+                ),
+            )
+            // Response embedding needs residual Z3.
+            Phase.HaveResponse -> SyncStepPlan.NeedsZ3
         }
     }
 

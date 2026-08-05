@@ -1,6 +1,6 @@
 package julay.compiler
 
-import julay.program.SyncOptimizeConfig
+import julay.program.sync.SyncResolveConfig
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -8,18 +8,18 @@ import kotlin.test.assertFailsWith
 class DisableOptFlagTest {
     @Test
     fun bareFlagDisablesAll() {
-        assertEquals(SyncOptimizeConfig.ALL_OFF, SyncOptimizeConfig.fromDisableOptFlag("ALL"))
-        assertEquals(SyncOptimizeConfig.ALL_OFF, SyncOptimizeConfig.fromDisableOptFlag(""))
+        assertEquals(SyncResolveConfig.ALL_OFF, SyncResolveConfig.fromDisableOptFlag("ALL"))
+        assertEquals(SyncResolveConfig.ALL_OFF, SyncResolveConfig.fromDisableOptFlag(""))
     }
 
     @Test
     fun absentKeepsDefaultsOn() {
-        assertEquals(SyncOptimizeConfig.ALL_ON, SyncOptimizeConfig.fromDisableOptFlag(null))
+        assertEquals(SyncResolveConfig.ALL_ON, SyncResolveConfig.fromDisableOptFlag(null))
     }
 
     @Test
     fun namedListDisablesSubset() {
-        val cfg = SyncOptimizeConfig.fromDisableOptFlag("eq-unify,directed-eval")
+        val cfg = SyncResolveConfig.fromDisableOptFlag("eq-unify,directed-eval")
         assertEquals(false, cfg.eqUnify)
         assertEquals(true, cfg.argOwnership)
         assertEquals(false, cfg.directedEval)
@@ -28,7 +28,7 @@ class DisableOptFlagTest {
     @Test
     fun unknownNameErrors() {
         assertFailsWith<IllegalArgumentException> {
-            SyncOptimizeConfig.fromDisableOptFlag("not-a-real-opt")
+            SyncResolveConfig.fromDisableOptFlag("not-a-real-opt")
         }
     }
 }

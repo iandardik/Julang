@@ -1,0 +1,47 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+
+/*
+ * Local ~done + arg equality — Context-free enablement + sync.
+ */
+
+proc Sender {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    transition handoff(x : Int) {
+        guard: x = 9
+    }
+}
+
+proc Receiver {
+    var k : Int
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            k := 9
+            done := false
+    }
+
+    transition handoff(x : Int) {
+        guard:
+            & x = k
+            & ~done
+        transit:
+            done := true
+        after:
+            println("local-not got " + x)
+    }
+
+    internal transition exitSystem() {
+        guard: done
+        after:
+            exitProcess()
+    }
+}
+
+proc LocalNotAndEq := Sender || Receiver
+
+compile LocalNotAndEq

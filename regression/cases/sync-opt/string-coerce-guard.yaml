@@ -1,0 +1,9 @@
+source: regression/input/sync-opt/string-coerce-guard.jul
+tags: [sync-opt, sync-opt-parity]
+compileTwiceWithDisableOpt: true
+programs:
+  - name: StringCoerceGuard
+    run:
+      timeoutMs: 60000
+      expectStdoutContains:
+        - "coerce 3"

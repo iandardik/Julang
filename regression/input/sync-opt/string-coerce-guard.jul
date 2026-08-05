@@ -1,0 +1,45 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+
+/*
+ * Empty-concat coerce in a guard: msg = n + ""
+ */
+
+proc S {
+    var n : Int
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            n := 3
+            done := false
+    }
+
+    transition handoff(msg : String) {
+        guard: ~done & (msg = n + "")
+        transit:
+            done := true
+        after:
+            println("coerce " + msg)
+    }
+
+    internal transition exitSystem() {
+        guard: done
+        after:
+            exitProcess()
+    }
+}
+
+proc T {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    transition handoff(msg : String) {
+        guard: msg = "3"
+    }
+}
+
+proc StringCoerceGuard := S || T
+
+compile StringCoerceGuard

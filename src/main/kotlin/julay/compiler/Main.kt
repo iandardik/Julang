@@ -13,7 +13,7 @@ import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.path
 import com.github.ajalt.clikt.parameters.options.optionalValue
 import julay.compiler.analysis.AnalyzeOptions
-import julay.program.SyncOptimizeConfig
+import julay.program.sync.SyncResolveConfig
 
 class Julayc : CliktCommand(name = "julayc") {
     init {
@@ -84,8 +84,8 @@ class Julayc : CliktCommand(name = "julayc") {
             return
         }
         val file = input ?: throw UsageError("Missing argument \"<input>\"")
-        val syncOptimizeConfig = try {
-            SyncOptimizeConfig.fromDisableOptFlag(disableOpt)
+        val syncResolveConfig = try {
+            SyncResolveConfig.fromDisableOptFlag(disableOpt)
         } catch (e: IllegalArgumentException) {
             throw UsageError(e.message ?: "Invalid --disable-opt")
         }
@@ -96,7 +96,7 @@ class Julayc : CliktCommand(name = "julayc") {
             allowUnindexedSpec = allowUnindexedSpec,
             compileNames = compileNames,
             compileTlaNames = compileTlaNames,
-            syncOptimizeConfig = syncOptimizeConfig,
+            syncResolveConfig = syncResolveConfig,
         )
     }
 }

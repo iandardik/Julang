@@ -4,10 +4,20 @@ import com.microsoft.z3.Context
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpHandler
 import com.sun.net.httpserver.HttpServer
-import julay.compiler.decl.ActionDecl
 import julay.compiler.LibraryLoc
-import julay.program.*
-import julay.program.action.*
+import julay.compiler.decl.ActionDecl
+import julay.program.Program
+import julay.program.Proc
+import julay.program.TransitionSystem
+import julay.program.TransitionSystemStaticInfo
+import julay.program.Value
+import julay.program.Variable
+import julay.program.action.ConcreteAction
+import julay.program.action.SymbolicAction
+import julay.program.action.TSAction
+import julay.program.sync.FastOffer
+import julay.program.sync.BoolExprFast
+import julay.program.sync.SyncStepPlan
 import julay.program.type.intType
 import java.net.InetSocketAddress
 
@@ -89,7 +99,16 @@ class JulHttpServer(
             return emptySet()
         }
         return setOf(
-            TSAction(closeHttpServerAct, ctx.mkTrue(), TSAction.SyncRole.Default),
+            TSAction(closeHttpServerAct, ctx.mkTrue(), TSAction.SyncRole.Default, fastGuard = BoolExprFast.True),
+        )
+    }
+
+    override fun syncStepPlan(): SyncStepPlan {
+        if (closed) {
+            return SyncStepPlan.FastOnly(emptyList())
+        }
+        return SyncStepPlan.FastOnly(
+            listOf(FastOffer(closeHttpServerAct, BoolExprFast.True, TSAction.SyncRole.Default)),
         )
     }
 
@@ -138,11 +157,26 @@ class JulHttpServer(
                     TSAction(
                         sendResponseAct,
                         ctx.mkTrue(),
+                        fastGuard = BoolExprFast.True,
                     ),
                 )
             } else {
                 return setOf()
             }
+        }
+
+        override fun syncStepPlan(): SyncStepPlan {
+            // receiveRequest embeds an oclass value → residual Z3 for that step.
+            if (initHttpReq) {
+                return SyncStepPlan.NeedsZ3
+            }
+            if (finishHttpReq) {
+                finishHttpReq = false
+                return SyncStepPlan.FastOnly(
+                    listOf(FastOffer(sendResponseAct, BoolExprFast.True)),
+                )
+            }
+            return SyncStepPlan.FastOnly(emptyList())
         }
         override suspend fun transit(act: ConcreteAction) {
             if (act.symAction.name == sendResponseAct.name) {

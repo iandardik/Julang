@@ -25,6 +25,14 @@ interface TransitionSystem {
     suspend fun actions(ctx: Context): Set<TSAction>
 
     /**
+     * Whether this step can avoid Z3: [julay.program.sync.SyncStepPlan.FastOnly] means Proc
+     * runs Select/transit using [BoolExprFast] only (no step Context). Default
+     * [julay.program.sync.SyncStepPlan.NeedsZ3] builds BoolExpr guards with a Context.
+     */
+    fun syncStepPlan(): julay.program.sync.SyncStepPlan =
+        julay.program.sync.SyncStepPlan.NeedsZ3
+
+    /**
      * The transition system transits to a (potentially new) state based on the given concrete action.
      */
     suspend fun transit(act: ConcreteAction)

@@ -1990,9 +1990,7 @@ private fun tlaStringCoerce(expr: ExprNode, rendered: String): String =
     if (exprIsStringTyped(expr)) rendered else "ToString($rendered)"
 
 private fun isEmptyStringLiteral(expr: ExprNode): Boolean =
-    expr is LiteralValueExprNode &&
-        expr.getType() is StringType &&
-        expr.literalText().isEmpty()
+    julay.compiler.ast.isEmptyStringLiteral(expr)
 
 /**
  * @param leafCtx map of leaf name → SpecLeaf (for FieldAccess context; optional)

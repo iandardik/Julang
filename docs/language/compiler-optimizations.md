@@ -29,7 +29,7 @@ java -jar build/libs/julayc.jar --disable-opt=eq-unify path/to/file.jul
 java -jar build/libs/julayc.jar --disable-opt=eq-unify,directed-eval path/to/file.jul
 ```
 
-The chosen config is **baked into** the generated program JAR (`Program(..., SyncOptimizeConfig(...))`). There is no runtime env var; recompile with or without the flag to change behavior.
+The chosen config is **baked into** the generated program JAR (`Program(..., SyncResolveConfig(...))`). There is no runtime env var; recompile with or without the flag to change behavior.
 
 Unknown optimization ids are a usage error.
 

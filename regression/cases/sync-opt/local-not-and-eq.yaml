@@ -1,0 +1,9 @@
+source: regression/input/sync-opt/local-not-and-eq.jul
+tags: [sync-opt, sync-opt-parity]
+compileTwiceWithDisableOpt: true
+programs:
+  - name: LocalNotAndEq
+    run:
+      timeoutMs: 60000
+      expectStdoutContains:
+        - "local-not got 9"

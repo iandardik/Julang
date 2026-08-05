@@ -56,6 +56,7 @@ internal class ContextLocalCache<T> {
  * before close so prune-via-probe is unnecessary.
  */
 internal inline fun <T> withEphemeralContext(block: (Context) -> T): T {
+    ContextAllocationCounter.increment()
     val ctx = Context()
     try {
         return block(ctx)
@@ -67,11 +68,27 @@ internal inline fun <T> withEphemeralContext(block: (Context) -> T): T {
 
 /** Suspend variant of [withEphemeralContext] for [Proc] step loops. */
 internal suspend inline fun <T> withEphemeralContextSuspend(block: suspend (Context) -> T): T {
+    ContextAllocationCounter.increment()
     val ctx = Context()
     try {
         return block(ctx)
     } finally {
         ContextLocalCache.dropContext(ctx)
         ctx.close()
+    }
+}
+
+/** Test hook: counts Contexts created via [withEphemeralContext] / [withEphemeralContextSuspend]. */
+object ContextAllocationCounter {
+    private val count = java.util.concurrent.atomic.AtomicLong(0)
+
+    fun increment() {
+        count.incrementAndGet()
+    }
+
+    fun get(): Long = count.get()
+
+    fun reset() {
+        count.set(0)
     }
 }

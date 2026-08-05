@@ -30,7 +30,7 @@ class SelectCaseContextTest {
     private fun translateCompute(): (Set<Constraint>) -> Optional<Int> = { constraints ->
         Context().use { ctx ->
             val solver = ctx.mkSolver()
-            constraints.forEach { c -> solver.add(c.expr.translate(ctx) as BoolExpr) }
+            constraints.forEach { c -> solver.add(c.expr!!.translate(ctx) as BoolExpr) }
             if (solver.check() != Status.SATISFIABLE) {
                 Optional.empty()
             } else {
@@ -42,7 +42,7 @@ class SelectCaseContextTest {
     private fun translateSatisfiable(): (Set<Constraint>) -> Boolean = { constraints ->
         Context().use { ctx ->
             val solver = ctx.mkSolver()
-            constraints.forEach { c -> solver.add(c.expr.translate(ctx) as BoolExpr) }
+            constraints.forEach { c -> solver.add(c.expr!!.translate(ctx) as BoolExpr) }
             solver.check() == Status.SATISFIABLE
         }
     }

@@ -6,7 +6,6 @@ import com.microsoft.z3.Expr
 import com.microsoft.z3.IntNum
 import com.microsoft.z3.Status
 import julay.program.Constraint
-import julay.program.SyncOptimizeConfig
 import julay.program.Value
 import julay.program.Variable
 import julay.program.action.ConcreteAction
@@ -18,26 +17,31 @@ import julay.program.type.Type
 import java.util.Optional
 
 /**
- * Fast-path helpers for action sync: equality unify, unilateral arg ownership,
- * and directed evaluation of determined args. Falls back when the formula shape
- * is unsupported ([trySatisfiable] / [tryConcreteAction] return null).
+ * Equality-unify / directed-eval over Z3 [BoolExpr] guards (needs a [Context]).
  *
- * Meta constraints: [META_PROVIDER_CLIENT], [META_CLASS_ID].
+ * Layering when sync opts are on ([SyncResolveConfig]): try [SyncResolveFast] first
+ * (IR / no Z3 Context); if that returns null, pattern-match BoolExprs here; if that also
+ * returns null, the caller runs residual `mkSolver` / `check`.
+ *
+ * Meta constraint names: [META_PROVIDER_CLIENT], [META_CLASS_ID].
  */
-object SyncOptimize {
+object SyncResolveZ3 {
     const val META_PROVIDER_CLIENT = "providerClientTransition"
     const val META_CLASS_ID = "classID"
 
     /**
-     * @return true/false if decided; null → residual Z3
+     * @return true/false if decided without a full solve; null → residual Z3 `check`
      */
     fun trySatisfiable(
         constraints: Set<Constraint>,
-        config: SyncOptimizeConfig,
+        config: SyncResolveConfig,
         ctx: Context,
     ): Boolean? {
         if (!config.anyEnabled()) return null
-        val translated = constraints.map { it.expr.translate(ctx) as BoolExpr }
+        // IR path first when Constraint.fast / SyncAnti is present (no extra Context work).
+        SyncResolveFast.trySatisfiable(constraints, config)?.let { return it }
+        if (constraints.any { it.expr == null }) return null
+        val translated = constraints.map { it.expr!!.translate(ctx) as BoolExpr }
         val analysis = analyzeAll(translated) ?: return null
         if (!analysis.onlyEqualities) return null // mixed relational → residual Z3
         if (!config.eqUnify && !config.argOwnership && !config.directedEval) return null
@@ -54,11 +58,13 @@ object SyncOptimize {
     fun tryConcreteAction(
         act: SymbolicAction,
         constraints: Set<Constraint>,
-        config: SyncOptimizeConfig,
+        config: SyncResolveConfig,
         ctx: Context,
     ): Optional<ConcreteAction>? {
         if (!config.anyEnabled()) return null
-        val translated = constraints.map { it.expr.translate(ctx) as BoolExpr }
+        SyncResolveFast.tryConcreteAction(act, constraints, config)?.let { return it }
+        if (constraints.any { it.expr == null }) return null
+        val translated = constraints.map { it.expr!!.translate(ctx) as BoolExpr }
         val analysis = analyzeAll(translated) ?: return null
         if (!analysis.onlyEqualities) return null
         return when (val u = unify(analysis, config, ctx)) {
@@ -80,8 +86,11 @@ object SyncOptimize {
         }
     }
 
-    /** Local enablement short-circuit. */
-    fun tryLocalEnablement(guard: BoolExpr, config: SyncOptimizeConfig, ctx: Context): Boolean? {
+    /**
+     * Local enablement via BoolExpr unify (unused by [Proc]; prefer [SyncResolveFast.enableFast]
+     * / IR for the no-Z3 path). Kept for residual BoolExpr experiments.
+     */
+    fun tryLocalEnablement(guard: BoolExpr, config: SyncResolveConfig, ctx: Context): Boolean? {
         if (!config.eqUnify) return null
         val analysis = analyzeAll(listOf(guard)) ?: return null
         if (!analysis.onlyEqualities) return null
@@ -128,7 +137,7 @@ object SyncOptimize {
         return listOf(e)
     }
 
-    private fun unify(analysis: Analysis, config: SyncOptimizeConfig, ctx: Context): UnifyResult {
+    private fun unify(analysis: Analysis, config: SyncResolveConfig, ctx: Context): UnifyResult {
         val argGround = mutableMapOf<String, Expr<*>>()
         val metaGround = mutableMapOf<String, Expr<*>>()
         val pendingFunctional = mutableListOf<Pair<String, Expr<*>>>()

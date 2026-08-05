@@ -11,6 +11,7 @@ import julay.program.*
 import julay.program.type.*
 import julay.program.action.*
 import julay.program.library.LibraryRegistry
+import julay.program.sync.SyncResolveConfig
 
 data class CodegenResult(
     val sourceText: String,
@@ -22,7 +23,7 @@ fun codegenPass(
     program: ProcDecl,
     procDecls: List<ProcDecl>,
     librariesInUse: Set<String> = emptySet(),
-    syncOptimizeConfig: SyncOptimizeConfig = SyncOptimizeConfig.ALL_ON,
+    syncResolveConfig: SyncResolveConfig = SyncResolveConfig.ALL_ON,
 ): CodegenResult {
     val libPClassNames = librariesInUse
     val leafMap = leafActionMap(ast, program.allProcNames(procDecls), librariesInUse)
@@ -67,7 +68,7 @@ fun codegenPass(
     val objClassDecls = ast.resolvedObjClassDecls()
         .filterNot { ObjClassBuiltinRegistry.isBuiltin(it.name) }
     val runProgram =
-        "Program(tsInfo, args.toList(), procFunInfo, ${SyncOptimizeConfig.toKotlinExpr(syncOptimizeConfig)}).run()"
+        "Program(tsInfo, args.toList(), procFunInfo, ${SyncResolveConfig.toKotlinExpr(syncResolveConfig)}).run()"
     val mainFunction = "suspend fun main(args : Array<String>) {" +
         "\n$staticInfo".prependIndent() +
         "\n$procFunInfo".prependIndent() +
@@ -80,6 +81,7 @@ fun codegenPass(
         "import julay.program.type.*\n" +
         "import julay.program.action.*\n" +
         "import julay.program.library.*\n" +
+        "import julay.program.sync.*\n" +
         "import julay.tools.mkStringConst\n" +
         "import julay.tools.mkSeqLengthAny\n" +
         "import julay.tools.mkSeqNthAny\n" +
@@ -450,6 +452,7 @@ private fun ProcClassDecl.kotlinClassString(
             it.kotlinActionString(stateVarTypes, name, channelKeys).prependIndent()
         } +
         "\n)"
+    val syncStepPlanStr = kotlinSyncStepPlanString(runtimeTransitions, stateVarTypes, name, channelKeys)
     val transitStr = "override suspend fun transit(act: ConcreteAction) {" +
         "\nreturn when (act.symAction.name) {".prependIndent() +
         runtimeTransitions.joinToString("") {
@@ -492,6 +495,7 @@ private fun ProcClassDecl.kotlinClassString(
         registerTypes +
         "\n$finishConstructionStr".prependIndent() +
         "\n$actionsStr".prependIndent() +
+        "\n$syncStepPlanStr".prependIndent() +
         "\n$transitStr".prependIndent() +
         "\n}"
 }
@@ -569,11 +573,80 @@ private fun ActionDecl.kotlinActionString(
         TSAction.SyncRole.Provider -> "TSAction.SyncRole.Provider"
         TSAction.SyncRole.Client -> "TSAction.SyncRole.Client"
     }
+    val fastIr = guards.toCombinedBoolExprFastOrNull(symbolTypes, argSymbols)
+    val fastParam = if (fastIr != null) {
+        ",\nfastGuard = $fastIr"
+    } else {
+        ""
+    }
     return "TSAction(" +
         "\n$actionSigStr,".prependIndent() +
         "\n$guardStr,".prependIndent() +
         "\n$syncRoleStr".prependIndent() +
+        fastParam.prependIndent() +
         "\n)"
+}
+
+/**
+ * Emit [SyncStepPlan]: if every transition guard lowers to [BoolExprFast], [FastOnly] so Proc
+ * can skip Z3 Contexts on that step; otherwise [NeedsZ3] (residual BoolExpr path).
+ */
+private fun kotlinSyncStepPlanString(
+    runtimeTransitions: List<ActionDecl>,
+    stateVarTypes: Map<String, Type>,
+    pclassName: String,
+    channelKeys: Map<LeafActionId, String>,
+): String {
+    val classified = runtimeTransitions.map { decl ->
+        val symbolTypes = stateVarTypes + actionArgEnv(decl.action.args)
+        val argSymbols = actionArgSymbols(decl.action.args)
+        val ir = decl.guards.toCombinedBoolExprFastOrNull(symbolTypes, argSymbols)
+        decl to ir
+    }
+    if (classified.any { it.second == null }) {
+        return "override fun syncStepPlan(): SyncStepPlan = SyncStepPlan.NeedsZ3"
+    }
+    val localEntries = stateVarTypes.entries
+        .filter { (_, ty) ->
+            ty is julay.program.type.IntType ||
+                ty is julay.program.type.BoolType ||
+                ty is julay.program.type.StringType
+        }
+        .joinToString(", ") { (name, _) ->
+            // Use nullable backing fields so syncStepPlan is safe before/without init.
+            "\"${name.escapeKotlinStringLiteral()}\" to _${name.toKotlinIdent()}"
+        }
+    val offerBlocks = classified.joinToString("\n") { (decl, ir) ->
+        val actionSigStr = decl.kotlinStaticInfoString(
+            pclassName,
+            occurrenceId = "",
+            channelKeys,
+            isConstructor = false,
+        )
+        val syncRoleStr = when (decl.modifier) {
+            TSAction.SyncRole.Default -> "TSAction.SyncRole.Default"
+            TSAction.SyncRole.Internal -> "TSAction.SyncRole.Internal"
+            TSAction.SyncRole.Provider -> "TSAction.SyncRole.Provider"
+            TSAction.SyncRole.Client -> "TSAction.SyncRole.Client"
+        }
+        """
+        run {
+            val __g = $ir
+            val __grounded = SyncResolveFast.groundForOffer(__g, __locals)
+            if (__grounded != null) {
+                __offers.add(FastOffer($actionSigStr, __grounded, $syncRoleStr))
+            }
+        }
+        """.trimIndent()
+    }
+    return """
+override fun syncStepPlan(): SyncStepPlan {
+    val __locals: Map<String, Any?> = mapOf($localEntries)
+    val __offers = mutableListOf<FastOffer>()
+${offerBlocks.prependIndent()}
+    return SyncStepPlan.FastOnly(__offers)
+}
+""".trimIndent()
 }
 
 private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): String {

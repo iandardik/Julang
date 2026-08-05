@@ -8,6 +8,7 @@ import julay.program.action.ProgramAction
 import julay.program.action.SessionPeerMeta
 import julay.program.action.SymbolicAction
 import julay.program.action.SyncPayload
+import julay.program.sync.SyncResolveConfig
 import julay.program.type.listType
 import julay.program.type.stringType
 import kotlinx.coroutines.CoroutineScope
@@ -45,7 +46,7 @@ class Program {
     val godScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** Sync fast-path configuration baked in at compile time (see `--disable-opt`). */
-    val syncOptimizeConfig: SyncOptimizeConfig
+    val syncResolveConfig: SyncResolveConfig
 
     private val componentInfo: Set<TransitionSystemStaticInfo>
     private val constructorsByAction:
@@ -66,10 +67,10 @@ class Program {
         componentInfo: Set<TransitionSystemStaticInfo>,
         cliArgs: List<String> = emptyList(),
         procFunInfo: Set<TransitionSystemStaticInfo> = emptySet(),
-        syncOptimizeConfig: SyncOptimizeConfig = SyncOptimizeConfig.ALL_ON,
+        syncResolveConfig: SyncResolveConfig = SyncResolveConfig.ALL_ON,
     ) {
         this.componentInfo = componentInfo
-        this.syncOptimizeConfig = syncOptimizeConfig
+        this.syncResolveConfig = syncResolveConfig
         this.procFunByName = procFunInfo.associateBy { it.name }
 
         val argsVar = Variable("args", listType(stringType))
@@ -207,30 +208,59 @@ class Program {
         return deferred.await().value
     }
 
-    private fun constraintsSatisfiable(constraints: Set<Constraint>): Boolean =
-        withEphemeralContext { ctx ->
-            when (val fast = julay.program.sync.SyncOptimize.trySatisfiable(constraints, syncOptimizeConfig, ctx)) {
+    private fun constraintsSatisfiable(constraints: Set<Constraint>): Boolean {
+        if (syncResolveConfig.anyEnabled()) {
+            when (val fast = julay.program.sync.SyncResolveFast.trySatisfiable(constraints, syncResolveConfig)) {
+                null -> Unit
+                else -> return fast
+            }
+        }
+        return withEphemeralContext { ctx ->
+            when (val fast = julay.program.sync.SyncResolveZ3.trySatisfiable(constraints, syncResolveConfig, ctx)) {
                 null -> {
                     val solver = ctx.mkSolver()
-                    constraints.forEach { c -> solver.add(c.expr.translate(ctx) as BoolExpr) }
+                    for (c in constraints) {
+                        val expr = c.expr?.translate(ctx) as BoolExpr?
+                            ?: c.fast?.let { julay.program.sync.SyncResolveFast.toZ3(it, ctx) }
+                        if (expr == null) return@withEphemeralContext false
+                        solver.add(expr)
+                    }
                     solver.check() == Status.SATISFIABLE
                 }
                 else -> fast
             }
         }
+    }
 
     private fun extractSyncPayload(
         act: SymbolicAction,
         constraints: Set<Constraint>,
         installSession: Boolean,
-    ): Optional<SyncPayload> =
-        withEphemeralContext { ctx ->
+    ): Optional<SyncPayload> {
+        if (syncResolveConfig.anyEnabled()) {
+            when (
+                val fastConcrete =
+                    julay.program.sync.SyncResolveFast.tryConcreteAction(act, constraints, syncResolveConfig)
+            ) {
+                null -> Unit
+                else -> {
+                    val concrete = if (fastConcrete.isEmpty) null else fastConcrete.get()
+                    return buildPayload(concrete, constraints, act, installSession)
+                }
+            }
+        }
+        return withEphemeralContext { ctx ->
             val fastConcrete =
-                julay.program.sync.SyncOptimize.tryConcreteAction(act, constraints, syncOptimizeConfig, ctx)
+                julay.program.sync.SyncResolveZ3.tryConcreteAction(act, constraints, syncResolveConfig, ctx)
             val concrete: ConcreteAction? = when {
                 fastConcrete == null -> {
                     val solver = ctx.mkSolver()
-                    constraints.forEach { c -> solver.add(c.expr.translate(ctx) as BoolExpr) }
+                    for (c in constraints) {
+                        val expr = c.expr?.translate(ctx) as BoolExpr?
+                            ?: c.fast?.let { julay.program.sync.SyncResolveFast.toZ3(it, ctx) }
+                        if (expr == null) return@withEphemeralContext Optional.empty()
+                        solver.add(expr)
+                    }
                     if (solver.check() != Status.SATISFIABLE) {
                         null
                     } else if (act.args.isEmpty()) {
@@ -242,39 +272,48 @@ class Program {
                 fastConcrete.isEmpty -> null
                 else -> fastConcrete.get()
             }
-            if (concrete == null) {
-                Optional.empty()
-            } else {
-                val syncPeers = constraints
-                    .filter { it.procId >= 0 }
-                    .map { c ->
-                        val proc = c.proc
-                            ?: throw JulayException(
-                                "session sync constraint for proc ${c.procId} missing Proc handle",
-                            )
-                        SessionPeerMeta(c.procId, c.classId, proc)
-                    }
-                val sessionToInstall =
-                    if (installSession) {
-                        val actionName = act.name
-                        val channel = makeSessionChannel(act)
-                        val entry: java.util.Map.Entry<String, SyncChannel<SyncPayload, Constraint>> =
-                            object : java.util.Map.Entry<String, SyncChannel<SyncPayload, Constraint>> {
-                                override fun getKey(): String = actionName
-                                override fun getValue(): SyncChannel<SyncPayload, Constraint> = channel
-                                override fun setValue(
-                                    newValue: SyncChannel<SyncPayload, Constraint>,
-                                ): SyncChannel<SyncPayload, Constraint> {
-                                    throw UnsupportedOperationException()
-                                }
-                            }
-                        Optional.of(entry)
-                    } else {
-                        Optional.empty()
-                    }
-                Optional.of(SyncPayload(concrete, syncPeers, sessionToInstall))
-            }
+            buildPayload(concrete, constraints, act, installSession)
         }
+    }
+
+    private fun buildPayload(
+        concrete: ConcreteAction?,
+        constraints: Set<Constraint>,
+        act: SymbolicAction,
+        installSession: Boolean,
+    ): Optional<SyncPayload> {
+        if (concrete == null) {
+            return Optional.empty()
+        }
+        val syncPeers = constraints
+            .filter { it.procId >= 0 }
+            .map { c ->
+                val proc = c.proc
+                    ?: throw JulayException(
+                        "session sync constraint for proc ${c.procId} missing Proc handle",
+                    )
+                SessionPeerMeta(c.procId, c.classId, proc)
+            }
+        val sessionToInstall =
+            if (installSession) {
+                val actionName = act.name
+                val channel = makeSessionChannel(act)
+                val entry: java.util.Map.Entry<String, SyncChannel<SyncPayload, Constraint>> =
+                    object : java.util.Map.Entry<String, SyncChannel<SyncPayload, Constraint>> {
+                        override fun getKey(): String = actionName
+                        override fun getValue(): SyncChannel<SyncPayload, Constraint> = channel
+                        override fun setValue(
+                            newValue: SyncChannel<SyncPayload, Constraint>,
+                        ): SyncChannel<SyncPayload, Constraint> {
+                            throw UnsupportedOperationException()
+                        }
+                    }
+                Optional.of(entry)
+            } else {
+                Optional.empty()
+            }
+        return Optional.of(SyncPayload(concrete, syncPeers, sessionToInstall))
+    }
 
     private fun makeSyncChannel(
         act: SymbolicAction,
