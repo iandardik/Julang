@@ -79,8 +79,8 @@ class SelectCloseTest {
     @Test
     fun closingSharedChannelUnblocksTwoSelects() = runBlocking {
         withContext(Dispatchers.Default) {
-            // Sync size 3 so two waiters never form a group on their own.
-            val shared = SyncChannel<Int, Int>(3) { Optional.of(1) }
+            // Size-2 with compute always empty so two waiters never successfully rendezvous.
+            val shared = SyncChannel<Int, Int>(2) { Optional.empty() }
             val fired = AtomicInteger(0)
             val j1 = async {
                 Select(Select.SyncCase(shared) { fired.incrementAndGet() }).run()

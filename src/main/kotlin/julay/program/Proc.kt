@@ -47,7 +47,7 @@ class Proc(
     private val affinity = mutableMapOf<Int, Proc>()
 
     /** (peerProcId, actionName) → dedicated session SyncChannel. */
-    private val sessionChannelTable = mutableMapOf<Pair<Long, String>, SyncChannel<SyncPayload, Constraint>>()
+    private val sessionChannelTable = mutableMapOf<Pair<Long, String>, SyncChannel<Constraint, SyncPayload>>()
 
     private val silentlyKilled = AtomicBoolean(false)
     @Volatile
@@ -188,7 +188,7 @@ class Proc(
     private fun installSession(
         peerProcId: Long,
         actionName: String,
-        session: SyncChannel<SyncPayload, Constraint>,
+        session: SyncChannel<Constraint, SyncPayload>,
     ) {
         sessionChannelTable[peerProcId to actionName] = session
     }
@@ -231,28 +231,14 @@ class Proc(
                 nextPayload = Optional.of(payload)
             }
         }
-        Select(*cases.toTypedArray()).run()
+        runSyncCases(cases) { payload -> nextPayload = Optional.of(payload) }
 
         if (nextPayload.isEmpty) {
             scrubClosedSessionsAndAffinity()
             return true
         }
 
-        val payload = nextPayload.get()
-        applySessionPayload(payload)
-        val act = payload.action
-        val syncPeer = payload.syncPeers.firstOrNull { it.procId != procId }?.proc
-        withSessionPeer(syncPeer) {
-            transitionSystem.transit(act)
-        }
-        if (program.isConstructorAction(act.symAction)) {
-            program.spawn(act, parent = this)
-        }
-        transitionSystem.consumeProcFunReturn()?.let { value ->
-            program.completeProcFunReturn(procId, value)
-            return false
-        }
-        return !silentlyKilled.get()
+        return applySyncPayload(nextPayload.get())
     }
 
     /**
@@ -287,28 +273,20 @@ class Proc(
                     classId = classId,
                     proc = this,
                 ).cloneInto(caseCtx)
-                val anticonstraintExpr = when (act.syncRole) {
-                    TSAction.SyncRole.Default, TSAction.SyncRole.Internal ->
-                        ctx.mkEq(ctx.mkIntConst("classID"), ctx.mkInt(tsInfo.classID()))
-                    TSAction.SyncRole.Provider ->
-                        ctx.mkEq(ctx.mkBoolConst("providerClientTransition"), ctx.mkTrue())
-                    TSAction.SyncRole.Client ->
-                        ctx.mkEq(ctx.mkBoolConst("providerClientTransition"), ctx.mkFalse())
-                }
                 // Affinity exclusivity is enforced by routing onto the dedicated session SyncChannel
                 // once affinity exists (see resolveSyncChannel). First contact may use the static channel.
+                // Anticonstraints are SyncAnti only (no Z3 BoolExpr).
                 val anticonstraint = Constraint(
-                    expr = anticonstraintExpr,
                     anti = julay.program.sync.SyncAnti.fromRole(act.syncRole, tsInfo.classID()),
                     procId = procId,
                     classId = classId,
                     proc = this,
-                ).cloneInto(caseCtx)
+                )
                 Select.SyncCase(syncChannel, constraint, anticonstraint) { payload: SyncPayload ->
                     nextPayload = Optional.of(payload)
                 }
             }
-            Select(*cases.toTypedArray()).run()
+            runSyncCases(cases) { payload -> nextPayload = Optional.of(payload) }
         } finally {
             caseCtxs.forEach { caseCtx ->
                 ContextLocalCache.dropContext(caseCtx)
@@ -323,7 +301,25 @@ class Proc(
             return true
         }
 
-        val payload = nextPayload.get()
+        return applySyncPayload(nextPayload.get())
+    }
+
+    /**
+     * One enabled offer: [Select.SyncCase.syncDirect] (no Select). Multiple offers: [Select.run].
+     */
+    private suspend fun runSyncCases(
+        cases: List<Select.SyncCase<SyncPayload, Constraint>>,
+        onSat: (SyncPayload) -> Unit,
+    ) {
+        if (cases.isEmpty()) return
+        if (cases.size == 1) {
+            cases[0].syncDirect(onSat)
+            return
+        }
+        Select(*cases.toTypedArray()).run()
+    }
+
+    private suspend fun applySyncPayload(payload: SyncPayload): Boolean {
         applySessionPayload(payload)
         val act = payload.action
         val syncPeer = payload.syncPeers.firstOrNull { it.procId != procId }?.proc
@@ -333,7 +329,6 @@ class Proc(
         if (program.isConstructorAction(act.symAction)) {
             program.spawn(act, parent = this)
         }
-        // Procfun return: deliver value to waiter and exit this proc.
         transitionSystem.consumeProcFunReturn()?.let { value ->
             program.completeProcFunReturn(procId, value)
             return false
@@ -375,13 +370,13 @@ class Proc(
      * [Program.spawn] then installs dedicated channels for all shared follow-on session actions
      * before the child starts.
      */
-    private suspend fun resolveSyncChannel(offer: julay.program.sync.FastOffer): SyncChannel<SyncPayload, Constraint> =
+    private suspend fun resolveSyncChannel(offer: julay.program.sync.FastOffer): SyncChannel<Constraint, SyncPayload> =
         resolveSyncChannelForSym(offer.symAction, offer.syncChannel)
 
     private suspend fun resolveSyncChannelForSym(
         symAction: SymbolicAction,
-        syncChannel: SyncChannel<SyncPayload, Constraint>?,
-    ): SyncChannel<SyncPayload, Constraint> {
+        syncChannel: SyncChannel<Constraint, SyncPayload>?,
+    ): SyncChannel<Constraint, SyncPayload> {
         syncChannel?.let { return it }
         val resolvedSym = resolveSymbolicAction(symAction)
         if (resolvedSym.isSession) {
@@ -406,7 +401,7 @@ class Proc(
             )
     }
 
-    private suspend fun resolveSyncChannel(act: TSAction): SyncChannel<SyncPayload, Constraint> {
+    private suspend fun resolveSyncChannel(act: TSAction): SyncChannel<Constraint, SyncPayload> {
         return resolveSyncChannelForSym(act.symAction, act.syncChannel)
     }
 

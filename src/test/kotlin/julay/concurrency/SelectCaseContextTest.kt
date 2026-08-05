@@ -28,22 +28,19 @@ import kotlin.test.assertTrue
  */
 class SelectCaseContextTest {
     private fun translateCompute(): (Set<Constraint>) -> Optional<Int> = { constraints ->
-        Context().use { ctx ->
-            val solver = ctx.mkSolver()
-            constraints.forEach { c -> solver.add(c.expr!!.translate(ctx) as BoolExpr) }
-            if (solver.check() != Status.SATISFIABLE) {
-                Optional.empty()
-            } else {
-                Optional.of(1)
+        val exprs = constraints.mapNotNull { it.expr }
+        if (exprs.isEmpty()) {
+            Optional.of(1)
+        } else {
+            Context().use { ctx ->
+                val solver = ctx.mkSolver()
+                exprs.forEach { e -> solver.add(e.translate(ctx) as BoolExpr) }
+                if (solver.check() != Status.SATISFIABLE) {
+                    Optional.empty()
+                } else {
+                    Optional.of(1)
+                }
             }
-        }
-    }
-
-    private fun translateSatisfiable(): (Set<Constraint>) -> Boolean = { constraints ->
-        Context().use { ctx ->
-            val solver = ctx.mkSolver()
-            constraints.forEach { c -> solver.add(c.expr!!.translate(ctx) as BoolExpr) }
-            solver.check() == Status.SATISFIABLE
         }
     }
 
@@ -53,8 +50,24 @@ class SelectCaseContextTest {
             val rounds = 100
             val wins = AtomicInteger(0)
             repeat(rounds) {
-                val chan1 = SyncChannel<Int, Constraint>(2, translateSatisfiable(), translateCompute())
-                val chan2 = SyncChannel<Int, Constraint>(2, translateSatisfiable(), translateCompute())
+                val chan1 = SyncChannel(
+                    2,
+                    antisCompatible = { a, b ->
+                        val aa = a.anti; val bb = b.anti
+                        aa == null || bb == null ||
+                            !julay.program.sync.SyncResolveFast.antiSatisfiable(listOf(aa, bb))
+                    },
+                    compute = translateCompute(),
+                )
+                val chan2 = SyncChannel(
+                    2,
+                    antisCompatible = { a, b ->
+                        val aa = a.anti; val bb = b.anti
+                        aa == null || bb == null ||
+                            !julay.program.sync.SyncResolveFast.antiSatisfiable(listOf(aa, bb))
+                    },
+                    compute = translateCompute(),
+                )
 
                 // One shared source Context (the bug pattern) — must clone before Select.
                 val source = Context()
@@ -64,16 +77,16 @@ class SelectCaseContextTest {
                 val caseCtx2 = Context()
                 val c1 = Constraint(g1).cloneInto(caseCtx1)
                 val c2 = Constraint(g2).cloneInto(caseCtx2)
-                val a1 = Constraint(source.mkEq(source.mkIntConst("classID"), source.mkInt(1))).cloneInto(caseCtx1)
-                val a2 = Constraint(source.mkEq(source.mkIntConst("classID"), source.mkInt(2))).cloneInto(caseCtx2)
+                val a1 = Constraint(anti = julay.program.sync.SyncAnti.ClassId(1))
+                val a2 = Constraint(anti = julay.program.sync.SyncAnti.ClassId(2))
                 source.close()
 
                 val peerCtx1 = Context()
                 val peerCtx2 = Context()
                 val peer1 = Constraint(peerCtx1.mkEq(peerCtx1.mkIntConst("x"), peerCtx1.mkInt(1)))
-                val peerAnti1 = Constraint(peerCtx1.mkEq(peerCtx1.mkIntConst("classID"), peerCtx1.mkInt(99)))
+                val peerAnti1 = Constraint(anti = julay.program.sync.SyncAnti.ClassId(99))
                 val peer2 = Constraint(peerCtx2.mkEq(peerCtx2.mkIntConst("y"), peerCtx2.mkInt(2)))
-                val peerAnti2 = Constraint(peerCtx2.mkEq(peerCtx2.mkIntConst("classID"), peerCtx2.mkInt(98)))
+                val peerAnti2 = Constraint(anti = julay.program.sync.SyncAnti.ClassId(98))
 
                 val p1 = launch {
                     try {

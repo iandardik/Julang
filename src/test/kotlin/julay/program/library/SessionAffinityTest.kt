@@ -204,7 +204,7 @@ class SessionAffinityTest {
             val infoC = TransitionSystemStaticInfo("CTS$", setOf(ping), emptyMap())
             val procC = Proc(EmptyTS(), infoC, program.staticChannelTable, program)
 
-            val sessionBox = arrayOfNulls<SyncChannel<SyncPayload, Constraint>>(1)
+            val sessionBox = arrayOfNulls<SyncChannel<Constraint, SyncPayload>>(1)
             val installCount = AtomicInteger(0)
 
             val ctxA = Context()

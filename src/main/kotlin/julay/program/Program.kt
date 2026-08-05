@@ -1,6 +1,7 @@
 package julay.program
 
 import com.microsoft.z3.BoolExpr
+import com.microsoft.z3.Context
 import com.microsoft.z3.Status
 import julay.concurrency.SyncChannel
 import julay.program.action.ConcreteAction
@@ -119,7 +120,7 @@ class Program {
             ?: sessionActionsByName[name]
 
     /** Dedicated session SyncChannel: payload never includes a session to install. */
-    fun makeSessionChannel(act: SymbolicAction): SyncChannel<SyncPayload, Constraint> =
+    fun makeSessionChannel(act: SymbolicAction): SyncChannel<Constraint, SyncPayload> =
         makeSyncChannel(act, syncSize = 2, installSession = false)
 
     fun spawnProc(ts: TransitionSystem, tsInfo: TransitionSystemStaticInfo) {
@@ -298,13 +299,13 @@ class Program {
             if (installSession) {
                 val actionName = act.name
                 val channel = makeSessionChannel(act)
-                val entry: java.util.Map.Entry<String, SyncChannel<SyncPayload, Constraint>> =
-                    object : java.util.Map.Entry<String, SyncChannel<SyncPayload, Constraint>> {
+                val entry: java.util.Map.Entry<String, SyncChannel<Constraint, SyncPayload>> =
+                    object : java.util.Map.Entry<String, SyncChannel<Constraint, SyncPayload>> {
                         override fun getKey(): String = actionName
-                        override fun getValue(): SyncChannel<SyncPayload, Constraint> = channel
+                        override fun getValue(): SyncChannel<Constraint, SyncPayload> = channel
                         override fun setValue(
-                            newValue: SyncChannel<SyncPayload, Constraint>,
-                        ): SyncChannel<SyncPayload, Constraint> {
+                            newValue: SyncChannel<Constraint, SyncPayload>,
+                        ): SyncChannel<Constraint, SyncPayload> {
                             throw UnsupportedOperationException()
                         }
                     }
@@ -319,10 +320,28 @@ class Program {
         act: SymbolicAction,
         syncSize: Int,
         installSession: Boolean,
-    ): SyncChannel<SyncPayload, Constraint> {
+    ): SyncChannel<Constraint, SyncPayload> {
         return SyncChannel(
             syncSize,
             satisfiable = ::constraintsSatisfiable,
+            antisCompatible = { a, b ->
+                val aa = a.anti
+                val bb = b.anti
+                aa == null || bb == null ||
+                    !julay.program.sync.SyncResolveFast.antiSatisfiable(listOf(aa, bb))
+            },
+            snapshotForCompute = { cs ->
+                if (cs.none { it.expr != null }) {
+                    cs to {}
+                } else {
+                    val ctx = Context()
+                    val cloned = cs.map { it.cloneInto(ctx) }.toSet()
+                    cloned to {
+                        ContextLocalCache.dropContext(ctx)
+                        ctx.close()
+                    }
+                }
+            },
             compute = { constraints -> extractSyncPayload(act, constraints, installSession) },
         )
     }

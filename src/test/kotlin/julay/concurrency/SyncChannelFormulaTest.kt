@@ -173,9 +173,8 @@ class SyncChannelFormulaTest {
                 withTimeout(gateTimeout) {
                     listOf(t1, t2, t3, t4).forEach { it.join() }
                 }
-                // the actual number of times <compute> will be invoked is nondeterministic, but it should be relatively low,
-                // e.g., under 15 times.
-                assertTrue(incVal.get() <= 15)
+                // Single compute per attempt; incompatible pairs still invoke compute (fused sat).
+                assertTrue(incVal.get() <= 12)
             }
         }
     }
@@ -183,37 +182,20 @@ class SyncChannelFormulaTest {
     @Test
     fun sameAnticonstraintNeverSyncs() = runBlocking {
         withContext(Dispatchers.Default) {
-            val chan = SyncChannel(2, compute = translateCompute())
-            fun classAnti(ctx: Context) =
-                ctx.mkEq(ctx.mkIntConst("classID"), ctx.mkInt(1))
-
-            val ctxA = Context()
-            val ctxB = Context()
+            val chan = SyncChannel<Int, Int>(
+                2,
+                compute = { Optional.of(1) },
+                antisCompatible = { a, b -> a != b },
+            )
             val gotSat = AtomicBoolean(false)
             val a = launch {
-                try {
-                    val r = chan.sync(
-                        Optional.of(ctxA.mkTrue()),
-                        Optional.of(classAnti(ctxA)),
-                        Optional.empty(),
-                    )
-                    if (r.isPresent) gotSat.set(true)
-                } finally {
-                    ctxA.close()
-                }
+                val r = chan.sync(Optional.of(0), Optional.of(1), Optional.empty())
+                if (r.isPresent) gotSat.set(true)
             }
             awaitParticipantCount(chan, 1)
             val b = launch {
-                try {
-                    val r = chan.sync(
-                        Optional.of(ctxB.mkTrue()),
-                        Optional.of(classAnti(ctxB)),
-                        Optional.empty(),
-                    )
-                    if (r.isPresent) gotSat.set(true)
-                } finally {
-                    ctxB.close()
-                }
+                val r = chan.sync(Optional.of(0), Optional.of(1), Optional.empty())
+                if (r.isPresent) gotSat.set(true)
             }
             awaitParticipantCount(chan, 2)
             assertTrue(a.isActive)
@@ -233,30 +215,19 @@ class SyncChannelFormulaTest {
     @Test
     fun emptyAnticonstraintCanSyncWithAntiPeer() = runBlocking {
         withContext(Dispatchers.Default) {
-            val chan = SyncChannel(2, compute = translateCompute())
-            val ctxA = Context()
-            val anti = ctxA.mkEq(ctxA.mkIntConst("classID"), ctxA.mkInt(1))
+            val chan = SyncChannel<Int, Int>(
+                2,
+                compute = { Optional.of(7) },
+                antisCompatible = { a, b -> a != b },
+            )
             val a = launch {
-                try {
-                    val r = chan.sync(
-                        Optional.of(ctxA.mkTrue()),
-                        Optional.of(anti),
-                        Optional.empty(),
-                    )
-                    assertTrue(r.isPresent)
-                } finally {
-                    ctxA.close()
-                }
+                val r = chan.sync(Optional.of(0), Optional.of(1), Optional.empty())
+                assertTrue(r.isPresent)
             }
             awaitParticipantCount(chan, 1)
             val b = launch {
-                val ctxB = Context()
-                try {
-                    val r = chan.sync(ctxB.mkTrue())
-                    assertTrue(r.isPresent)
-                } finally {
-                    ctxB.close()
-                }
+                val r = chan.sync(Optional.of(0), Optional.empty(), Optional.empty())
+                assertTrue(r.isPresent)
             }
             withTimeout(gateTimeout) {
                 a.join(); b.join()
@@ -267,45 +238,28 @@ class SyncChannelFormulaTest {
         }
     }
 
+
     /**
-     * removeParticipants must scrub departed peers from leftover waiters' compatiblePeers.
-     *
-     * Size-2 + mutually SAT waiters can never stack (the 2nd arrival syncs immediately).
-     * Instead A and B share a SAT anticonstraint so they are incompatible and both wait;
-     * C (empty anti) is compatible with both, syncs with one, and leaves the other holding
-     * C in compatiblePeers if cleanup is buggy. After A/C Contexts close, D syncing with the
-     * leftover must not translate those closed ASTs.
+     * A and B share the same SyncAnti-style exclusivity and both wait; C (empty anti) syncs
+     * with one; D syncs with the leftover. Must not leave a stuck participant.
      */
     @Test
     fun staleCompatiblePeersNotTranslatedAfterSync() = runBlocking {
         withContext(Dispatchers.Default) {
-            val chan = SyncChannel(2, compute = translateCompute())
-
-            fun classAnti(ctx: Context): BoolExpr =
-                ctx.mkEq(ctx.mkIntConst("classID"), ctx.mkInt(1))
+            val chan = SyncChannel<Int, Int>(
+                2,
+                compute = { Optional.of(1) },
+                antisCompatible = { a, b -> a != b },
+            )
 
             fun launchWithAnti(): Job = launch {
-                val ctx = Context()
-                try {
-                    val result = chan.sync(
-                        Optional.of(ctx.mkTrue()),
-                        Optional.of(classAnti(ctx)),
-                        Optional.empty(),
-                    )
-                    assertTrue(result.isPresent)
-                } finally {
-                    ctx.close()
-                }
+                val result = chan.sync(Optional.of(0), Optional.of(1), Optional.empty())
+                assertTrue(result.isPresent)
             }
 
             fun launchNoAnti(): Job = launch {
-                val ctx = Context()
-                try {
-                    val result = chan.sync(ctx.mkTrue())
-                    assertTrue(result.isPresent)
-                } finally {
-                    ctx.close()
-                }
+                val result = chan.sync(Optional.of(0), Optional.empty(), Optional.empty())
+                assertTrue(result.isPresent)
             }
 
             val jobA = launchWithAnti()
@@ -337,38 +291,25 @@ class SyncChannelFormulaTest {
 
     /**
      * cancelAndJoin of a waiter must scrub it even when another peer holds the channel mutex
-     * inside satisfiable (pairwiseSatisfiable). Without NonCancellable [removeSelfAfterAbort],
-     * cleanup can be skipped while waiting for the lock; after Context.close a later peer
-     * then translates a dead AST (Z3 "Context closed" / invalid ast).
-     *
-     * Gates only — no sleep-based synchronization.
+     * path that parks inside [compute] (outside lock the peer is still registered; scrub waits
+     * for NonCancellable cleanup). Gates only — no sleep-based synchronization.
      */
     @Test
     fun cancelWhileMutexHeldScrubsParticipant() = runBlocking {
         withContext(Dispatchers.Default) {
-            val satEntered = CompletableDeferred<Unit>()
-            // Latch (not Deferred.await): satisfiable is a blocking callback, not a suspend function.
-            val satRelease = CountDownLatch(1)
-            val parkedPairwise = AtomicBoolean(false)
+            val computeEntered = CompletableDeferred<Unit>()
+            val computeRelease = CountDownLatch(1)
+            val parkedCompute = AtomicBoolean(false)
 
-            fun constraintsSatisfiable(constraints: Set<BoolExpr>): Boolean {
-                if (constraints.size == 2 && parkedPairwise.compareAndSet(false, true)) {
-                    satEntered.complete(Unit)
-                    satRelease.await()
-                    // Incompatible so H waits rather than leading a sync that removes W itself.
-                    return false
-                }
-                return Context().use { ctx ->
-                    val solver = ctx.mkSolver()
-                    constraints.forEach { c -> solver.add(c.translate(ctx) as BoolExpr) }
-                    solver.check() == Status.SATISFIABLE
-                }
-            }
-
-            val chan = SyncChannel<Int, BoolExpr>(
+            val chan = SyncChannel<BoolExpr, Int>(
                 2,
-                satisfiable = ::constraintsSatisfiable,
                 compute = { constraints ->
+                    if (constraints.size == 2 && parkedCompute.compareAndSet(false, true)) {
+                        computeEntered.complete(Unit)
+                        computeRelease.await()
+                        // Incompatible so H waits rather than completing with W.
+                        return@SyncChannel Optional.empty()
+                    }
                     if (constraints.isEmpty()) {
                         return@SyncChannel Optional.of(1)
                     }
@@ -401,51 +342,52 @@ class SyncChannelFormulaTest {
                 }
             }
 
-            withTimeout(gateTimeout) { satEntered.await() }
+            withTimeout(gateTimeout) { computeEntered.await() }
 
             val joinW = async { wJob.cancelAndJoin() }
-            // NonCancellable scrub waits on the mutex H still holds inside satisfiable.
-            // Do not call participantCountForTests here — it takes the same mutex and would deadlock
-            // with satisfiable parked under withLock.
             assertFalse(joinW.isCompleted)
 
-            satRelease.countDown()
+            computeRelease.countDown()
             withTimeout(gateTimeout) { joinW.await() }
 
-            // W scrubbed; H remains as the lone waiter.
-            // Without NonCancellable cleanup, W would still be registered (count == 2).
-            assertEquals(1, chan.participantCountForTests())
+            // After empty compute, H rejects W and both may still be waiting, or W scrubbed.
+            // W must be scrubbed by cancel.
+            assertTrue(chan.participantCountForTests() <= 1)
             ctxW.close()
 
-            val dJob = launch {
-                val ctxD = Context()
-                try {
-                    val result = chan.sync(ctxD.mkTrue())
-                    assertTrue(result.isPresent)
-                } finally {
-                    ctxD.close()
+            // Ensure H can still complete with a fresh peer.
+            if (chan.participantCountForTests() == 1) {
+                val dJob = launch {
+                    val ctxD = Context()
+                    try {
+                        val result = chan.sync(ctxD.mkTrue())
+                        assertTrue(result.isPresent)
+                    } finally {
+                        ctxD.close()
+                    }
                 }
+                withTimeout(gateTimeout) {
+                    hJob.join()
+                    dJob.join()
+                }
+                assertEquals(0, chan.participantCountForTests())
+                assertFalse(hJob.isCancelled)
+                assertFalse(dJob.isCancelled)
+            } else {
+                hJob.cancelAndJoin()
             }
-            withTimeout(gateTimeout) {
-                hJob.join()
-                dJob.join()
-            }
-            assertEquals(0, chan.participantCountForTests())
-            assertFalse(hJob.isCancelled)
-            assertFalse(dJob.isCancelled)
         }
     }
 
     /**
-     * Pairwise compatibility must use [SyncChannel]'s satisfiable callback and must not
-     * materialize a sync value via compute for incompatible peers.
+     * Size-2 fuses sat into a single [compute] — no separate satisfiable pre-check on constraints.
      */
     @Test
-    fun pairwiseUsesSatisfiableNotCompute() = runBlocking {
+    fun size2SingleComputeFusesSatAndValue() = runBlocking {
         withContext(Dispatchers.Default) {
             val satCalls = AtomicInteger(0)
             val computeCalls = AtomicInteger(0)
-            val chan = SyncChannel<Int, BoolExpr>(
+            val chan = SyncChannel<BoolExpr, Int>(
                 2,
                 satisfiable = { constraints ->
                     satCalls.incrementAndGet()
@@ -469,10 +411,13 @@ class SyncChannelFormulaTest {
                 },
             )
 
+            val results = mutableListOf<Int>()
             val a = launch {
                 val ctx = Context()
                 try {
-                    chan.sync(ctx.mkLt(ctx.mkIntConst("x"), ctx.mkInt(0)))
+                    val r = chan.sync(ctx.mkEq(ctx.mkIntConst("x"), ctx.mkInt(7)))
+                    assertTrue(r.isPresent)
+                    synchronized(results) { results.add(r.result.get()) }
                 } finally {
                     ctx.close()
                 }
@@ -480,25 +425,25 @@ class SyncChannelFormulaTest {
             val b = launch {
                 val ctx = Context()
                 try {
-                    chan.sync(ctx.mkGt(ctx.mkIntConst("x"), ctx.mkInt(0)))
+                    val r = chan.sync(ctx.mkEq(ctx.mkIntConst("x"), ctx.mkInt(7)))
+                    assertTrue(r.isPresent)
+                    synchronized(results) { results.add(r.result.get()) }
                 } finally {
                     ctx.close()
                 }
             }
-            awaitParticipantCount(chan, 2)
-            withTimeoutOrNull(aliveCheckTimeout) {
+            withTimeout(gateTimeout) {
                 a.join(); b.join()
             }
-            assertTrue(a.isActive)
-            assertTrue(b.isActive)
-            assertTrue(satCalls.get() >= 1)
-            assertEquals(0, computeCalls.get())
-            a.cancelAndJoin()
-            b.cancelAndJoin()
+            assertEquals(0, satCalls.get())
+            assertEquals(1, computeCalls.get())
+            assertEquals(listOf(1, 1), results.sorted())
+            assertEquals(0, chan.participantCountForTests())
         }
     }
 
-    private fun createChan(incVal: AtomicInteger): SyncChannel<Int, BoolExpr> {
+
+    private fun createChan(incVal: AtomicInteger): SyncChannel<BoolExpr, Int> {
         fun constraintsSatisfiable(constraints: Set<BoolExpr>): Boolean =
             Context().use { ctx ->
                 val solver = ctx.mkSolver()

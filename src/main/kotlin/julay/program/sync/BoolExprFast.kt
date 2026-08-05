@@ -99,7 +99,7 @@ data class FastOffer(
     val symAction: SymbolicAction,
     val guard: BoolExprFast,
     val syncRole: TSAction.SyncRole = TSAction.SyncRole.Default,
-    val syncChannel: SyncChannel<SyncPayload, Constraint>? = null,
+    val syncChannel: SyncChannel<Constraint, SyncPayload>? = null,
 )
 
 /**

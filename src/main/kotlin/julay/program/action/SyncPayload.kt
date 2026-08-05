@@ -18,7 +18,7 @@ import java.util.Optional
 data class SyncPayload(
     val action: ConcreteAction,
     val syncPeers: List<SessionPeerMeta> = emptyList(),
-    val sessionToInstall: Optional<java.util.Map.Entry<String, SyncChannel<SyncPayload, Constraint>>> =
+    val sessionToInstall: Optional<java.util.Map.Entry<String, SyncChannel<Constraint, SyncPayload>>> =
         Optional.empty(),
 )
 

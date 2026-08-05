@@ -110,21 +110,33 @@ class Select(private vararg val cases : Case) {
      * Case-local Context (see [Select.run]); do not share one Context across multiple cases.
      */
     class SyncCase<V : Any, C : Any>(
-        private val chan : SyncChannel<V, C>,
+        private val chan : SyncChannel<C, V>,
         private val constraint : Optional<C> = Optional.empty(),
         private val anticonstraint : Optional<C> = Optional.empty(),
         private val callback : (V)->Unit = {}
     ) : Case {
         private var selectRef = Optional.empty<Select>()
-        constructor(chan : SyncChannel<V, C>, callback : (V)->Unit = {})
+        constructor(chan : SyncChannel<C, V>, callback : (V)->Unit = {})
             : this(chan, Optional.empty(), Optional.empty(), callback) {}
-        constructor(chan : SyncChannel<V, C>, constraint : C, anticonstraint : C, callback : (V)->Unit = {})
+        constructor(chan : SyncChannel<C, V>, constraint : C, anticonstraint : C, callback : (V)->Unit = {})
                 : this(chan, Optional.of(constraint), Optional.of(anticonstraint), callback) {}
         override fun setSelect(s : Select) {
             selectRef = Optional.of(s)
         }
         override fun hasSelect() = selectRef.isPresent
         override fun getChannelHash() = chan.hashCode()
+
+        /**
+         * Direct sync without a [Select] (single-offer Proc steps). Uses empty Select so
+         * SyncChannel skips 2PL. Does not require [setSelect].
+         */
+        suspend fun syncDirect(onSat: (V) -> Unit = callback) {
+            val ret = chan.sync(constraint, anticonstraint, Optional.empty())
+            if (ret.isPresent) {
+                onSat.invoke(ret.result.get())
+            }
+        }
+
         override suspend fun run() {
             val select = selectRef.get()
             val ret = chan.sync(constraint, anticonstraint, selectRef)

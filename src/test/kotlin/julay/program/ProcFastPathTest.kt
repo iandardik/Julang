@@ -48,7 +48,7 @@ class ProcFastPathTest {
             val infoA = TransitionSystemStaticInfo("A", setOf(handoff), emptyMap())
             val infoB = TransitionSystemStaticInfo("B", setOf(handoff), emptyMap())
             // Use a dedicated Program with known sync channel
-            val chan = SyncChannel<SyncPayload, Constraint>(
+            val chan = SyncChannel<Constraint, SyncPayload>(
                 2,
                 satisfiable = { cs ->
                     julay.program.sync.SyncResolveFast.trySatisfiable(cs, SyncResolveConfig.ALL_ON)

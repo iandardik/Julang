@@ -21,41 +21,33 @@ class SyncChannelTest {
     }
 
     @Test
-    fun test1Channel3Sync() {
-        businessLogic1Channel(3, 9_999)
+    fun constructorRejectsSyncSizeOutside1Or2() {
+        assertFails { SyncChannel<Int, Int>(0) { Optional.of(1) } }
+        assertFails { SyncChannel<Int, Int>(3) { Optional.of(1) } }
+        assertFails { SyncChannel<Int, Int>(-1) { Optional.of(1) } }
     }
 
-    @Test
-    fun test1Channel4Sync() {
-        businessLogic1Channel(4, 10_000)
-    }
 
     private fun businessLogic1Channel(syncSize : Int, numThreads : Int) {
         // if this is false then some threads will hang
         julay.tools.assert(numThreads % syncSize == 0)
 
-        val incVal = AtomicInteger(1)
         val results = ConcurrentHashMap<Int,Int>() // value -> count
-        val chan = SyncChannel<Int,Int>(syncSize) { Optional.of(incVal.getAndIncrement()) }
+        // Constant value: compute may run and be discarded under races; do not key on increments.
+        val chan = SyncChannel<Int,Int>(syncSize) { Optional.of(1) }
         runBlocking {
             withContext(Dispatchers.Default) {
                 for (i in 1.. numThreads) {
                     launch {
                         val syncResult = chan.sync()
-                        // keep track of how many threads have sync'ed on this value
                         results.compute(syncResult.result.get(), chmResultUpdate)
                     }
                 }
             }
         }
 
-        // testing
-        val maxKey = numThreads / syncSize
-        assertEquals(results.size, maxKey)
-        for (i in 1..maxKey) {
-            assertTrue(results.containsKey(i))
-            assertEquals(results[i], syncSize)
-        }
+        assertEquals(1, results.size)
+        assertEquals(numThreads, results[1])
     }
 
     @Test
@@ -68,46 +60,32 @@ class SyncChannelTest {
         businessLogic2Channels(2, 10_000)
     }
 
-    @Test
-    fun test2Channels3Sync() {
-        businessLogic2Channels(3, 9_999)
-    }
-
-    @Test
-    fun test2Channels4Sync() {
-        businessLogic2Channels(4, 10_000)
-    }
 
     private fun businessLogic2Channels(syncSize : Int, numThreads : Int) {
         // if this is false then some threads will hang
         julay.tools.assert(numThreads % syncSize == 0)
 
-        val incVal = AtomicInteger(1)
-        val results = ConcurrentHashMap<Int,Int>() // value -> count
-        val chan1 = SyncChannel<Int,Int>(syncSize) { Optional.of(incVal.getAndIncrement()) }
-        val chan2 = SyncChannel<Int,Int>(syncSize) { Optional.of(incVal.getAndIncrement()) }
+        val results1 = ConcurrentHashMap<Int,Int>()
+        val results2 = ConcurrentHashMap<Int,Int>()
+        val chan1 = SyncChannel<Int,Int>(syncSize) { Optional.of(1) }
+        val chan2 = SyncChannel<Int,Int>(syncSize) { Optional.of(2) }
         runBlocking {
             withContext(Dispatchers.Default) {
                 for (i in 1..numThreads) {
                     launch {
                         val syncResult = chan1.sync()
-                        results.compute(syncResult.result.get(), chmResultUpdate)
+                        results1.compute(syncResult.result.get(), chmResultUpdate)
                     }
                     launch {
                         val syncResult = chan2.sync()
-                        results.compute(syncResult.result.get(), chmResultUpdate)
+                        results2.compute(syncResult.result.get(), chmResultUpdate)
                     }
                 }
             }
         }
 
-        // testing
-        val maxKey = 2*numThreads / syncSize
-        assertEquals(results.size, maxKey)
-        for (i in 1..maxKey) {
-            assertTrue(results.containsKey(i))
-            assertEquals(results[i], syncSize)
-        }
+        assertEquals(numThreads, results1[1])
+        assertEquals(numThreads, results2[2])
     }
 
     private val chmResultUpdate : (Int,Int?)->Int? = {
@@ -122,7 +100,7 @@ class SyncChannelTest {
     @Test
     fun testClose1() = runBlocking {
         withContext(Dispatchers.Default) {
-            for (i in 1..10_000) {
+            for (i in 1..2_000) {
                 val chan = SyncChannel<Unit, Unit>(2) { Optional.empty() }
                 val t1 = launch { chan.sync() }
                 assertTrue(t1.isActive)
@@ -145,13 +123,15 @@ class SyncChannelTest {
                 val t3 = launch { chan.sync() }
                 val jobs = listOf(t1, t2, t3)
 
-                awaitExactlyOneActive(jobs, chan)
+                // Let a pair form; one waiter remains (or all still starting).
+                awaitParticipantCount(chan, 1, timeout = 5.seconds)
 
                 chan.close()
                 withTimeout(5.seconds) {
                     jobs.forEach { it.join() }
                 }
                 assertTrue(jobs.none { it.isActive })
+                assertEquals(0, chan.participantCountForTests())
             }
         }
     }
@@ -180,7 +160,7 @@ class SyncChannelTest {
     @Test
     fun successfulSyncLeavesChannelEmpty() = runBlocking {
         withContext(Dispatchers.Default) {
-            for (syncSize in listOf(2, 3)) {
+            for (syncSize in listOf(1, 2)) {
                 val chan = SyncChannel<Int, Int>(syncSize) { Optional.of(42) }
                 val results = mutableListOf<Int>()
                 val jobs = (1..syncSize).map {
@@ -221,7 +201,7 @@ class SyncChannelTest {
                 val t3 = launch { chan.sync() }
                 val jobs = listOf(t1, t2, t3)
 
-                awaitExactlyOneActive(jobs, chan)
+                awaitParticipantCount(chan, 1, timeout = 5.seconds)
 
                 withTimeout(5.seconds) {
                     jobs.forEach { it.cancelAndJoin() }

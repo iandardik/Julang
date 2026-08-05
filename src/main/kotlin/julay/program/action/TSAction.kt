@@ -20,7 +20,7 @@ data class TSAction(
      * When non-null, sync on this dedicated session SyncChannel instead of the static
      * [Program.actionTable] channel.
      */
-    val syncChannel: SyncChannel<SyncPayload, Constraint>? = null,
+    val syncChannel: SyncChannel<Constraint, SyncPayload>? = null,
     /**
      * Optional [BoolExprFast] for this action (codegen / libraries). When non-null, Julay may
      * use it instead of [guard] to avoid Z3 on sat/commit; null means BoolExpr/[guard] only.
