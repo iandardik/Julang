@@ -33,6 +33,10 @@ The chosen config is **baked into** the generated program JAR (`Program(..., Syn
 
 Unknown optimization ids are a usage error.
 
+## `--verbose` sync-path summary
+
+`julayc --verbose` prints a **compile-time** summary of generated Julay procs: which emit `SyncStepPlan.FastOnly` vs `NeedsZ3` (TS-level: every transition guard must lower to `BoolExprFast`), and separately how many actions get a residual `fastGuard` vs remain opaque. Kotlin library `TransitionSystem`s are not tallied. When all named opts are off, the banner notes that runtime still always uses NeedsZ3 even if codegen classified a proc as FastOnly.
+
 ## Correctness
 
 Fast paths apply to **pairwise compatibility** and **commit-time argument binding**. Local action **enablement** still uses Z3 so mixed embeddings (string concat, collections) cannot falsely skip steps.

@@ -75,6 +75,11 @@ class Julayc : CliktCommand(name = "julayc") {
             "See docs/language/compiler-optimizations.md",
     ).optionalValue("ALL", acceptsUnattachedValue = false)
 
+    private val verbose by option(
+        "--verbose",
+        help = "Print sync-path summary (FastOnly vs NeedsZ3).",
+    ).flag()
+
     private val input by argument(
         help = "Jul source file to compile",
     ).path(mustExist = true, canBeFile = true).optional()
@@ -97,6 +102,7 @@ class Julayc : CliktCommand(name = "julayc") {
             compileNames = compileNames,
             compileTlaNames = compileTlaNames,
             syncResolveConfig = syncResolveConfig,
+            verbose = verbose,
         )
     }
 }

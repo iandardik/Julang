@@ -16,6 +16,7 @@ import julay.program.sync.SyncResolveConfig
 data class CodegenResult(
     val sourceText: String,
     val mainClassName: String,
+    val syncPathStats: SyncPathStats = SyncPathStats.EMPTY,
 )
 
 fun codegenPass(
@@ -162,7 +163,10 @@ fun codegenPass(
         "\n\n" +
         mainFunction
 
-    return CodegenResult(sourceText, mainClassName)
+    val syncPathStats = SyncPathStats(
+        (procClasses + procFunClasses).map { it.syncPathProcStat() },
+    )
+    return CodegenResult(sourceText, mainClassName, syncPathStats)
 }
 
 private fun occurrenceStaticInfoExpr(
@@ -502,6 +506,34 @@ private fun ProcClassDecl.kotlinClassString(
 
 private fun ProcClassDecl.runtimeTransitionsForStaticInfo(): List<ActionDecl> =
     transitions.filterNot { it.action.name == procFunRetAction(name) }
+
+/** Compile-time FastOnly/NeedsZ3 + per-action fastGuard classification (same as codegen emit). */
+private fun ProcClassDecl.syncPathProcStat(): SyncPathProcStat {
+    val stateVarTypes = stateVars.associate { it.name to it.type }
+    val actions = runtimeTransitionsForStaticInfo().map { it.syncPathActionStat(stateVarTypes) }
+    // Match kotlinSyncStepPlanString: empty transition set → FastOnly; else all guards lower.
+    val fastOnly = actions.all { it.hasFastGuard }
+    return SyncPathProcStat(
+        name = name,
+        fastOnly = fastOnly,
+        actions = actions,
+    )
+}
+
+private fun ActionDecl.syncPathActionStat(stateVarTypes: Map<String, Type>): SyncPathActionStat {
+    val symbolTypes = stateVarTypes + actionArgEnv(action.args)
+    val argSymbols = actionArgSymbols(action.args)
+    val fast = guards.toCombinedBoolExprFastOrNull(symbolTypes, argSymbols)
+    return if (fast != null) {
+        SyncPathActionStat(name = action.name, hasFastGuard = true)
+    } else {
+        SyncPathActionStat(
+            name = action.name,
+            hasFastGuard = false,
+            opaqueReason = guards.opaqueFastGuardReason(symbolTypes, argSymbols),
+        )
+    }
+}
 
 private fun ProcClassDecl.kotlinStaticInfoString(
     occurrenceId: String,

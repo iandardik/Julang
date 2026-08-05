@@ -53,7 +53,7 @@ fun compileProgram(
     keepBuild: Boolean = false,
     compilerJar: Path = resolveCompilerJar(),
     syncResolveConfig: SyncResolveConfig = SyncResolveConfig.ALL_ON,
-) {
+): SyncPathStats {
     val buildDir = "${program.name}-jul-build"
     if (!File(buildDir).exists() && !File(buildDir).mkdir()) {
         println("Could not create $buildDir dir")
@@ -77,7 +77,7 @@ fun compileProgram(
         installVendoredGradleWrapper(File(buildDir))
     } catch (e: Exception) {
         println("Failed to install Gradle wrapper for program \"${program.name}\": ${e.message}")
-        return
+        return codegen.syncPathStats
     }
 
     File("$buildDir/build.gradle.kts").writeText(
@@ -89,15 +89,16 @@ fun compileProgram(
     )
     if (gradleResult.timedOut) {
         println("Gradle build timed out for program \"${program.name}\"")
-        return
+        return codegen.syncPathStats
     }
     if (gradleResult.exitCode != 0) {
         println("Gradle build failed for program \"${program.name}\" (exit ${gradleResult.exitCode}):\n${gradleResult.output}")
-        return
+        return codegen.syncPathStats
     }
     if (!keepBuild) {
         deleteDirectory(File(buildDir))
     }
+    return codegen.syncPathStats
 }
 
 /**

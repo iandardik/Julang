@@ -163,3 +163,70 @@ fun List<ExprNode>.toCombinedBoolExprFastOrNull(
     val parts = map { it.toBoolExprFastOrNull(symbolTypes, argSymbols) ?: return null }
     return "BoolExprFast.And(listOf(${parts.joinToString(", ")}))"
 }
+
+/**
+ * Short reason why a guard list cannot lower to [julay.program.sync.BoolExprFast].
+ * Call only when [toCombinedBoolExprFastOrNull] returned null.
+ */
+fun List<ExprNode>.opaqueFastGuardReason(
+    symbolTypes: Map<String, Type>,
+    argSymbols: Set<String>,
+): String {
+    if (isEmpty()) return "empty" // should not happen when combined is null
+    for (e in this) {
+        if (e.toBoolExprFastOrNull(symbolTypes, argSymbols) == null) {
+            return e.opaqueFastGuardKind(symbolTypes, argSymbols)
+        }
+    }
+    return "opaque"
+}
+
+private fun ExprNode.opaqueFastGuardKind(
+    symbolTypes: Map<String, Type>,
+    argSymbols: Set<String>,
+): String = when (this) {
+    is BinaryOpExprNode -> when (val op = op()) {
+        "<", ">", "<=", ">=" -> "relational"
+        "&" -> {
+            val l = lhsOperand().toBoolExprFastOrNull(symbolTypes, argSymbols)
+            val r = rhsOperand().toBoolExprFastOrNull(symbolTypes, argSymbols)
+            when {
+                l == null -> lhsOperand().opaqueFastGuardKind(symbolTypes, argSymbols)
+                r == null -> rhsOperand().opaqueFastGuardKind(symbolTypes, argSymbols)
+                else -> "opaque &"
+            }
+        }
+        "=" -> {
+            when {
+                lhsOperand().toSyncTermOrNull(symbolTypes, argSymbols) == null ->
+                    "equality (opaque left term)"
+                rhsOperand().toSyncTermOrNull(symbolTypes, argSymbols) == null ->
+                    "equality (opaque right term)"
+                else -> "equality"
+            }
+        }
+        else -> "op '$op'"
+    }
+    is UnaryOpExprNode -> when (val op = op()) {
+        "~" -> {
+            if (operand().toBoolExprFastOrNull(symbolTypes, argSymbols) == null) {
+                operand().opaqueFastGuardKind(symbolTypes, argSymbols)
+            } else {
+                "unary ~"
+            }
+        }
+        else -> "unary '$op'"
+    }
+    is MethodCallExprNode -> "method call"
+    is FunCallExprNode -> "function call"
+    is QuantifiedExprNode -> "quantifier"
+    is IfElseExprNode -> "if-else"
+    is WhenExprNode -> "when"
+    is LetExprNode -> "let"
+    is IndexExprNode -> "index"
+    is SliceExprNode -> "slice"
+    is FieldAccessExprNode, is FieldAccessOnExprNode, is MemberAccessExprNode -> "field access"
+    is ListLiteralExprNode, is MapLiteralExprNode, is SetLiteralExprNode -> "collection literal"
+    is LambdaExprNode -> "lambda"
+    else -> this::class.simpleName?.removeSuffix("ExprNode")?.lowercase() ?: "opaque"
+}

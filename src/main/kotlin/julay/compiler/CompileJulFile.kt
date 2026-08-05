@@ -17,6 +17,7 @@ fun compileJulFile(
     compileNames: List<String> = emptyList(),
     compileTlaNames: List<String> = emptyList(),
     syncResolveConfig: SyncResolveConfig = SyncResolveConfig.ALL_ON,
+    verbose: Boolean = false,
 ) {
     val checked = prepareCheckedCompilation(
         source,
@@ -47,11 +48,17 @@ fun compileJulFile(
         }
     }
 
+    var syncPathStats = SyncPathStats.EMPTY
     jarTargets.forEach {
-        compileProgram(
+        val stats = compileProgram(
             it, ast, procDecls, librariesInUse, keepBuild, compilerJar,
             syncResolveConfig = syncResolveConfig,
         )
+        syncPathStats += stats
+    }
+
+    if (verbose && jarTargets.isNotEmpty()) {
+        print(syncPathStats.formatSummary(syncResolveConfig))
     }
 
     val specNodes = ast.declNodes().filterIsInstance<SpecNode>().associateBy { it.name() }
