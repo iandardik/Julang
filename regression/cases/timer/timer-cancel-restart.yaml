@@ -2,7 +2,8 @@ source: regression/input/timer/timer-cancel-restart.jul
 programs:
   - name: TimerCancelRestart
     run:
-      background: true
-      durationMs: 8000
+      # Foreground: Driver exitProcess()s after "restarted". Avoids background
+      # durationMs being capped below the 1s short timer when compile is slow.
+      timeoutMs: 15000
       expectStdoutContains:
         - "restarted"

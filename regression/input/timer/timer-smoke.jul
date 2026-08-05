@@ -1,4 +1,5 @@
 import julay.proclib.Timer
+import julay.funlib.exitProcess
 import julay.funlib.println
 
 proc Driver {
@@ -32,6 +33,7 @@ proc Driver {
         transit: step := "idle"
         after:
             println(msg)
+            exitProcess()
     }
 }
 

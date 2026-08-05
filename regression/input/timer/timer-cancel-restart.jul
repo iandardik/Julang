@@ -1,8 +1,12 @@
 import julay.proclib.Timer
+import julay.funlib.exitProcess
 import julay.funlib.println
 
 /*
  * Start a long timer, cancel it, then start a short one that should fire.
+ * Long delay is only to prove cancel (we never wait it out); short delay is 1s.
+ * Exits after print so the regression harness can wait for completion instead of
+ * a fixed background sleep (which is capped by the case compile+run budget).
  */
 proc Driver {
     var step : String
@@ -18,7 +22,7 @@ proc Driver {
 
     session transition startTimer(time : Int) {
         guard:
-            (step = "startLong" & time = 10) | (step = "startShort" & time = 1)
+            (step = "startLong" & time = 5) | (step = "startShort" & time = 1)
         transit:
             step := when (step) {
                 "startLong" -> "cancel"
@@ -41,6 +45,7 @@ proc Driver {
         transit: step := "idle"
         after:
             println(msg)
+            exitProcess()
     }
 }
 
