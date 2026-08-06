@@ -1,5 +1,7 @@
 package julay.compiler
 
+import julay.compiler.ast.LeafSpecNode
+import julay.compiler.ast.ParamProcExprNode
 import julay.compiler.ast.SpecNode
 import julay.compiler.ast.ValueProcExprNode
 import julay.compiler.pass.compileSpecToTla
@@ -61,9 +63,11 @@ fun compileJulFile(
         print(syncPathStats.formatSummary(syncResolveConfig))
     }
 
-    val specNodes = ast.declNodes().filterIsInstance<SpecNode>().associateBy { it.name() }
+    val compositionSpecs = ast.declNodes().filterIsInstance<SpecNode>().associateBy { it.name() }
+    val leafSpecs = ast.declNodes().filterIsInstance<LeafSpecNode>().associateBy { it.name() }
     for (specDecl in specTargets) {
-        val specNode = specNodes[specDecl.name]
+        val specNode = compositionSpecs[specDecl.name]
+            ?: leafSpecs[specDecl.name]?.let { syntheticLeafSpec(it) }
         if (specNode == null) {
             println("Internal error: missing SpecNode for \"${specDecl.name}\"")
             return
@@ -108,4 +112,16 @@ private fun runTlaStructuralPass(
 internal fun syntheticProcSpec(procName: String): SpecNode {
     val loc = SourceLoc(0 to 0)
     return SpecNode(procName, ValueProcExprNode(procName, null, loc), loc)
+}
+
+/** Leaf spec compile target → plain system (with declaration params when present). */
+internal fun syntheticLeafSpec(leaf: LeafSpecNode): SpecNode {
+    val loc = leaf.programLocation()
+    val body: julay.compiler.ast.ASTNode = ValueProcExprNode(leaf.leafSpecName(), null, loc)
+    val system = if (leaf.isParameterized()) {
+        ParamProcExprNode(body, leaf.leafSpecParamName()!!, leaf.leafSpecParamType()!!, loc)
+    } else {
+        body
+    }
+    return SpecNode(leaf.leafSpecName(), system, loc)
 }

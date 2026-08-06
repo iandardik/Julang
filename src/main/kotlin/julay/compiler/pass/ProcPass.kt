@@ -12,6 +12,7 @@ fun ASTNode.procPass(): List<ProcDecl> = when (this) {
         listOf(ProcDecl(apiName(), procParts + callParts, ProcDeclType.Proc))
     }
     is SpecNode -> listOf(ProcDecl(specNodeName(), specNodeValue().procPass(), ProcDeclType.Spec))
+    is LeafSpecNode -> listOf(ProcDecl(leafSpecName(), emptyList(), ProcDeclType.Spec))
     is AgSpecExprNode -> {
         val assumeParts = assumeExpr()?.procPass() ?: emptyList()
         val systemParts = systemExpr().procPass()
@@ -35,6 +36,7 @@ fun ASTNode.resolvedProcPass(unit: CompilationUnit): List<ProcDecl> = when (this
     is SpecNode -> listOf(
         ProcDecl(specNodeName(), specNodeValue().resolvedProcPass(unit), ProcDeclType.Spec),
     )
+    is LeafSpecNode -> listOf(ProcDecl(leafSpecName(), emptyList(), ProcDeclType.Spec))
     is AgSpecExprNode -> {
         val assumeParts = assumeExpr()?.resolvedProcPass(unit) ?: emptyList()
         val systemParts = systemExpr().resolvedProcPass(unit)

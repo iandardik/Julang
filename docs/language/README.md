@@ -39,8 +39,8 @@ Two different instances of the **same proc class never synchronize** with each o
 
 Top-level `compile Name, ...` selects what `julayc` emits:
 
-- **Proc** names → runnable JARs
-- **Spec** names → `.tla` / `.cfg`
+- **Proc** names → runnable JARs (error if the assembly reaches a sort-bearing type)
+- **Spec** names (composition or leaf) → `.tla` / `.cfg` (sorts and sort-field objs allowed)
 
 How-to: [Getting started](../getting-started.md). Specs: [Specifications](specifications.md).
 

@@ -5,6 +5,7 @@ import julay.compiler.ast.RootNode
 import julay.compiler.decl.ProcDecl
 import julay.compiler.decl.ProcDeclType
 import julay.compiler.pass.errorPass
+import julay.compiler.pass.jarSortReachabilityErrors
 import julay.compiler.pass.resolvedProcPass
 import julay.compiler.pass.typePass
 import julay.compiler.pass.warningPass
@@ -49,6 +50,12 @@ fun checkJulFile(
     val (jarTargets, _, targetErrors) = resolveCompileTargetsCollecting(ast, unit, procDecls)
     diagnostics += targetErrors.map { it.toStructuredDiagnostic(entry) }
     if (targetErrors.isNotEmpty()) {
+        return CheckResult(diagnostics)
+    }
+
+    val jarSortErrors = jarSortReachabilityErrors(jarTargets, ast, procDecls)
+    diagnostics += jarSortErrors.map { it.toStructuredDiagnostic(entry) }
+    if (jarSortErrors.isNotEmpty()) {
         return CheckResult(diagnostics)
     }
 
@@ -167,6 +174,8 @@ private fun resolveCompileTargetsCollecting(
                 // Standalone TLA target — not a JAR; ignore for check's jar/spec lists.
             }
             byName[name]?.type == ProcDeclType.Spec -> specs += byName.getValue(name)
+            name in unit.allLeafSpecNames ->
+                specs += byName[name] ?: ProcDecl(name, emptyList(), ProcDeclType.Spec)
             byName[name]?.type == ProcDeclType.Proc -> jars += byName.getValue(name)
             name in unit.allPClassNames -> jars += ProcDecl(name, emptyList(), ProcDeclType.Proc)
             else -> missing += name

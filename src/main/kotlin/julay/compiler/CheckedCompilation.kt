@@ -7,6 +7,7 @@ import julay.compiler.collectProcFunNames
 import julay.compiler.decl.ProcDecl
 import julay.compiler.decl.ProcDeclType
 import julay.compiler.pass.errorPass
+import julay.compiler.pass.jarSortReachabilityErrors
 import julay.compiler.pass.resolvedProcPass
 import julay.compiler.pass.typePass
 import julay.compiler.pass.warningPass
@@ -74,6 +75,8 @@ fun resolveCompileTargets(
         val decl = byName[name]
         when {
             decl?.type == ProcDeclType.Spec -> specs += decl
+            name in unit.allLeafSpecNames ->
+                specs += decl ?: ProcDecl(name, emptyList(), ProcDeclType.Spec)
             decl?.type == ProcDeclType.Proc -> jars += decl
             name in unit.allPClassNames -> jars += ProcDecl(name, emptyList(), ProcDeclType.Proc)
             else -> missing += name
@@ -163,6 +166,13 @@ fun prepareCheckedCompilation(
         return null
     }
     val tlaProcTargets = (fromCompileTla + targets.procFunTla).distinctBy { it.name }
+
+    val jarSortErrors = jarSortReachabilityErrors(jarTargets, ast, procDecls)
+    if (jarSortErrors.isNotEmpty()) {
+        jarSortErrors.forEach { println(it) }
+        println("Found compile errors, exiting.")
+        return null
+    }
 
     return CheckedCompilation(
         unit = unit,

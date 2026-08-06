@@ -23,6 +23,8 @@ data class CompilationUnit(
     val entryDeclNames: Set<String>,
     val allPClassNames: Set<String>,
     val allProcNames: Set<String>,
+    /** Leaf spec declaration names (TLA-only; never JAR-eligible). */
+    val allLeafSpecNames: Set<String> = emptySet(),
 ) {
     fun isLibraryInUse(flatName: String): Boolean =
         importTable.shortNames.values.any { it is ResolvedSymbol.Library && it.flatName == flatName } ||
@@ -65,6 +67,7 @@ fun emptyCompilationUnit(entryPath: Path): CompilationUnit {
         entryDeclNames = emptySet(),
         allPClassNames = emptySet(),
         allProcNames = emptySet(),
+        allLeafSpecNames = emptySet(),
     )
 }
 
@@ -77,9 +80,12 @@ fun collectDeclNames(root: RootNode): Set<String> =
 fun collectPClassNames(root: RootNode): Set<String> =
     root.declNodes().filterIsInstance<ProcClassNode>().map { it.name() }.toSet()
 
+fun collectLeafSpecNames(root: RootNode): Set<String> =
+    root.declNodes().filterIsInstance<LeafSpecNode>().map { it.name() }.toSet()
+
 fun collectProcAliasNames(root: RootNode): Set<String> =
     root.declNodes()
-        .filter { it is ProcNode || it is SpecNode || it is ApiNode }
+        .filter { it is ProcNode || it is SpecNode || it is ApiNode || it is LeafSpecNode }
         .map { it.name() }
         .toSet()
 

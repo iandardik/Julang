@@ -1,5 +1,6 @@
 source: regression/input/type-errors/sort-as-obj-field.jul
 expectCompileFailure: true
 expectCompileOutputContains:
-  - "fields must not use sort types"
-  - "Found type errors; exiting."
+  - "sort-bearing type"
+  - "Peer"
+  - "Found compile errors, exiting."

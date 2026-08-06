@@ -1,0 +1,15 @@
+spec Env {
+    var ready : Boolean := false
+
+    constructor initially(args : List<String>) {
+        transit: ready := false
+    }
+
+    transition mark() {
+        transit: ready := true
+    }
+}
+
+spec LeafPlainEnv := Env
+
+compile LeafPlainEnv

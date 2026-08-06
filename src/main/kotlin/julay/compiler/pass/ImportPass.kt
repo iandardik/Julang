@@ -12,6 +12,7 @@ fun validateProcExprs(unit: CompilationUnit): List<CompileError> =
         unit.importTable,
         unit.moduleSymbols,
         collectProcFunNames(unit.root),
+        unit.allLeafSpecNames,
     )
 
 fun validateProcExprsInModule(
@@ -22,10 +23,46 @@ fun validateProcExprsInModule(
     importTable: ImportTable,
     moduleSymbols: Map<String, ResolvedSymbol>,
     procFunNames: Set<String> = emptySet(),
+    leafSpecNames: Set<String> = emptySet(),
 ): List<CompileError> =
-    validateProcExprsInNode(
-        root, entryDeclNames, allPClassNames, allProcNames, importTable, moduleSymbols, procFunNames,
-    )
+    root.declNodes().flatMap { decl ->
+        when (decl) {
+            is ProcNode -> validateProcExprsInNode(
+                decl.procNodeValue(),
+                entryDeclNames,
+                allPClassNames,
+                allProcNames,
+                importTable,
+                moduleSymbols,
+                procFunNames,
+                banLeafSpecs = true,
+                leafSpecNames,
+            )
+            is ApiNode -> validateProcExprsInNode(
+                decl,
+                entryDeclNames,
+                allPClassNames,
+                allProcNames,
+                importTable,
+                moduleSymbols,
+                procFunNames,
+                banLeafSpecs = true,
+                leafSpecNames,
+            )
+            is SpecNode -> validateProcExprsInNode(
+                decl,
+                entryDeclNames,
+                allPClassNames,
+                allProcNames,
+                importTable,
+                moduleSymbols,
+                procFunNames,
+                banLeafSpecs = false,
+                leafSpecNames,
+            )
+            else -> emptyList()
+        }
+    }
 
 private fun validateProcExprsInNode(
     node: ASTNode,
@@ -35,6 +72,8 @@ private fun validateProcExprsInNode(
     importTable: ImportTable,
     moduleSymbols: Map<String, ResolvedSymbol>,
     procFunNames: Set<String>,
+    banLeafSpecs: Boolean,
+    leafSpecNames: Set<String>,
 ): List<CompileError> {
     return when (node) {
         is ValueProcExprNode -> {
@@ -60,6 +99,12 @@ private fun validateProcExprsInNode(
                     ),
                 )
             }
+            if (banLeafSpecs) {
+                val leafSpecError = leafSpecInProcAssemblyError(
+                    node, bare, importedDecl, leafSpecNames, moduleSymbols,
+                )
+                if (leafSpecError != null) return listOf(leafSpecError)
+            }
             val (_, error) = resolveProcLeaf(
                 node,
                 entryDeclNames,
@@ -74,6 +119,7 @@ private fun validateProcExprsInNode(
             val procErrors = validateProcExprsInNode(
                 node.apiProcExpr(),
                 entryDeclNames, allPClassNames, allProcNames, importTable, moduleSymbols, procFunNames,
+                banLeafSpecs, leafSpecNames,
             )
             val callErrors = node.apiCallNames().flatMap { callName ->
                 val localPf = callName in procFunNames
@@ -100,7 +146,30 @@ private fun validateProcExprsInNode(
         else -> node.children.flatMap {
             validateProcExprsInNode(
                 it, entryDeclNames, allPClassNames, allProcNames, importTable, moduleSymbols, procFunNames,
+                banLeafSpecs, leafSpecNames,
             )
         }
     }
+}
+
+private fun leafSpecInProcAssemblyError(
+    node: ValueProcExprNode,
+    bare: String?,
+    importedDecl: DeclNode?,
+    leafSpecNames: Set<String>,
+    moduleSymbols: Map<String, ResolvedSymbol>,
+): CompileError? {
+    fun errorFor(name: String) = OneLocCompileError(
+        node.programLocation(),
+        "leaf spec \"$name\" cannot appear in a proc assembly",
+    )
+    if (importedDecl is LeafSpecNode) return errorFor(importedDecl.leafSpecName())
+    if (bare != null && bare in leafSpecNames) return errorFor(bare)
+    if (node.isQualified()) {
+        val parts = node.qualifiedParts()!!
+        val resolved = resolveQualifiedName(parts, moduleSymbols)
+        val decl = resolved?.let { declFromResolvedSymbol(it) }
+        if (decl is LeafSpecNode) return errorFor(decl.leafSpecName())
+    }
+    return null
 }

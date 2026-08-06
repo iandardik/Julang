@@ -1,0 +1,28 @@
+sort Node := { "n1", "n2" }
+
+spec Net[n : Node] {
+    var lastDest : String := ""
+
+    constructor initially(args : List<String>) {}
+
+    transition send() {
+        transit:
+            lastDest := n
+    }
+}
+
+proc Peer {
+    var ack : Boolean := false
+
+    constructor initially(args : List<String>) {
+        transit: ack := false
+    }
+
+    transition send() {
+        transit: ack := true
+    }
+}
+
+spec LeafParamNet := <true> Net || Peer <true>
+
+compile LeafParamNet

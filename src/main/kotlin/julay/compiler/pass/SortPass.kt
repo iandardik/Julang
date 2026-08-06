@@ -119,20 +119,32 @@ private fun buildSortType(decl: SortDeclNode): SortBuildResult {
     return SortBuildResult.Ok(SortType(decl.name(), elementType, cfgElements))
 }
 
+/**
+ * True when [type] is a sort domain (or a collection of such), not merely an
+ * obj that nests sort-typed fields. Nested sort-bearing objs are allowed in
+ * type-check and refused later for JAR targets.
+ */
+fun Type.isDirectSortDomain(): Boolean = when (this) {
+    is SortType -> true
+    is ListType -> elementType.isDirectSortDomain()
+    is SetType -> elementType.isDirectSortDomain()
+    is MapType -> keyType.isDirectSortDomain() || valueType.isDirectSortDomain()
+    else -> false
+}
+
 fun sortDomainOnlyError(type: Type, loc: ProgramLoc): CompileError? {
-    if (!type.containsSortType()) return null
-    val sortName = firstSortName(type) ?: type.toString()
+    if (!type.isDirectSortDomain()) return null
+    val sortName = firstDirectSortName(type) ?: type.toString()
     return OneLocCompileError(
         loc,
         "sort \"$sortName\" can only be used as a spec or quantifier domain",
     )
 }
 
-private fun firstSortName(type: Type): String? = when (type) {
+private fun firstDirectSortName(type: Type): String? = when (type) {
     is SortType -> type.name
-    is ListType -> firstSortName(type.elementType)
-    is SetType -> firstSortName(type.elementType)
-    is MapType -> firstSortName(type.keyType) ?: firstSortName(type.valueType)
-    is ObjClassType -> type.fields.firstNotNullOfOrNull { firstSortName(it.type) }
+    is ListType -> firstDirectSortName(type.elementType)
+    is SetType -> firstDirectSortName(type.elementType)
+    is MapType -> firstDirectSortName(type.keyType) ?: firstDirectSortName(type.valueType)
     else -> null
 }

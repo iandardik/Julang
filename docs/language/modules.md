@@ -11,17 +11,21 @@ export api RpcOut {
     calls: rpcOutClientCaller
 }
 export fun add(x : Int, y : Int) : Int = x + y
+export sort NodeSet := { "n1", "n2", "n3" }
+export spec Net[n : Node] { ... }   // leaf or composition specs
 ```
 
 ```jul
 import printer.Printer
 import julay.proclib.HttpServer
 import julay.funlib.parseInt
+import node.protocol.NodeSet
 ```
 
 - User modules: `import path.to.Name` resolves to a `.jul` file on the search path (e.g. `printer.Printer` → `printer.jul` exporting `Printer`).
 - Stdlib procs: `julay.proclib.*`
 - Funlib (pure helpers and effectful functions): `julay.funlib.*` — see [Standard library](standard-library.md)
+- **Sorts** may be `export`ed and imported like other decls; use the short name as a spec index / quantifier / leaf-spec parameter domain (see [Specifications](specifications.md)).
 
 Same-file references never need `export`. Cross-file use without `export` on the defining declaration is a compile error.
 

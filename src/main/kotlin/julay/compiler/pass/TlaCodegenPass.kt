@@ -34,9 +34,12 @@ fun tlaCodegenPass(
     unit: CompilationUnit,
 ): TlaCodegenResult {
     val moduleName = spec.specNodeName()
+    val leafSpecNodes = unit.modules
+        .flatMap { it.root.declNodes().filterIsInstance<LeafSpecNode>() }
+        .associateBy { it.name() }
     val pclassNodes = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<ProcClassNode>() }
-        .associateBy { it.name() }
+        .associateBy { it.name() } + leafSpecNodes.mapValues { it.value.asProcClass() }
     val procFunNodes = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<ProcFunNode>() }
         .associateBy { it.name() }
@@ -64,6 +67,7 @@ fun tlaCodegenPass(
         procAliases,
         specAliases,
         apiAliases,
+        leafSpecNodes,
     ).map { leaf ->
         if (leaf.name in procFunNameSet) leaf.copy(isProcFun = true) else leaf
     }
@@ -115,6 +119,18 @@ fun tlaCodegenPass(
         emptyList()
     }
     invClosure.forEach { collectTypeConstants(it.invariantFormula(), constants) }
+
+    // Sort domains mentioned in leaf state (and nested objs) must be CONSTANTs.
+    leaves.forEach { leaf ->
+        val pc = pclassesForTla[leaf.name] ?: return@forEach
+        pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
+            collectSortConstants(safeType(vn), constants)
+        }
+        (pc.localDecls().flatMap { it.constructors() } + pc.localDecls().flatMap { it.transitions() })
+            .forEach { action ->
+                action.action.args.forEach { collectSortConstants(it.type, constants) }
+            }
+    }
 
     // Finite TLC models for built-in domains used in the module (assigned in .cfg only).
     val cfgOverrides = linkedSetOf<String>()
@@ -1583,6 +1599,7 @@ internal fun defaultTlaValue(type: Type): String = when (type) {
     is IntType -> "0"
     is RealType -> "0"
     is StringType -> "\"\""
+    is SortType -> type.cfgElements.firstOrNull() ?: defaultTlaValue(type.elementType)
     is ListType -> "<<>>"
     is SetType -> "{}"
     is MapType -> "[x \\in {} |-> 0]"
@@ -1752,7 +1769,9 @@ internal fun typeToTlaDomain(type: Type): String = when (type) {
     is IntType -> "Int"
     is RealType -> "Int"
     is StringType -> "String"
+    is SortType -> type.name
     is ListType -> "Seq(${typeToTlaDomain(type.elementType)})"
+    is SetType -> "SUBSET ${typeToTlaDomain(type.elementType)}"
     is ObjClassType -> {
         val fields = type.fields.joinToString(", ") { f ->
             "${f.name}: ${typeToTlaDomain(f.type)}"
@@ -1762,20 +1781,27 @@ internal fun typeToTlaDomain(type: Type): String = when (type) {
     else -> "Int"
 }
 
-/** True if [expr] contains IO (`readln` / `readFile`) that should havoc a transit target in TLA+. */
-internal fun exprContainsIoHavoc(expr: ExprNode): Boolean =
-    when (expr) {
-        is FunCallExprNode ->
-            expr.callName() in FunBuiltinRegistry.ioHavocEffects ||
-                expr.callArgs().any { exprContainsIoHavoc(it) }
-        else -> expr.children.filterIsInstance<ExprNode>().any { exprContainsIoHavoc(it) }
+/** Collect sort CONSTANT names nested in [type]. */
+internal fun collectSortConstants(type: Type, into: MutableSet<String>) {
+    when (type) {
+        is SortType -> into += type.name
+        is ObjClassType -> type.fields.forEach { collectSortConstants(it.type, into) }
+        is ListType -> collectSortConstants(type.elementType, into)
+        is SetType -> collectSortConstants(type.elementType, into)
+        is MapType -> {
+            collectSortConstants(type.keyType, into)
+            collectSortConstants(type.valueType, into)
+        }
+        else -> {}
     }
+}
 
 /** Collect finite TLC model names (Int, String, …) needed by action argument domains. */
 internal fun collectDomainModelNames(type: Type, into: MutableSet<String>) {
     when (type) {
         is IntType, is RealType -> into += "Int"
         is StringType -> into += "String"
+        is SortType -> into += type.name
         is ObjClassType -> type.fields.forEach { collectDomainModelNames(it.type, into) }
         is ListType -> collectDomainModelNames(type.elementType, into)
         is SetType -> collectDomainModelNames(type.elementType, into)
@@ -1786,6 +1812,15 @@ internal fun collectDomainModelNames(type: Type, into: MutableSet<String>) {
         else -> {}
     }
 }
+
+/** True if [expr] contains IO (`readln` / `readFile`) that should havoc a transit target in TLA+. */
+internal fun exprContainsIoHavoc(expr: ExprNode): Boolean =
+    when (expr) {
+        is FunCallExprNode ->
+            expr.callName() in FunBuiltinRegistry.ioHavocEffects ||
+                expr.callArgs().any { exprContainsIoHavoc(it) }
+        else -> expr.children.filterIsInstance<ExprNode>().any { exprContainsIoHavoc(it) }
+    }
 
 private fun collectActionArgDomainModels(
     leaves: List<SpecLeaf>,
@@ -1986,6 +2021,12 @@ private fun exprIsStringTyped(expr: ExprNode): Boolean = try {
     false
 }
 
+private fun exprIsSetTyped(expr: ExprNode): Boolean = try {
+    expr.getType() is SetType
+} catch (_: RuntimeException) {
+    false
+}
+
 private fun tlaStringCoerce(expr: ExprNode, rendered: String): String =
     if (exprIsStringTyped(expr)) rendered else "ToString($rendered)"
 
@@ -2072,6 +2113,10 @@ internal fun exprToTla(
             }
             "[$fields]"
         }
+        is SetLiteralExprNode -> {
+            if (expr.elements.isEmpty()) "{}"
+            else "{${expr.elements.joinToString(", ") { rec(it) }}}"
+        }
         is IndexExprNode -> {
             "${rec(expr.base)}[${rec(expr.index)}]"
         }
@@ -2096,24 +2141,33 @@ internal fun exprToTla(
                 "<=" -> "($l <= $r)"
                 ">" -> "($l > $r)"
                 ">=" -> "($l >= $r)"
+                "in" -> "($l \\in $r)"
                 "+" -> {
-                    val stringy = exprIsStringTyped(expr) ||
-                        exprIsStringTyped(expr.lhsOperand()) ||
-                        exprIsStringTyped(expr.rhsOperand())
-                    if (stringy) {
-                        val lhs = expr.lhsOperand()
-                        val rhs = expr.rhsOperand()
-                        when {
-                            isEmptyStringLiteral(lhs) && isEmptyStringLiteral(rhs) -> "\"\""
-                            isEmptyStringLiteral(lhs) -> tlaStringCoerce(rhs, r)
-                            isEmptyStringLiteral(rhs) -> tlaStringCoerce(lhs, l)
-                            else -> "(${tlaStringCoerce(lhs, l)} \\o ${tlaStringCoerce(rhs, r)})"
+                    when {
+                        exprIsSetTyped(expr) || exprIsSetTyped(expr.lhsOperand()) || exprIsSetTyped(expr.rhsOperand()) ->
+                            "($l \\cup $r)"
+                        exprIsStringTyped(expr) ||
+                            exprIsStringTyped(expr.lhsOperand()) ||
+                            exprIsStringTyped(expr.rhsOperand()) -> {
+                            val lhs = expr.lhsOperand()
+                            val rhs = expr.rhsOperand()
+                            when {
+                                isEmptyStringLiteral(lhs) && isEmptyStringLiteral(rhs) -> "\"\""
+                                isEmptyStringLiteral(lhs) -> tlaStringCoerce(rhs, r)
+                                isEmptyStringLiteral(rhs) -> tlaStringCoerce(lhs, l)
+                                else -> "(${tlaStringCoerce(lhs, l)} \\o ${tlaStringCoerce(rhs, r)})"
+                            }
                         }
-                    } else {
-                        "($l + $r)"
+                        else -> "($l + $r)"
                     }
                 }
-                "-" -> "($l - $r)"
+                "-" -> {
+                    if (exprIsSetTyped(expr) || exprIsSetTyped(expr.lhsOperand())) {
+                        "($l \\ $r)"
+                    } else {
+                        "($l - $r)"
+                    }
+                }
                 "*" -> "($l * $r)"
                 "/" -> "($l \\div $r)"
                 else -> "($l ${expr.op()} $r)"

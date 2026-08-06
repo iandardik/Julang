@@ -196,7 +196,38 @@ class SpecNode(
     internal fun specNodeName() = name
     internal fun specNodeValue() = value
     override fun toString(): String {
-        return "spec $name := $value"
+        val export = if (isExported) "export " else ""
+        return "${export}spec $name := $value"
+    }
+}
+
+/**
+ * Leaf spec: proc-class-shaped body that compiles only to TLA+ (never a JAR).
+ * Optional declaration parameter `[paramName : paramType]` is an immutable binder
+ * in scope in the body and becomes the TLA instance index when present.
+ */
+class LeafSpecNode(
+    private val name: String,
+    private val paramName: String?,
+    private val paramType: TypeExpr?,
+    private val localDecls: List<ProcClassDeclNode>,
+    private val loc: ProgramLoc,
+) : DeclNode(localDecls) {
+    override fun programLocation() = loc
+    override fun name() = name
+    internal fun leafSpecName() = name
+    internal fun leafSpecParamName() = paramName
+    internal fun leafSpecParamType() = paramType
+    internal fun localDecls(): List<ProcClassDeclNode> = localDecls
+    internal fun isParameterized(): Boolean = paramName != null
+    /** View as a [ProcClassNode] for TLA / alphabet reuse. */
+    internal fun asProcClass(): ProcClassNode =
+        ProcClassNode(name, localDecls, loc).also { it.visibility = this.visibility }
+    override fun toString(): String {
+        val body = localDecls.joinToString("\n") { "$it".prependIndent() }
+        val export = if (isExported) "export " else ""
+        val params = if (paramName != null && paramType != null) "[$paramName : $paramType]" else ""
+        return "${export}spec $name$params {\n$body\n}"
     }
 }
 
@@ -270,8 +301,10 @@ class SortDeclNode(
 ) : DeclNode(elements) {
     override fun programLocation() = loc
     override fun name() = name
-    override fun toString(): String =
-        "sort $name := {${elements.joinToString(", ")}}"
+    override fun toString(): String {
+        val export = if (isExported) "export " else ""
+        return "${export}sort $name := {${elements.joinToString(", ")}}"
+    }
 }
 
 class FieldNode(

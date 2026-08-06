@@ -17,13 +17,14 @@ java -jar build/libs/julayc.jar --compile EchoServer --compile EchoClient path/t
 java -jar build/libs/julayc.jar --compile-tla IncServer path/to/file.jul
 ```
 
+Compiling a **proc** fails (no `.jar`) if that target reaches a sort-bearing type — a `sort`, or an `obj`/collection that nests one. Spec `compile` targets are unaffected and may use sort-typed state and sort-field objs freely. `julayc check` reports the same JAR reachability errors for named `compile` procs.
 ### Useful flags
 
 | Flag | Meaning |
 |------|---------|
 | `-L <dir>` | Add a module search directory |
-| `--compile NAME` | Compile proc/spec `NAME` (repeatable; ignores source `compile` directives) |
-| `--compile-tla NAME` | Emit TLA+ for proc `NAME` as `<true> NAME <true>` (repeatable; no extra invariants) |
+| `--compile NAME` | Compile proc/spec `NAME` (repeatable; ignores source `compile` directives). Specs include composition and leaf forms → `.tla` / `.cfg` |
+| `--compile-tla NAME` | Emit TLA+ for proc `NAME` as `<true> NAME <true>` (repeatable; no extra invariants; leaf/composition specs use `--compile` instead) |
 | `--keep-build` | Keep generated `<name>-jul-build` dirs after success |
 | `--allow-unindexed-spec` | Warn instead of error when a multi-instance proc appears unindexed in a spec |
 | `--verbose` | Print a compile-time sync-path summary (`FastOnly` vs `NeedsZ3` procs, and per-action `fastGuard` vs opaque). See [Compiler optimizations](language/compiler-optimizations.md) |

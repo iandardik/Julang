@@ -866,6 +866,100 @@ class SpecTlaTlcSmokeTest {
         }
     }
 
+    @Test
+    fun leafPlainEnvCompilesAndTlcStarts() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-leaf-plain").toFile()
+        try {
+            val source = File("regression/input/spec/leaf-plain-env.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("LeafPlainEnv.tla")
+            val cfg = File("LeafPlainEnv.cfg")
+            assertTrue(tla.exists(), "expected LeafPlainEnv.tla")
+            assertTrue(cfg.exists(), "expected LeafPlainEnv.cfg")
+            val tlaText = tla.readText()
+            assertTrue(
+                tlaText.contains("VARIABLE") && tlaText.contains("ready"),
+                "expected Env state in TLA;\n$tlaText",
+            )
+            tla.copyTo(File(work, "LeafPlainEnv.tla"), overwrite = true)
+            cfg.copyTo(File(work, "LeafPlainEnv.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "LeafPlainEnv")
+        } finally {
+            work.deleteRecursively()
+            File("LeafPlainEnv.tla").delete()
+            File("LeafPlainEnv.cfg").delete()
+        }
+    }
+
+    @Test
+    fun leafParamNetCompilesAndTlcStarts() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-leaf-param").toFile()
+        try {
+            val source = File("regression/input/spec/leaf-param-net.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("LeafParamNet.tla")
+            val cfg = File("LeafParamNet.cfg")
+            assertTrue(tla.exists(), "expected LeafParamNet.tla")
+            assertTrue(cfg.exists(), "expected LeafParamNet.cfg")
+            val tlaText = tla.readText()
+            assertTrue(
+                tlaText.contains("CONSTANT Node") || tlaText.contains("CONSTANT Node,"),
+                "expected Node sort as CONSTANT;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("\\E n \\in Node") || tlaText.contains("[n \\in Node"),
+                "expected binder n over Node;\n$tlaText",
+            )
+            // Body uses param n as assignment RHS — should appear as bare binder.
+            assertTrue(
+                tlaText.contains("lastDest") &&
+                    (tlaText.contains("EXCEPT ![n] = n") || tlaText.contains("= n")),
+                "expected param n used in transit;\n$tlaText",
+            )
+            tla.copyTo(File(work, "LeafParamNet.tla"), overwrite = true)
+            cfg.copyTo(File(work, "LeafParamNet.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "LeafParamNet")
+        } finally {
+            work.deleteRecursively()
+            File("LeafParamNet.tla").delete()
+            File("LeafParamNet.cfg").delete()
+        }
+    }
+
+    @Test
+    fun objSortFieldCompilesAndTlcStarts() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-obj-sort-field").toFile()
+        try {
+            val source = File("regression/input/spec/obj-sort-field.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("Env.tla")
+            val cfg = File("Env.cfg")
+            assertTrue(tla.exists(), "expected Env.tla")
+            assertTrue(cfg.exists(), "expected Env.cfg")
+            val cfgText = cfg.readText()
+            assertTrue(cfgText.contains("NodeSet"), "expected NodeSet in cfg;\n$cfgText")
+            tla.copyTo(File(work, "Env.tla"), overwrite = true)
+            cfg.copyTo(File(work, "Env.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "Env")
+        } finally {
+            work.deleteRecursively()
+            File("Env.tla").delete()
+            File("Env.cfg").delete()
+        }
+    }
+
     private fun assumeTlcPresent() {
         if (!TLC_JAR.isFile) {
             fail("TLC jar not found at ${TLC_JAR.path}")

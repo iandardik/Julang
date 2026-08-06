@@ -16,9 +16,12 @@ fun RootNode.specTypePass(
 ): SpecTypePassResult {
     val registry = cachedObjClassRegistry() ?: return SpecTypePassResult(emptyList())
     val invariants = declNodes().filterIsInstance<InvariantNode>().associateBy { it.name() }
+    val leafSpecNodes = unit.modules
+        .flatMap { it.root.declNodes().filterIsInstance<LeafSpecNode>() }
+        .associateBy { it.name() }
     val pclassNodes = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<ProcClassNode>() }
-        .associateBy { it.name() }
+        .associateBy { it.name() } + leafSpecNodes.mapValues { it.value.asProcClass() }
     val procAliases = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<ProcNode>() }
         .associateBy { it.name() }
@@ -36,6 +39,7 @@ fun RootNode.specTypePass(
             spec,
             invariants,
             pclassNodes,
+            leafSpecNodes,
             procAliases,
             specAliases,
             apiAliases,
@@ -66,6 +70,7 @@ private fun typePassSpec(
     spec: SpecNode,
     invariants: Map<String, InvariantNode>,
     pclassNodes: Map<String, ProcClassNode>,
+    leafSpecNodes: Map<String, LeafSpecNode>,
     procAliases: Map<String, ProcNode>,
     specAliases: Map<String, SpecNode>,
     apiAliases: Map<String, ApiNode>,
@@ -77,11 +82,37 @@ private fun typePassSpec(
     val warnings = mutableListOf<CompileWarning>()
     val value = spec.specNodeValue()
 
+    fun annotateDeclParams(leaves: List<SpecLeaf>): List<SpecLeaf> =
+        leaves.map { leaf ->
+            val ls = leafSpecNodes[leaf.name] ?: return@map leaf
+            if (!ls.isParameterized()) return@map leaf
+            if (!leaf.isParameterized) {
+                leaf.copy(paramName = ls.leafSpecParamName(), paramType = ls.leafSpecParamType())
+            } else {
+                val declType = ls.leafSpecParamType()
+                val useType = leaf.paramType
+                if (declType != null && useType != null &&
+                    resolveType(registry, declType) != null &&
+                    resolveType(registry, useType) != null &&
+                    resolveType(registry, declType) != resolveType(registry, useType)
+                ) {
+                    errors += OneLocCompileError(
+                        spec.programLocation(),
+                        "leaf spec \"${leaf.name}\" is parameterized as [${ls.leafSpecParamName()} : $declType] " +
+                            "but re-indexed with incompatible type $useType",
+                    )
+                }
+                leaf
+            }
+        }
+
     fun checkLeaves(leaves: List<SpecLeaf>, role: String) {
         val procFunNames = collectProcFunNames(unit.root)
         leaves.forEach { leaf ->
             val known = leaf.name in pclassNodes ||
+                leaf.name in leafSpecNodes ||
                 leaf.name in unit.allPClassNames ||
+                leaf.name in unit.allLeafSpecNames ||
                 leaf.name in unit.allProcNames ||
                 leaf.name in unit.entryDeclNames ||
                 leaf.name in procFunNames ||
@@ -108,19 +139,27 @@ private fun typePassSpec(
             procAliases,
             specAliases,
             apiAliases,
+            leafSpecNodes,
         )
         expanded.forEach { leaf ->
+            val ls = leafSpecNodes[leaf.name]
+            if (ls != null) {
+                // Decl-parameterized leaf specs are intentionally parameterized.
+                if (ls.isParameterized()) return@forEach
+                // Unparameterized leaf specs: same initially-only heuristic as procs.
+            }
             val pc = pclassNodes[leaf.name] ?: return@forEach
             if (pc.isInitiallyOnly()) {
-                if (leaf.isParameterized) {
+                if (leaf.isParameterized && ls?.isParameterized() != true) {
                     warnings += OneLocCompileWarning(
                         spec.programLocation(),
                         "proc \"${leaf.name}\" only has constructor initially, so indexing is unnecessary",
                     )
                 }
             } else if (!leaf.isParameterized) {
+                val kind = if (ls != null) "leaf spec" else "proc"
                 val msg =
-                    "proc \"${leaf.name}\" can have multiple instances and must be indexed in this spec " +
+                    "$kind \"${leaf.name}\" can have multiple instances and must be indexed in this spec " +
                         "(e.g. ${leaf.name}[i : Type]); pass --allow-unindexed-spec to warn instead"
                 if (allowUnindexedSpec) {
                     warnings += OneLocCompileWarning(spec.programLocation(), msg)
@@ -133,8 +172,8 @@ private fun typePassSpec(
 
     when (value) {
         is AgSpecExprNode -> {
-            val assumeLeaves = flattenSpecLeaves(value.assumeExpr())
-            val systemLeaves = flattenSpecLeaves(value.systemExpr())
+            val assumeLeaves = annotateDeclParams(flattenSpecLeaves(value.assumeExpr()))
+            val systemLeaves = annotateDeclParams(flattenSpecLeaves(value.systemExpr()))
             checkLeaves(assumeLeaves, "assumption")
             checkLeaves(systemLeaves, "system")
             checkIndexing(assumeLeaves)
@@ -148,6 +187,7 @@ private fun typePassSpec(
                     procAliases,
                     specAliases,
                     apiAliases,
+                    leafSpecNodes,
                 )
                 val systemPclasses = expandedSystem.mapNotNull { leaf ->
                     pclassNodes[leaf.name]?.let { leaf.name to it }
@@ -177,7 +217,7 @@ private fun typePassSpec(
             }
         }
         else -> {
-            val systemLeaves = flattenSpecLeaves(value)
+            val systemLeaves = annotateDeclParams(flattenSpecLeaves(value))
             checkLeaves(systemLeaves, "system")
             checkIndexing(systemLeaves)
         }

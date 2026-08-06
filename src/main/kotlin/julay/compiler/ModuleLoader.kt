@@ -198,6 +198,7 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
         val moduleDeclNames = collectDeclNames(root)
         val modulePClassNames = collectPClassNames(root)
         val moduleProcNames = collectProcAliasNames(root)
+        val moduleLeafSpecNames = collectLeafSpecNames(root)
         errors.addAll(
             validateProcExprsInModule(
                 root,
@@ -207,6 +208,7 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
                 moduleImportTable,
                 moduleSymbolsSnapshot,
                 collectProcFunNames(root),
+                moduleLeafSpecNames,
             ),
         )
 
@@ -259,6 +261,7 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
     val entryDeclNames = collectDeclNames(entryModule.root)
     val allPClassNames = collectPClassNames(mergedRoot)
     val allProcNames = collectProcAliasNames(mergedRoot)
+    val allLeafSpecNames = collectLeafSpecNames(mergedRoot)
 
     return CompilationUnit(
         entryPath = entryPath,
@@ -269,6 +272,7 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
         entryDeclNames = entryDeclNames,
         allPClassNames = allPClassNames,
         allProcNames = allProcNames,
+        allLeafSpecNames = allLeafSpecNames,
     ) to errors
 }
 

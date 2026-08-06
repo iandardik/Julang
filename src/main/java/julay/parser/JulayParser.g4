@@ -87,7 +87,8 @@ compile_decl
     ;
 
 spec
-    : SPEC ID ASGN_EQ ag_spec
+    : SPEC ID (LBRACK ID COLON typeExpr RBRACK)? LCURLY pclass_body* RCURLY
+    | SPEC ID ASGN_EQ ag_spec
     | SPEC ID ASGN_EQ system_expr MODELS expr
     | SPEC ID ASGN_EQ system_expr
     ;

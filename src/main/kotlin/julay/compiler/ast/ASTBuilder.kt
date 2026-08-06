@@ -238,7 +238,21 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     }
 
     override fun visitSpec(ctx: JulayParser.SpecContext?): ASTNode {
-        val name = ctx!!.ID().text
+        val name = ctx!!.ID(0).text
+        // Leaf form: spec Name [p : T]? { ... }
+        if (ctx.LCURLY() != null) {
+            val localDecls = ctx.pclass_body()
+                .map { visit(it) }
+                .map {
+                    if (it !is ProcClassDeclNode) {
+                        throw RuntimeException("Expected ProcClassDeclNode but got $it")
+                    }
+                    it
+                }
+            val paramName = if (ctx.LBRACK() != null) ctx.ID(1).text else null
+            val paramType = if (ctx.LBRACK() != null) parseTypeExpr(ctx.typeExpr()) else null
+            return LeafSpecNode(name, paramName, paramType, localDecls, sourceLocation(ctx))
+        }
         val value = when {
             ctx.ag_spec() != null -> visit(ctx.ag_spec())
             ctx.MODELS() != null -> {

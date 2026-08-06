@@ -22,6 +22,8 @@ private var typePassApiEnv: Map<String, ApiNode> = emptyMap()
 /** procfun name → api that lists it in calls: (first wins if overlapping). */
 private var typePassCallToApi: Map<String, String> = emptyMap()
 private var typePassInsideProcFun: Boolean = false
+/** True while typing leaf-spec bodies: sort types OK in state/args (specs/TLA only). */
+private var typePassAllowSortDomains: Boolean = false
 
 /** Prefer an obj-literal hint when `Name(...)` names a known obj type rather than a function. */
 internal fun unknownFunctionMessage(name: String, registry: ObjClassRegistry): String =
@@ -30,6 +32,17 @@ internal fun unknownFunctionMessage(name: String, registry: ObjClassRegistry): S
     } else {
         "Unknown function \"$name\""
     }
+
+private fun sortDomainBan(type: Type, loc: ProgramLoc): CompileError? =
+    if (typePassAllowSortDomains) null else sortDomainOnlyError(type, loc)
+
+/** Value-level view: a sort domain is inhabited by its element type. */
+private fun valueView(type: Type): Type =
+    if (type is SortType) type.elementType else type
+
+/** Typing view of a type in leaf-spec bodies: sort domains behave as their element type. */
+private fun typingView(type: Type): Type =
+    if (typePassAllowSortDomains) valueView(type) else type
 
 fun RootNode.typePass(
     unit: CompilationUnit,
@@ -98,8 +111,17 @@ fun RootNode.typePass(
             val builtins = callableFunBuiltins(module)
             val procFuns = callableProcFuns(module, modulesByPath)
             module.root.declNodes()
-                .filter { it !is FunNode && it !is SpecNode && it !is InvariantNode && it !is ApiNode }
-                .flatMap { it.typePass(emptyMap(), built, callable, emptyMap(), builtins, procFuns) }
+                .filter {
+                    it !is FunNode && it !is SpecNode && it !is InvariantNode && it !is ApiNode
+                }
+                .flatMap { decl ->
+                    when (decl) {
+                        is LeafSpecNode -> decl.typePassLeafSpec(
+                            emptyMap(), built, callable, emptyMap(), builtins, procFuns,
+                        )
+                        else -> decl.typePass(emptyMap(), built, callable, emptyMap(), builtins, procFuns)
+                    }
+                }
         }
         val specResult = unit.root.specTypePass(unit, allowUnindexedSpec)
         return TypePassResult(
@@ -122,6 +144,7 @@ fun ASTNode.typePass(
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> = when (this) {
     is ProcClassNode -> typePassProcClass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is LeafSpecNode -> typePassLeafSpec(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is ProcFunNode -> typePassProcFun(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is VarNode -> typePassVarNode(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is ConstructorNode -> typePassConstructor(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
@@ -179,12 +202,74 @@ private fun ProcClassNode.typePassProcClass(
     if (varErrors.isNotEmpty()) {
         return varErrors
     }
-    val localSymbolEnv = localDecls
+    val localSymbolEnv = symbolEnv + localDecls
         .filterIsInstance<VarNode>()
-        .associate { it.name to it.type }
+        .associate { it.name to typingView(it.type) }
     return varErrors + localDecls.flatMap { decl ->
         if (decl is VarNode) emptyList() else decl.typePass(localSymbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     }
+}
+
+private fun LeafSpecNode.typePassLeafSpec(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
+): List<CompileError> {
+    val paramErrors = mutableListOf<CompileError>()
+    var env = symbolEnv
+    val pName = leafSpecParamName()
+    val pTypeExpr = leafSpecParamType()
+    if (pName != null && pTypeExpr != null) {
+        when (val result = registry.resolveTypeExpr(pTypeExpr, typeParamEnv, programLocation())) {
+            is TypeResolveResult.Found -> {
+                // Sort params are domain binders; in the body they behave as the sort's element type.
+                val bodyType = when (val t = result.type) {
+                    is SortType -> t.elementType
+                    else -> t
+                }
+                env = env + (pName to bodyType)
+            }
+            is TypeResolveResult.Error -> {
+                paramErrors += OneLocCompileError(
+                    programLocation(),
+                    "Unknown parameter type \"$pTypeExpr\" on leaf spec \"${leafSpecName()}\"",
+                )
+            }
+        }
+    }
+    if (paramErrors.isNotEmpty()) return paramErrors
+    val prevAllow = typePassAllowSortDomains
+    typePassAllowSortDomains = true
+    try {
+        val bodyErrors = asProcClass().typePassProcClass(env, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+        val assignErrors = if (pName != null) leafSpecParamAssignmentErrors(pName) else emptyList()
+        return bodyErrors + assignErrors
+    } finally {
+        typePassAllowSortDomains = prevAllow
+    }
+}
+
+private fun LeafSpecNode.leafSpecParamAssignmentErrors(paramName: String): List<CompileError> {
+    fun checkKey(key: String, loc: ProgramLoc): CompileError? =
+        if (julay.program.type.transitRootVar(key) == paramName) {
+            OneLocCompileError(loc, "Cannot assign to leaf-spec parameter \"$paramName\"")
+        } else {
+            null
+        }
+    val fromTransitions = localDecls()
+        .filterIsInstance<TransitionNode>()
+        .flatMap { trans ->
+            trans.transitVars().mapNotNull { (key, loc) -> checkKey(key, loc) }
+        }
+    val fromCtors = localDecls()
+        .filterIsInstance<ConstructorNode>()
+        .flatMap { ctor ->
+            ctor.transitVars().mapNotNull { (key, loc) -> checkKey(key, loc) }
+        }
+    return fromTransitions + fromCtors
 }
 
 private fun VarNode.typePassVarNode(
@@ -198,18 +283,19 @@ private fun VarNode.typePassVarNode(
     return when (val result = registry.resolveTypeExpr(typeExpr, typeParamEnv, programLocation())) {
         is TypeResolveResult.Found -> {
             resolveType(result.type)
-            val sortErr = listOfNotNull(sortDomainOnlyError(result.type, programLocation()))
+            val sortErr = listOfNotNull(sortDomainBan(result.type, programLocation()))
             val init = initExpr ?: return sortErr
+            val expectedInitType = typingView(result.type)
             // Empty {} / [] need the declared type before typePass (same as transit assigns).
-            applyExpectedCollectionType(init, result.type)
+            applyExpectedCollectionType(init, expectedInitType)
             val initErrors = init.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
             if (initErrors.isNotEmpty()) return sortErr + initErrors
-            applyExpectedCollectionType(init, result.type)
+            applyExpectedCollectionType(init, expectedInitType)
             sortErr + assertOrCompileError(
-                init.getType() == result.type,
+                init.getType() == expectedInitType,
                 OneLocCompileError(
                     init.programLocation(),
-                    "Expected init of \"$name\" to have type ${result.type} but got ${init.getType()}",
+                    "Expected init of \"$name\" to have type $expectedInitType but got ${init.getType()}",
                 ),
             )
         }
@@ -227,8 +313,9 @@ private fun ConstructorNode.typePassConstructor(
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
     val argErrors = constructorArgs().typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
-    val actionEnv = symbolEnv + constructorArgs().argsTypeMap() +
-        constructorArgs().actionArgs().filter { !it.name.isDiscardBinding() }.associate { it.name to it.type }
+    val actionEnv = symbolEnv + constructorArgs().argsTypeMap().mapValues { (_, t) -> typingView(t) } +
+        constructorArgs().actionArgs().filter { !it.name.isDiscardBinding() }
+            .associate { it.name to typingView(it.type) }
     return argErrors + body().flatMap { it.typePass(actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
 }
 
@@ -241,8 +328,9 @@ private fun TransitionNode.typePassTransition(
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
     val argErrors = transitionArgs().typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
-    val actionEnv = symbolEnv + transitionArgs().argsTypeMap() +
-        transitionArgs().actionArgs().filter { !it.name.isDiscardBinding() }.associate { it.name to it.type }
+    val actionEnv = symbolEnv + transitionArgs().argsTypeMap().mapValues { (_, t) -> typingView(t) } +
+        transitionArgs().actionArgs().filter { !it.name.isDiscardBinding() }
+            .associate { it.name to typingView(it.type) }
     return argErrors + body().flatMap { it.typePass(actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
 }
 
@@ -252,7 +340,7 @@ private fun ArgNode.typePassArgNode(symbolEnv: Map<String, Type>, registry: ObjC
     when (val result = registry.resolveTypeExpr(argTypeExpr(), typeParamEnv, programLocation())) {
         is TypeResolveResult.Found -> {
             resolveArgType(result.type)
-            listOfNotNull(sortDomainOnlyError(result.type, programLocation()))
+            listOfNotNull(sortDomainBan(result.type, programLocation()))
         }
         is TypeResolveResult.Error ->
             listOf(OneLocCompileError(programLocation(), "Unknown type \"${argTypeName()}\" for action argument \"${argName()}\""))
@@ -343,7 +431,7 @@ private fun LetTransitNode.typePassLetTransit(
     val typeErrors = when (val result = registry.resolveTypeExpr(letTypeExpr(), typeParamEnv, programLocation())) {
         is TypeResolveResult.Found -> {
             resolveLetType(result.type)
-            listOfNotNull(sortDomainOnlyError(result.type, programLocation()))
+            listOfNotNull(sortDomainBan(result.type, programLocation()))
         }
         is TypeResolveResult.Error ->
             listOf(
@@ -403,7 +491,7 @@ private fun VarTransitNode.typePassVarTransit(
     val expectedType: Type? = when {
         fieldPath.isEmpty() -> varType
         else -> when (val result = resolveFieldPath(varType, fieldPath)) {
-            is FieldPathResult.Resolved -> result.type
+            is FieldPathResult.Resolved -> valueView(result.type)
             is FieldPathResult.Error -> null
         }
     }
@@ -424,6 +512,7 @@ private fun VarTransitNode.typePassVarTransit(
         when (val result = resolveFieldPath(varType, fieldPath)) {
             is FieldPathResult.Error -> listOf(OneLocCompileError(programLocation(), result.message))
             is FieldPathResult.Resolved -> {
+                val fieldExpected = valueView(result.type)
                 if (result.type is ObjClassType) {
                     assertOrCompileError(
                         false,
@@ -434,10 +523,10 @@ private fun VarTransitNode.typePassVarTransit(
                     )
                 } else {
                     assertOrCompileError(
-                        transitExpr().getType() == result.type,
+                        transitExpr().getType() == fieldExpected,
                         OneLocCompileError(
                             programLocation(),
-                            "Expected assignment to \"${transitKey()}\" (${result.type}) but got expression of type ${transitExpr().getType()}",
+                            "Expected assignment to \"${transitKey()}\" ($fieldExpected) but got expression of type ${transitExpr().getType()}",
                         ),
                     )
                 }
@@ -696,7 +785,7 @@ private fun LetExprNode.typePassLet(symbolEnv: Map<String, Type>, registry: ObjC
     val typeErrors = when (val result = registry.resolveTypeExpr(letTypeExpr(), typeParamEnv, programLocation())) {
         is TypeResolveResult.Found -> {
             resolveLetType(result.type)
-            listOfNotNull(sortDomainOnlyError(result.type, programLocation()))
+            listOfNotNull(sortDomainBan(result.type, programLocation()))
         }
         is TypeResolveResult.Error ->
             listOf(
@@ -979,11 +1068,12 @@ private fun ObjClassLiteralExprNode.typePassObjClassLiteral(
 
     val matchErrors = resolvedType.fields.flatMap { field ->
         val expr = fieldAssignments.getValue(field.name)
+        val expected = valueView(field.type)
         assertOrCompileError(
-            expr.getType() == field.type,
+            expr.getType() == expected,
             OneLocCompileError(
                 expr.programLocation(),
-                "Expected field \"${field.name}\" of \"$className\" to have type ${field.type} but got ${expr.getType()}",
+                "Expected field \"${field.name}\" of \"$className\" to have type $expected but got ${expr.getType()}",
             ),
         )
     }
@@ -1005,7 +1095,7 @@ private fun FieldAccessExprNode.typePassFieldAccess(
     }
     when (val coll = resolveCollectionPropertyPath(baseType, fieldPath)) {
         is CollectionPropResult.Resolved -> {
-            resolveFieldAccess(coll.type, fieldPath.joinToString("."))
+            resolveFieldAccess(valueView(coll.type), fieldPath.joinToString("."))
             inferExprType(symbolEnv)
             return emptyList()
         }
@@ -1016,7 +1106,7 @@ private fun FieldAccessExprNode.typePassFieldAccess(
     return when (val result = resolveFieldPath(baseType, fieldPath)) {
         is FieldPathResult.Error -> listOf(OneLocCompileError(programLocation(), result.message))
         is FieldPathResult.Resolved -> {
-            resolveFieldAccess(result.type, result.relPath)
+            resolveFieldAccess(valueView(result.type), result.relPath)
             val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
             inferExprType(symbolEnv)
             childErrors
@@ -1043,7 +1133,7 @@ private fun MemberAccessExprNode.typePassMemberAccess(
     }
     when (val coll = resolveCollectionProperty(baseType, fieldName)) {
         is CollectionPropResult.Resolved -> {
-            setInferredType(TypePassType.Inferred(coll.type))
+            setInferredType(TypePassType.Inferred(valueView(coll.type)))
             return emptyList()
         }
         is CollectionPropResult.Error ->
@@ -1053,7 +1143,7 @@ private fun MemberAccessExprNode.typePassMemberAccess(
     return when (val result = resolveFieldPath(baseType, listOf(fieldName))) {
         is FieldPathResult.Error -> listOf(OneLocCompileError(programLocation(), result.message))
         is FieldPathResult.Resolved -> {
-            setInferredType(TypePassType.Inferred(result.type))
+            setInferredType(TypePassType.Inferred(valueView(result.type)))
             emptyList()
         }
     }
@@ -1794,7 +1884,7 @@ private fun FunNode.typePassFunSignature(registry: ObjClassRegistry): List<Compi
         when (val result = registry.resolveTypeExpr(arg.argTypeExpr(), typeParamEnv, arg.programLocation())) {
             is TypeResolveResult.Found -> {
                 arg.resolveArgType(result.type)
-                listOfNotNull(sortDomainOnlyError(result.type, arg.programLocation()))
+                listOfNotNull(sortDomainBan(result.type, arg.programLocation()))
             }
             is TypeResolveResult.Error ->
                 listOf(
@@ -1808,7 +1898,7 @@ private fun FunNode.typePassFunSignature(registry: ObjClassRegistry): List<Compi
     val returnErrors = when (val result = registry.resolveTypeExpr(funReturnTypeExpr(), typeParamEnv, programLocation())) {
         is TypeResolveResult.Found -> {
             resolveReturnType(result.type)
-            listOfNotNull(sortDomainOnlyError(result.type, programLocation()))
+            listOfNotNull(sortDomainBan(result.type, programLocation()))
         }
         is TypeResolveResult.Error ->
             listOf(
@@ -2165,7 +2255,7 @@ private fun ProcFunNode.typePassProcFunSignature(registry: ObjClassRegistry): Li
         when (val result = registry.resolveTypeExpr(arg.argTypeExpr(), emptyMap(), arg.programLocation())) {
             is TypeResolveResult.Found -> {
                 arg.resolveArgType(result.type)
-                listOfNotNull(sortDomainOnlyError(result.type, arg.programLocation()))
+                listOfNotNull(sortDomainBan(result.type, arg.programLocation()))
             }
             is TypeResolveResult.Error ->
                 listOf(
@@ -2179,7 +2269,7 @@ private fun ProcFunNode.typePassProcFunSignature(registry: ObjClassRegistry): Li
     val returnErrors = when (val result = registry.resolveTypeExpr(procFunReturnTypeExpr(), emptyMap(), programLocation())) {
         is TypeResolveResult.Found -> {
             resolveReturnType(result.type)
-            listOfNotNull(sortDomainOnlyError(result.type, programLocation()))
+            listOfNotNull(sortDomainBan(result.type, programLocation()))
         }
         is TypeResolveResult.Error ->
             listOf(

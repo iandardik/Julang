@@ -1,0 +1,20 @@
+import imports.nodeset.NodeSet
+
+proc Counter {
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit: n := 0
+    }
+
+    transition bump() {
+        guard: n < 3
+        transit: n := n + 1
+    }
+}
+
+invariant G := all i : NodeSet, Counter[i].n <= 3
+
+spec SortImport := <true> Counter[i : NodeSet] <G>
+
+compile SortImport

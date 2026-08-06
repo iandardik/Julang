@@ -36,17 +36,19 @@ obj Name { ... }
 sort Name := { lit, ... }
 fun name(...) : Type = expr
 invariant Name := Expr
+spec Name { ... }                          // leaf spec (optional [p : T])
+spec Name[p : T] { ... }                   // parameterized leaf spec
 spec Name := <Assume> System <Guarantee>
 spec Name := System |= Guarantee
 spec Name := System
 compile Name1, Name2, ...
 ```
 
-`sort` declares a finite homogeneous domain (String, non-negative Int, or Boolean literals) for **spec index / quantifier domains only**. It becomes a TLA+ `CONSTANT` with the exact set in the `.cfg`. Do not use sorts as proc state, action args, or `obj` fields.
+`sort` declares a finite homogeneous domain (String, non-negative Int, or Boolean literals) for **spec index / quantifier / leaf-spec parameter domains**, **leaf-spec state**, and **`obj` fields**. It becomes a TLA+ `CONSTANT` with the exact set in the `.cfg`. Do not use sorts as ordinary proc state or action args. Sort-bearing objs in a JAR `compile` target are an error. Sorts may be `export`ed and imported by name.
 
 `Guarantee` may be a named invariant, an inline Boolean formula (`true` / `false` included), or `true` meaning no guarantee. Plain `spec := System` equals `<true> System <true>` / `--compile-tla`.
 
-`compile` targets: **proc** → JAR; **spec** → `.tla` / `.cfg`; **procfun** → standalone TLA/analyze (not a JAR root).
+`compile` targets: **proc** → JAR (fails if the assembly reaches a sort-bearing type); **spec** (composition or leaf) → `.tla` / `.cfg`; **procfun** → standalone TLA/analyze (not a JAR root). Leaf specs must not appear in `proc Name := …` assemblies.
 
 Procfuns cannot appear in `||`. List them in an [api](composition-and-actions.md#apis)'s `calls:` for TLA coupling. Parent **alphabets** always include called procfuns' non-synthetic actions. See [Procfuns](procfun.md).
 

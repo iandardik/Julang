@@ -125,6 +125,7 @@ fun expandLeavesToPclasses(
     procAliases: Map<String, ProcNode>,
     specAliases: Map<String, SpecNode> = emptyMap(),
     apiAliases: Map<String, ApiNode> = emptyMap(),
+    leafSpecs: Map<String, LeafSpecNode> = emptyMap(),
 ): List<SpecLeaf> {
     val out = mutableListOf<SpecLeaf>()
     val visiting = mutableSetOf<String>()
@@ -136,6 +137,16 @@ fun expandLeavesToPclasses(
             child
         }
 
+    fun withDeclParams(leaf: SpecLeaf): SpecLeaf {
+        val ls = leafSpecs[leaf.name] ?: return leaf
+        if (!ls.isParameterized()) return leaf
+        return if (!leaf.isParameterized) {
+            leaf.copy(paramName = ls.leafSpecParamName(), paramType = ls.leafSpecParamType())
+        } else {
+            leaf
+        }
+    }
+
     fun childrenOfSpec(spec: SpecNode): List<SpecLeaf> {
         val value = spec.specNodeValue()
         return when (value) {
@@ -145,37 +156,35 @@ fun expandLeavesToPclasses(
     }
 
     fun expand(leaf: SpecLeaf) {
+        val annotated = withDeclParams(leaf)
         when {
-            leaf.name in pclasses -> out += leaf
-            leaf.name in apiAliases -> {
-                val api = apiAliases.getValue(leaf.name)
-                flattenSpecLeaves(api.apiProcExpr(), leaf.name).forEach { child ->
-                    expand(pushDown(leaf, child.copy(introducingAssembly = leaf.name)))
-                }
-                // calls: are TLA coupling metadata / alphabet peers, not SpecLeaf hosts here;
-                // call-site occurrences come from discoverProcFunCallSiteDrafts.
-            }
-            leaf.name in procAliases -> {
-                val proc = procAliases.getValue(leaf.name)
-                // Expand the alias body with introducing assembly = this proc's name.
-                flattenSpecLeaves(proc.procNodeValue(), leaf.name).forEach { child ->
-                    expand(pushDown(leaf, child.copy(introducingAssembly = leaf.name)))
+            annotated.name in leafSpecs || annotated.name in pclasses -> out += annotated
+            annotated.name in apiAliases -> {
+                val api = apiAliases.getValue(annotated.name)
+                flattenSpecLeaves(api.apiProcExpr(), annotated.name).forEach { child ->
+                    expand(pushDown(annotated, child.copy(introducingAssembly = annotated.name)))
                 }
             }
-            leaf.name in specAliases -> {
-                if (!visiting.add(leaf.name)) {
-                    out += leaf
+            annotated.name in procAliases -> {
+                val proc = procAliases.getValue(annotated.name)
+                flattenSpecLeaves(proc.procNodeValue(), annotated.name).forEach { child ->
+                    expand(pushDown(annotated, child.copy(introducingAssembly = annotated.name)))
+                }
+            }
+            annotated.name in specAliases -> {
+                if (!visiting.add(annotated.name)) {
+                    out += annotated
                     return
                 }
                 try {
-                    childrenOfSpec(specAliases.getValue(leaf.name)).forEach { child ->
-                        expand(pushDown(leaf, child))
+                    childrenOfSpec(specAliases.getValue(annotated.name)).forEach { child ->
+                        expand(pushDown(annotated, child))
                     }
                 } finally {
-                    visiting.remove(leaf.name)
+                    visiting.remove(annotated.name)
                 }
             }
-            else -> out += leaf
+            else -> out += annotated
         }
     }
     leaves.forEach { expand(it) }

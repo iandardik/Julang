@@ -1,0 +1,20 @@
+sort NodeSet := { "n1", "n2" }
+
+obj VoteRequestMsg {
+    dest : NodeSet
+    msg : String
+}
+
+spec Env {
+    var dest : NodeSet := "n1"
+    var msgs : Set<VoteRequestMsg> := {}
+    constructor initially(args : List<String>) {
+        transit: dest := "n1"
+        transit: msgs := {}
+    }
+    transition send() {
+        transit: msgs := msgs + { VoteRequestMsg { dest := dest, msg := "hi" } }
+    }
+}
+
+compile Env

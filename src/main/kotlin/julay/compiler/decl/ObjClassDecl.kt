@@ -439,15 +439,7 @@ class ObjClassRegistry private constructor(
             rawDecls.filter { it.typeParams.isEmpty() }.forEach { raw ->
                 when (val result = resolver.resolveNullaryObjClass(raw.name)) {
                     is ObjClassResolveResult.Success -> {
-                        if (result.type.containsSortType()) {
-                            errors.add(
-                                OneLocCompileError(
-                                    raw.loc,
-                                    "obj \"${raw.name}\" fields must not use sort types " +
-                                        "(sorts are only for spec/quantifier domains)",
-                                ),
-                            )
-                        }
+                        // Sort-bearing objs are allowed; JAR targets that reach them are rejected later.
                     }
                     is ObjClassResolveResult.Failed ->
                         errors.add(OneLocCompileError(raw.loc, result.message))

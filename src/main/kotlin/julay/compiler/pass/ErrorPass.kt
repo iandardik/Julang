@@ -18,6 +18,7 @@ fun ASTNode.errorPass(
 ): List<CompileError> = when (this) {
     is RootNode -> errorPassRoot(procs, librariesInUse, program, procDecls, requireCompleteSync)
     is ProcClassNode -> errorPassProcClass(procs, librariesInUse)
+    is LeafSpecNode -> errorPassLeafSpec(procs, librariesInUse)
     is ProcFunNode -> errorPassProcFun(procs, librariesInUse)
     is ObjClassNode -> errorPassObjClass(procs, librariesInUse)
     is ConstructorNode -> errorPassConstructor(procs, librariesInUse)
@@ -499,6 +500,37 @@ private fun RootNode.overlappingDeclNamesErrors(): List<CompileError> {
                 )
             }
     }
+}
+
+private fun LeafSpecNode.errorPassLeafSpec(
+    procs: Set<String>,
+    librariesInUse: Set<String>,
+): List<CompileError> {
+    val pcErrors = asProcClass().errorPassProcClass(procs, librariesInUse)
+    val paramName = leafSpecParamName() ?: return pcErrors
+    val forbidden = setOf(paramName)
+    val transitionAssign = localDecls()
+        .filterIsInstance<TransitionNode>()
+        .flatMap { constAssignmentErrors(it, forbidden) }
+        .map { err ->
+            when (err) {
+                is OneLocCompileError ->
+                    OneLocCompileError(err.loc, "Cannot assign to leaf-spec parameter \"$paramName\"")
+                else -> err
+            }
+        }
+    val ctorAssign = localDecls()
+        .filterIsInstance<ConstructorNode>()
+        .flatMap { ctor ->
+            ctor.transitVars().mapNotNull { (key, loc) ->
+                if (transitRootVar(key) == paramName) {
+                    OneLocCompileError(loc, "Cannot assign to leaf-spec parameter \"$paramName\"")
+                } else {
+                    null
+                }
+            }
+        }
+    return pcErrors + transitionAssign + ctorAssign
 }
 
 private fun ProcClassNode.errorPassProcClass(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {

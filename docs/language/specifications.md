@@ -13,6 +13,13 @@ Invariants are Boolean expressions over proc state. Quantifiers (`all`, `exists`
 
 ## Specs
 
+Two kinds of `spec` declaration:
+
+1. **Composition specs** — assume–guarantee (or plain) systems over procs / apis / leaf specs
+2. **Leaf specs** — proc-class-shaped bodies that exist only for TLA+ (never JAR)
+
+### Composition specs
+
 Three surface forms (same TLA pipeline):
 
 ```jul
@@ -22,10 +29,52 @@ spec SafeInc := <Env> Counter <Bound>       // full assume-guarantee
 ```
 
 - Left of the system (`<Env>`): assumption / environment (`true` means none)
-- Middle: system expression (procs, **apis**, indexing, `||`)
+- Middle: system expression (procs, **apis**, **leaf specs**, indexing, `||`)
 - Right / `|=` side: guarantee — a named invariant, an inline Boolean formula, or `true` (no guarantee)
 
 Plain `spec Name := System` is also what `--compile-tla Name` synthesizes for a proc or api. Apis work like procs in all three forms; procfuns listed in an api's `calls:` are coupled in TLA+ (see [Composition and actions — APIs](composition-and-actions.md#apis)).
+
+### Leaf specs
+
+A leaf spec looks like a proc class but is **verification-only**: `compile` emits `.tla` / `.cfg`, never a JAR. Use them for environments and other stubs that should not be executable.
+
+```jul
+spec Env {
+    var ready : Boolean := false
+    constructor initially(args : List<String>) { transit: ready := false }
+    transition mark() { transit: ready := true }
+}
+
+spec Sys := Env
+compile Env, Sys
+```
+
+Optional declaration parameters bind an immutable name usable in guards and transit (unlike indexing a proc class from the outside, where the binder is not in the proc body):
+
+```jul
+sort Node := {"n1", "n2"}
+spec Net[n : Node] {
+    var lastDest : String := ""
+    constructor initially(args : List<String>) {}
+    transition send() { transit: lastDest := n }
+}
+spec Ag := <Net> Peer <true>
+```
+
+When the parameter type is a `sort`, the body treats `n` as the sort’s element type (e.g. `String`); the TLA instance domain remains the sort. Assigning to a leaf-spec parameter is an error.
+
+**Not allowed in proc assemblies.** Leaf specs may appear in composition specs, but not under `proc Name := …` or an api’s `proc:`:
+
+```jul
+spec A { constructor initially(args : List<String>) {} }
+proc Peer { constructor initially(args : List<String>) {} }
+
+spec C := A            // ok
+proc B := A            // error
+proc E := A || Peer    // error
+```
+
+Fixtures: [`regression/input/spec/leaf-plain-env.jul`](../../regression/input/spec/leaf-plain-env.jul), [`leaf-param-net.jul`](../../regression/input/spec/leaf-param-net.jul).
 
 ### Indexed procs
 
@@ -43,18 +92,18 @@ sort Node := {"n1", "n2", "n3"}
 spec S := Counter[n : Node]
 ```
 
-Elements must be homogeneous String, non-negative Int, or Boolean literals. Sorts are not allowed in proc bodies (state / args / `obj` fields).
+Elements must be homogeneous String, non-negative Int, or Boolean literals. Sorts are illegal as ordinary **proc** state / action args. They **are** allowed on `obj` fields and in **leaf-spec state** (and leaf-spec parameters as domain binders). A JAR `compile` target that reaches any sort-bearing type (including via nested objs) is refused — see [Types and expressions](types-and-expressions.md#finite-sorts-sort). Fixtures: [`regression/input/spec/obj-sort-field.jul`](../../regression/input/spec/obj-sort-field.jul). A sort may be `export`ed and `import`ed from another module (same rules as other decls); see [Modules](modules.md).
 
 See [`input/inc_server/main.jul`](../../input/inc_server/main.jul) and [`regression/input/spec/`](../../regression/input/spec/).
 
 ## Compiling specs
 
 ```jul
-compile IncServer, HandlerSpec, IncSpec
+compile IncServer, HandlerSpec, IncSpec, Env
 ```
 
 - `IncServer` (a proc) → JAR
-- `HandlerSpec` / `IncSpec` (specs) → `HandlerSpec.tla` / `.cfg`, `IncSpec.tla` / `.cfg`
+- `HandlerSpec` / `IncSpec` / `Env` (composition or leaf specs) → `.tla` / `.cfg`
 
 Primary how-to: [Getting started](../getting-started.md). CLI flag `--allow-unindexed-spec` softens indexing errors—see [Tooling](../tooling.md).
 

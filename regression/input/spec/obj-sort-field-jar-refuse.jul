@@ -1,0 +1,18 @@
+sort Node := { "n1", "n2" }
+
+obj Inner {
+    d : Node
+}
+
+obj Outer {
+    inner : Inner
+}
+
+proc Bad {
+    var o : Outer
+    constructor initially(args : List<String>) {
+        transit: o := Outer { inner := Inner { d := "n1" } }
+    }
+}
+
+compile Bad
