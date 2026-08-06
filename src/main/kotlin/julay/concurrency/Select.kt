@@ -81,7 +81,14 @@ class Select(private vararg val cases : Case) {
             val doneCases = mutableSetOf<Case>()
             var winnerCopy = Optional.empty<Int>()
             var winnerDone = false
-            while (!winnerDone && !exitDueToChannelClose && doneCases != allCases) {
+            while (!winnerDone && doneCases != allCases) {
+                // Peer exit may close a non-winning arm's channel. Do not abandon Select while a
+                // different arm has already committed (winner set) but not yet reported caseDone —
+                // that race drops the payload and deadlocks the proc (e.g. Timer cancel-restart).
+                if (exitDueToChannelClose) {
+                    winnerMutex.mutex.withLock { winnerCopy = winner }
+                    if (winnerCopy.isEmpty) break
+                }
                 val case = caseDoneChan.receive()
                 doneCases.add(case)
                 if (winnerCopy.isEmpty) {

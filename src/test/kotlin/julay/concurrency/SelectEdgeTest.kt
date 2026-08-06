@@ -61,6 +61,39 @@ class SelectEdgeTest {
     }
 
     @Test
+    fun selectKeepsWinnerWhenPeerClosesWinningChannelAfterCommit() = runBlocking {
+        withContext(Dispatchers.Default) {
+            // Mirrors Timer cancel-restart: Controller Select(cancel, end); Helper syncDirect(end)
+            // then closes the session channel in finally. Select must keep the committed end winner
+            // even if close races the non-winning arm.
+            val endChan = SyncChannel<Int, Int>(2) { Optional.of(99) }
+            // Idle arm: peer present but compute never sat — cannot win Select.
+            val cancelChan = SyncChannel<Int, Int>(2) { Optional.empty() }
+            val got = AtomicInteger(-1)
+            val cancelPeer = launch { cancelChan.sync() }
+            awaitParticipantCount(cancelChan, 1)
+            val selectJob = async {
+                Select(
+                    Select.SyncCase(cancelChan) { got.set(it) },
+                    Select.SyncCase(endChan) { got.set(it) },
+                ).run()
+            }
+            awaitParticipantCount(endChan, 1)
+            val helper = launch {
+                val ret = Select.SyncCase(endChan) { }.syncDirect()
+                endChan.close()
+                ret
+            }
+            withTimeout(gateTimeout) {
+                helper.join()
+                selectJob.await()
+            }
+            assertEquals(99, got.get())
+            cancelPeer.cancelAndJoin()
+        }
+    }
+
+    @Test
     fun selectTwoSingleCaseSelectsOnSize2() = runBlocking {
         withContext(Dispatchers.Default) {
             val chan = SyncChannel<Int, Int>(2) { Optional.of(7) }

@@ -273,11 +273,14 @@ class SyncChannel<C : Any, V : Any>(
      *   TRY carries a constraint snapshot + reserved [group] (+ cleanup for the snapshot).
      */
     private fun pickCandidateLocked(me: Participant<V, C>): SyncDecision<V, C> {
+        // Committed followers must receive their value even if the peer already closed the
+        // channel (e.g. TimerHelper exits and clearAffinity closes the session SyncChannel
+        // before TimerController's Select arm finishes). Check followerValue before closed.
+        if (me.followerValue.get()) {
+            return SyncDecision(SyncDecision.Kind.FOLLOW, pairGate = me.pairGate ?: completedGate())
+        }
         if (closed) return SyncDecision(SyncDecision.Kind.ABORT)
         if (me !in participants) {
-            if (me.followerValue.get()) {
-                return SyncDecision(SyncDecision.Kind.FOLLOW, pairGate = me.pairGate ?: completedGate())
-            }
             // Never re-register after scrub/commit/abort removal.
             if (me.everRegistered) return SyncDecision(SyncDecision.Kind.ABORT)
             me.everRegistered = true
@@ -285,9 +288,6 @@ class SyncChannel<C : Any, V : Any>(
             signalWaitersLocked()
         }
         // Already reserved or value pending — do not become a competing leader.
-        if (me.followerValue.get()) {
-            return SyncDecision(SyncDecision.Kind.FOLLOW, pairGate = me.pairGate ?: completedGate())
-        }
         if (me.pairing) {
             return SyncDecision(SyncDecision.Kind.FOLLOW, pairGate = me.pairGate ?: completedGate())
         }
@@ -494,7 +494,11 @@ class SyncChannel<C : Any, V : Any>(
             if (!closed) {
                 closed = true
                 participants.forEach {
-                    it.syncValueChan.close()
+                    // Do not close a committed follower's delivery channel — they may still
+                    // be in waitForLeaderOrAbort and must receive the buffered sync value.
+                    if (!it.followerValue.get()) {
+                        it.syncValueChan.close()
+                    }
                     it.pairGate?.complete(Unit)
                     it.pairGate = null
                     it.pairing = false

@@ -2,6 +2,6 @@ source: regression/input/timer/timer-smoke.jul
 programs:
   - name: TimerSmoke
     run:
-      timeoutMs: 15000
+      timeoutMs: 8000
       expectStdoutContains:
         - "ok"

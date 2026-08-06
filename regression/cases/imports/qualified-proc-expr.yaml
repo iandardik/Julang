@@ -4,5 +4,5 @@ programs:
     run:
       # Foreground: Driver exitProcess()s after "ok". Avoids background
       # durationMs being capped below the 1s timer when compile is slow.
-      timeoutMs: 15000
+      timeoutMs: 8000
       expectStdout: regression/expected/imports-qualified-proc-expr.stdout
