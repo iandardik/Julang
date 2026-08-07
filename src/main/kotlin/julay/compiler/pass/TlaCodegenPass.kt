@@ -130,6 +130,34 @@ fun tlaCodegenPass(
             .forEach { action ->
                 action.action.args.forEach { collectSortConstants(it.type, constants) }
             }
+        // Leaf-spec decl binders and also-args (aux domains).
+        leafSpecNodes[leaf.name]?.leafSpecParamType()?.let { te ->
+            typeDomainConstant(te)?.let { name ->
+                if (name !in setOf("Int", "Nat", "Boolean", "Real")) constants += name
+            }
+        }
+        pc.localDecls().filterIsInstance<TransitionNode>().forEach { tr ->
+            tr.alsoArgs()?.children?.filterIsInstance<ArgNode>()?.forEach { arg ->
+                try {
+                    collectSortConstants(arg.type, constants)
+                } catch (_: RuntimeException) {
+                    typeDomainConstant(arg.argTypeExpr())?.let { name ->
+                        if (name !in setOf("Int", "Nat", "Boolean", "Real")) constants += name
+                    }
+                }
+            }
+        }
+        pc.localDecls().filterIsInstance<ConstructorNode>().forEach { ctor ->
+            ctor.alsoArgs()?.children?.filterIsInstance<ArgNode>()?.forEach { arg ->
+                try {
+                    collectSortConstants(arg.type, constants)
+                } catch (_: RuntimeException) {
+                    typeDomainConstant(arg.argTypeExpr())?.let { name ->
+                        if (name !in setOf("Int", "Nat", "Boolean", "Real")) constants += name
+                    }
+                }
+            }
+        }
     }
 
     // Finite TLC models for built-in domains used in the module (assigned in .cfg only).
@@ -272,7 +300,7 @@ fun tlaCodegenPass(
     val built = buildTlaActions(
         leaves, pclassesForTla, offers, sessionPairs, stateVarNames,
         killTargets, needsSessionException, callSites, handshake, procFunNodes,
-        havocSites, cfgOverrides,
+        havocSites, cfgOverrides, leafSpecNodes,
     )
     val helpers = built.helpers
     val actions = built.actions
@@ -963,6 +991,7 @@ private fun buildTlaActions(
     procFunNodes: Map<String, ProcFunNode> = emptyMap(),
     havocSites: List<ProcFunCallSite> = emptyList(),
     cfgOverrides: MutableSet<String> = linkedSetOf(),
+    leafSpecs: Map<String, LeafSpecNode> = emptyMap(),
 ): TlaBuildResult {
     val allVars = allTlaVars(leaves, pclasses, stateVarNames, killTargets) +
         handshake.allNames() +
@@ -1001,6 +1030,9 @@ private fun buildTlaActions(
         returnToByOccurrence = returnToByOccurrence,
         blockingByHost = blockingByHost,
         hostsWithBlocking = hostsWithBlocking,
+        pclasses = pclasses,
+        leafSpecs = leafSpecs,
+        systemLeaves = leaves,
     )
 
     fun emitCoupled(offer: TlaActionOffer, site: ProcFunCallSite) {
@@ -1190,7 +1222,7 @@ private fun emitConjoined(
     offers: List<TlaActionOffer>,
     allVars: List<String>,
     stateVarsByLeaf: Map<String, Set<String>>,
-    stateVarNames: Map<Pair<String, String>, String>,
+    stateVarNamesIn: Map<Pair<String, String>, String>,
     sessionPair: SessionLeafPair? = null,
     allSessionPairs: List<SessionLeafPair> = emptyList(),
     killTargets: Set<String> = emptySet(),
@@ -1198,13 +1230,43 @@ private fun emitConjoined(
     returnToByOccurrence: Map<String, String> = emptyMap(),
     blockingByHost: Map<String, String> = emptyMap(),
     hostsWithBlocking: Set<String> = emptySet(),
+    pclasses: Map<String, ProcClassNode> = emptyMap(),
+    leafSpecs: Map<String, LeafSpecNode> = emptyMap(),
+    systemLeaves: List<SpecLeaf> = emptyList(),
 ): TlaAction {
+    // Peer reads use class names (Peer.self); map unique class → occurrence tlaName.
+    val stateVarNames = stateVarNamesIn.toMutableMap()
+    systemLeaves.groupBy { it.name }.forEach { (cls, occs) ->
+        if (occs.size == 1) {
+            val leaf = occs.single()
+            stateVarNamesIn.forEach { (key, id) ->
+                if (key.first == leaf.tlaName) {
+                    stateVarNames[cls to key.second] = id
+                }
+            }
+        }
+    }
     val parts = mutableListOf<String>()
     val changed = mutableSetOf<String>()
     val argParams = mutableListOf<Pair<String, String>>()
+    val auxParams = mutableListOf<Pair<String, String>>()
+    val auxNamesByLeaf = mutableMapOf<String, Set<String>>()
+
+    offers.forEach { offer ->
+        val aux = collectLeafSpecAuxParams(
+            offer.leaf,
+            offer.decl.action.name,
+            offer.isConstructor,
+            pclasses,
+            leafSpecs,
+        )
+        auxNamesByLeaf[offer.leaf.tlaName] = aux.map { it.name }.toSet()
+        aux.forEach { a -> auxParams += a.name to a.domain }
+    }
 
     // Collect action arg names that appear in this conjoined action (for binder clash checks).
     val usedArgNames = mutableSetOf<String>()
+    usedArgNames += auxParams.map { it.first }
     offers.forEach { offer ->
         fun refsArg(argName: String): Boolean {
             return offer.decl.guards.any { exprReferencesSymbol(it, argName) } ||
@@ -1222,6 +1284,7 @@ private fun emitConjoined(
 
     // Instance binders for parameterized leaves: paramName indexes into the type domain.
     val selfBinders = linkedMapOf<String, String>() // leafName -> binder
+    val sharedWithBinders = linkedMapOf<String, String>() // withScopeId -> binder
     val reserved = usedArgNames.toMutableSet()
     offers.forEach { offer ->
         if (offer.leaf.isParameterized) {
@@ -1242,21 +1305,23 @@ private fun emitConjoined(
             }
         }
     }
-    offers.forEach { offer ->
-        if (offer.leaf.isParameterized) {
-            val binder = indexBinderName(offer.leaf, reserved)
-            selfBinders[offer.leaf.tlaName] = binder
-            reserved += binder
+    fun bindLeaf(leaf: SpecLeaf) {
+        // Apply-only / leaf-spec under `with`: register shared binder without lifting state.
+        if (!leaf.isParameterized && leaf.withScopeId != null && leaf.paramName != null) {
+            sharedWithBinders.putIfAbsent(leaf.withScopeId!!, leaf.paramName!!)
+            reserved += leaf.paramName!!
+            return
         }
+        if (!leaf.isParameterized || leaf.tlaName in selfBinders) return
+        val binder = indexBinderName(leaf, reserved, sharedWithBinders)
+        selfBinders[leaf.tlaName] = binder
+        reserved += binder
+        leaf.withScopeId?.let { sharedWithBinders.putIfAbsent(it, binder) }
     }
+    offers.forEach { offer -> bindLeaf(offer.leaf) }
     pairsNeedingBinders.forEach { pair ->
-        listOf(pair.leafA, pair.leafB).forEach { leaf ->
-            if (leaf.isParameterized && leaf.tlaName !in selfBinders) {
-                val binder = indexBinderName(leaf, reserved)
-                selfBinders[leaf.tlaName] = binder
-                reserved += binder
-            }
-        }
+        bindLeaf(pair.leafA)
+        bindLeaf(pair.leafB)
     }
 
     fun selfOf(leaf: SpecLeaf): String? = selfBinders[leaf.tlaName]
@@ -1267,7 +1332,8 @@ private fun emitConjoined(
 
     fun emitTransitUpdates(offer: TlaActionOffer, targetParts: MutableList<String>, targetChanged: MutableSet<String>) {
         val self = selfOf(offer.leaf)
-        val argNames = offer.decl.action.args.map { it.name }.toSet()
+        val auxNames = auxNamesByLeaf[offer.leaf.tlaName].orEmpty()
+        val argNames = offer.decl.action.args.map { it.name }.toSet() + auxNames
         val leafCtx = mapOf(offer.leaf.name to offer.leaf, offer.leaf.tlaName to offer.leaf)
         var letBindings = emptyMap<String, ExprNode>()
         fun substLets(expr: ExprNode): ExprNode {
@@ -1392,7 +1458,8 @@ private fun emitConjoined(
 
     offers.forEach { offer ->
         val self = selfOf(offer.leaf)
-        val argNames = offer.decl.action.args.map { it.name }.toSet()
+        val auxNames = auxNamesByLeaf[offer.leaf.tlaName].orEmpty()
+        val argNames = offer.decl.action.args.map { it.name }.toSet() + auxNames
         val leafCtx = mapOf(offer.leaf.name to offer.leaf, offer.leaf.tlaName to offer.leaf)
 
         // Only include args that appear in guards/transits (skip unused initially args).
@@ -1505,11 +1572,11 @@ private fun emitConjoined(
 
     val body = parts.joinToString("\n  ")
     val indexParams = selfBinders.map { (leafName, binder) ->
-        val leaf = offers.firstOrNull { it.leaf.name == leafName }?.leaf
+        val leaf = offers.firstOrNull { it.leaf.tlaName == leafName }?.leaf
             ?: pairsNeedingBinders.firstNotNullOfOrNull { p ->
                 when (leafName) {
-                    p.leafA.name -> p.leafA
-                    p.leafB.name -> p.leafB
+                    p.leafA.tlaName -> p.leafA
+                    p.leafB.tlaName -> p.leafB
                     else -> null
                 }
             }
@@ -1517,7 +1584,8 @@ private fun emitConjoined(
         val domain = typeDomainConstant(leaf.paramType!!) ?: leaf.paramType.toString()
         binder to domain
     }
-    val params = (indexParams + argParams).distinctBy { it.first }
+    // Aux params that are already index binders (same name) are dropped by distinctBy.
+    val params = (indexParams + auxParams + argParams).distinctBy { it.first }
     val signature = if (params.isEmpty()) {
         name
     } else {
@@ -1526,9 +1594,15 @@ private fun emitConjoined(
     return TlaAction(name, "$signature ==\n  $body", params, comment)
 }
 
-/** Prefer [SpecLeaf.paramName] as the TLA binder; append `_<leaf>` on name clashes. */
-internal fun indexBinderName(leaf: SpecLeaf, reserved: Set<String>): String {
+/** Prefer [SpecLeaf.paramName] as the TLA binder; append `_<leaf>` on name clashes.
+ * Leaves that share [SpecLeaf.withScopeId] reuse the same binder string.
+ */
+internal fun indexBinderName(leaf: SpecLeaf, reserved: Set<String>, sharedBinders: Map<String, String> = emptyMap()): String {
     val base = leaf.paramName!!
+    val scope = leaf.withScopeId
+    if (scope != null) {
+        sharedBinders[scope]?.let { return it }
+    }
     return if (base !in reserved) base else "${base}_${leaf.tlaName}"
 }
 
@@ -2092,13 +2166,18 @@ internal fun exprToTla(
         }
         is MemberAccessExprNode -> {
             val base = expr.baseExpr
-            if (base is IndexExprNode && base.base is SymbolValueExprNode) {
-                val leafName = (base.base as SymbolValueExprNode).symbol
-                val v = stateTlaName(leafName, expr.fieldName, stateVarNames)
-                "$v[${rec(base.index)}]"
-            } else {
-                val rendered = rec(base)
-                "$rendered.${expr.fieldName}"
+            when {
+                base is IndexExprNode && base.base is SymbolValueExprNode -> {
+                    val leafName = (base.base as SymbolValueExprNode).symbol
+                    val v = stateTlaName(leafName, expr.fieldName, stateVarNames)
+                    "$v[${rec(base.index)}]"
+                }
+                base is SymbolValueExprNode && stateVarNames.containsKey(base.symbol to expr.fieldName) ->
+                    stateTlaName(base.symbol, expr.fieldName, stateVarNames)
+                else -> {
+                    val rendered = rec(base)
+                    "$rendered.${expr.fieldName}"
+                }
             }
         }
         is FieldAccessOnExprNode -> {

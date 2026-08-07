@@ -1,0 +1,26 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+import protocol.Sys
+
+proc Peer {
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit: done := false
+    }
+
+    internal transition ping() {
+        guard: ~done
+        before: println("ok")
+        transit: done := true
+    }
+
+    internal transition exitSystem() {
+        guard: done
+        after: exitProcess()
+    }
+}
+
+proc PeerApp := Peer
+
+compile PeerApp, Sys

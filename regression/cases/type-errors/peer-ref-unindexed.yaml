@@ -1,0 +1,5 @@
+source: regression/input/spec/peer-ref-unindexed.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "does not compose an indexed Peer"
+  - "Found errors while compiling"

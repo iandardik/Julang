@@ -1,0 +1,8 @@
+source: regression/input/spec/mixedjarsort/main.jul
+expectJars: true
+programs:
+  - name: PeerApp
+    run:
+      timeoutMs: 30000
+      expectStdoutContains:
+        - "ok"

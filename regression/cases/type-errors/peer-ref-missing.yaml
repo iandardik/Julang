@@ -1,0 +1,5 @@
+source: regression/input/spec/peer-ref-missing.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "does not compose Peer"
+  - "Found errors while compiling"

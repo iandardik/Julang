@@ -8,6 +8,7 @@ Compact cheat sheet. For explanations, use the other chapters.
 `var` `const` `constructor` `transition`  
 `internal` `provider` `client` `session`  
 `guard` `before` `transit` `error` `after` `return`  
+`also` `with`  
 `all` `exists` `if` `else` `let` `when` `in`  
 `true` `false`
 
@@ -36,13 +37,18 @@ obj Name { ... }
 sort Name := { lit, ... }
 fun name(...) : Type = expr
 invariant Name := Expr
-spec Name { ... }                          // leaf spec (optional [p : T])
-spec Name[p : T] { ... }                   // parameterized leaf spec
+spec Name { ... }                          // leaf spec (optional [p : T] body binder; no state lift)
+spec Name[p : T] { ... }                   // leaf spec with decl param
 spec Name := <Assume> System <Guarantee>
 spec Name := System |= Guarantee
 spec Name := System
+spec Name := with (v : T) { System }       // shared apply-binder scope
 compile Name1, Name2, ...
 ```
+
+System atoms: `Name[v : T]` **creates** an index (lifts state); inside `with`, only `Name[v]` **applies** a shared binder. Shorthand `(A || B)[n : T]` desugars to create-temps + `with` + applies — see [Specifications](specifications.md#indexes-create-with-and-apply).
+
+Leaf-spec actions: `transition name(args) also (aux : T) { … }` (leaf specs only). Bodies may read peer state `P.var` / `P[idx].var` (compile checks composition + indexing).
 
 `sort` declares a finite homogeneous domain (String, non-negative Int, or Boolean literals) for **spec index / quantifier / leaf-spec parameter domains**, **leaf-spec state**, and **`obj` fields**. It becomes a TLA+ `CONSTANT` with the exact set in the `.cfg`. Do not use sorts as ordinary proc state or action args. Sort-bearing objs in a JAR `compile` target are an error. Sorts may be `export`ed and imported by name.
 

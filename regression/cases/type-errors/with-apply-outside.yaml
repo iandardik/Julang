@@ -1,0 +1,5 @@
+source: regression/input/spec/with-apply-outside.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "only allowed inside with"
+  - "Found type errors; exiting."

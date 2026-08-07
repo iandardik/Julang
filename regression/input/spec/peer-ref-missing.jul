@@ -1,0 +1,27 @@
+sort Node := { "n1" }
+
+proc Peer {
+    var self : String := ""
+
+    constructor initially(args : List<String>) {
+        transit: self := "n1"
+    }
+
+    transition ping() {
+        transit: self := self
+    }
+}
+
+spec Net[n : Node] {
+    constructor initially(args : List<String>) {}
+
+    transition observe(target : String) also (m : Node) {
+        guard: Peer[m].self = target
+        transit:
+    }
+}
+
+// Peer missing from composition.
+spec BadMissingPeer := Net
+
+compile BadMissingPeer

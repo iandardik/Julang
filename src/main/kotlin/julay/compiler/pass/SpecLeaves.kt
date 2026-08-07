@@ -18,12 +18,24 @@ data class SpecLeaf(
     val tlaName: String = name,
     /** True when this leaf is a procfun call-site occurrence (not a `||` peer). */
     val isProcFun: Boolean = false,
+    /**
+     * When non-null, this leaf's index was applied under `with (binder)`; leaves that share the
+     * same [withScopeId] use one TLA binder (no per-leaf clash rename).
+     */
+    val withScopeId: String? = null,
 ) {
-    val isParameterized: Boolean get() = paramName != null
+    val isParameterized: Boolean get() = paramName != null && paramType != null
     fun identityKey(): String {
         val base = if (paramName != null) "$name[$paramName:${paramType}]" else name
         return if (occurrenceId.isNotEmpty()) "$base#$occurrenceId" else base
     }
+}
+
+private var withScopeCounter = 0
+
+private fun freshWithScopeId(): String {
+    withScopeCounter += 1
+    return "with_$withScopeCounter"
 }
 
 private var specOccCounter = 0
@@ -36,13 +48,19 @@ private fun freshSpecOccurrenceId(pclass: String): String {
 
 fun resetSpecOccurrenceCounter() {
     specOccCounter = 0
+    withScopeCounter = 0
 }
 
 /** Flatten a system/assume expr keeping every occurrence (`X || X` → two leaves). */
 fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<SpecLeaf> {
     if (node == null) return emptyList()
     val out = mutableListOf<SpecLeaf>()
-    fun walk(n: ASTNode, intro: String) {
+    fun walk(
+        n: ASTNode,
+        intro: String,
+        withBinders: Map<String, TypeExpr> = emptyMap(),
+        withScopeId: String? = null,
+    ) {
         when (n) {
             is ValueProcExprNode -> {
                 val name = n.valueProcName()
@@ -52,25 +70,67 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
                     occurrenceId = freshSpecOccurrenceId(name),
                     introducingAssembly = assembly,
                     tlaName = name,
+                    withScopeId = withScopeId,
                 )
+            }
+            is WithSpecExprNode -> {
+                val scopeId = freshWithScopeId()
+                val binders = withBinders + (n.withBinderName() to n.withBinderType())
+                walk(n.withBody(), intro, binders, scopeId)
             }
             is ParamProcExprNode -> {
                 val paramName = n.paramName()
-                val paramType = n.paramType()
-                flattenSpecLeaves(n.paramBody(), intro).forEach { child ->
-                    out += if (!child.isParameterized) {
-                        child.copy(paramName = paramName, paramType = paramType)
-                    } else {
-                        child
+                when {
+                    n.isApplyIndex() -> {
+                        // Apply: share binder / with-scope only. Do not lift unindexed state.
+                        // Create-indexed children keep lifting; binder renamed to the with-name.
+                        flattenSpecLeaves(n.paramBody(), intro).forEach { child ->
+                            out += if (child.isParameterized) {
+                                child.copy(paramName = paramName, withScopeId = withScopeId)
+                            } else {
+                                child.copy(
+                                    paramName = paramName,
+                                    paramType = null,
+                                    withScopeId = withScopeId,
+                                )
+                            }
+                        }
+                    }
+                    // Shorthand (A || B)[n : T] → shared with-scope + create-index on each peer
+                    n.paramBody() is CompositeProcExprNode -> {
+                        val scopeId = freshWithScopeId()
+                        val pType = n.paramType()!!
+                        flattenSpecLeaves(n.paramBody(), intro).forEach { child ->
+                            out += if (!child.isParameterized) {
+                                child.copy(
+                                    paramName = paramName,
+                                    paramType = pType,
+                                    withScopeId = scopeId,
+                                )
+                            } else {
+                                child
+                            }
+                        }
+                    }
+                    else -> {
+                        val pType = n.paramType()!!
+                        flattenSpecLeaves(n.paramBody(), intro).forEach { child ->
+                            out += if (!child.isParameterized) {
+                                child.copy(paramName = paramName, paramType = pType)
+                            } else {
+                                child
+                            }
+                        }
                     }
                 }
             }
-            is CompositeProcExprNode -> n.compositeProcChildren().forEach { walk(it, intro) }
+            is CompositeProcExprNode ->
+                n.compositeProcChildren().forEach { walk(it, intro, withBinders, withScopeId) }
             is AgSpecExprNode -> {
-                n.assumeExpr()?.let { walk(it, intro) }
-                walk(n.systemExpr(), intro)
+                n.assumeExpr()?.let { walk(it, intro, withBinders, withScopeId) }
+                walk(n.systemExpr(), intro, withBinders, withScopeId)
             }
-            else -> n.children.forEach { walk(it, intro) }
+            else -> n.children.forEach { walk(it, intro, withBinders, withScopeId) }
         }
     }
     walk(node, introducingAssembly)
@@ -130,21 +190,18 @@ fun expandLeavesToPclasses(
     val out = mutableListOf<SpecLeaf>()
     val visiting = mutableSetOf<String>()
 
-    fun pushDown(outer: SpecLeaf, child: SpecLeaf): SpecLeaf =
-        if (outer.isParameterized && !child.isParameterized) {
-            child.copy(paramName = outer.paramName, paramType = outer.paramType)
-        } else {
-            child
+    fun pushDown(outer: SpecLeaf, child: SpecLeaf): SpecLeaf {
+        var c = child.copy(withScopeId = outer.withScopeId ?: child.withScopeId)
+        when {
+            outer.isParameterized && !c.isParameterized ->
+                c = c.copy(paramName = outer.paramName, paramType = outer.paramType)
+            outer.paramName != null && c.isParameterized ->
+                // Apply / shared with: rename create-index binder to the shared name.
+                c = c.copy(paramName = outer.paramName)
+            outer.paramName != null && !c.isParameterized && outer.withScopeId != null ->
+                c = c.copy(paramName = outer.paramName, paramType = null)
         }
-
-    fun withDeclParams(leaf: SpecLeaf): SpecLeaf {
-        val ls = leafSpecs[leaf.name] ?: return leaf
-        if (!ls.isParameterized()) return leaf
-        return if (!leaf.isParameterized) {
-            leaf.copy(paramName = ls.leafSpecParamName(), paramType = ls.leafSpecParamType())
-        } else {
-            leaf
-        }
+        return c
     }
 
     fun childrenOfSpec(spec: SpecNode): List<SpecLeaf> {
@@ -156,35 +213,34 @@ fun expandLeavesToPclasses(
     }
 
     fun expand(leaf: SpecLeaf) {
-        val annotated = withDeclParams(leaf)
         when {
-            annotated.name in leafSpecs || annotated.name in pclasses -> out += annotated
-            annotated.name in apiAliases -> {
-                val api = apiAliases.getValue(annotated.name)
-                flattenSpecLeaves(api.apiProcExpr(), annotated.name).forEach { child ->
-                    expand(pushDown(annotated, child.copy(introducingAssembly = annotated.name)))
+            leaf.name in leafSpecs || leaf.name in pclasses -> out += leaf
+            leaf.name in apiAliases -> {
+                val api = apiAliases.getValue(leaf.name)
+                flattenSpecLeaves(api.apiProcExpr(), leaf.name).forEach { child ->
+                    expand(pushDown(leaf, child.copy(introducingAssembly = leaf.name)))
                 }
             }
-            annotated.name in procAliases -> {
-                val proc = procAliases.getValue(annotated.name)
-                flattenSpecLeaves(proc.procNodeValue(), annotated.name).forEach { child ->
-                    expand(pushDown(annotated, child.copy(introducingAssembly = annotated.name)))
+            leaf.name in procAliases -> {
+                val proc = procAliases.getValue(leaf.name)
+                flattenSpecLeaves(proc.procNodeValue(), leaf.name).forEach { child ->
+                    expand(pushDown(leaf, child.copy(introducingAssembly = leaf.name)))
                 }
             }
-            annotated.name in specAliases -> {
-                if (!visiting.add(annotated.name)) {
-                    out += annotated
+            leaf.name in specAliases -> {
+                if (!visiting.add(leaf.name)) {
+                    out += leaf
                     return
                 }
                 try {
-                    childrenOfSpec(specAliases.getValue(annotated.name)).forEach { child ->
-                        expand(pushDown(annotated, child))
+                    childrenOfSpec(specAliases.getValue(leaf.name)).forEach { child ->
+                        expand(pushDown(leaf, child))
                     }
                 } finally {
-                    visiting.remove(annotated.name)
+                    visiting.remove(leaf.name)
                 }
             }
-            else -> out += annotated
+            else -> out += leaf
         }
     }
     leaves.forEach { expand(it) }

@@ -1,0 +1,5 @@
+source: regression/input/type-errors/also-on-proc.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "also args are only allowed on leaf-spec actions"
+  - "Found type errors; exiting."

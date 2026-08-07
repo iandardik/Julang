@@ -1,0 +1,157 @@
+import node.core.RaftProtocol
+import node.protocol.NodeSet
+
+obj VoteRequestMsg {
+    src : NodeSet
+    dest : NodeSet
+    msg : VoteRequestData
+}
+obj VoteResponseMsg {
+    src : NodeSet
+    dest : NodeSet
+    id : Int
+    term : Int
+    granted : Boolean
+}
+obj AppendEntriesRequestMsg {
+    src : NodeSet
+    dest : NodeSet
+    msg : AppendEntriesData
+}
+obj AppendEntriesResponseMsg {
+    src : NodeSet
+    dest : NodeSet
+    id : Int
+    term : Int
+    success : Boolean
+    matchIdx : Int
+}
+
+export spec Net[n : NodeSet] {
+    var voteRequestMsgs : Set<VoteRequestMsg> := {}
+    var voteResponseMsgs : Set<VoteResponseMsg> := {}
+    var appendEntriesRequestMsgs : Set<AppendEntriesRequestMsg> := {}
+    var appendEntriesResponseMsgs : Set<AppendEntriesResponseMsg> := {}
+    
+    constructor initially(args : List<String>) {}
+
+    transition requestVote(target : Node, payload : VoteRequestData) also (m : NodeSet) {
+        guard:
+            RaftProtocol[m].self = target
+        transit:
+            voteRequestMsgs := voteRequestMsgs + {VoteRequestMsg {
+                src := n,
+                dest := m,
+                msg := payload
+            }}
+    }
+
+    client transition handleRequestVoteRequest(
+        inTerm : Int,
+        candidateId : Int,
+        lastLogIndex : Int,
+        lastLogTerm : Int,
+        outTerm : Int,
+        voteGranted : Boolean
+    ) also (m : NodeSet) {
+        guard:
+            VoteRequestMsg {
+                src := m,
+                dest := n,
+                msg := VoteRequestData {
+                    term := inTerm,
+                    candidateId := candidateId,
+                    lastLogIndex := lastLogIndex,
+                    lastLogTerm := lastLogTerm
+                }
+            } in voteRequestMsgs
+        transit:
+            voteResponseMsgs := voteResponseMsgs + {VoteResponseMsg {
+                src := n,
+                dest := m,
+                id := candidateId,
+                term := outTerm,
+                granted := voteGranted
+            }}
+    }
+
+    client transition handleRequestVoteResponse(peerId : Int, term : Int, granted : Boolean) also (m : NodeSet) {
+        guard:
+            VoteResponseMsg {
+                src := m,
+                dest := n,
+                id := peerId,
+                term := term,
+                granted := granted
+            } in voteResponseMsgs
+    }
+
+    transition appendEntries(target : Node, payload : AppendEntriesData) also (m : NodeSet) {
+        guard:
+            RaftProtocol[m].self = target
+        transit:
+            appendEntriesRequestMsgs := appendEntriesRequestMsgs + {AppendEntriesRequestMsg {
+                src := n,
+                dest := m,
+                msg := payload
+            }}
+    }
+
+    client transition handleAppendEntriesRequest(
+        inTerm : Int,
+        leaderId : Int,
+        prevLogIndex : Int,
+        prevLogTerm : Int,
+        entriesLen : Int,
+        entryTerm : Int,
+        entryValue : String,
+        leaderCommit : Int,
+        outTerm : Int,
+        success : Boolean,
+        matchIdx : Int
+    ) also (m : NodeSet) {
+        guard:
+            AppendEntriesRequestMsg {
+                src := m,
+                dest := n,
+                msg := AppendEntriesData {
+                    term := inTerm,
+                    leaderId := leaderId,
+                    prevLogIndex := prevLogIndex,
+                    prevLogTerm := prevLogTerm,
+                    entry := Entry {
+                        term := entryTerm,
+                        value := entryValue
+                    },
+                    entriesLen := entriesLen,
+                    leaderCommit := leaderCommit
+                }
+            } in appendEntriesRequestMsgs
+        transit:
+            appendEntriesResponseMsgs := appendEntriesResponseMsgs + {AppendEntriesResponseMsg {
+                src := n,
+                dest := m,
+                id := leaderId,
+                term := inTerm,
+                success := success,
+                matchIdx := matchIdx
+            }}
+    }
+
+    client transition handleAppendEntriesResponse(
+        peerId : Int,
+        inTerm : Int,
+        success : Boolean,
+        matchIdx : Int
+    ) also (m : NodeSet) {
+        guard:
+            AppendEntriesResponseMsg {
+                src := m,
+                dest := n,
+                id := peerId,
+                term := inTerm,
+                success := success,
+                matchIdx := matchIdx
+            } in appendEntriesResponseMsgs
+    }
+}

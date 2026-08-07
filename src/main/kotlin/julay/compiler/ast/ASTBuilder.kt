@@ -296,18 +296,31 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 val right = visit(ctx.system_expr(1))
                 CompositeProcExprNode(listOf(left, right), sourceLocation(ctx))
             }
+            ctx.with_expr() != null -> visit(ctx.with_expr())
             else -> visit(ctx.system_atom())
         }
     }
 
+    override fun visitWith_expr(ctx: JulayParser.With_exprContext?): ASTNode {
+        val binderName = ctx!!.ID().text
+        val binderType = parseTypeExpr(ctx.typeExpr())
+        val body = visit(ctx.system_expr())
+        return WithSpecExprNode(binderName, binderType, body, sourceLocation(ctx))
+    }
+
     override fun visitSystem_atom(ctx: JulayParser.System_atomContext?): ASTNode {
         val primary = visit(ctx!!.system_primary())
-        return if (ctx.LBRACK() != null) {
-            val paramName = ctx.ID().text
-            val paramType = parseTypeExpr(ctx.typeExpr())
-            ParamProcExprNode(primary, paramName, paramType, sourceLocation(ctx))
-        } else {
-            primary
+        return when {
+            ctx.COLON() != null -> {
+                val paramName = ctx.ID().text
+                val paramType = parseTypeExpr(ctx.typeExpr())
+                ParamProcExprNode(primary, paramName, paramType, sourceLocation(ctx))
+            }
+            ctx.LBRACK() != null -> {
+                val paramName = ctx.ID().text
+                ParamProcExprNode(primary, paramName, null, sourceLocation(ctx))
+            }
+            else -> primary
         }
     }
 
@@ -357,7 +370,17 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
 
     override fun visitConstructor(ctx: JulayParser.ConstructorContext?): ASTNode {
         val name = ctx!!.ID().text
-        val args = visit(ctx.args()).let { argsNode ->
+        val isSession = ctx.SESSION() != null
+        val alsoArgs = if (ctx.ALSO() != null) {
+            val allArgs = ctx.args()
+            val alsoNode = visit(allArgs[allArgs.size - 1])
+            if (alsoNode !is ArgsNode) throw RuntimeException("Expected ArgsNode for also")
+            alsoNode
+        } else {
+            null
+        }
+        val syncArgsCtx = ctx.args(0)
+        val args = visit(syncArgsCtx).let { argsNode ->
             if (argsNode !is ArgsNode) {
                 throw RuntimeException("Expected ArgsNode but got $argsNode")
             }
@@ -371,8 +394,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 }
                 it
             }
-        val isSession = ctx.SESSION() != null
-        return ConstructorNode(name, args, body, signatureLocation(ctx, ctx.args()), isSession)
+        return ConstructorNode(name, args, body, signatureLocation(ctx, syncArgsCtx), isSession, alsoArgs)
     }
 
     override fun visitTransition(ctx: JulayParser.TransitionContext?): ASTNode {
@@ -393,7 +415,16 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             else -> TSAction.SyncRole.Default
         }
         val name = ctx.ID().text
-        val args = visit(ctx.args()).let { argsNode ->
+        val alsoArgs = if (ctx.ALSO() != null) {
+            val allArgs = ctx.args()
+            val alsoNode = visit(allArgs[allArgs.size - 1])
+            if (alsoNode !is ArgsNode) throw RuntimeException("Expected ArgsNode for also")
+            alsoNode
+        } else {
+            null
+        }
+        val syncArgsCtx = ctx.args(0)
+        val args = visit(syncArgsCtx).let { argsNode ->
             if (argsNode !is ArgsNode) {
                 throw RuntimeException("Expected ArgsNode but got $argsNode")
             }
@@ -407,7 +438,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 }
                 it
             }
-        return TransitionNode(modifier, name, args, body, signatureLocation(ctx, ctx.args()), isSession)
+        return TransitionNode(modifier, name, args, body, signatureLocation(ctx, syncArgsCtx), isSession, alsoArgs)
     }
 
     override fun visitArgs(ctx: JulayParser.ArgsContext?): ASTNode {

@@ -85,6 +85,86 @@ class ObjSortFieldTest {
     }
 
     @Test
+    fun jarIgnoresSortBearingObjsUsedOnlyBySpecs() {
+        // Same shape as Raft sys.jul: JAR target + imported leaf-spec that pulls in
+        // sort-bearing objs. Codegen must not try to emit those objs as Kotlin.
+        val root = Files.createTempDirectory("julay-mixed-sort-objs")
+        val net = root.resolve("net.jul")
+        net.writeText(
+            """
+            export sort NodeSet := { "n1", "n2" }
+            obj VoteRequestMsg {
+                dest : NodeSet
+                msg : String
+            }
+            export spec Net {
+                var msgs : Set<VoteRequestMsg> := {}
+                constructor initially(args : List<String>) {}
+            }
+            """.trimIndent(),
+        )
+        val protocol = root.resolve("protocol.jul")
+        protocol.writeText(
+            """
+            import net.Net
+            export spec Sys := Net
+            """.trimIndent(),
+        )
+        val main = root.resolve("main.jul")
+        main.writeText(
+            """
+            import protocol.Sys
+            proc Peer {
+                var ack : Boolean := false
+                constructor initially(args : List<String>) {}
+                transition ping() { transit: ack := true }
+            }
+            proc App := Peer
+            compile App, Sys
+            """.trimIndent(),
+        )
+        val cwd = java.io.File(".").absoluteFile
+        val jar = java.io.File(cwd, "App.jar")
+        val tla = java.io.File(cwd, "Sys.tla")
+        val cfg = java.io.File(cwd, "Sys.cfg")
+        jar.delete()
+        tla.delete()
+        cfg.delete()
+        try {
+            compileJulFile(main, keepBuild = false)
+            assertTrue(jar.exists(), "JAR App should compile despite sort-bearing objs used only by specs")
+            assertTrue(tla.exists() && cfg.exists(), "spec Sys should emit TLA")
+        } finally {
+            jar.delete()
+            tla.delete()
+            cfg.delete()
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun mixedJarSortObjsRegressionFixtureCompiles() {
+        val source = File("regression/input/spec/mixedjarsort/main.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        val cwd = java.io.File(".").absoluteFile
+        val jar = java.io.File(cwd, "PeerApp.jar")
+        val tla = java.io.File(cwd, "Sys.tla")
+        val cfg = java.io.File(cwd, "Sys.cfg")
+        jar.delete()
+        tla.delete()
+        cfg.delete()
+        try {
+            compileJulFile(source.toPath(), keepBuild = false)
+            assertTrue(jar.exists(), "expected PeerApp.jar from mixedjarsort fixture")
+            assertTrue(tla.exists() && cfg.exists(), "expected Sys.tla/cfg from mixedjarsort fixture")
+        } finally {
+            jar.delete()
+            tla.delete()
+            cfg.delete()
+        }
+    }
+
+    @Test
     fun procSortBearingObjTypeChecksButJarRefused() {
         val source = """
             sort NodeSet := { "n1", "n2" }

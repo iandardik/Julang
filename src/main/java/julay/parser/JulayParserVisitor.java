@@ -137,6 +137,12 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitSystem_expr(JulayParser.System_exprContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#with_expr}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitWith_expr(JulayParser.With_exprContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#system_atom}.
 	 * @param ctx the parse tree
 	 * @return the visitor result

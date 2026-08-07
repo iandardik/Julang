@@ -184,6 +184,9 @@ fun Type.toKotlinTypeString(): String = when (this) {
     is SetType -> "Set<${elementType.toKotlinTypeString()}>"
     is MapType -> "Map<${keyType.toKotlinTypeString()}, ${valueType.toKotlinTypeString()}>"
     is TypeVar -> throw RuntimeException("TypeVar \"$name\" must not reach Kotlin codegen")
+    is SortType -> throw RuntimeException(
+        "sort \"$name\" must not reach Kotlin codegen (sorts are specs/TLA+ only)",
+    )
     else -> throw RuntimeException("Invalid type: $this")
 }
 
@@ -197,6 +200,9 @@ fun Type.toCodegenTypeVal(): String = when (this) {
     is SetType -> setTypeValName(elementType)
     is MapType -> mapTypeValName(keyType, valueType)
     is TypeVar -> throw RuntimeException("TypeVar \"$name\" must not reach Kotlin codegen")
+    is SortType -> throw RuntimeException(
+        "sort \"$name\" must not reach Kotlin codegen (sorts are specs/TLA+ only)",
+    )
     else -> throw RuntimeException("Invalid type: $this")
 }
 

@@ -104,11 +104,17 @@ assume_expr
 
 system_expr
     : system_expr PARALLEL system_expr
+    | with_expr
     | system_atom
+    ;
+
+with_expr
+    : WITH LPAREN ID COLON typeExpr RPAREN LCURLY system_expr RCURLY
     ;
 
 system_atom
     : system_primary LBRACK ID COLON typeExpr RBRACK
+    | system_primary LBRACK ID RBRACK
     | system_primary
     ;
 
@@ -141,11 +147,11 @@ var
     ;
 
 constructor
-    : SESSION? CONSTRUCTOR ID args LCURLY constructor_body* RCURLY
+    : SESSION? CONSTRUCTOR ID args (ALSO args)? LCURLY constructor_body* RCURLY
     ;
 
 transition
-    : (INTERNAL | PROVIDER | CLIENT | SESSION)? TRANSITION ID args LCURLY action_body* RCURLY
+    : (INTERNAL | PROVIDER | CLIENT | SESSION)? TRANSITION ID args (ALSO args)? LCURLY action_body* RCURLY
     ;
 
 args

@@ -265,14 +265,31 @@ class AgSpecExprNode(
 class ParamProcExprNode(
     private val body: ASTNode,
     private val paramName: String,
-    private val paramType: TypeExpr,
+    /** Null when this is an apply-index `Name[n]` (type comes from enclosing `with`). */
+    private val paramType: TypeExpr?,
     private val loc: ProgramLoc,
 ) : ASTNode(listOf(body)) {
     override fun programLocation() = loc
     internal fun paramBody() = body
     internal fun paramName() = paramName
-    internal fun paramType() = paramType
-    override fun toString(): String = "$body[$paramName : $paramType]"
+    internal fun paramType(): TypeExpr? = paramType
+    internal fun isApplyIndex(): Boolean = paramType == null
+    override fun toString(): String =
+        if (paramType == null) "$body[$paramName]" else "$body[$paramName : $paramType]"
+}
+
+/** `with (n : T) { system }` — introduces binder [n] for apply-index forms inside. */
+class WithSpecExprNode(
+    private val binderName: String,
+    private val binderType: TypeExpr,
+    private val body: ASTNode,
+    private val loc: ProgramLoc,
+) : ASTNode(listOf(body)) {
+    override fun programLocation() = loc
+    internal fun withBinderName() = binderName
+    internal fun withBinderType() = binderType
+    internal fun withBody() = body
+    override fun toString(): String = "with ($binderName : $binderType) { $body }"
 }
 
 class ObjClassNode(
@@ -622,7 +639,8 @@ class ConstructorNode(
     private val body: List<ActionBodyNode>,
     private val loc: ProgramLoc,
     private val isSession: Boolean = false,
-) : ProcClassDeclNode(listOf(args) + body) {
+    private val alsoArgs: ArgsNode? = null,
+) : ProcClassDeclNode(listOfNotNull(args, alsoArgs) + body) {
     override fun programLocation() = loc
     override fun transitVars() = body.flatMap { it.transitVars() }
     override fun constructors(): List<ActionDecl> {
@@ -644,13 +662,15 @@ class ConstructorNode(
     internal fun body(): List<ActionBodyNode> = body
     internal fun constructorName(): String = name
     internal fun constructorArgs(): ArgsNode = args
+    internal fun alsoArgs(): ArgsNode? = alsoArgs
     internal fun actionArgs(): List<Variable> = args.actionArgs()
     internal fun withBody(newBody: List<ActionBodyNode>): ConstructorNode =
-        ConstructorNode(name, args, newBody, programLocation(), isSession)
+        ConstructorNode(name, args, newBody, programLocation(), isSession, alsoArgs)
     override fun toString(): String {
         val sessionStr = if (isSession) "session " else ""
+        val alsoStr = alsoArgs?.let { " also $it" } ?: ""
         val bodyStr = body.joinToString("\n") { "$it".prependIndent() }
-        return "${sessionStr}constructor $name($args) {\n$bodyStr\n}"
+        return "${sessionStr}constructor $name($args)$alsoStr {\n$bodyStr\n}"
     }
 }
 
@@ -661,7 +681,8 @@ class TransitionNode(
     private val body: List<ActionBodyNode>,
     private val loc: ProgramLoc,
     private val isSession: Boolean = false,
-) : ProcClassDeclNode(listOf(args) + body) {
+    private val alsoArgs: ArgsNode? = null,
+) : ProcClassDeclNode(listOfNotNull(args, alsoArgs) + body) {
     override fun programLocation() = loc
     override fun transitVars() = body.flatMap { it.transitVars() }
     override fun transitions(): List<ActionDecl> {
@@ -695,11 +716,12 @@ class TransitionNode(
     internal fun transitionName() = name
     internal fun body(): List<ActionBodyNode> = body
     internal fun transitionArgs(): ArgsNode = args
+    internal fun alsoArgs(): ArgsNode? = alsoArgs
     internal fun actionArgs(): List<Variable> = args.actionArgs()
     internal fun modifier(): TSAction.SyncRole = modifier
     internal fun isSessionTransition(): Boolean = isSession
     internal fun withBody(newBody: List<ActionBodyNode>): TransitionNode =
-        TransitionNode(modifier, name, args, newBody, programLocation(), isSession)
+        TransitionNode(modifier, name, args, newBody, programLocation(), isSession, alsoArgs)
     override fun toString(): String {
         val modifierStr = when {
             isSession -> "session "
@@ -708,8 +730,9 @@ class TransitionNode(
             modifier == TSAction.SyncRole.Internal -> "internal "
             else -> ""
         }
+        val alsoStr = alsoArgs?.let { " also $it" } ?: ""
         val bodyStr = body.joinToString("\n") { "$it".prependIndent() }
-        return "${modifierStr}transition $name($args) {\n$bodyStr\n}"
+        return "${modifierStr}transition $name($args)$alsoStr {\n$bodyStr\n}"
     }
 }
 

@@ -1,0 +1,5 @@
+source: regression/input/spec/with-create-inside.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "cannot create an index inside with"
+  - "Found type errors; exiting."

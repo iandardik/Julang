@@ -916,11 +916,12 @@ class SpecTlaTlcSmokeTest {
                 tlaText.contains("\\E n \\in Node") || tlaText.contains("[n \\in Node"),
                 "expected binder n over Node;\n$tlaText",
             )
-            // Body uses param n as assignment RHS — should appear as bare binder.
+            // Decl param n is an aux action arg; state stays scalar (no EXCEPT ![n]).
             assertTrue(
                 tlaText.contains("lastDest") &&
-                    (tlaText.contains("EXCEPT ![n] = n") || tlaText.contains("= n")),
-                "expected param n used in transit;\n$tlaText",
+                    tlaText.contains("lastDest' = n") &&
+                    !tlaText.contains("EXCEPT ![n]"),
+                "expected scalar lastDest' = n;\n$tlaText",
             )
             tla.copyTo(File(work, "LeafParamNet.tla"), overwrite = true)
             cfg.copyTo(File(work, "LeafParamNet.cfg"), overwrite = true)

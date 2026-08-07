@@ -1,10 +1,17 @@
 package julay.compiler
 
+import julay.compiler.ast.ApiNode
 import julay.compiler.ast.LeafSpecNode
-import julay.compiler.ast.ParamProcExprNode
+import julay.compiler.ast.ProcClassNode
+import julay.compiler.ast.ProcFunNode
+import julay.compiler.ast.ProcNode
 import julay.compiler.ast.SpecNode
 import julay.compiler.ast.ValueProcExprNode
+import julay.compiler.pass.compositionLeavesOfSpec
 import julay.compiler.pass.compileSpecToTla
+import julay.compiler.pass.asSyntheticProcClass
+import julay.compiler.pass.expandLeavesToPclasses
+import julay.compiler.pass.peerCompositionErrors
 import julay.compiler.pass.procFunCompositionErrors
 import julay.compiler.pass.procFunHavocWarnings
 import julay.program.sync.SyncResolveConfig
@@ -65,6 +72,21 @@ fun compileJulFile(
 
     val compositionSpecs = ast.declNodes().filterIsInstance<SpecNode>().associateBy { it.name() }
     val leafSpecs = ast.declNodes().filterIsInstance<LeafSpecNode>().associateBy { it.name() }
+    val pclasses = unit.modules
+        .flatMap { it.root.declNodes() }
+        .mapNotNull { decl ->
+            when (decl) {
+                is ProcClassNode -> decl.name() to decl
+                is LeafSpecNode -> decl.name() to decl.asProcClass()
+                else -> null
+            }
+        }
+        .toMap()
+    val procAliases = ast.declNodes().filterIsInstance<ProcNode>().associateBy { it.name() }
+    val apiAliases = ast.declNodes().filterIsInstance<ApiNode>().associateBy { it.name() }
+    val procFuns = ast.declNodes().filterIsInstance<ProcFunNode>()
+        .associate { it.name() to it.asSyntheticProcClass() }
+
     for (specDecl in specTargets) {
         val specNode = compositionSpecs[specDecl.name]
             ?: leafSpecs[specDecl.name]?.let { syntheticLeafSpec(it) }
@@ -75,6 +97,20 @@ fun compileJulFile(
         // TLA+ allows incomplete alphabets (unmatched clients, unilateral ordinary/session,
         // dual providers, etc.). SyncChannel completeness is JAR-only.
         if (!runTlaStructuralPass(ast, specDecl, procDecls)) {
+            return
+        }
+        val leaves = expandLeavesToPclasses(
+            compositionLeavesOfSpec(specNode),
+            pclasses + procFuns,
+            procAliases,
+            compositionSpecs,
+            apiAliases,
+            leafSpecs,
+        )
+        val peerErrors = peerCompositionErrors(leaves, leafSpecs, pclasses)
+        if (peerErrors.isNotEmpty()) {
+            peerErrors.forEach { System.err.println(it) }
+            System.err.println("Found errors while compiling \"${specDecl.name}\"; exiting.")
             return
         }
         compileSpecToTla(specNode, ast, unit)
@@ -114,14 +150,9 @@ internal fun syntheticProcSpec(procName: String): SpecNode {
     return SpecNode(procName, ValueProcExprNode(procName, null, loc), loc)
 }
 
-/** Leaf spec compile target → plain system (with declaration params when present). */
+/** Leaf spec compile target → plain system (decl params are body binders, not create-index). */
 internal fun syntheticLeafSpec(leaf: LeafSpecNode): SpecNode {
     val loc = leaf.programLocation()
-    val body: julay.compiler.ast.ASTNode = ValueProcExprNode(leaf.leafSpecName(), null, loc)
-    val system = if (leaf.isParameterized()) {
-        ParamProcExprNode(body, leaf.leafSpecParamName()!!, leaf.leafSpecParamType()!!, loc)
-    } else {
-        body
-    }
-    return SpecNode(leaf.leafSpecName(), system, loc)
+    val body = ValueProcExprNode(leaf.leafSpecName(), null, loc)
+    return SpecNode(leaf.leafSpecName(), body, loc)
 }

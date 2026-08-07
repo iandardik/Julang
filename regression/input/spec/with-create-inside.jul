@@ -1,0 +1,20 @@
+sort Node := { "n1" }
+
+proc Counter {
+    var n : Int := 0
+
+    constructor initially(args : List<String>) {
+        transit: n := 0
+    }
+
+    transition bump() {
+        transit: n := n + 1
+    }
+}
+
+// Create-index inside with is illegal.
+spec BadCreateInWith := with (i : Node) {
+    Counter[i : Node]
+}
+
+compile BadCreateInWith

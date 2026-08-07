@@ -1,0 +1,22 @@
+proc Peer {
+    var ack : Boolean := false
+
+    constructor initially(args : List<String>) {
+        transit: ack := false
+    }
+
+    transition send() {
+        transit: ack := true
+    }
+}
+
+// also is leaf-spec only
+proc Bad {
+    constructor initially(args : List<String>) {}
+
+    transition send() also (m : Int) {
+        transit:
+    }
+}
+
+compile Bad

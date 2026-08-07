@@ -68,6 +68,8 @@ fun codegenPass(
     val procFunInfo = "val procFunInfo = $procFunInfoBlock"
     val objClassDecls = ast.resolvedObjClassDecls()
         .filterNot { ObjClassBuiltinRegistry.isBuiltin(it.name) }
+        // Specs may define sort-bearing objs in the same CU; JAR codegen must not emit them.
+        .filterNot { decl -> decl.fields.any { it.type.containsSortType() } }
     val runProgram =
         "Program(tsInfo, args.toList(), procFunInfo, ${SyncResolveConfig.toKotlinExpr(syncResolveConfig)}).run()"
     val mainFunction = "suspend fun main(args : Array<String>) {" +

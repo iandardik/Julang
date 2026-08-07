@@ -86,9 +86,9 @@ private fun typePassSpec(
         leaves.map { leaf ->
             val ls = leafSpecNodes[leaf.name] ?: return@map leaf
             if (!ls.isParameterized()) return@map leaf
-            if (!leaf.isParameterized) {
-                leaf.copy(paramName = ls.leafSpecParamName(), paramType = ls.leafSpecParamType())
-            } else {
+            // Leaf-decl [n : T] is a body binder only — do not lift state via SpecLeaf params.
+            // Create-index Name[n : T] may still parameterize the leaf; check domain compatibility.
+            if (leaf.isParameterized) {
                 val declType = ls.leafSpecParamType()
                 val useType = leaf.paramType
                 if (declType != null && useType != null &&
@@ -102,8 +102,8 @@ private fun typePassSpec(
                             "but re-indexed with incompatible type $useType",
                     )
                 }
-                leaf
             }
+            leaf
         }
 
     fun checkLeaves(leaves: List<SpecLeaf>, role: String) {
@@ -144,22 +144,21 @@ private fun typePassSpec(
         expanded.forEach { leaf ->
             val ls = leafSpecNodes[leaf.name]
             if (ls != null) {
-                // Decl-parameterized leaf specs are intentionally parameterized.
-                if (ls.isParameterized()) return@forEach
-                // Unparameterized leaf specs: same initially-only heuristic as procs.
+                // Leaf specs are never required to be create-indexed (decl params do not lift
+                // state; singleton / global-state stubs are normal).
+                return@forEach
             }
             val pc = pclassNodes[leaf.name] ?: return@forEach
             if (pc.isInitiallyOnly()) {
-                if (leaf.isParameterized && ls?.isParameterized() != true) {
+                if (leaf.isParameterized) {
                     warnings += OneLocCompileWarning(
                         spec.programLocation(),
                         "proc \"${leaf.name}\" only has constructor initially, so indexing is unnecessary",
                     )
                 }
             } else if (!leaf.isParameterized) {
-                val kind = if (ls != null) "leaf spec" else "proc"
                 val msg =
-                    "$kind \"${leaf.name}\" can have multiple instances and must be indexed in this spec " +
+                    "proc \"${leaf.name}\" can have multiple instances and must be indexed in this spec " +
                         "(e.g. ${leaf.name}[i : Type]); pass --allow-unindexed-spec to warn instead"
                 if (allowUnindexedSpec) {
                     warnings += OneLocCompileWarning(spec.programLocation(), msg)
@@ -172,6 +171,7 @@ private fun typePassSpec(
 
     when (value) {
         is AgSpecExprNode -> {
+            errors += withIndexStructureErrors(value)
             val assumeLeaves = annotateDeclParams(flattenSpecLeaves(value.assumeExpr()))
             val systemLeaves = annotateDeclParams(flattenSpecLeaves(value.systemExpr()))
             checkLeaves(assumeLeaves, "assumption")
@@ -217,6 +217,7 @@ private fun typePassSpec(
             }
         }
         else -> {
+            errors += withIndexStructureErrors(value)
             val systemLeaves = annotateDeclParams(flattenSpecLeaves(value))
             checkLeaves(systemLeaves, "system")
             checkIndexing(systemLeaves)

@@ -1,0 +1,35 @@
+sort Node := { "n1", "n2" }
+
+proc Peer {
+    var self : String := ""
+    var ready : Boolean := false
+
+    constructor initially(args : List<String>) {
+        transit:
+            self := "n1"
+            ready := false
+    }
+
+    transition ping() {
+        transit: ready := true
+    }
+}
+
+spec Net[n : Node] {
+    var lastSeen : String := ""
+
+    constructor initially(args : List<String>) {}
+
+    transition observe(target : String) also (m : Node) {
+        guard: Peer[m].self = target
+        transit: lastSeen := Peer[m].self
+    }
+}
+
+spec PeerIndexed := Peer[n : Node]
+
+spec AlsoPeerSys := with (n : Node) {
+    PeerIndexed[n] || Net[n]
+}
+
+compile AlsoPeerSys

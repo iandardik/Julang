@@ -1,0 +1,17 @@
+sort Node := { "n1", "n2" }
+
+proc Counter {
+    var count : Int := 0
+
+    constructor initially(args : List<String>) {
+        transit: count := 0
+    }
+
+    transition bump() {
+        transit: count := count + 1
+    }
+}
+
+spec SharedIdx := (Counter || Counter)[i : Node]
+
+compile SharedIdx

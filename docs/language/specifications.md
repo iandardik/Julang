@@ -49,19 +49,32 @@ spec Sys := Env
 compile Env, Sys
 ```
 
-Optional declaration parameters bind an immutable name usable in guards and transit (unlike indexing a proc class from the outside, where the binder is not in the proc body):
+Optional **declaration parameters** bind an immutable name usable in guards and transit. They do **not** lift leaf state to functions of that index (unlike create-index on a composition leaf):
 
 ```jul
 sort Node := {"n1", "n2"}
 spec Net[n : Node] {
     var lastDest : String := ""
     constructor initially(args : List<String>) {}
-    transition send() { transit: lastDest := n }
+    transition send() { transit: lastDest := n }   // n is an aux binder; lastDest stays scalar
 }
 spec Ag := <Net> Peer <true>
 ```
 
-When the parameter type is a `sort`, the body treats `n` as the sort’s element type (e.g. `String`); the TLA instance domain remains the sort. Assigning to a leaf-spec parameter is an error.
+When the parameter type is a `sort`, the body treats `n` as the sort’s element type (e.g. `String`); the TLA domain remains the sort. Assigning to a leaf-spec parameter is an error. If the action body mentions the decl param, TLA emits it as a leading auxiliary action parameter (`\E n \in Node: …`).
+
+Leaf-spec actions may also declare explicit auxiliaries with `also (…)` (leaf specs only — illegal on ordinary `proc` / `procfun`):
+
+```jul
+transition observe(target : String) also (m : Node) {
+    guard: Peer[m].self = target
+    transit: lastSeen := Peer[m].self
+}
+```
+
+TLA action parameter order: **decl param (if used), then `also` args, then used sync args**.
+
+**Cross-leaf state reads** in leaf-spec bodies (same shape as invariants): `Peer.var` or `Peer[idx].var`. Read-only; not allowed in ordinary proc bodies. Compiling a system that uses such a read requires that peer to appear in the expanded system with matching indexing (`Peer[idx].var` ⇒ create-indexed peer; `Peer.var` ⇒ unindexed).
 
 **Not allowed in proc assemblies.** Leaf specs may appear in composition specs, but not under `proc Name := …` or an api’s `proc:`:
 
@@ -74,11 +87,47 @@ proc B := A            // error
 proc E := A || Peer    // error
 ```
 
-Fixtures: [`regression/input/spec/leaf-plain-env.jul`](../../regression/input/spec/leaf-plain-env.jul), [`leaf-param-net.jul`](../../regression/input/spec/leaf-param-net.jul).
+Fixtures: [`regression/input/spec/leaf-plain-env.jul`](../../regression/input/spec/leaf-plain-env.jul), [`leaf-param-net.jul`](../../regression/input/spec/leaf-param-net.jul), [`also-peer-with.jul`](../../regression/input/spec/also-peer-with.jul).
+
+### Indexes: create, `with`, and apply
+
+Three roles:
+
+| Role | Syntax | Meaning |
+|------|--------|---------|
+| **Create index** | `Name[v : Type]` | Lift `Name`’s state to functions of a new index |
+| **Shared binder** | `with (v : Type) { system }` | Scope where `v` may be applied; one `\E v` for the group |
+| **Apply index** | `Name[v]` | Use binder `v` from an enclosing `with` (no type). Does not create an index |
+
+Hard rule: inside `with`, **create-index `Name[n : T]` is illegal** — create outside, then apply. Apply-index outside `with` is illegal.
+
+```jul
+spec PeerIndexed := Peer[n : NodeSet]          // create (lift state)
+
+spec Sys := with (n : NodeSet) {
+    PeerIndexed[n] || Net[n]                   // apply only
+}
+```
+
+**Shorthand** `(A || B)[n : T]` means the same as create-temps + `with` + applies:
+
+```jul
+// Shorthand
+spec Result := (RaftProtocol || OtherProc)[n : NodeSet]
+
+// Means the same as
+spec RaftProtocolTemp := RaftProtocol[x : NodeSet]
+spec OtherProcTemp := OtherProc[x : NodeSet]
+spec Result := with (n : NodeSet) {
+    RaftProtocolTemp[n] || OtherProcTemp[n]
+}
+```
+
+Temps / binder `x` may be compiler-internal when using the shorthand. Leaves under one `with` share one TLA binder string.
 
 ### Indexed procs
 
-Multiple instances of a class in a spec use indexing:
+Multiple instances of a class in a spec use **create-index**:
 
 ```jul
 spec HandlerSpec := IncReqHandler[t : Int]

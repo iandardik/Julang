@@ -185,6 +185,125 @@ class LeafSpecTest {
         }
     }
 
+    @Test
+    fun alsoArgsTypeCheckOnLeafSpec() {
+        val result = typeCheck(
+            """
+            sort Node := { "n1" }
+            proc Peer {
+                var self : String := ""
+                constructor initially(args : List<String>) { transit: self := "n1" }
+                transition ping() { transit: self := self }
+            }
+            spec Net[n : Node] {
+                constructor initially(args : List<String>) {}
+                transition observe(target : String) also (m : Node) {
+                    guard: Peer[m].self = target
+                    transit:
+                }
+            }
+            spec S := Net || Peer[i : Node]
+            """.trimIndent(),
+        )
+        assertTrue(result.errors.isEmpty(), result.toString())
+    }
+
+    @Test
+    fun alsoArgsOnProcIsError() {
+        val result = typeCheck(
+            """
+            proc Bad {
+                constructor initially(args : List<String>) {}
+                transition send() also (m : Int) { transit: }
+            }
+            """.trimIndent(),
+        )
+        assertTrue(
+            result.errors.any { it.toString().contains("also args are only allowed on leaf-spec actions") },
+            result.toString(),
+        )
+    }
+
+    @Test
+    fun withApplySharesBinder() {
+        val cwd = java.io.File(".").absoluteFile
+        val tla = java.io.File(cwd, "Sys.tla")
+        val cfg = java.io.File(cwd, "Sys.cfg")
+        tla.delete()
+        cfg.delete()
+        val dir = Files.createTempDirectory("julay-with-share")
+        val file = dir.resolve("main.jul")
+        file.writeText(
+            """
+            sort Node := { "n1", "n2" }
+            proc Counter {
+                var count : Int := 0
+                constructor initially(args : List<String>) { transit: count := 0 }
+                transition bump() { transit: count := count + 1 }
+            }
+            spec C1 := Counter[x : Node]
+            spec C2 := Counter[x : Node]
+            spec Sys := with (i : Node) { C1[i] || C2[i] }
+            compile Sys
+            """.trimIndent(),
+        )
+        try {
+            compileJulFile(file, keepBuild = false)
+            assertTrue(tla.exists(), "expected Sys.tla")
+            val text = tla.readText()
+            assertTrue(
+                text.contains("\\E i \\in Node") || text.contains("[i \\in Node"),
+                "expected shared binder i;\n$text",
+            )
+            assertTrue(
+                !text.contains("\\E i_C") && !text.contains("i_C1") && !text.contains("i_C2"),
+                "with-scope must not clash-rename binder across peers;\n$text",
+            )
+        } finally {
+            tla.delete()
+            cfg.delete()
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun createIndexInsideWithIsError() {
+        val result = typeCheck(
+            """
+            sort Node := { "n1" }
+            proc Counter {
+                var n : Int := 0
+                constructor initially(args : List<String>) { transit: n := 0 }
+                transition bump() { transit: n := n + 1 }
+            }
+            spec Bad := with (i : Node) { Counter[i : Node] }
+            """.trimIndent(),
+        )
+        assertTrue(
+            result.errors.any { it.toString().contains("cannot create an index inside with") },
+            result.toString(),
+        )
+    }
+
+    @Test
+    fun applyIndexOutsideWithIsError() {
+        val result = typeCheck(
+            """
+            sort Node := { "n1" }
+            proc Counter {
+                var n : Int := 0
+                constructor initially(args : List<String>) { transit: n := 0 }
+                transition bump() { transit: n := n + 1 }
+            }
+            spec Bad := Counter[i]
+            """.trimIndent(),
+        )
+        assertTrue(
+            result.errors.any { it.toString().contains("only allowed inside with") },
+            result.toString(),
+        )
+    }
+
     private fun typeCheck(source: String): TypePassResult {
         val (unit, loadErrors) = loadSource(source)
         assertTrue(loadErrors.isEmpty(), loadErrors.toString())

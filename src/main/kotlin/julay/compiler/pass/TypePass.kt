@@ -24,6 +24,8 @@ private var typePassCallToApi: Map<String, String> = emptyMap()
 private var typePassInsideProcFun: Boolean = false
 /** True while typing leaf-spec bodies: sort types OK in state/args (specs/TLA only). */
 private var typePassAllowSortDomains: Boolean = false
+/** Proc/leaf-spec classes visible for peer state reads in leaf-spec bodies. */
+private var typePassPeerClasses: Map<String, ProcClassNode> = emptyMap()
 
 /** Prefer an obj-literal hint when `Name(...)` names a known obj type rather than a function. */
 internal fun unknownFunctionMessage(name: String, registry: ObjClassRegistry): String =
@@ -64,9 +66,20 @@ fun RootNode.typePass(
     val prevApiEnv = typePassApiEnv
     val prevCallToApi = typePassCallToApi
     val prevInside = typePassInsideProcFun
+    val prevPeers = typePassPeerClasses
     try {
         typePassInsideProcFun = false
         val modulesByPath = unit.modules.associateBy { it.modulePath }
+        typePassPeerClasses = unit.modules
+            .flatMap { it.root.declNodes() }
+            .mapNotNull { decl ->
+                when (decl) {
+                    is ProcClassNode -> decl.name() to decl
+                    is LeafSpecNode -> decl.name() to decl.asProcClass()
+                    else -> null
+                }
+            }
+            .toMap()
 
         val allFuns = unit.modules
             .flatMap { it.root.declNodes().filterIsInstance<FunNode>() }
@@ -132,6 +145,7 @@ fun RootNode.typePass(
         typePassApiEnv = prevApiEnv
         typePassCallToApi = prevCallToApi
         typePassInsideProcFun = prevInside
+        typePassPeerClasses = prevPeers
     }
 }
 
@@ -312,11 +326,17 @@ private fun ConstructorNode.typePassConstructor(
     funBuiltinEnv: Map<String, FunBuiltin>,
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
+    val alsoErr = alsoArgsOutsideLeafError()
+    if (alsoErr != null) return listOf(alsoErr)
     val argErrors = constructorArgs().typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    val alsoErrors = alsoArgs()?.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv).orEmpty()
+    val alsoEnv = alsoArgs()?.argsTypeMap()?.mapValues { (_, t) -> typingView(t) }.orEmpty() +
+        alsoArgs()?.actionArgs()?.filter { !it.name.isDiscardBinding() }
+            ?.associate { it.name to typingView(it.type) }.orEmpty()
     val actionEnv = symbolEnv + constructorArgs().argsTypeMap().mapValues { (_, t) -> typingView(t) } +
         constructorArgs().actionArgs().filter { !it.name.isDiscardBinding() }
-            .associate { it.name to typingView(it.type) }
-    return argErrors + body().flatMap { it.typePass(actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
+            .associate { it.name to typingView(it.type) } + alsoEnv
+    return argErrors + alsoErrors + body().flatMap { it.typePass(actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
 }
 
 private fun TransitionNode.typePassTransition(
@@ -327,12 +347,32 @@ private fun TransitionNode.typePassTransition(
     funBuiltinEnv: Map<String, FunBuiltin>,
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
+    val alsoErr = alsoArgsOutsideLeafError()
+    if (alsoErr != null) return listOf(alsoErr)
     val argErrors = transitionArgs().typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    val alsoErrors = alsoArgs()?.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv).orEmpty()
+    val alsoEnv = alsoArgs()?.argsTypeMap()?.mapValues { (_, t) -> typingView(t) }.orEmpty() +
+        alsoArgs()?.actionArgs()?.filter { !it.name.isDiscardBinding() }
+            ?.associate { it.name to typingView(it.type) }.orEmpty()
     val actionEnv = symbolEnv + transitionArgs().argsTypeMap().mapValues { (_, t) -> typingView(t) } +
         transitionArgs().actionArgs().filter { !it.name.isDiscardBinding() }
-            .associate { it.name to typingView(it.type) }
-    return argErrors + body().flatMap { it.typePass(actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
+            .associate { it.name to typingView(it.type) } + alsoEnv
+    return argErrors + alsoErrors + body().flatMap { it.typePass(actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
 }
+
+private fun ConstructorNode.alsoArgsOutsideLeafError(): CompileError? =
+    if (alsoArgs() != null && !typePassAllowSortDomains) {
+        OneLocCompileError(programLocation(), "also args are only allowed on leaf-spec actions")
+    } else {
+        null
+    }
+
+private fun TransitionNode.alsoArgsOutsideLeafError(): CompileError? =
+    if (alsoArgs() != null && !typePassAllowSortDomains) {
+        OneLocCompileError(programLocation(), "also args are only allowed on leaf-spec actions")
+    } else {
+        null
+    }
 
 private fun ArgNode.typePassArgNode(symbolEnv: Map<String, Type>, registry: ObjClassRegistry, funEnv: Map<String, FunNode>, typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
@@ -1089,6 +1129,28 @@ private fun FieldAccessExprNode.typePassFieldAccess(
     funBuiltinEnv: Map<String, FunBuiltin>,
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
+    if (typePassAllowSortDomains && fieldPath.size == 1) {
+        val pc = typePassPeerClasses[baseSymbol]
+        if (pc != null && baseSymbol !in symbolEnv) {
+            val vn = pc.localDecls().filterIsInstance<VarNode>().firstOrNull { it.name == fieldPath[0] }
+            if (vn == null) {
+                return listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "unknown state variable \"$baseSymbol.${fieldPath[0]}\"",
+                    ),
+                )
+            }
+            val t = try {
+                valueView(vn.type)
+            } catch (_: RuntimeException) {
+                return listOf(OneLocCompileError(programLocation(), "unresolved type for \"$baseSymbol.${fieldPath[0]}\""))
+            }
+            resolveFieldAccess(t, fieldPath[0])
+            inferExprType(symbolEnv)
+            return emptyList()
+        }
+    }
     val baseType = symbolEnv[baseSymbol]
     if (baseType == null) {
         return listOf(OneLocCompileError(programLocation(), "Unknown variable \"$baseSymbol\" in field access"))
@@ -1114,6 +1176,62 @@ private fun FieldAccessExprNode.typePassFieldAccess(
     }
 }
 
+private data class PeerRefTypeResult(val type: Type?, val errors: List<CompileError>)
+
+/** Resolve Peer[idx].field / Peer.field in leaf-spec bodies; null if not a peer ref. */
+private fun peerStateRefType(
+    baseExpr: ExprNode,
+    fieldName: String,
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode>,
+): PeerRefTypeResult? {
+    when (baseExpr) {
+        is IndexExprNode -> {
+            val peerSym = (baseExpr.base as? SymbolValueExprNode)?.symbol ?: return null
+            val pc = typePassPeerClasses[peerSym] ?: return null
+            if (peerSym in symbolEnv) return null
+            val idxErrors = baseExpr.index.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+            val vn = pc.localDecls().filterIsInstance<VarNode>().firstOrNull { it.name == fieldName }
+                ?: return PeerRefTypeResult(
+                    null,
+                    listOf(OneLocCompileError(baseExpr.programLocation(), "unknown state variable \"$peerSym.$fieldName\"")),
+                )
+            val t = try {
+                valueView(vn.type)
+            } catch (_: RuntimeException) {
+                return PeerRefTypeResult(
+                    null,
+                    listOf(OneLocCompileError(baseExpr.programLocation(), "unresolved type for \"$peerSym.$fieldName\"")),
+                )
+            }
+            return PeerRefTypeResult(t, idxErrors)
+        }
+        is SymbolValueExprNode -> {
+            val pc = typePassPeerClasses[baseExpr.symbol] ?: return null
+            if (baseExpr.symbol in symbolEnv) return null
+            val vn = pc.localDecls().filterIsInstance<VarNode>().firstOrNull { it.name == fieldName }
+                ?: return PeerRefTypeResult(
+                    null,
+                    listOf(OneLocCompileError(baseExpr.programLocation(), "unknown state variable \"${baseExpr.symbol}.$fieldName\"")),
+                )
+            val t = try {
+                valueView(vn.type)
+            } catch (_: RuntimeException) {
+                return PeerRefTypeResult(
+                    null,
+                    listOf(OneLocCompileError(baseExpr.programLocation(), "unresolved type for \"${baseExpr.symbol}.$fieldName\"")),
+                )
+            }
+            return PeerRefTypeResult(t, emptyList())
+        }
+        else -> return null
+    }
+}
+
 private fun MemberAccessExprNode.typePassMemberAccess(
     symbolEnv: Map<String, Type>,
     registry: ObjClassRegistry,
@@ -1122,6 +1240,15 @@ private fun MemberAccessExprNode.typePassMemberAccess(
     funBuiltinEnv: Map<String, FunBuiltin>,
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
+    // Leaf-spec peer read: Peer[idx].var or Peer.var
+    if (typePassAllowSortDomains) {
+        val peerRef = peerStateRefType(baseExpr, fieldName, symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+        if (peerRef != null) {
+            if (peerRef.errors.isNotEmpty()) return peerRef.errors
+            setInferredType(TypePassType.Inferred(peerRef.type!!))
+            return emptyList()
+        }
+    }
     val baseErrors = baseExpr.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     if (baseErrors.isNotEmpty()) {
         return baseErrors
