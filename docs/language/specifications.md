@@ -145,6 +145,45 @@ Elements must be homogeneous String, non-negative Int, or Boolean literals. Sort
 
 See [`input/inc_server/main.jul`](../../input/inc_server/main.jul) and [`regression/input/spec/`](../../regression/input/spec/).
 
+## TLA+ translation notes
+
+### Lists and sequences
+
+- Julay lists are **0-based**; TLA `Sequences` are **1-based**. Reads and `EXCEPT` updates on list-typed state emit `xs[(i) + 1]`.
+- List **action-argument / havoc domains** use a finite `BoundedSeq(S, MaxListLen)` (not bare `Seq(S)`, which TLC cannot enumerate). `MaxListLen` is a module `CONSTANT` (default `3` in the `.cfg`); raise it for longer lists.
+- Emitted helpers include `BoundedSeq(S, N) == UNION { [1..k -> S] : k \in 0..N }` when list domains appear.
+
+### Collections emitted today
+
+| Julay | TLA+ |
+|-------|------|
+| `[]` / list literals | `<<>>` / `<<…>>` |
+| `length(xs)` / `xs.length` on lists | `Len(xs)` |
+| `length` / `.length` on sets | `Cardinality(…)` |
+| list/set `.map` (lambda) | function/set comprehension |
+| list `.filter` | `SelectSeq` |
+| set `.filter` | set comprehension |
+| list slices `xs[a:b]` | `SubSeq` (0-based exclusive → 1-based inclusive, with clamp) |
+
+### TLA+ translation limits
+
+Unsupported (or only partial) constructs may still degrade to `TRUE` or unusable TLC domains — avoid them in specs you intend to model-check, or expect incomplete operators:
+
+| Feature | Status |
+|---------|--------|
+| `.fold` | Not emitted |
+| Map `.filter` / `.map` / `.fold` / HOF pipelines on `.keys` | Not fully emitted |
+| Freestanding HOFs beyond `length` / `map` | Unsupported unless listed above |
+| Bare infinite `Seq(S)` as `\E` bound | Replaced by `BoundedSeq`; do not reintroduce |
+| `SUBSET Int` / other infinite set domains for `\E` | Still problematic for TLC as action-arg domains |
+| Complex list updates beyond index `EXCEPT` / slices | Slices use `SubSeq`; other bulk updates may degrade |
+| Named funs in transit RHS (e.g. `entryTermAt`, `max`) | Not emitted as operators (may degrade to `TRUE`) |
+| `when` expressions | Not emitted as TLA (fall through) |
+| IO / effectful funlib in guards | Existing havoc rules |
+| Procfuns not listed in an api `calls:` | Existing havoc warnings |
+
+See also [Collections](collections.md).
+
 ## Compiling specs
 
 ```jul

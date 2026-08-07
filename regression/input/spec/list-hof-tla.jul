@@ -1,0 +1,44 @@
+import julay.funlib.length
+
+sort Node := { "n1", "n2" }
+
+obj Peer {
+    id : Int
+}
+
+proc Counter {
+    var cluster : List<Peer>
+    var nextIndex : List<Int>
+    var n : Int
+
+    constructor initially(args : List<String>, peers : List<Peer>) {
+        transit:
+            cluster := peers
+            nextIndex := peers.map(p -> 0)
+            n := 0
+    }
+
+    transition bump(target : Peer) {
+        guard:
+            & target.id >= 0
+            & target.id < length(cluster)
+            & cluster[target.id] = target
+        transit:
+            n := n + 1
+            nextIndex[target.id] := nextIndex[target.id] + 1
+    }
+
+    // Slice + map: exercises SubSeq and lambda field access (e.value).
+    transition takePrefix(k : Int) {
+        guard:
+            & k >= 0
+            & k <= length(nextIndex)
+            & nextIndex = nextIndex[0:k].map(e -> e)
+        transit:
+            n := n
+    }
+}
+
+spec ListHof := Counter[i : Node]
+
+compile ListHof

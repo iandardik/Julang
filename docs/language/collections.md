@@ -249,6 +249,8 @@ Freestanding `map(xs, f)` from `julay.funlib.map` accepts a named fun or a lambd
 
 Higher-order calls that only depend on concrete process state are encoded by evaluating the Kotlin form and embedding the result in Z3 (so patterns like `mp.keys.filter(...).length` work in guards). Calls that depend on **symbolic action arguments** are rejected in guards.
 
+For **TLA+ / TLC**, list and set `.map` / `.filter` / `.length` are emitted (with list indexes shifted `+ 1`); `.fold` and map HOFs are not — see [Specifications — TLA+ translation limits](specifications.md#tla-translation-limits).
+
 Runtime list/map indexing throws on out-of-bounds or missing keys. Symbolic map reads in guards may soft-default missing keys — do not rely on that for executable behavior; check `k in mp` first.
 
 ## See also

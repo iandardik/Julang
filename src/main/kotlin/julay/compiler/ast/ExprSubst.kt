@@ -225,6 +225,7 @@ fun exprReferencesSymbol(expr: ExprNode, symbol: String): Boolean {
         is FieldAccessOnExprNode -> exprReferencesSymbol(expr.baseExpr, symbol)
         is ObjClassLiteralExprNode -> expr.fieldEntries.any { exprReferencesSymbol(it.second, symbol) }
         is ListLiteralExprNode -> expr.elements.any { exprReferencesSymbol(it, symbol) }
+        is EmptyBracketLiteralExprNode -> false
         is SetLiteralExprNode -> expr.elements.any { exprReferencesSymbol(it, symbol) }
         is MapLiteralExprNode -> expr.entries.any { exprReferencesSymbol(it.first, symbol) || exprReferencesSymbol(it.second, symbol) }
         is IndexExprNode ->

@@ -184,6 +184,10 @@ fun tlaCodegenPass(
     if ("String" in cfgOverrides) {
         constants += "String"
     }
+    // MaxListLen bounds BoundedSeq domains; must be a module CONSTANT (assigned in .cfg).
+    if ("MaxListLen" in cfgOverrides) {
+        constants += "MaxListLen"
+    }
 
     val intModelValues = linkedSetOf(0, 1, 2, 3, 4, 5)
     collectIntLiteralsFromLeaves(leaves, pclassesForTla, intModelValues)
@@ -343,6 +347,10 @@ fun tlaCodegenPass(
         append(varsLine)
         appendLine("vars == $varsTuple")
         appendLine()
+        if ("MaxListLen" in constants || "MaxListLen" in cfgOverrides) {
+            appendLine("BoundedSeq(S, N) == UNION { [1..k -> S] : k \\in 0..N }")
+            appendLine()
+        }
         if (helpers.isNotEmpty()) {
             helpers.forEach { helper ->
                 appendLine(helper)
@@ -1382,7 +1390,17 @@ private fun emitConjoined(
                     val bare = stateVarsByLeaf[offer.leaf.tlaName].orEmpty()
                     val keyExpr = substLets(update.index)
                     val valueExpr = substLets(update.value)
-                    val k = exprToTla(keyExpr, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames)
+                    val kRaw = exprToTla(keyExpr, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames)
+                    val collType = try {
+                        pclasses[offer.leaf.name]
+                            ?.localDecls()
+                            ?.filterIsInstance<VarNode>()
+                            ?.firstOrNull { it.name == update.collectionVar }
+                            ?.type
+                    } catch (_: RuntimeException) {
+                        null
+                    }
+                    val k = if (collType is ListType) "(($kRaw) + 1)" else kRaw
                     if (exprContainsIoHavoc(valueExpr)) {
                         val domain = typeToTlaDomain(valueExpr.getType())
                         targetParts += if (self != null) {
@@ -1781,6 +1799,7 @@ internal fun cfgConstantModel(name: String): String = when (name) {
     "Int", "Nat", "Real" -> "{0, 1, 2, 3, 4, 5}"
     "String" -> "{\"\", \"0\", \"1\", \"2\", \"3\", \"4\", \"5\", \"a\", \"b\"}"
     "Boolean" -> "BOOLEAN"
+    "MaxListLen" -> "3"
     else -> "{\"a\", \"b\"}" // parameter sets and other domains
 }
 
@@ -1844,7 +1863,8 @@ internal fun typeToTlaDomain(type: Type): String = when (type) {
     is RealType -> "Int"
     is StringType -> "String"
     is SortType -> type.name
-    is ListType -> "Seq(${typeToTlaDomain(type.elementType)})"
+    // Seq(S) is infinite; TLC needs a length-bounded set of sequences.
+    is ListType -> "BoundedSeq(${typeToTlaDomain(type.elementType)}, MaxListLen)"
     is SetType -> "SUBSET ${typeToTlaDomain(type.elementType)}"
     is ObjClassType -> {
         val fields = type.fields.joinToString(", ") { f ->
@@ -1877,7 +1897,10 @@ internal fun collectDomainModelNames(type: Type, into: MutableSet<String>) {
         is StringType -> into += "String"
         is SortType -> into += type.name
         is ObjClassType -> type.fields.forEach { collectDomainModelNames(it.type, into) }
-        is ListType -> collectDomainModelNames(type.elementType, into)
+        is ListType -> {
+            into += "MaxListLen"
+            collectDomainModelNames(type.elementType, into)
+        }
         is SetType -> collectDomainModelNames(type.elementType, into)
         is MapType -> {
             collectDomainModelNames(type.keyType, into)
@@ -2107,6 +2130,26 @@ private fun tlaStringCoerce(expr: ExprNode, rendered: String): String =
 private fun isEmptyStringLiteral(expr: ExprNode): Boolean =
     julay.compiler.ast.isEmptyStringLiteral(expr)
 
+private fun exprIsListTyped(expr: ExprNode): Boolean = try {
+    expr.getType() is ListType
+} catch (_: RuntimeException) {
+    false
+}
+
+private fun exprIsMapTyped(expr: ExprNode): Boolean = try {
+    expr.getType() is MapType
+} catch (_: RuntimeException) {
+    false
+}
+
+private fun tlaLengthOf(baseRendered: String, baseExpr: ExprNode): String =
+    when (try { baseExpr.getType() } catch (_: RuntimeException) { null }) {
+        is ListType -> "Len($baseRendered)"
+        is SetType -> "Cardinality($baseRendered)"
+        is MapType -> "Cardinality($baseRendered)" // maps emit as functions; prefer keys cardinality if needed
+        else -> "Len($baseRendered)"
+    }
+
 /**
  * @param leafCtx map of leaf name → SpecLeaf (for FieldAccess context; optional)
  * @param argNames action argument symbols (emitted bare)
@@ -2127,6 +2170,11 @@ internal fun exprToTla(
 ): String {
     fun rec(e: ExprNode): String =
         exprToTla(e, leafCtx, argNames, self, bareStateVars, reservedNames, stateVarNames, symbolOverrides)
+    fun recWithOverrides(e: ExprNode, extra: Map<String, String>): String =
+        exprToTla(
+            e, leafCtx, argNames, self, bareStateVars, reservedNames, stateVarNames,
+            symbolOverrides + extra,
+        )
     return when (expr) {
         is LiteralValueExprNode -> literalToTla(expr)
         is SymbolValueExprNode -> {
@@ -2142,8 +2190,53 @@ internal fun exprToTla(
                 else -> sym
             }
         }
+        is EmptyBracketLiteralExprNode -> {
+            when {
+                expr.resolvedListTypeOrNull() != null -> "<<>>"
+                expr.resolvedMapTypeOrNull() != null -> "[x \\in {} |-> 0]"
+                else -> try {
+                    when (expr.getType()) {
+                        is ListType -> "<<>>"
+                        is MapType -> "[x \\in {} |-> 0]"
+                        else -> "<<>>"
+                    }
+                } catch (_: RuntimeException) {
+                    "<<>>"
+                }
+            }
+        }
+        is ListLiteralExprNode -> {
+            if (expr.elements.isEmpty()) "<<>>"
+            else "<<${expr.elements.joinToString(", ") { rec(it) }}>>"
+        }
+        is LetExprNode -> {
+            // Inline let-init into body (TLA has no expression-level let).
+            val subst = substituteExpr(expr.bodyExpr(), expr.letName(), expr.letInitExpr())
+            rec(subst)
+        }
         is FieldAccessExprNode -> {
             val base = expr.baseSymbol
+            if (expr.fieldPath == listOf("length")) {
+                val baseRendered = when {
+                    base in symbolOverrides -> symbolOverrides.getValue(base)
+                    base in argNames -> base
+                    base in bareStateVars && leafCtx.size == 1 -> {
+                        val leaf = leafCtx.values.first()
+                        val v = stateTlaName(leaf.tlaName, base, stateVarNames)
+                        if (self != null) "$v[$self]" else v
+                    }
+                    else -> base
+                }
+                // Bare `xs.length` via FieldAccess: lists are the common case (Len).
+                // Prefer MemberAccess / FieldAccessOnExpr when the base expr carries a Set type.
+                return "Len($baseRendered)"
+            }
+            // Lambda / HOF binder substitution (e.g. map(e -> e.value)).
+            if (base in symbolOverrides) {
+                val baseRendered = symbolOverrides.getValue(base)
+                return if (expr.fieldPath.isEmpty()) baseRendered
+                else expr.fieldPath.fold(baseRendered) { acc, field -> "$acc.$field" }
+            }
             val isObjectField = base in argNames || base in bareStateVars
             val leafVarName = expr.fieldPath.singleOrNull()?.let { stateVarNames[base to it] }
             if (!isObjectField && leafVarName != null) {
@@ -2166,7 +2259,12 @@ internal fun exprToTla(
         }
         is MemberAccessExprNode -> {
             val base = expr.baseExpr
+            if (expr.fieldName == "length") {
+                return tlaLengthOf(rec(base), base)
+            }
             when {
+                base is SymbolValueExprNode && base.symbol in symbolOverrides ->
+                    "${symbolOverrides.getValue(base.symbol)}.${expr.fieldName}"
                 base is IndexExprNode && base.base is SymbolValueExprNode -> {
                     val leafName = (base.base as SymbolValueExprNode).symbol
                     val v = stateTlaName(leafName, expr.fieldName, stateVarNames)
@@ -2180,11 +2278,77 @@ internal fun exprToTla(
                 }
             }
         }
+        is SliceExprNode -> {
+            // Julay xs[start:end) is 0-based exclusive-end; SubSeq is 1-based inclusive.
+            val xs = rec(expr.base)
+            val start = rec(expr.start)
+            val end = rec(expr.end)
+            "(LET __xs == $xs __s == ($start) __e == ($end) IN " +
+                "LET __lo == IF __s > Len(__xs) THEN Len(__xs) ELSE __s " +
+                "__hi == IF __e > Len(__xs) THEN Len(__xs) ELSE __e IN " +
+                "IF __lo >= __hi THEN <<>> ELSE SubSeq(__xs, (__lo) + 1, __hi))"
+        }
         is FieldAccessOnExprNode -> {
+            if (expr.fieldPath == listOf("length")) {
+                return tlaLengthOf(rec(expr.baseExpr), expr.baseExpr)
+            }
             val base = rec(expr.baseExpr)
             val path = expr.fieldPath
             if (path.isEmpty()) base
             else path.fold(base) { acc, field -> "$acc.$field" }
+        }
+        is FunCallExprNode -> {
+            when (expr.callName()) {
+                "length" -> {
+                    val arg = expr.callArgs().singleOrNull() ?: return "TRUE"
+                    tlaLengthOf(rec(arg), arg)
+                }
+                "map" -> {
+                    // map(xs, f) — prefer method form; support freestanding.
+                    val args = expr.callArgs()
+                    if (args.size < 2) return "TRUE"
+                    val xs = args[0]
+                    val f = args[1]
+                    emitMapToTla(xs, f, ::rec, ::recWithOverrides)
+                }
+                else -> "TRUE"
+            }
+        }
+        is MethodCallExprNode -> {
+            when (expr.methodName) {
+                "map" -> {
+                    val f = expr.args.singleOrNull()
+                        ?: expr.hofBodyOrNull()?.let { /* lambda already resolved into hof */ null }
+                    val hofBody = expr.hofBodyOrNull()
+                    val hofParams = expr.hofParamNamesOrNull()
+                    when {
+                        hofBody != null && hofParams != null && hofParams.size == 1 ->
+                            emitMapLambdaToTla(expr.baseExpr, hofParams[0], hofBody, ::rec, ::recWithOverrides)
+                        f != null ->
+                            emitMapToTla(expr.baseExpr, f, ::rec, ::recWithOverrides)
+                        else -> "TRUE"
+                    }
+                }
+                "filter" -> {
+                    val hofBody = expr.hofBodyOrNull()
+                    val hofParams = expr.hofParamNamesOrNull()
+                    if (hofBody == null || hofParams == null || hofParams.size != 1) return "TRUE"
+                    val p = hofParams[0]
+                    val xs = rec(expr.baseExpr)
+                    when (try { expr.baseExpr.getType() } catch (_: RuntimeException) { null }) {
+                        is ListType -> {
+                            val pred = recWithOverrides(hofBody, mapOf(p to p))
+                            "SelectSeq($xs, LAMBDA $p: $pred)"
+                        }
+                        is SetType -> {
+                            val pred = recWithOverrides(hofBody, mapOf(p to p))
+                            "{ $p \\in $xs : $pred }"
+                        }
+                        else -> "TRUE"
+                    }
+                }
+                else -> "TRUE"
+            }
         }
         is ObjClassLiteralExprNode -> {
             val fields = expr.fieldEntries.joinToString(", ") { (name, e) ->
@@ -2197,7 +2361,13 @@ internal fun exprToTla(
             else "{${expr.elements.joinToString(", ") { rec(it) }}}"
         }
         is IndexExprNode -> {
-            "${rec(expr.base)}[${rec(expr.index)}]"
+            val idx = rec(expr.index)
+            val idxAdj = if (exprIsListTyped(expr.base) && !exprIsMapTyped(expr.base)) {
+                "(($idx) + 1)"
+            } else {
+                idx
+            }
+            "${rec(expr.base)}[$idxAdj]"
         }
         is UnaryOpExprNode -> {
             val o = rec(expr.operand())
@@ -2225,6 +2395,8 @@ internal fun exprToTla(
                     when {
                         exprIsSetTyped(expr) || exprIsSetTyped(expr.lhsOperand()) || exprIsSetTyped(expr.rhsOperand()) ->
                             "($l \\cup $r)"
+                        exprIsListTyped(expr) || exprIsListTyped(expr.lhsOperand()) || exprIsListTyped(expr.rhsOperand()) ->
+                            "($l \\o $r)"
                         exprIsStringTyped(expr) ||
                             exprIsStringTyped(expr.lhsOperand()) ||
                             exprIsStringTyped(expr.rhsOperand()) -> {
@@ -2273,6 +2445,47 @@ internal fun exprToTla(
             "(IF ${rec(expr.condExpr())} THEN ${rec(expr.thenExpr())} ELSE ${rec(expr.elseExpr())})"
         }
         else -> "TRUE"
+    }
+}
+
+private fun emitMapLambdaToTla(
+    xsExpr: ExprNode,
+    param: String,
+    body: ExprNode,
+    rec: (ExprNode) -> String,
+    recWithOverrides: (ExprNode, Map<String, String>) -> String,
+): String {
+    val xs = rec(xsExpr)
+    return when (try { xsExpr.getType() } catch (_: RuntimeException) { null }) {
+        is ListType -> {
+            val i = "__i"
+            val elem = "$xs[$i]"
+            val mapped = recWithOverrides(body, mapOf(param to elem))
+            "[$i \\in DOMAIN $xs |-> $mapped]"
+        }
+        is SetType -> {
+            val mapped = recWithOverrides(body, mapOf(param to param))
+            "{ $mapped : $param \\in $xs }"
+        }
+        else -> "TRUE"
+    }
+}
+
+private fun emitMapToTla(
+    xsExpr: ExprNode,
+    funArg: ExprNode,
+    rec: (ExprNode) -> String,
+    recWithOverrides: (ExprNode, Map<String, String>) -> String,
+): String {
+    when (funArg) {
+        is LambdaExprNode -> {
+            val p = funArg.params.singleOrNull() ?: return "TRUE"
+            return emitMapLambdaToTla(xsExpr, p, funArg.body, rec, recWithOverrides)
+        }
+        else -> {
+            // Named fun or other: apply as FunCall if we can resolve — fall back TRUE.
+            return "TRUE"
+        }
     }
 }
 

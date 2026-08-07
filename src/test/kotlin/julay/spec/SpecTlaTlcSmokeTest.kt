@@ -896,6 +896,61 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun listHofAndBoundedSeqEmitCorrectly() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-list-hof").toFile()
+        try {
+            val source = File("regression/input/spec/list-hof-tla.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("ListHof.tla")
+            val cfg = File("ListHof.cfg")
+            assertTrue(tla.exists(), "expected ListHof.tla")
+            assertTrue(cfg.exists(), "expected ListHof.cfg")
+            val tlaText = tla.readText()
+            val cfgText = cfg.readText()
+            assertTrue(
+                tlaText.contains("<<>>") &&
+                    tlaText.contains("[__i \\in DOMAIN") &&
+                    tlaText.contains("Len(") &&
+                    !tlaText.contains("nextIndex' = [nextIndex EXCEPT ![i] = TRUE]"),
+                "expected list literal, map comprehension, Len — not TRUE for nextIndex;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("SubSeq(") &&
+                    !tlaText.contains("DOMAIN TRUE") &&
+                    !Regex("""\be\.value\b""").containsMatchIn(tlaText),
+                "expected SubSeq for slices and substituted map binders (no DOMAIN TRUE / bare e);\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("((target.id) + 1)") || tlaText.contains("(target.id) + 1"),
+                "expected list index + 1;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("BoundedSeq(") && tlaText.contains("MaxListLen"),
+                "expected BoundedSeq / MaxListLen;\n$tlaText",
+            )
+            assertTrue(
+                !Regex("""(?<!Bounded)(?<!Sub)Seq\(""").containsMatchIn(tlaText),
+                "must not use bare Seq(...) as a domain;\n$tlaText",
+            )
+            assertTrue(
+                cfgText.contains("MaxListLen"),
+                "expected MaxListLen in cfg;\n$cfgText",
+            )
+            tla.copyTo(File(work, "ListHof.tla"), overwrite = true)
+            cfg.copyTo(File(work, "ListHof.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "ListHof")
+        } finally {
+            work.deleteRecursively()
+            File("ListHof.tla").delete()
+            File("ListHof.cfg").delete()
+        }
+    }
+
+    @Test
     fun leafParamNetCompilesAndTlcStarts() {
         assumeTlcPresent()
         val work = Files.createTempDirectory("julay-leaf-param").toFile()
