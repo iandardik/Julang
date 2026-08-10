@@ -86,7 +86,9 @@ internal fun emitProcFunCallAndRet(
     callParts += "/\\ ~${idx(blocking, hostBinder)}"
 
     hostOffer.decl.guards.forEach { g ->
-        callParts += "/\\ ${exprToTla(g, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)}"
+        flattenTopLevelAnd(g).forEach { conjunct ->
+            callParts += "/\\ ${exprToTla(conjunct, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames, linePrefix = "/\\ ")}"
+        }
     }
 
     // Call-arg → child param binds + inline inits + constructed (folded former F_call ctor).
@@ -272,7 +274,9 @@ internal fun emitProcFunHavocAction(
         parts += "/\\ ${idx(hostConstructed, hostBinder)}"
     }
     hostOffer.decl.guards.forEach { g ->
-        parts += "/\\ ${exprToTla(g, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)}"
+        flattenTopLevelAnd(g).forEach { conjunct ->
+            parts += "/\\ ${exprToTla(conjunct, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames, linePrefix = "/\\ ")}"
+        }
     }
 
     val retDomain = typeToTlaDomain(procFun.returnType)

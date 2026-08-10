@@ -1,0 +1,25 @@
+obj Point {
+    x : Int
+    y : Int
+}
+
+proc Painter {
+    var p : Point
+
+    constructor initially(args : List<String>) {
+        transit: p := Point { x := 0, y := 0 }
+    }
+
+    transition paint() {
+        guard: p.x >= 0
+        transit:
+            p := Point {
+                x := 1,
+                y := 2
+            }
+    }
+}
+
+spec ObjRecordLayout := <true> Painter <true>
+
+compile ObjRecordLayout

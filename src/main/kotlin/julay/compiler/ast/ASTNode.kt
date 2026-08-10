@@ -989,6 +989,21 @@ class UnaryOpExprNode(
     }
 }
 
+/** Explicit `(…)` written in Julay source; preserved when emitting TLA+. */
+class ParenExprNode(
+    private val inner: ExprNode,
+    private val loc: ProgramLoc,
+) : ExprNode(listOf(inner)) {
+    override fun programLocation() = loc
+    fun innerExpr(): ExprNode = inner
+    override fun toZ3GuardString(symbolTypes: Map<String, Type>, argSymbols: Set<String>, forceString: Boolean): String =
+        inner.toZ3GuardString(symbolTypes, argSymbols, forceString)
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String =
+        "(${inner.toTransitString(symbolTypes, argSymbols)})"
+    override fun inferType(symbolEnv: Map<String, Type>): Type = inner.getType()
+    override fun toString(): String = "($inner)"
+}
+
 class BinaryOpExprNode(
     private val op : String,
     private val lhsOperand : ExprNode,

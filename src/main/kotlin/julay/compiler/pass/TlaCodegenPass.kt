@@ -2,6 +2,7 @@ package julay.compiler.pass
 
 import julay.compiler.CompilationUnit
 import julay.compiler.FunBuiltinRegistry
+import julay.compiler.SourceLoc
 import julay.compiler.TypeExpr
 import julay.compiler.ast.*
 import julay.compiler.decl.*
@@ -200,6 +201,11 @@ fun tlaCodegenPass(
     val offers = collectTlaActionOffers(leaves, pclassesForTla, procFunDecls)
         // Coupled: child construct is folded into parent *_call. Standalone: keep F_call.
         .filterNot { it.isConstructor && it.leaf.isProcFun && !standaloneProcFun }
+    val usedFunOps = orderFunsForTlaEmit(collectUserFunsUsedInOffers(offers))
+    val needsSpliceOperator =
+        offersUseSlice(offers) ||
+            usedFunOps.any { exprContainsSlice(it.funBody()) } ||
+            invClosure.any { exprContainsSlice(it.invariantFormula()) }
     val sessionPairs = detectTwoSidedSessionPairs(offers)
     val emittedOfferLists = collectEmittedOfferLists(offers)
     val killTargets = collectKillTargets(emittedOfferLists, sessionPairs)
@@ -309,6 +315,14 @@ fun tlaCodegenPass(
     val helpers = built.helpers
     val actions = built.actions
 
+    // Fun operator params must not collide with VARIABLES / CONSTANTS / other module ops.
+    val funReservedNames = (
+        constants + variables + usedFunOps.map { it.name() } +
+            actions.map { it.name } +
+            setOf("vars", "BoundedSeq", "splice", "Init", "Next", "Spec", "GF", "dummy")
+        ).toSet()
+    val funOperatorDefs = usedFunOps.map { emitFunOperatorDef(it, funReservedNames) }
+
     val invDefs = if (invClosure.isNotEmpty()) {
         invClosure.flatMap { node ->
             emitInvariantDefs(node, leaves, stateVarNames, constants)
@@ -351,9 +365,19 @@ fun tlaCodegenPass(
             appendLine("BoundedSeq(S, N) == UNION { [1..k -> S] : k \\in 0..N }")
             appendLine()
         }
+        if (needsSpliceOperator) {
+            appendLine(SPLICE_OPERATOR_DEF)
+            appendLine()
+        }
         if (helpers.isNotEmpty()) {
             helpers.forEach { helper ->
                 appendLine(helper)
+                appendLine()
+            }
+        }
+        if (funOperatorDefs.isNotEmpty()) {
+            funOperatorDefs.forEach { def ->
+                appendLine(def)
                 appendLine()
             }
         }
@@ -1204,8 +1228,14 @@ private fun buildTlaActions(
         result += emitEndSession(pair, pair.leafB, sessionPairs, allVars, stateVarsByLeaf)
     }
 
-    return TlaBuildResult(helpers, result.distinctBy { it.name })
+    val unique = result.distinctBy { it.name }
+    val (initiallyActions, otherActions) = unique.partition { it.isInitiallyAction() }
+    return TlaBuildResult(helpers, initiallyActions + otherActions)
 }
+
+/** True for solo `initially` / `Leaf_initially` constructors (defs + Next lead with these). */
+private fun TlaAction.isInitiallyAction(): Boolean =
+    name == "initially" || name.endsWith("_initially")
 
 private fun allTlaVars(
     leaves: List<SpecLeaf>,
@@ -1374,10 +1404,16 @@ private fun emitConjoined(
                             "/\\ $v' \\in $domain"
                         }
                     } else {
+                        val assignPrefix = if (self != null) {
+                            "/\\ $v' = [$v EXCEPT ![$self] = "
+                        } else {
+                            "/\\ $v' = "
+                        }
                         val rhs = exprToTla(
                             expr, leafCtx, argNames, self,
                             bareStateVars = stateVarsByLeaf[offer.leaf.tlaName].orEmpty(),
                             stateVarNames = stateVarNames,
+                            linePrefix = assignPrefix,
                         )
                         targetParts += if (self != null) {
                             "/\\ $v' = [$v EXCEPT ![$self] = $rhs]"
@@ -1411,7 +1447,15 @@ private fun emitConjoined(
                             "/\\ \\E __io \\in $domain: $v' = [$v EXCEPT ![$k] = __io]"
                         }
                     } else {
-                        val vv = exprToTla(valueExpr, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames)
+                        val putPrefix = if (self != null) {
+                            "/\\ $v' = [$v EXCEPT ![$self] = [@ EXCEPT ![$k] = "
+                        } else {
+                            "/\\ $v' = [$v EXCEPT ![$k] = "
+                        }
+                        val vv = exprToTla(
+                            valueExpr, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames,
+                            linePrefix = putPrefix,
+                        )
                         targetParts += if (self != null) {
                             "/\\ $v' = [$v EXCEPT ![$self] = [@ EXCEPT ![$k] = $vv]]"
                         } else {
@@ -1452,8 +1496,9 @@ private fun emitConjoined(
         }
     }
 
-    // Participant-only constructed / killed / terminated enabling (no constraints on non-offering leaves).
+    // Per-offer sections: comment + gates + guards + transits (Julay-like layout).
     offers.forEach { offer ->
+        parts += "\\* ${offer.leaf.name} action logic"
         val c = stateTlaName(offer.leaf.tlaName, "constructed", stateVarNames)
         val self = selfOf(offer.leaf)
         if (offer.isConstructor) {
@@ -1474,10 +1519,7 @@ private fun emitConjoined(
             val blocking = blockingByHost.getValue(offer.leaf.tlaName)
             parts += if (self != null) "/\\ ~$blocking[$self]" else "/\\ ~$blocking"
         }
-    }
 
-    offers.forEach { offer ->
-        val self = selfOf(offer.leaf)
         val auxNames = auxNamesByLeaf[offer.leaf.tlaName].orEmpty()
         val argNames = offer.decl.action.args.map { it.name }.toSet() + auxNames
         val leafCtx = mapOf(offer.leaf.name to offer.leaf, offer.leaf.tlaName to offer.leaf)
@@ -1499,11 +1541,15 @@ private fun emitConjoined(
         }
 
         offer.decl.guards.forEach { g ->
-            parts += "/\\ ${exprToTla(
-                g, leafCtx, argNames, self,
-                bareStateVars = stateVarsByLeaf[offer.leaf.tlaName].orEmpty(),
-                stateVarNames = stateVarNames,
-            )}"
+            // Flatten top-level `&` so each Julay conjunct is its own `/\\` line.
+            flattenTopLevelAnd(g).forEach { conjunct ->
+                parts += "/\\ ${exprToTla(
+                    conjunct, leafCtx, argNames, self,
+                    bareStateVars = stateVarsByLeaf[offer.leaf.tlaName].orEmpty(),
+                    stateVarNames = stateVarNames,
+                    linePrefix = "/\\ ",
+                )}"
+            }
         }
 
         // Defer constructor spawn updates into the CanStart THEN branch (throw-before-launch).
@@ -1742,7 +1788,7 @@ private fun emitInvariantDefs(
     val bases = collectInvariantLeafBases(node.invariantFormula())
     val byClass = leaves.groupBy { it.name }
     val multiClasses = bases.filter { (byClass[it]?.size ?: 0) > 1 }
-    if (multiClasses.isEmpty()) {
+    fun formatInv(name: String, remapped: Map<Pair<String, String>, String>): String {
         val body = exprToTla(
             node.invariantFormula(),
             leafCtx = emptyMap(),
@@ -1750,9 +1796,19 @@ private fun emitInvariantDefs(
             self = null,
             bareStateVars = emptySet(),
             reservedNames = constants,
-            stateVarNames = stateVarNames,
+            stateVarNames = remapped,
+            linePrefix = "",
+            parentPrec = PREC_BOTTOM,
         )
-        return listOf("${node.name()} == $body")
+        return if (body.contains('\n') || isMultiLineExpr(node.invariantFormula())) {
+            val indented = body.lineSequence().joinToString("\n") { "  $it" }
+            "$name ==\n$indented"
+        } else {
+            "$name == $body"
+        }
+    }
+    if (multiClasses.isEmpty()) {
+        return listOf(formatInv(node.name(), stateVarNames))
     }
     var bindings: List<Map<String, SpecLeaf>> = listOf(emptyMap())
     for (cls in multiClasses) {
@@ -1783,16 +1839,7 @@ private fun emitInvariantDefs(
                 }
             }
         }
-        val body = exprToTla(
-            node.invariantFormula(),
-            leafCtx = emptyMap(),
-            argNames = emptySet(),
-            self = null,
-            bareStateVars = emptySet(),
-            reservedNames = constants,
-            stateVarNames = remapped,
-        )
-        "$invName == $body"
+        formatInv(invName, remapped)
     }
 }
 
@@ -2164,6 +2211,393 @@ private fun tlaLengthOf(baseRendered: String, baseExpr: ExprNode): String =
  * @param reservedNames CONSTANT names; quantifier binders that clash are renamed
  * @param stateVarNames (leaf, julayVar) → TLA identifier
  */
+
+/**
+ * Collect user [FunNode]s referenced by [expr] (resolved fun calls only; builtins ignored).
+ */
+internal fun collectUserFunNodesFromExpr(expr: ExprNode, into: MutableSet<FunNode>) {
+    when (expr) {
+        is FunCallExprNode -> {
+            expr.resolvedFunOrNull()?.let { into += it }
+            expr.namedFunArgNodeOrNull()?.let { into += it }
+            expr.callArgs().forEach { collectUserFunNodesFromExpr(it, into) }
+            expr.specializedBodyOrNull()?.let { collectUserFunNodesFromExpr(it, into) }
+            expr.namedFunBodyOrNull()?.let { collectUserFunNodesFromExpr(it, into) }
+        }
+        is ParenExprNode -> collectUserFunNodesFromExpr(expr.innerExpr(), into)
+        else -> expr.children.filterIsInstance<ExprNode>().forEach { collectUserFunNodesFromExpr(it, into) }
+    }
+}
+
+/** True when [expr] contains a Julay list slice `xs[a:b]`. */
+internal fun exprContainsSlice(expr: ExprNode): Boolean =
+    when (expr) {
+        is SliceExprNode -> true
+        is ParenExprNode -> exprContainsSlice(expr.innerExpr())
+        else -> expr.children.filterIsInstance<ExprNode>().any { exprContainsSlice(it) }
+    }
+
+/** True when any Init/action offer guard or transit uses a list slice. */
+internal fun offersUseSlice(offers: List<TlaActionOffer>): Boolean =
+    offers.any { offer ->
+        offer.decl.guards.any { exprContainsSlice(it) } ||
+            offer.decl.transits.any { update ->
+                when (update) {
+                    is TransitUpdate.Assign -> exprContainsSlice(update.expr)
+                    is TransitUpdate.IndexPut ->
+                        exprContainsSlice(update.index) || exprContainsSlice(update.value)
+                    is TransitUpdate.Let -> exprContainsSlice(update.init)
+                }
+            }
+    }
+
+/**
+ * Julay `xs[s:e)` helper: 0-based exclusive-end with clamp, via TLA `SubSeq`.
+ * Emitted above Init when any slice appears in the module.
+ */
+internal const val SPLICE_OPERATOR_DEF =
+    "\\* splice\n" +
+        "splice(xs, s, e) ==\n" +
+        "  LET lo == IF s > Len(xs) THEN Len(xs) ELSE s\n" +
+        "      hi == IF e > Len(xs) THEN Len(xs) ELSE e\n" +
+        "  IN IF lo >= hi THEN <<>> ELSE SubSeq(xs, (lo) + 1, hi)"
+
+
+/** User funs called from Init/action guards and transit RHS (plus transitive callees). */
+internal fun collectUserFunsUsedInOffers(offers: List<TlaActionOffer>): LinkedHashSet<FunNode> {
+    val used = linkedSetOf<FunNode>()
+    offers.forEach { offer ->
+        offer.decl.guards.forEach { collectUserFunNodesFromExpr(it, used) }
+        offer.decl.transits.forEach { update ->
+            when (update) {
+                is TransitUpdate.Assign -> collectUserFunNodesFromExpr(update.expr, used)
+                is TransitUpdate.IndexPut -> {
+                    collectUserFunNodesFromExpr(update.index, used)
+                    collectUserFunNodesFromExpr(update.value, used)
+                }
+                is TransitUpdate.Let -> collectUserFunNodesFromExpr(update.init, used)
+            }
+        }
+    }
+    val queue = ArrayDeque(used)
+    val seen = used.map { it.name() }.toMutableSet()
+    while (queue.isNotEmpty()) {
+        val f = queue.removeFirst()
+        val nested = linkedSetOf<FunNode>()
+        collectUserFunNodesFromExpr(f.funBody(), nested)
+        nested.forEach { g ->
+            if (g.name() !in seen) {
+                seen += g.name()
+                used += g
+                queue += g
+            }
+        }
+    }
+    return used
+}
+
+/** Callees before callers when possible so nested fun operators appear first. */
+internal fun orderFunsForTlaEmit(funs: Set<FunNode>): List<FunNode> {
+    if (funs.isEmpty()) return emptyList()
+    val byName = funs.associateBy { it.name() }
+    val deps = funs.associate { f ->
+        val nested = linkedSetOf<FunNode>()
+        collectUserFunNodesFromExpr(f.funBody(), nested)
+        f.name() to nested.map { it.name() }.filter { it in byName && it != f.name() }.toMutableSet()
+    }
+    val remaining = funs.map { it.name() }.toMutableSet()
+    val ordered = mutableListOf<FunNode>()
+    while (remaining.isNotEmpty()) {
+        val ready = remaining.filter { name -> deps.getValue(name).none { it in remaining } }
+        val batch = if (ready.isEmpty()) listOf(remaining.first()) else ready.sorted()
+        batch.forEach { name ->
+            remaining -= name
+            ordered += byName.getValue(name)
+            deps.values.forEach { it -= name }
+        }
+    }
+    return ordered
+}
+
+/**
+ * Emit a Julay `fun` as a TLA+ operator.
+ * Parameters that collide with [reservedNames] (VARIABLES, CONSTANTS, …) are renamed (`p_…`).
+ */
+internal fun emitFunOperatorDef(funNode: FunNode, reservedNames: Set<String> = emptySet()): String {
+    val params = funNode.funArgs().actionArgs()
+    val taken = reservedNames.toMutableSet()
+    val renamed = linkedMapOf<String, String>()
+    params.forEach { param ->
+        var tlaName = param.name
+        if (tlaName in taken) {
+            tlaName = "p_${param.name}"
+            var n = 2
+            while (tlaName in taken) {
+                tlaName = "p_${param.name}_$n"
+                n++
+            }
+        }
+        taken += tlaName
+        renamed[param.name] = tlaName
+    }
+    val header = if (params.isEmpty()) {
+        funNode.name()
+    } else {
+        "${funNode.name()}(${renamed.values.joinToString(", ")})"
+    }
+    val bodyExpr = funNode.funBody()
+    val body = exprToTla(
+        bodyExpr,
+        leafCtx = emptyMap(),
+        argNames = renamed.values.toSet(),
+        self = null,
+        bareStateVars = emptySet(),
+        stateVarNames = emptyMap(),
+        symbolOverrides = renamed,
+        linePrefix = "  ",
+        parentPrec = PREC_BOTTOM,
+    )
+    return if (body.contains('\n') || isMultiLineExpr(bodyExpr)) {
+        "\\* fun\n$header ==\n  $body"
+    } else {
+        "\\* fun\n$header == $body"
+    }
+}
+
+/**
+ * Split a guard expression on top-level `&` so each Julay conjunct can be a separate TLA `/\\` line.
+ * Nested `&` inside `|` / other operators is left intact.
+ */
+internal fun flattenTopLevelAnd(expr: ExprNode): List<ExprNode> {
+    if (expr is BinaryOpExprNode && expr.op() == "&") {
+        return flattenTopLevelAnd(expr.lhsOperand()) + flattenTopLevelAnd(expr.rhsOperand())
+    }
+    return listOf(expr)
+}
+
+internal fun flattenTopLevelOr(expr: ExprNode): List<ExprNode> {
+    if (expr is BinaryOpExprNode && expr.op() == "|") {
+        return flattenTopLevelOr(expr.lhsOperand()) + flattenTopLevelOr(expr.rhsOperand())
+    }
+    return listOf(expr)
+}
+
+/** True when a Julay `&` / `|` (or obj literal) spans more than one source line. */
+internal fun isMultiLineExpr(expr: ExprNode): Boolean {
+    val loc = expr.programLocation()
+    return loc is SourceLoc && loc.startLine != loc.endLine
+}
+
+/** Indent for continuation body lines of a multi-line IF / LET opened at [linePrefix]. */
+internal fun exprBodyIndent(linePrefix: String): String =
+    " ".repeat(visualObjOpenLinePrefix(linePrefix).length + 2)
+
+/** Column-aligned indent for keywords like ELSE / IN under a multi-line IF / LET. */
+internal fun exprKeywordIndent(linePrefix: String): String =
+    " ".repeat(visualObjOpenLinePrefix(linePrefix).length)
+
+/**
+ * Multi-line Julay `if` → TLA IF/THEN/ELSE with THEN and ELSE bodies on following lines.
+ */
+internal fun emitMultiLineIf(
+    cond: String,
+    thenBranch: String,
+    elseBranch: String,
+    linePrefix: String,
+    open: String,
+    close: String,
+): String {
+    val bodyIndent = exprBodyIndent(linePrefix + open)
+    val kwIndent = exprKeywordIndent(linePrefix + open)
+    return buildString {
+        append(open)
+        append("IF ")
+        append(cond)
+        append(" THEN\n")
+        append(bodyIndent)
+        append(thenBranch)
+        append("\n")
+        append(kwIndent)
+        append("ELSE\n")
+        append(bodyIndent)
+        append(elseBranch)
+        append(close)
+    }
+}
+
+/**
+ * Julay `let` → TLA `LET name == init IN body`. Multi-line source uses line breaks;
+ * [body] / [init] should already be rendered (with let-name overrides applied to [body]).
+ */
+internal fun emitLetToTla(
+    name: String,
+    init: String,
+    body: String,
+    linePrefix: String,
+    multiLine: Boolean,
+    open: String = "",
+    close: String = "",
+): String {
+    if (!multiLine) {
+        return "${open}LET $name == $init IN $body$close"
+    }
+    val bodyIndent = exprBodyIndent(linePrefix + open)
+    val kwIndent = exprKeywordIndent(linePrefix + open)
+    return if (init.contains('\n')) {
+        buildString {
+            append(open)
+            append("LET $name ==\n")
+            append(bodyIndent)
+            append(init)
+            append("\n")
+            append(kwIndent)
+            append("IN\n")
+            append(bodyIndent)
+            append(body)
+            append(close)
+        }
+    } else {
+        buildString {
+            append(open)
+            append("LET $name == $init IN\n")
+            append(bodyIndent)
+            append(body)
+            append(close)
+        }
+    }
+}
+
+/**
+ * Recursively format multi-line Julay `|` as TLA `\\/` branches.
+ * Each branch is introduced by `\\/ `; nested multi-line `&` / `|` are formatted the same way.
+ */
+internal fun emitMultiLineOr(
+    disjuncts: List<ExprNode>,
+    linePrefix: String,
+    render: (ExprNode, String) -> String,
+): String {
+    val orOp = "\\/ "
+    val visualBefore = visualObjOpenLinePrefix(linePrefix)
+    val orContIndent = " ".repeat(visualBefore.length)
+    return buildString {
+        disjuncts.forEachIndexed { i, d ->
+            val prefix = if (i == 0) linePrefix + orOp else orContIndent + orOp
+            if (i > 0) {
+                append("\n")
+                append(orContIndent)
+            }
+            append(orOp)
+            append(emitBoolOperand(d, prefix, render))
+        }
+    }
+}
+
+/**
+ * Recursively format multi-line Julay `&` as TLA `/\\` conjuncts.
+ */
+internal fun emitMultiLineAnd(
+    conjuncts: List<ExprNode>,
+    linePrefix: String,
+    render: (ExprNode, String) -> String,
+): String {
+    val andOp = "/\\ "
+    val visualBefore = visualObjOpenLinePrefix(linePrefix)
+    val andContIndent = " ".repeat(visualBefore.length)
+    return buildString {
+        conjuncts.forEachIndexed { i, c ->
+            val prefix = if (i == 0) linePrefix + andOp else andContIndent + andOp
+            if (i > 0) {
+                append("\n")
+                append(andContIndent)
+            }
+            append(andOp)
+            append(emitBoolOperand(c, prefix, render))
+        }
+    }
+}
+
+/** Dispatch nested multi-line `&` / `|`; otherwise render as a normal TLA atom/expr. */
+internal fun emitBoolOperand(
+    expr: ExprNode,
+    linePrefix: String,
+    render: (ExprNode, String) -> String,
+): String {
+    if (expr is BinaryOpExprNode && expr.op() == "|" && isMultiLineExpr(expr)) {
+        return emitMultiLineOr(flattenTopLevelOr(expr), linePrefix, render)
+    }
+    if (expr is BinaryOpExprNode && expr.op() == "&" && isMultiLineExpr(expr)) {
+        return emitMultiLineAnd(flattenTopLevelAnd(expr), linePrefix, render)
+    }
+    return render(expr, linePrefix)
+}
+
+/** True when the Julay obj literal spans more than one source line. */
+internal fun isMultiLineObjLiteral(expr: ObjClassLiteralExprNode): Boolean = isMultiLineExpr(expr)
+
+/**
+ * Column (1-based) of the first symbol on [line] that is not part of a leading `/\\` or `\\/` conjunct.
+ */
+internal fun firstNonSlashConjunctColumn(line: String): Int {
+    var i = 0
+    while (i < line.length && line[i] == ' ') i++
+    when {
+        line.startsWith("/\\", i) -> {
+            i += 2
+            while (i < line.length && line[i] == ' ') i++
+            return i + 1
+        }
+        line.startsWith("\\/", i) -> {
+            i += 2
+            while (i < line.length && line[i] == ' ') i++
+            return i + 1
+        }
+        else -> return i + 1
+    }
+}
+
+/**
+ * Action conjunct lines are indented two spaces in the module. [linePrefix] is the part-local
+ * prefix (usually starting with `/\\ `); continuation lines already use absolute columns.
+ */
+internal fun visualObjOpenLinePrefix(linePrefix: String): String =
+    if (linePrefix.startsWith("/\\") || linePrefix.startsWith("\\/")) "  $linePrefix" else linePrefix
+
+/** TLA operator precedence for paren elision (higher binds tighter). */
+internal const val PREC_BOTTOM = 0
+internal const val PREC_IMPLIES = 10
+internal const val PREC_OR = 20
+internal const val PREC_AND = 30
+internal const val PREC_REL = 40
+internal const val PREC_ADD = 50
+internal const val PREC_MUL = 60
+internal const val PREC_UNARY = 70
+internal const val PREC_ATOM = 100
+
+/**
+ * Emit a TLA record for an obj literal. Multi-line Julay inits put each field on its own line,
+ * indented 2 spaces past the first non-`/\\`/`\\/` symbol on the opening line.
+ */
+internal fun emitObjClassLiteralToTla(
+    expr: ObjClassLiteralExprNode,
+    render: (ExprNode, String) -> String,
+    linePrefix: String,
+): String {
+    if (!isMultiLineObjLiteral(expr) || expr.fieldEntries.isEmpty()) {
+        val fields = expr.fieldEntries.joinToString(", ") { (name, e) ->
+            "$name |-> ${render(e, linePrefix)}"
+        }
+        return "[$fields]"
+    }
+    val base = firstNonSlashConjunctColumn(visualObjOpenLinePrefix(linePrefix))
+    val fieldIndent = " ".repeat(base + 1) // content at column base+2
+    val closeIndent = " ".repeat((base - 1).coerceAtLeast(0)) // `]` at column base
+    val fields = expr.fieldEntries.joinToString(",\n$fieldIndent") { (name, e) ->
+        val valuePrefix = fieldIndent + "$name |-> "
+        "$name |-> ${render(e, valuePrefix)}"
+    }
+    return "[\n$fieldIndent$fields\n$closeIndent]"
+}
+
 internal fun exprToTla(
     expr: ExprNode,
     leafCtx: Map<String, SpecLeaf>,
@@ -2173,13 +2607,20 @@ internal fun exprToTla(
     reservedNames: Set<String> = emptySet(),
     stateVarNames: Map<Pair<String, String>, String> = emptyMap(),
     symbolOverrides: Map<String, String> = emptyMap(),
+    /** Text on the current TLA line before this expression (e.g. `/\\ p' = `). */
+    linePrefix: String = "",
+    /** Parent operator precedence; wrap this expr in parens when its prec is lower. */
+    parentPrec: Int = PREC_BOTTOM,
 ): String {
-    fun rec(e: ExprNode): String =
-        exprToTla(e, leafCtx, argNames, self, bareStateVars, reservedNames, stateVarNames, symbolOverrides)
-    fun recWithOverrides(e: ExprNode, extra: Map<String, String>): String =
+    fun rec(e: ExprNode, prefix: String = linePrefix, prec: Int = parentPrec): String =
+        exprToTla(
+            e, leafCtx, argNames, self, bareStateVars, reservedNames, stateVarNames, symbolOverrides,
+            prefix, prec,
+        )
+    fun recWithOverrides(e: ExprNode, extra: Map<String, String>, prefix: String = linePrefix, prec: Int = parentPrec): String =
         exprToTla(
             e, leafCtx, argNames, self, bareStateVars, reservedNames, stateVarNames,
-            symbolOverrides + extra,
+            symbolOverrides + extra, prefix, prec,
         )
     return when (expr) {
         is LiteralValueExprNode -> literalToTla(expr)
@@ -2212,13 +2653,47 @@ internal fun exprToTla(
             }
         }
         is ListLiteralExprNode -> {
-            if (expr.elements.isEmpty()) "<<>>"
-            else "<<${expr.elements.joinToString(", ") { rec(it) }}>>"
+            if (expr.elements.isEmpty()) {
+                "<<>>"
+            } else if (isMultiLineExpr(expr)) {
+                val bodyIndent = exprBodyIndent(linePrefix)
+                val closeIndent = exprKeywordIndent(linePrefix)
+                buildString {
+                    append("<<\n")
+                    expr.elements.forEachIndexed { idx, el ->
+                        append(bodyIndent)
+                        append(rec(el, bodyIndent, PREC_BOTTOM))
+                        if (idx < expr.elements.lastIndex) append(",")
+                        append("\n")
+                    }
+                    append(closeIndent)
+                    append(">>")
+                }
+            } else {
+                "<<${expr.elements.joinToString(", ") { rec(it) }}>>"
+            }
         }
         is LetExprNode -> {
-            // Inline let-init into body (TLA has no expression-level let).
-            val subst = substituteExpr(expr.bodyExpr(), expr.letName(), expr.letInitExpr())
-            rec(subst)
+            val needParen = PREC_IMPLIES < parentPrec
+            val open = if (needParen) "(" else ""
+            val close = if (needParen) ")" else ""
+            val rawName = expr.letName()
+            val name = if (rawName.isDiscardBinding()) "__discard" else rawName
+            val multi = isMultiLineExpr(expr)
+            val initPrefix = if (multi && isMultiLineExpr(expr.letInitExpr())) {
+                exprBodyIndent(linePrefix + open)
+            } else {
+                "$linePrefix${open}LET $name == "
+            }
+            val init = rec(expr.letInitExpr(), initPrefix, PREC_BOTTOM)
+            val bodyPrefix = if (multi) exprBodyIndent(linePrefix + open) else "$linePrefix${open}LET $name == $init IN "
+            // Bind the let name so it is not rewritten as a leaf state var / arg index.
+            val body = if (rawName.isDiscardBinding()) {
+                rec(expr.bodyExpr(), bodyPrefix, PREC_BOTTOM)
+            } else {
+                recWithOverrides(expr.bodyExpr(), mapOf(name to name), bodyPrefix, PREC_BOTTOM)
+            }
+            emitLetToTla(name, init, body, linePrefix, multi, open, close)
         }
         is FieldAccessExprNode -> {
             val base = expr.baseSymbol
@@ -2285,14 +2760,11 @@ internal fun exprToTla(
             }
         }
         is SliceExprNode -> {
-            // Julay xs[start:end) is 0-based exclusive-end; SubSeq is 1-based inclusive.
+            // Julay xs[start:end) → splice (0-based exclusive-end, clamped).
             val xs = rec(expr.base)
             val start = rec(expr.start)
             val end = rec(expr.end)
-            "(LET __xs == $xs __s == ($start) __e == ($end) IN " +
-                "LET __lo == IF __s > Len(__xs) THEN Len(__xs) ELSE __s " +
-                "__hi == IF __e > Len(__xs) THEN Len(__xs) ELSE __e IN " +
-                "IF __lo >= __hi THEN <<>> ELSE SubSeq(__xs, (__lo) + 1, __hi))"
+            "splice($xs, $start, $end)"
         }
         is FieldAccessOnExprNode -> {
             if (expr.fieldPath == listOf("length")) {
@@ -2317,7 +2789,15 @@ internal fun exprToTla(
                     val f = args[1]
                     emitMapToTla(xs, f, ::rec, ::recWithOverrides)
                 }
-                else -> "TRUE"
+                else -> {
+                    val userFun = expr.resolvedFunOrNull()
+                    if (userFun != null) {
+                        val args = expr.callArgs().joinToString(", ") { rec(it, linePrefix, PREC_BOTTOM) }
+                        if (args.isEmpty()) userFun.name() else "${userFun.name()}($args)"
+                    } else {
+                        "TRUE"
+                    }
+                }
             }
         }
         is MethodCallExprNode -> {
@@ -2356,53 +2836,115 @@ internal fun exprToTla(
                 else -> "TRUE"
             }
         }
-        is ObjClassLiteralExprNode -> {
-            val fields = expr.fieldEntries.joinToString(", ") { (name, e) ->
-                "$name |-> ${rec(e)}"
-            }
-            "[$fields]"
-        }
+        is ObjClassLiteralExprNode ->
+            emitObjClassLiteralToTla(expr, { e, p -> rec(e, p, PREC_BOTTOM) }, linePrefix)
         is SetLiteralExprNode -> {
-            if (expr.elements.isEmpty()) "{}"
-            else "{${expr.elements.joinToString(", ") { rec(it) }}}"
+            if (expr.elements.isEmpty()) {
+                "{}"
+            } else if (isMultiLineExpr(expr)) {
+                val bodyIndent = exprBodyIndent(linePrefix)
+                val closeIndent = exprKeywordIndent(linePrefix)
+                buildString {
+                    append("{\n")
+                    expr.elements.forEachIndexed { idx, el ->
+                        append(bodyIndent)
+                        append(rec(el, bodyIndent, PREC_BOTTOM))
+                        if (idx < expr.elements.lastIndex) append(",")
+                        append("\n")
+                    }
+                    append(closeIndent)
+                    append("}")
+                }
+            } else {
+                buildString {
+                    append("{")
+                    var before = "$linePrefix{"
+                    expr.elements.forEachIndexed { idx, el ->
+                        if (idx > 0) {
+                            append(", ")
+                            before += ", "
+                        }
+                        val rendered = rec(el, before, PREC_BOTTOM)
+                        append(rendered)
+                        before += rendered
+                    }
+                    append("}")
+                }
+            }
         }
         is IndexExprNode -> {
-            val idx = rec(expr.index)
+            val idx = rec(expr.index, linePrefix, PREC_BOTTOM)
             val idxAdj = if (exprIsListTyped(expr.base) && !exprIsMapTyped(expr.base)) {
-                "(($idx) + 1)"
+                "($idx + 1)"
             } else {
                 idx
             }
-            "${rec(expr.base)}[$idxAdj]"
+            "${rec(expr.base, linePrefix, PREC_ATOM)}[$idxAdj]"
         }
         is UnaryOpExprNode -> {
-            val o = rec(expr.operand())
             when (expr.op()) {
-                "~" -> "~($o)"
-                "-" -> "(-$o)"
-                else -> "(${expr.op()} $o)"
+                "~" -> {
+                    val o = rec(expr.operand(), linePrefix, PREC_UNARY)
+                    val s = "~$o"
+                    if (PREC_UNARY < parentPrec) "($s)" else s
+                }
+                "-" -> {
+                    val o = rec(expr.operand(), "$linePrefix(-", PREC_UNARY)
+                    val s = "-$o"
+                    if (PREC_UNARY < parentPrec) "($s)" else s
+                }
+                else -> {
+                    val o = rec(expr.operand())
+                    "(${expr.op()} $o)"
+                }
             }
         }
+        is ParenExprNode -> {
+            val inner = rec(expr.innerExpr(), "$linePrefix(", PREC_BOTTOM)
+            "($inner)"
+        }
         is BinaryOpExprNode -> {
-            val l = rec(expr.lhsOperand())
-            val r = rec(expr.rhsOperand())
+            fun bin(mid: String, prec: Int, rightPrec: Int = prec): String {
+                val needParen = prec < parentPrec
+                val open = if (needParen) "(" else ""
+                val close = if (needParen) ")" else ""
+                val l = rec(expr.lhsOperand(), linePrefix + open, prec)
+                val r = rec(expr.rhsOperand(), linePrefix + open + l + mid, rightPrec)
+                return "$open$l$mid$r$close"
+            }
             when (expr.op()) {
-                "&" -> "($l /\\ $r)"
-                "|" -> "($l \\/ $r)"
-                "=>" -> "($l => $r)"
-                "=" -> "($l = $r)"
-                "~=" -> "($l # $r)"
-                "<" -> "($l < $r)"
-                "<=" -> "($l <= $r)"
-                ">" -> "($l > $r)"
-                ">=" -> "($l >= $r)"
-                "in" -> "($l \\in $r)"
+                "&" -> {
+                    if (isMultiLineExpr(expr)) {
+                        emitMultiLineAnd(flattenTopLevelAnd(expr), linePrefix) { e, p ->
+                            rec(e, p, PREC_AND)
+                        }
+                    } else {
+                        bin(" /\\ ", PREC_AND)
+                    }
+                }
+                "|" -> {
+                    if (isMultiLineExpr(expr)) {
+                        emitMultiLineOr(flattenTopLevelOr(expr), linePrefix) { e, p ->
+                            rec(e, p, PREC_OR)
+                        }
+                    } else {
+                        bin(" \\/ ", PREC_OR)
+                    }
+                }
+                "=>" -> bin(" => ", PREC_IMPLIES, rightPrec = PREC_IMPLIES)
+                "=" -> bin(" = ", PREC_REL)
+                "~=" -> bin(" # ", PREC_REL)
+                "<" -> bin(" < ", PREC_REL)
+                "<=" -> bin(" <= ", PREC_REL)
+                ">" -> bin(" > ", PREC_REL)
+                ">=" -> bin(" >= ", PREC_REL)
+                "in" -> bin(" \\in ", PREC_REL)
                 "+" -> {
                     when {
                         exprIsSetTyped(expr) || exprIsSetTyped(expr.lhsOperand()) || exprIsSetTyped(expr.rhsOperand()) ->
-                            "($l \\cup $r)"
+                            bin(" \\cup ", PREC_ADD)
                         exprIsListTyped(expr) || exprIsListTyped(expr.lhsOperand()) || exprIsListTyped(expr.rhsOperand()) ->
-                            "($l \\o $r)"
+                            bin(" \\o ", PREC_ADD)
                         exprIsStringTyped(expr) ||
                             exprIsStringTyped(expr.lhsOperand()) ||
                             exprIsStringTyped(expr.rhsOperand()) -> {
@@ -2410,24 +2952,39 @@ internal fun exprToTla(
                             val rhs = expr.rhsOperand()
                             when {
                                 isEmptyStringLiteral(lhs) && isEmptyStringLiteral(rhs) -> "\"\""
-                                isEmptyStringLiteral(lhs) -> tlaStringCoerce(rhs, r)
-                                isEmptyStringLiteral(rhs) -> tlaStringCoerce(lhs, l)
-                                else -> "(${tlaStringCoerce(lhs, l)} \\o ${tlaStringCoerce(rhs, r)})"
+                                isEmptyStringLiteral(lhs) -> {
+                                    val r = rec(rhs, linePrefix, PREC_BOTTOM)
+                                    tlaStringCoerce(rhs, r)
+                                }
+                                isEmptyStringLiteral(rhs) -> {
+                                    val l = rec(lhs, linePrefix, PREC_BOTTOM)
+                                    tlaStringCoerce(lhs, l)
+                                }
+                                else -> bin(" \\o ", PREC_ADD).let {
+                                    // string concat uses \\o; rebuild with coerce
+                                    val needParen = PREC_ADD < parentPrec
+                                    val open = if (needParen) "(" else ""
+                                    val close = if (needParen) ")" else ""
+                                    val l = rec(lhs, linePrefix + open, PREC_ADD)
+                                    val ls = tlaStringCoerce(lhs, l)
+                                    val r = rec(rhs, linePrefix + open + ls + " \\o ", PREC_ADD)
+                                    "$open$ls \\o ${tlaStringCoerce(rhs, r)}$close"
+                                }
                             }
                         }
-                        else -> "($l + $r)"
+                        else -> bin(" + ", PREC_ADD)
                     }
                 }
                 "-" -> {
                     if (exprIsSetTyped(expr) || exprIsSetTyped(expr.lhsOperand())) {
-                        "($l \\ $r)"
+                        bin(" \\ ", PREC_ADD)
                     } else {
-                        "($l - $r)"
+                        bin(" - ", PREC_ADD)
                     }
                 }
-                "*" -> "($l * $r)"
-                "/" -> "($l \\div $r)"
-                else -> "($l ${expr.op()} $r)"
+                "*" -> bin(" * ", PREC_MUL)
+                "/" -> bin(" \\div ", PREC_MUL)
+                else -> bin(" ${expr.op()} ", PREC_REL)
             }
         }
         is QuantifiedExprNode -> {
@@ -2437,18 +2994,38 @@ internal fun exprToTla(
             }
             val origBinder = expr.binderName()
             val binder = if (origBinder in reservedNames) "q_$origBinder" else origBinder
-            val body = rec(expr.quantifiedBody()).let { b ->
+            fun fixBinder(b: String): String =
                 if (binder != origBinder) {
                     b.replace(Regex("\\b${Regex.escape(origBinder)}\\b"), binder)
                 } else {
                     b
                 }
-            }
             val q = if (expr.isUniversal()) "\\A" else "\\E"
-            "($q $binder \\in $domain : $body)"
+            val header = "$q $binder \\in $domain :"
+            if (isMultiLineExpr(expr)) {
+                val body = fixBinder(rec(expr.quantifiedBody(), "$linePrefix  ", PREC_BOTTOM))
+                "$header\n$linePrefix  $body"
+            } else {
+                val body = fixBinder(rec(expr.quantifiedBody(), "$linePrefix$header ", PREC_BOTTOM))
+                "$header $body"
+            }
         }
         is IfElseExprNode -> {
-            "(IF ${rec(expr.condExpr())} THEN ${rec(expr.thenExpr())} ELSE ${rec(expr.elseExpr())})"
+            val needParen = PREC_IMPLIES < parentPrec // IF binds loosely; paren when nested tightly
+            val open = if (needParen) "(" else ""
+            val close = if (needParen) ")" else ""
+            if (isMultiLineExpr(expr)) {
+                val c = rec(expr.condExpr(), "$linePrefix${open}IF ", PREC_BOTTOM)
+                val bodyPrefix = exprBodyIndent(linePrefix + open)
+                val t = rec(expr.thenExpr(), bodyPrefix, PREC_BOTTOM)
+                val e = rec(expr.elseExpr(), bodyPrefix, PREC_BOTTOM)
+                emitMultiLineIf(c, t, e, linePrefix, open, close)
+            } else {
+                val c = rec(expr.condExpr(), "$linePrefix$open", PREC_BOTTOM)
+                val t = rec(expr.thenExpr(), "$linePrefix${open}IF $c THEN ", PREC_BOTTOM)
+                val e = rec(expr.elseExpr(), "$linePrefix${open}IF $c THEN $t ELSE ", PREC_BOTTOM)
+                "${open}IF $c THEN $t ELSE $e$close"
+            }
         }
         else -> "TRUE"
     }

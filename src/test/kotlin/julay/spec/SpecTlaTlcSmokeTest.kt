@@ -213,6 +213,30 @@ class SpecTlaTlcSmokeTest {
                     tlaText.contains("Worker_initially(i) =="),
                 "expected disambiguation comment for Worker initially;\n$tlaText",
             )
+            assertTrue(
+                spawnDef.contains("\\* Server action logic") &&
+                    spawnDef.contains("\\* Worker action logic") &&
+                    spawnDef.indexOf("\\* Server action logic") < spawnDef.indexOf("\\* Worker action logic"),
+                "expected per-proc action logic comments in spawnWorker;\n$spawnDef",
+            )
+            val afterInit = tlaText.substringAfter("Init ==")
+            val serverInitIdx = afterInit.indexOf("Server_initially ==")
+            val workerInitIdx = afterInit.indexOf("Worker_initially(i) ==")
+            val spawnIdx = afterInit.indexOf("spawnWorker(i, id) ==")
+            assertTrue(
+                serverInitIdx >= 0 && workerInitIdx >= 0 && spawnIdx >= 0 &&
+                    serverInitIdx < spawnIdx && workerInitIdx < spawnIdx,
+                "initially defs should appear after Init and before spawnWorker;\n$tlaText",
+            )
+            val nextBody = tlaText.substringAfter("Next ==").substringBefore("\n\n")
+            val nextServer = nextBody.indexOf("Server_initially")
+            val nextWorker = nextBody.indexOf("Worker_initially")
+            val nextSpawn = nextBody.indexOf("spawnWorker")
+            assertTrue(
+                nextServer >= 0 && nextWorker >= 0 && nextSpawn >= 0 &&
+                    nextServer < nextSpawn && nextWorker < nextSpawn,
+                "initially should lead Next before spawnWorker;\n$nextBody",
+            )
             tla.copyTo(File(work, "SpawnWorker.tla"), overwrite = true)
             cfg.copyTo(File(work, "SpawnWorker.cfg"), overwrite = true)
             tla.delete()
@@ -377,6 +401,168 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun multiLineObjLiteralEmitsOneFieldPerLine() {
+        val source = File("regression/input/spec/obj-record-layout.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        try {
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("ObjRecordLayout.tla")
+            assertTrue(tla.exists(), "expected ObjRecordLayout.tla")
+            val tlaText = tla.readText()
+            val paintDef = tlaText.substringAfter("paint ==").substringBefore("\n\n")
+            assertTrue(
+                paintDef.contains("p' = [\n       x |-> 1,\n       y |-> 2\n     ]"),
+                "multi-line Julay obj fields should be +2 past first non-/\\ symbol;\n$paintDef",
+            )
+            val initDef = tlaText.substringAfter("initially ==").substringBefore("\n\n")
+                .ifEmpty { tlaText.substringAfter("Painter_initially ==").substringBefore("\n\n") }
+            assertTrue(
+                initDef.contains("p' = [x |-> 0, y |-> 0]") ||
+                    initDef.contains("[x |-> 0, y |-> 0]"),
+                "single-line Julay obj should stay compact;\n$initDef",
+            )
+            assertFalse(
+                initDef.contains("x |-> 0,\n"),
+                "single-line Julay obj should not be expanded;\n$initDef",
+            )
+        } finally {
+            File("ObjRecordLayout.tla").delete()
+            File("ObjRecordLayout.cfg").delete()
+        }
+    }
+
+    @Test
+    fun nestedMultiLineBoolFormatsRecursively() {
+        val source = File("regression/input/spec/nested-bool-layout.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        try {
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("NestedBoolLayout.tla")
+            assertTrue(tla.exists(), "expected NestedBoolLayout.tla")
+            val chooseDef = tla.readText().substringAfter("choose ==").substringBefore("\n\n")
+            assertTrue(
+                (chooseDef.contains("\\/ /\\ ~ok") || chooseDef.contains("\\/ (/\\ ~ok")) &&
+                    chooseDef.contains("/\\ n = 0") &&
+                    (chooseDef.contains("\\/ /\\ ok") || chooseDef.contains("\\/ (/\\ ok")) &&
+                    chooseDef.contains("/\\ n = 1"),
+                "nested multi-line |/& should emit recursive \\/ and /\\ lines;\n$chooseDef",
+            )
+            assertFalse(
+                chooseDef.contains("((~ok /\\ n = 0) \\/") ||
+                    chooseDef.contains("((~(ok) /\\ (n = 0)) \\/"),
+                "should not keep nested multi-line bool flat;\n$chooseDef",
+            )
+        } finally {
+            File("NestedBoolLayout.tla").delete()
+            File("NestedBoolLayout.cfg").delete()
+        }
+    }
+
+    @Test
+    fun invariantFormattingPreservesLayoutAndUserParens() {
+        val source = File("regression/input/spec/inv-layout.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        try {
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("InvLayout.tla")
+            assertTrue(tla.exists(), "expected InvLayout.tla")
+            val tlaText = tla.readText()
+            val invDef = tlaText.substringAfter("OneLeaderPerTerm ==").substringBefore("\n====")
+            assertTrue(
+                invDef.contains("\\A n1 \\in NodeSet :") &&
+                    invDef.contains("\\A n2 \\in NodeSet :"),
+                "multi-line quantifiers should be nested on separate lines;\n$invDef",
+            )
+            assertTrue(
+                invDef.contains(
+                    "(state[n1] = \"Leader\" /\\ state[n2] = \"Leader\" /\\ currentTerm[n1] = currentTerm[n2]) => (n1 = n2)",
+                ),
+                "user-written parentheses around antecedent and consequent should be preserved;\n$invDef",
+            )
+            assertFalse(
+                invDef.contains("(\\A n1"),
+                "quantifiers should not be wrapped in outer parens;\n$invDef",
+            )
+        } finally {
+            File("InvLayout.tla").delete()
+            File("InvLayout.cfg").delete()
+        }
+    }
+
+    @Test
+    fun ifAndLetFormattingPreservesMultiLineLayout() {
+        val source = File("regression/input/spec/if-let-layout.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        try {
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("IfLetLayout.tla")
+            assertTrue(tla.exists(), "expected IfLetLayout.tla")
+            val tlaText = tla.readText()
+            val stepDef = tlaText.substringAfter("step ==").substringBefore("\n\n")
+            assertTrue(
+                stepDef.contains("IF x < 1 THEN") &&
+                    stepDef.contains("ELSE") &&
+                    Regex("""THEN\n\s+LET n ==""").containsMatchIn(stepDef),
+                "multi-line if should put THEN body / nested LET on following lines;\n$stepDef",
+            )
+            assertTrue(
+                stepDef.contains("LET n ==") && stepDef.contains("IN"),
+                "expression-level let should emit TLA LET, not inline;\n$stepDef",
+            )
+            assertTrue(
+                stepDef.contains("LET a == 1 IN a + y"),
+                "single-line let should stay compact;\n$stepDef",
+            )
+            assertFalse(
+                stepDef.contains("IF x < 1 THEN LET n =="),
+                "multi-line if should not keep THEN body on the same line;\n$stepDef",
+            )
+        } finally {
+            File("IfLetLayout.tla").delete()
+            File("IfLetLayout.cfg").delete()
+        }
+    }
+
+    @Test
+    fun userFunsBecomeTlaOperatorsAboveInit() {
+        val source = File("regression/input/spec/fun-ops.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        try {
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("FunOps.tla")
+            assertTrue(tla.exists(), "expected FunOps.tla")
+            val tlaText = tla.readText()
+            val beforeInit = tlaText.substringBefore("Init ==")
+            assertTrue(
+                beforeInit.contains("\\* fun") &&
+                    beforeInit.contains("entryTermAt(p_log, idx) ==") &&
+                    beforeInit.contains("bumpTerm(t) =="),
+                "used funs should be operators above Init; params colliding with VARIABLES are renamed;\n$beforeInit",
+            )
+            assertTrue(
+                beforeInit.indexOf("entryTermAt(p_log, idx) ==") < beforeInit.indexOf("bumpTerm(t) =="),
+                "callee fun should be defined before caller;\n$beforeInit",
+            )
+            val advanceDef = tlaText.substringAfter("advance(").substringBefore("\n\n")
+            assertTrue(
+                advanceDef.contains("entryTermAt(log, newCommitIndex) = currentTerm"),
+                "call sites should keep the fun name;\n$advanceDef",
+            )
+            assertTrue(
+                advanceDef.contains("bumpTerm(currentTerm)"),
+                "transit RHS should call fun operators;\n$advanceDef",
+            )
+            assertFalse(
+                advanceDef.contains("TRUE = currentTerm"),
+                "fun calls must not degrade to TRUE;\n$advanceDef",
+            )
+        } finally {
+            File("FunOps.tla").delete()
+            File("FunOps.cfg").delete()
+        }
+    }
+
+    @Test
     fun stringCoerceElidesEmptyConcat() {
         val source = File("regression/input/spec/string-coerce.jul")
         assertTrue(source.exists(), "missing ${source.path}")
@@ -423,6 +609,18 @@ class SpecTlaTlcSmokeTest {
             assertFalse(
                 Regex("""\\/\s+noop\b""").containsMatchIn(tlaText),
                 "guard-only noop should be omitted from Next;\n$tlaText",
+            )
+            val stepDef = tlaText.substringAfter("step ==").substringBefore("\n\n")
+            assertTrue(
+                stepDef.contains("/\\ n < 3") &&
+                    stepDef.contains("/\\ n >= 0") &&
+                    stepDef.indexOf("/\\ n < 3") < stepDef.indexOf("/\\ n >= 0"),
+                "top-level & guard conjuncts should be separate /\\ lines;\n$stepDef",
+            )
+            assertFalse(
+                stepDef.contains("/\\ ((n < 3) /\\ (n >= 0))") ||
+                    stepDef.contains("/\\ (n < 3 /\\ n >= 0)"),
+                "should not nest top-level & as one conjunct;\n$stepDef",
             )
         } finally {
             File("StutterOmit.tla").delete()
@@ -935,10 +1133,13 @@ class SpecTlaTlcSmokeTest {
                 "expected list literal, map comprehension, Len — not TRUE for nextIndex;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("SubSeq(") &&
+                tlaText.contains("\\* splice") &&
+                    tlaText.contains("splice(xs, s, e) ==") &&
+                    tlaText.contains("splice(") &&
+                    tlaText.contains("SubSeq(") &&
                     !tlaText.contains("DOMAIN TRUE") &&
                     !Regex("""\be\.value\b""").containsMatchIn(tlaText),
-                "expected SubSeq for slices and substituted map binders (no DOMAIN TRUE / bare e);\n$tlaText",
+                "expected splice operator for slices (SubSeq inside splice) and substituted map binders;\n$tlaText",
             )
             assertTrue(
                 tlaText.contains("((target.id) + 1)") || tlaText.contains("(target.id) + 1"),

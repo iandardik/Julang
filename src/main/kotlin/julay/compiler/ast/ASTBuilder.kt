@@ -728,7 +728,13 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                     loc = sourceLocation(ctx),
                 )
             }
-            ctx.LPAREN() != null -> visit(ctx.expr(0))
+            ctx.LPAREN() != null -> {
+                val innerNode = visit(ctx.expr(0))
+                if (innerNode !is ExprNode) {
+                    throw RuntimeException("Expected expr children to be ExprNodes")
+                }
+                ParenExprNode(innerNode, sourceLocation(ctx))
+            }
             else -> throw RuntimeException("Invalid expr node: ${ctx.text}")
         }
     }

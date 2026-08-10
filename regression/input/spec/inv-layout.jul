@@ -1,0 +1,24 @@
+sort NodeSet := {"a", "b"}
+
+proc Node {
+    var state : String
+    var currentTerm : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            state := "Follower"
+            currentTerm := 0
+    }
+
+    transition bump() {
+        guard: currentTerm < 3
+        transit: currentTerm := currentTerm + 1
+    }
+}
+
+invariant OneLeaderPerTerm := all n1 : NodeSet, all n2 : NodeSet,
+    (Node[n1].state = "Leader" & Node[n2].state = "Leader" & Node[n1].currentTerm = Node[n2].currentTerm) => (n1 = n2)
+
+spec InvLayout := <true> Node[n : NodeSet] <OneLeaderPerTerm>
+
+compile InvLayout

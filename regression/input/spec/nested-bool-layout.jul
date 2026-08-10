@@ -1,0 +1,29 @@
+proc Branchy {
+    var n : Int
+    var ok : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            n := 0
+            ok := false
+    }
+
+    transition choose() {
+        guard:
+            & (
+                | (
+                    & ~ok
+                    & n = 0
+                )
+                | (
+                    & ok
+                    & n = 1
+                )
+            )
+        transit: n := n + 1
+    }
+}
+
+spec NestedBoolLayout := <true> Branchy <true>
+
+compile NestedBoolLayout

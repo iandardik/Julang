@@ -479,6 +479,16 @@ private fun typePassInvariantFormula(
                     }
                 }
             }
+            is ParenExprNode -> {
+                check(expr.innerExpr(), env)
+                if (errors.isEmpty()) {
+                    try {
+                        expr.setInferredType(TypePassType.Inferred(expr.inferType(env)))
+                    } catch (e: RuntimeException) {
+                        errors += OneLocCompileError(expr.programLocation(), e.message ?: "type error")
+                    }
+                }
+            }
             is BinaryOpExprNode -> {
                 check(expr.lhsOperand(), env)
                 check(expr.rhsOperand(), env)

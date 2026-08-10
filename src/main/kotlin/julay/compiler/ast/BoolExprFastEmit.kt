@@ -39,6 +39,7 @@ fun ExprNode.toBoolExprFastOrNull(
         }
         else -> null
     }
+    is ParenExprNode -> innerExpr().toBoolExprFastOrNull(symbolTypes, argSymbols)
     is BinaryOpExprNode -> binaryToBoolExprFast(symbolTypes, argSymbols)
     is SymbolValueExprNode -> {
         if (symbol !in argSymbols && symbolTypes[symbol] is BoolType) {
@@ -130,6 +131,7 @@ fun ExprNode.toSyncTermOrNull(
                 else -> null
             }
         }
+        is ParenExprNode -> innerExpr().toSyncTermOrNull(symbolTypes, argSymbols, forceString = false)
         else -> null
     }
 }
@@ -217,6 +219,7 @@ private fun ExprNode.opaqueFastGuardKind(
         }
         else -> "unary '$op'"
     }
+    is ParenExprNode -> innerExpr().opaqueFastGuardKind(symbolTypes, argSymbols)
     is MethodCallExprNode -> "method call"
     is FunCallExprNode -> "function call"
     is QuantifiedExprNode -> "quantifier"

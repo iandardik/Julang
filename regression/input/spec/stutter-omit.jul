@@ -11,7 +11,9 @@ proc Counter {
     }
 
     transition step() {
-        guard: n < 3
+        guard:
+            & n < 3
+            & n >= 0
         transit: n := n + 1
     }
 }

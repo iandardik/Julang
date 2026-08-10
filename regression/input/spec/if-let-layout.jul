@@ -1,0 +1,31 @@
+proc Nest {
+    var x : Int
+    var y : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            x := 0
+            y := 0
+    }
+
+    transition step() {
+        guard: true
+        transit:
+            x := if (x < 1) {
+                let (n : Int := x + 1) {
+                    if (n > 0) {
+                        n
+                    } else {
+                        0
+                    }
+                }
+            } else {
+                x
+            }
+            y := let (a : Int := 1) { a + y }
+    }
+}
+
+spec IfLetLayout := <true> Nest <true>
+
+compile IfLetLayout

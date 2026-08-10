@@ -1,0 +1,36 @@
+import julay.funlib.length
+
+obj Entry {
+    term : Int
+    value : String
+}
+
+fun entryTermAt(log : List<Entry>, idx : Int) : Int =
+    let (e : Entry := log[idx]) { e.term }
+
+fun bumpTerm(t : Int) : Int =
+    entryTermAt([Entry { term := t, value := "" }], 0) + 1
+
+proc LogNode {
+    var log : List<Entry>
+    var currentTerm : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            log := []
+            currentTerm := 0
+    }
+
+    transition advance(newCommitIndex : Int) {
+        guard:
+            & newCommitIndex >= 0
+            & newCommitIndex < length(log)
+            & entryTermAt(log, newCommitIndex) = currentTerm
+        transit:
+            currentTerm := bumpTerm(currentTerm)
+    }
+}
+
+spec FunOps := <true> LogNode <true>
+
+compile FunOps

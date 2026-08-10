@@ -10,6 +10,10 @@ fun substituteExpr(expr: ExprNode, name: String, replacement: ExprNode): ExprNod
             substituteExpr(expr.operand(), name, replacement),
             expr.programLocation(),
         ).withTypeOf(expr)
+        is ParenExprNode -> ParenExprNode(
+            substituteExpr(expr.innerExpr(), name, replacement),
+            expr.programLocation(),
+        ).withTypeOf(expr)
         is BinaryOpExprNode -> BinaryOpExprNode(
             expr.op(),
             substituteExpr(expr.lhsOperand(), name, replacement),
@@ -182,6 +186,7 @@ fun exprReferencesSymbol(expr: ExprNode, symbol: String): Boolean {
     return when (expr) {
         is SymbolValueExprNode -> expr.symbol == symbol
         is UnaryOpExprNode -> exprReferencesSymbol(expr.operand(), symbol)
+        is ParenExprNode -> exprReferencesSymbol(expr.innerExpr(), symbol)
         is BinaryOpExprNode ->
             exprReferencesSymbol(expr.lhsOperand(), symbol) || exprReferencesSymbol(expr.rhsOperand(), symbol)
         is IfElseExprNode ->
@@ -250,6 +255,7 @@ fun collectFunCallNames(expr: ExprNode): Set<String> {
     return when (expr) {
         is FunCallExprNode -> setOf(expr.callName()) + expr.callArgs().flatMap { collectFunCallNames(it) }
         is UnaryOpExprNode -> collectFunCallNames(expr.operand())
+        is ParenExprNode -> collectFunCallNames(expr.innerExpr())
         is BinaryOpExprNode ->
             collectFunCallNames(expr.lhsOperand()) + collectFunCallNames(expr.rhsOperand())
         is IfElseExprNode ->

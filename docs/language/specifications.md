@@ -163,7 +163,7 @@ See [`input/inc_server/main.jul`](../../input/inc_server/main.jul) and [`regress
 | list/set `.map` (lambda) | function/set comprehension |
 | list `.filter` | `SelectSeq` |
 | set `.filter` | set comprehension |
-| list slices `xs[a:b]` | `SubSeq` (0-based exclusive → 1-based inclusive, with clamp) |
+| list slices `xs[a:b]` | `splice(xs, a, b)` (helper above `Init`; 0-based exclusive → clamped `SubSeq`) |
 
 ### TLA+ translation limits
 
@@ -176,13 +176,24 @@ Unsupported (or only partial) constructs may still degrade to `TRUE` or unusable
 | Freestanding HOFs beyond `length` / `map` | Unsupported unless listed above |
 | Bare infinite `Seq(S)` as `\E` bound | Replaced by `BoundedSeq`; do not reintroduce |
 | `SUBSET Int` / other infinite set domains for `\E` | Still problematic for TLC as action-arg domains |
-| Complex list updates beyond index `EXCEPT` / slices | Slices use `SubSeq`; other bulk updates may degrade |
-| Named funs in transit RHS (e.g. `entryTermAt`, `max`) | Not emitted as operators (may degrade to `TRUE`) |
+| Complex list updates beyond index `EXCEPT` / slices | Slices use `splice`; other bulk updates may degrade |
+| Named Julay `fun`s used in Init/action bodies | Emitted as TLA+ operators above `Init` (with a `\* fun` comment); call sites keep the fun name |
 | `when` expressions | Not emitted as TLA (fall through) |
 | IO / effectful funlib in guards | Existing havoc rules |
 | Procfuns not listed in an api `calls:` | Existing havoc warnings |
 
 See also [Collections](collections.md).
+
+### Action layout
+
+- Multi-leaf (and solo) actions group each participant under `\* <Proc> action logic`, with that leaf’s enablement gates, guards, and transits together — similar to Init’s `\* State variables for <Proc>` sections.
+- Top-level `&` guard conjuncts become separate `/\\` lines (matching multi-line Julay guards). Nested multi-line `&` / `|` are formatted recursively as `/\\` and `\\/` branches (single-line boolean ops stay compact).
+- Multi-line Julay `Obj { ... }` literals become TLA records with one field per line; field lines are indented 2 spaces past the first non-`/\`/`\/` symbol on the opening line (single-line obj inits stay compact).
+- Multi-line Julay `if` / `let` become TLA `IF`/`THEN`/`ELSE` and `LET`/`IN` with bodies on following lines (same indent rule). Expression-level `let` is emitted as TLA `LET` (not inlined). Multi-line list/set literals put one element per line.
+- Invariants preserve multi-line structure (nested `\A` / `\E`, boolean trees). Parentheses written in the `.jul` source are kept; other parentheses are omitted when operator precedence makes them unnecessary.
+- `initially` constructors (`initially` / `*_initially`) are emitted first after `Init`, both as operator definitions and as the leading disjuncts of `Next`.
+- Julay `fun`s referenced from Init/action guards or transit RHS (and their transitive callees) are emitted as TLA+ operators immediately above `Init`, each preceded by `\* fun`. Operator parameters that collide with `VARIABLES` / `CONSTANT`s / other module operators are renamed (`p_…`).
+- List slices `xs[a:b]` become calls to a module-level `splice` operator (defined above `Init` with a `\* splice` comment when any slice is used).
 
 ## Compiling specs
 
