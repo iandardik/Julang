@@ -1003,7 +1003,22 @@ class BinaryOpExprNode(
         val lhsType = lhsOperand.getType()
         val rhsType = rhsOperand.getType()
         val isStringConcat = op == "+" && (lhsType is StringType || rhsType is StringType)
-        julay.tools.assert(!forceString || isStringConcat, "Cannot force a binary boolean operator to a string")
+        // String coerce via `e + ""` / `"" + e` sets forceString on the non-string side.
+        // Nested arithmetic (e.g. `(n+1) + ""`) is not itself string-concat; stringify the
+        // normally-emitted Z3 term (same path as castFieldZ3 for Int fields).
+        if (forceString && !isStringConcat) {
+            val inner = toZ3GuardString(symbolTypes, argSymbols, forceString = false)
+            return when (val resultType = getType()) {
+                is IntType -> "ctx.intToString($inner as IntExpr)"
+                is BoolType ->
+                    throw RuntimeException("Cannot force a binary boolean operator to a string")
+                is RealType ->
+                    throw RuntimeException("Cannot convert a Real expression to a string")
+                is StringType -> inner
+                else ->
+                    "ctx.mkString((${toTransitString(symbolTypes, argSymbols)}).toString())"
+            }
+        }
 
         val forceStringOperands = forceString || isStringConcat
         val lhsGuardStr = lhsOperand.toZ3GuardString(symbolTypes, argSymbols, forceStringOperands)
