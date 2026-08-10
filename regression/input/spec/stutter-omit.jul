@@ -1,0 +1,23 @@
+proc Counter {
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit: n := 0
+    }
+
+    // Guard-only: no state change → omitted from TLA Next / action defs
+    transition noop() {
+        guard: n < 3
+    }
+
+    transition step() {
+        guard: n < 3
+        transit: n := n + 1
+    }
+}
+
+invariant Bound := Counter.n >= 0
+
+spec StutterOmit := Counter |= Bound
+
+compile StutterOmit

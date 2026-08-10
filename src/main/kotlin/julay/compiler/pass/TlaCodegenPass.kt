@@ -1032,16 +1032,18 @@ private fun buildTlaActions(
         name: String,
         offerList: List<TlaActionOffer>,
         comment: String? = null,
-    ) = emitConjoined(
-        name, offerList, allVars, stateVarsByLeaf, stateVarNames,
-        sessionPairForOffers(offerList, sessionPairs), sessionPairs, killTargets, comment,
-        returnToByOccurrence = returnToByOccurrence,
-        blockingByHost = blockingByHost,
-        hostsWithBlocking = hostsWithBlocking,
-        pclasses = pclasses,
-        leafSpecs = leafSpecs,
-        systemLeaves = leaves,
-    )
+    ) {
+        emitConjoined(
+            name, offerList, allVars, stateVarsByLeaf, stateVarNames,
+            sessionPairForOffers(offerList, sessionPairs), sessionPairs, killTargets, comment,
+            returnToByOccurrence = returnToByOccurrence,
+            blockingByHost = blockingByHost,
+            hostsWithBlocking = hostsWithBlocking,
+            pclasses = pclasses,
+            leafSpecs = leafSpecs,
+            systemLeaves = leaves,
+        )?.let { result += it }
+    }
 
     fun emitCoupled(offer: TlaActionOffer, site: ProcFunCallSite) {
         val hostLeaf = leafByTla.getValue(offer.leaf.tlaName)
@@ -1082,14 +1084,14 @@ private fun buildTlaActions(
                     name = actionName
                     comment = null
                 }
-                result += emit(name, listOf(prov, cli), comment)
+                emit(name, listOf(prov, cli), comment)
             }
             return@forEach
         }
 
         // 1 constructor + 1 default transition → one hybrid shared action
         if (constructors.size == 1 && defaults.size == 1) {
-            result += emit(actionName, listOf(defaults[0], constructors[0]))
+            emit(actionName, listOf(defaults[0], constructors[0]))
             return@forEach
         }
 
@@ -1121,7 +1123,7 @@ private fun buildTlaActions(
                 name = actionName
                 comment = null
             }
-            result += emit(name, listOf(offer), comment)
+            emit(name, listOf(offer), comment)
         }
 
         val disambiguateInternals = internals.size > 1
@@ -1136,7 +1138,7 @@ private fun buildTlaActions(
                 name = actionName
                 comment = null
             }
-            result += emit(name, listOf(offer), comment)
+            emit(name, listOf(offer), comment)
         }
 
         when {
@@ -1145,11 +1147,11 @@ private fun buildTlaActions(
                     (it.leaf.tlaName to it.decl.action.name) in splitHostActions
                 }
                 coupled.forEach { offer -> emitSplitOrPlain(offer) }
-                if (plain.isNotEmpty()) result += emit(actionName, plain)
+                if (plain.isNotEmpty()) emit(actionName, plain)
             }
             defaults.size == 1 -> {
                 val offer = defaults[0]
-                if (!emitSplitOrPlain(offer)) result += emit(actionName, defaults)
+                if (!emitSplitOrPlain(offer)) emit(actionName, defaults)
             }
         }
 
@@ -1165,7 +1167,7 @@ private fun buildTlaActions(
                     name = actionName
                     comment = null
                 }
-                result += emit(name, listOf(prov), comment)
+                emit(name, listOf(prov), comment)
             }
         }
         if (clients.isNotEmpty() && providers.isEmpty()) {
@@ -1180,7 +1182,7 @@ private fun buildTlaActions(
                     name = actionName
                     comment = null
                 }
-                result += emit(name, listOf(cli), comment)
+                emit(name, listOf(cli), comment)
             }
         }
     }
@@ -1241,7 +1243,7 @@ private fun emitConjoined(
     pclasses: Map<String, ProcClassNode> = emptyMap(),
     leafSpecs: Map<String, LeafSpecNode> = emptyMap(),
     systemLeaves: List<SpecLeaf> = emptyList(),
-): TlaAction {
+): TlaAction? {
     // Peer reads use class names (Peer.self); map unique class → occurrence tlaName.
     val stateVarNames = stateVarNamesIn.toMutableMap()
     systemLeaves.groupBy { it.name }.forEach { (cls, occs) ->
@@ -1584,6 +1586,10 @@ private fun emitConjoined(
     }
 
     val unchanged = allVars.filter { it !in changed }
+    // Guard-only / pure-stutter actions: no primed updates → omit (stuttering via [][Next]_vars).
+    if (changed.isEmpty()) {
+        return null
+    }
     if (unchanged.isNotEmpty()) {
         parts += "/\\ UNCHANGED <<${unchanged.joinToString(", ")}>>"
     }

@@ -190,18 +190,9 @@ class SpecTlaTlcSmokeTest {
                 tlaText.contains("\\E i \\in Int : \\E id \\in Int : spawnWorker(i, id)"),
                 "expected Next to quantify index then args;\n$tlaText",
             )
-            assertTrue(
-                tlaText.contains("work(i) =="),
-                "expected work(i) operator;\n$tlaText",
-            )
-            val workBody = tlaText.substringAfter("work(i) ==").substringBefore("\n\n")
-            assertTrue(
-                workBody.contains("/\\ Worker_constructed[i]"),
-                "work should require Worker_constructed[i];\n$tlaText",
-            )
-            assertTrue(
-                workBody.lines().none { it.trim() == "/\\ Server_constructed" },
-                "work should not require Server_constructed;\n$tlaText",
+            assertFalse(
+                tlaText.contains("work(i) ==") || Regex("""\\/\s+.*\bwork\b""").containsMatchIn(tlaText),
+                "guard-only work should be omitted from defs/Next;\n$tlaText",
             )
             assertTrue(
                 tlaText.contains("\\* State variables for Server") &&
@@ -211,10 +202,6 @@ class SpecTlaTlcSmokeTest {
             assertTrue(
                 tlaText.contains("Worker_id") && tlaText.contains("/\\ ready = FALSE"),
                 "id clashes with action arg so stays Worker_id; ready is bare;\n$tlaText",
-            )
-            assertTrue(
-                workBody.contains("/\\ (Worker_id[i] >= 0)"),
-                "work guard should use Worker_id[i];\n$tlaText",
             )
             assertTrue(
                 tlaText.contains("\\* initially constructor on Server") &&
@@ -409,6 +396,37 @@ class SpecTlaTlcSmokeTest {
         } finally {
             File("StringCoerce.tla").delete()
             File("StringCoerce.cfg").delete()
+        }
+    }
+
+    @Test
+    fun guardOnlyActionOmittedFromTla() {
+        val source = File("regression/input/spec/stutter-omit.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        try {
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("StutterOmit.tla")
+            assertTrue(tla.exists(), "expected StutterOmit.tla")
+            val tlaText = tla.readText()
+            assertTrue(
+                tlaText.contains("step =="),
+                "expected state-changing step action;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("\\/ step"),
+                "expected step in Next;\n$tlaText",
+            )
+            assertFalse(
+                tlaText.contains("noop =="),
+                "guard-only noop should be omitted from action defs;\n$tlaText",
+            )
+            assertFalse(
+                Regex("""\\/\s+noop\b""").containsMatchIn(tlaText),
+                "guard-only noop should be omitted from Next;\n$tlaText",
+            )
+        } finally {
+            File("StutterOmit.tla").delete()
+            File("StutterOmit.cfg").delete()
         }
     }
 

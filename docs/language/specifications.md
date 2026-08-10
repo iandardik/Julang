@@ -224,6 +224,7 @@ When a spec includes **two-sided** session actions (both peer classes appear as 
 
 - `*_killed` — only for leaves that are a `killSessionPeer(Peer)` peer target somewhere in the module. Those leaves also get `~killed` enablement gates, and their `*_dead` includes a kill disjunct. Specs with no `killSessionPeer` omit all `*_killed` variables.
 - `sessionException` and `SessionIntegrity == ~sessionException` (checked in the `.cfg`) — only when a **session constructor** action exists (models rebind `JulayException`). Transition-only or exit-only session specs omit them. A stdlib Timer bug caught by `SessionIntegrity` is written up under [Bugs found with Julay](../examples/bugs-found-with-julay.md).
+- Actions whose TLA body updates no variables (guard-only / no primed updates) are omitted from action definitions and from `Next`; stuttering remains via `[][Next]_vars`. Constructors, session sticky/teardown, and procfun terminate still update bookkeeping vars and are kept.
 
 **Effect mapping** (`before:` / `after:` session teardown calls):
 
