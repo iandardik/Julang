@@ -251,8 +251,8 @@ expr
     | <assoc=right> expr IMPLIES expr
     // Biconditional binds looser than implication
     | expr IFF expr
-    | IF LPAREN expr RPAREN LCURLY expr RCURLY ELSE LCURLY expr RCURLY
-    | LET LPAREN ID COLON typeExpr ASGN_EQ expr RPAREN LCURLY expr RCURLY
+    | IF LPAREN expr RPAREN (LCURLY expr RCURLY | expr) ELSE (LCURLY expr RCURLY | expr)
+    | LET LPAREN ID COLON typeExpr ASGN_EQ expr RPAREN (LCURLY expr RCURLY | expr)
     | WHEN LPAREN expr RPAREN LCURLY when_subject_arm+ RCURLY
     | WHEN LCURLY when_guard_arm+ RCURLY
     | ALL ID COLON typeExpr COMMA expr

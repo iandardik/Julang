@@ -3,7 +3,7 @@ proc S {
 
     constructor initially(args : List<String>) {
         transit:
-            x := let (_ : Int := 1) { _ }
+            x := let (_ : Int := 1) _
     }
 }
 

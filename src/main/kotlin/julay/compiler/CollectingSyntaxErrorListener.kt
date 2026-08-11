@@ -38,12 +38,11 @@ internal fun rewriteSyntaxError(
     offendingSymbol: Any? = null,
     recognizer: Recognizer<*, *>? = null,
 ): String {
-    val thenAfterIf = Regex(
-        """extraneous input 'then' expecting '\{'""",
-        RegexOption.IGNORE_CASE,
-    )
-    if (thenAfterIf.containsMatchIn(msg)) {
-        return "Unexpected \"then\" after if-condition; write if (cond) { ... } else { ... } " +
+    if (looksLikeThenAfterIf(offendingSymbol, recognizer) ||
+        Regex("""extraneous input 'then' expecting""", RegexOption.IGNORE_CASE).containsMatchIn(msg) ||
+        Regex("""mismatched input 'then'""", RegexOption.IGNORE_CASE).containsMatchIn(msg)
+    ) {
+        return "Unexpected \"then\" after if-condition; write if (cond) expr else expr " +
             "(Julay if-expressions do not use \"then\")"
     }
     // `name := ...` where grammar requires `name : Type := ...` (let / var / arg, etc.)
@@ -106,6 +105,52 @@ internal fun rewriteSyntaxError(
     }
 
     return "Syntax error: $msg"
+}
+
+/**
+ * Detect `if (...) then` — `then` is parsed as an identifier expression, so the
+ * first syntax error may land later (e.g. on the then-branch body).
+ */
+private fun looksLikeThenAfterIf(
+    offendingSymbol: Any?,
+    recognizer: Recognizer<*, *>?,
+): Boolean {
+    val token = offendingSymbol as? Token ?: return false
+    val parser = recognizer as? Parser ?: return false
+    val stream = parser.tokenStream ?: return false
+    // Collect recent default-channel tokens up to and including a nearby "then" ID.
+    val recent = mutableListOf<Token>()
+    var i = token.tokenIndex
+    while (i >= 0 && recent.size < 40) {
+        val t = stream.get(i)
+        if (t.channel == Token.DEFAULT_CHANNEL) {
+            recent.add(t)
+        }
+        i--
+    }
+    recent.reverse()
+    // Find ID "then" followed eventually by our error region; require IF ... RPAREN before it.
+    for (idx in recent.indices) {
+        val t = recent[idx]
+        if (t.type != JulayLexer.ID || t.text != "then") continue
+        // Look left for IF ... RPAREN immediately before this then
+        var j = idx - 1
+        while (j >= 0 && recent[j].channel != Token.DEFAULT_CHANNEL) j--
+        if (j < 0 || recent[j].type != JulayLexer.RPAREN) continue
+        var k = j - 1
+        var depth = 1
+        while (k >= 0 && depth > 0) {
+            when (recent[k].type) {
+                JulayLexer.RPAREN -> depth++
+                JulayLexer.LPAREN -> depth--
+            }
+            k--
+        }
+        // k now before matching LPAREN; previous should be IF
+        while (k >= 0 && recent[k].channel != Token.DEFAULT_CHANNEL) k--
+        if (k >= 0 && recent[k].type == JulayLexer.IF) return true
+    }
+    return false
 }
 
 /**

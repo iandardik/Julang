@@ -3,7 +3,7 @@ proc S {
 
     constructor initially(args : List<String>) {
         transit:
-            x := if (true) { 0 } else { false }
+            x := if (true) 0 else false
     }
 }
 

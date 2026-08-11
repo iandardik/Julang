@@ -69,7 +69,7 @@ proc ElectionTimeoutImpl {
         guard:
             step ~= "done"
         transit:
-            step := if (step = "wait") { "cancel" } else { step }
+            step := if (step = "wait") "cancel" else step
     }
 
     transition stopElectionTimeout(t : Int) {

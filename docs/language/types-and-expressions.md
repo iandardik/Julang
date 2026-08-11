@@ -45,7 +45,7 @@ Declares a finite homogeneous domain for **spec index, quantifier, and leaf-spec
 - Membership: `in`
 - Quantifiers (especially in invariants): `all`, `exists`
 
-Example:
+Example (braces optional; useful for multi-line arms):
 
 ```jul
 targetNumReqs := if (length(args) > 0) {
@@ -55,16 +55,22 @@ targetNumReqs := if (length(args) > 0) {
 }
 ```
 
+One-line form:
+
+```jul
+n := if (ready) 1 else 0
+```
+
 ### Expression `let`
 
-Syntax: `let (name : Type := init) { body }`.
+Syntax: `let (name : Type := init) body`, or `let (name : Type := init) { body }` when you want braces (e.g. multi-line body).
 
 - `init` is typed in the outer environment (the bound name is not in scope there, unless it shadows an outer symbol of the same name).
 - `body` is typed with `name` in scope; the whole `let` has the type of `body`.
 - Allowed anywhere an expression is allowed: guards, transit RHS, returns, nested expressions.
 
 ```jul
-x := let (inc : Int := 2) { inc + 3 }
+x := let (inc : Int := 2) inc + 3
 ```
 
 To share one binding across **multiple** transit assignments, use a [transit statement `let`](effects.md#transit-statement-let) instead.

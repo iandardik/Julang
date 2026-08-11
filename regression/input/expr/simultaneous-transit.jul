@@ -28,7 +28,7 @@ proc SimultaneousTransitDemo {
             x := x + 1
             y := x
             peersLeft := peersLeft - 1
-            step := if (peersLeft - 1 = 0) { "doneRound" } else { "ready" }
+            step := if (peersLeft - 1 = 0) "doneRound" else "ready"
             print := true
     }
 

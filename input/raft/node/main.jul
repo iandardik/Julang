@@ -48,7 +48,7 @@ procfun parseCfg(cfg : String, myIdx : Int) : CfgPair {
             } else {
                 clusterBuilder
             }
-            entryIdx := if (isEntry) { entryIdx + 1 } else { entryIdx }
+            entryIdx := if (isEntry) entryIdx + 1 else entryIdx
             idx := idx + 1
     }
 

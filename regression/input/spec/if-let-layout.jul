@@ -22,7 +22,7 @@ proc Nest {
             } else {
                 x
             }
-            y := let (a : Int := 1) { a + y }
+            y := let (a : Int := 1) a + y
     }
 }
 

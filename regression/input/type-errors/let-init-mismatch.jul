@@ -8,7 +8,7 @@ proc S {
 
     constructor initially(args : List<String>) {
         transit:
-            p := let (n : Point := true) { n }
+            p := let (n : Point := true) n
     }
 }
 

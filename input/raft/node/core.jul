@@ -97,7 +97,7 @@ export proc RaftProtocol {
                 let (nextLogIndex : Int := nextIndex[target.id]) {
                 // prevLogIndex is the previous entry's index, or -1 if none
                 let (prevLogIndex : Int := nextLogIndex - 1) {
-                let (prevLogTerm : Int := if (nextLogIndex > 0) { entryTermAt(log, prevLogIndex) } else { 0 }) {
+                let (prevLogTerm : Int := if (nextLogIndex > 0) entryTermAt(log, prevLogIndex) else 0) {
                     AppendEntriesData {
                         term := currentTerm,
                         leaderId := self.id,
@@ -178,7 +178,7 @@ export proc RaftProtocol {
                 & (voteGranted <=> voteCondition)
             }}
         transit:
-            votedFor := if (voteGranted) { candidateId } else { votedFor }
+            votedFor := if (voteGranted) candidateId else votedFor
     }
 
     provider transition handleRequestVoteResponse(peerId : Int, term : Int, granted : Boolean) {
@@ -186,7 +186,7 @@ export proc RaftProtocol {
             & state = "Candidate"
             & term = currentTerm
         transit:
-            votesGranted := if (granted) { votesGranted + setOf(peerId) } else { votesGranted }
+            votesGranted := if (granted) votesGranted + setOf(peerId) else votesGranted
             votesResponded := votesResponded + setOf(peerId)
     }
 
@@ -252,9 +252,9 @@ export proc RaftProtocol {
             let index : Int := prevLogIndex + 1
             let alreadyDone : Boolean :=
                 success & entriesLen = 1 & length(log) > index & entryTermAt(log, index) = entryTerm
-            knownLeaderId := if (success) { leaderId } else { knownLeaderId }
+            knownLeaderId := if (success) leaderId else knownLeaderId
             // Matching-term AE: Candidate -> Follower, accept or reject.
-            state := if (inTerm = currentTerm) { "Follower" } else { state }
+            state := if (inTerm = currentTerm) "Follower" else state
             // accept paths, one-shot for sync RPC: already-done | conflict truncate+append | append.
             log := if (success & entriesLen = 1) {
                 if (alreadyDone) {
@@ -275,8 +275,8 @@ export proc RaftProtocol {
                 lastLogTermVar
             }
             commitIndex := if (success & leaderCommit > commitIndex) {
-                let (lastNew : Int := if (entriesLen = 1) { prevLogIndex + 1 } else { length(log) - 1 }) {
-                    if (leaderCommit < lastNew) { leaderCommit } else { lastNew }
+                let (lastNew : Int := if (entriesLen = 1) prevLogIndex + 1 else length(log) - 1) {
+                    if (leaderCommit < lastNew) leaderCommit else lastNew
                 }
             } else {
                 commitIndex
@@ -311,10 +311,10 @@ export proc RaftProtocol {
             let _ : Boolean := if (advance) {
                 ElectionTimeout.startElectionTimeout(self, inTerm)
             } else { true }
-            currentTerm := if (advance) { inTerm } else { currentTerm }
-            state := if (advance) { "Follower" } else { state }
-            votedFor := if (advance) { -1 } else { votedFor }
-            knownLeaderId := if (advance) { -1 } else { knownLeaderId }
+            currentTerm := if (advance) inTerm else currentTerm
+            state := if (advance) "Follower" else state
+            votedFor := if (advance) -1 else votedFor
+            knownLeaderId := if (advance) -1 else knownLeaderId
             votesGranted := if (advance) {
                 // TODO hack to get an empty set, since that doesn't compile for some reason
                 votesGranted - votesGranted

@@ -52,8 +52,8 @@ proc LeaderHeartbeatImpl {
             let newSentThisRound : Set<Node> := sentThisRound + setOf(target)
             // Finish the full heartbeat round before sleeping so every follower
             // is contacted within one election-timeout window.
-            sentThisRound := if (length(newSentThisRound) = length(cluster)) { {me} } else { newSentThisRound }
-            step := if (length(newSentThisRound) = length(cluster)) { "sleep" } else { "pickTarget" }
+            sentThisRound := if (length(newSentThisRound) = length(cluster)) setOf(me) else newSentThisRound
+            step := if (length(newSentThisRound) = length(cluster)) "sleep" else "pickTarget"
     }
 
     // terminate this proc once we detect a stale term

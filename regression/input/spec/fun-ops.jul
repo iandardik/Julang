@@ -7,7 +7,7 @@ obj Entry {
 }
 
 fun entryTermAt(log : List<Entry>, idx : Int) : Int =
-    let (e : Entry := log[idx]) { e.term }
+    let (e : Entry := log[idx]) e.term
 
 fun bumpTerm(t : Int) : Int =
     entryTermAt(listOf(Entry { term := t, value := "" }), 0) + 1

@@ -11,7 +11,7 @@ proc Main {
             // Prior transit let forces substituteExpr on later RHSs — must preserve
             // Api.fn resolution on MethodCallExprNode copies.
             let flag : Boolean := true
-            out := if (flag) { HelperApi.helper(1) } else { 0 }
+            out := if (flag) HelperApi.helper(1) else 0
             done := false
     }
 

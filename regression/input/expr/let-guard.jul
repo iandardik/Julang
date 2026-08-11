@@ -13,9 +13,9 @@ proc S {
 
     transition increment(inc : Int) {
         guard:
-            ~print & let (step : Int := inc + 1) { step = 2 } & x = 0
+            ~print & let (step : Int := inc + 1) step = 2 & x = 0
         transit:
-            x := let (delta : Int := inc) { x + delta }
+            x := let (delta : Int := inc) x + delta
             print := true
     }
 

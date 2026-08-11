@@ -15,8 +15,8 @@ proc TransitLet {
         guard: true
         transit:
             let alreadyDone : Boolean := flag & n > 0
-            n := if (alreadyDone) { n } else { n + 1 }
-            flag := if (alreadyDone) { flag } else { true }
+            n := if (alreadyDone) n else n + 1
+            flag := if (alreadyDone) flag else true
     }
 }
 

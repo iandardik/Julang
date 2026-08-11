@@ -28,9 +28,9 @@ proc RaftClientLogic {
         transit:
             targetUrl := args[0]
             command := args[1]
-            value := if (length(args) > 2) { args[2] } else { "" }
-            path := if (args[1] = "append") { "/client/append" } else { "/client/get" }
-            reqBody := if (args[1] = "append") { args[2] } else { "" }
+            value := if (length(args) > 2) args[2] else ""
+            path := if (args[1] = "append") "/client/append" else "/client/get"
+            reqBody := if (args[1] = "append") args[2] else ""
             respBody := ""
             respCode := 0
             retried := false

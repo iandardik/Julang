@@ -39,10 +39,10 @@ export obj AppendEntriesData {
 }
 
 export fun entryValueAt(log : List<Entry>, idx : Int) : String =
-    let (e : Entry := log[idx]) { e.value }
+    let (e : Entry := log[idx]) e.value
 
 export fun entryTermAt(log : List<Entry>, idx : Int) : Int =
-    let (e : Entry := log[idx]) { e.term }
+    let (e : Entry := log[idx]) e.term
 
 fun isQuorum(n : Int, granted : Set<Int>) : Boolean =
     length(granted) * 2 > n
@@ -54,7 +54,7 @@ export fun encodeRequestVote(data : VoteRequestData) : String =
     "term=" + data.term + "|candidateId=" + data.candidateId + "|lastLogIndex=" + data.lastLogIndex + "|lastLogTerm=" + data.lastLogTerm
 
 export fun encodeRequestVoteResp(term : Int, voteGranted : Boolean) : String =
-    "term=" + term + "|voteGranted=" + if (voteGranted) { "true" } else { "false" }
+    "term=" + term + "|voteGranted=" + if (voteGranted) "true" else "false"
 
 export fun encodeAppendEntries(data : AppendEntriesData) : String =
     "term=" + data.term
@@ -68,7 +68,7 @@ export fun encodeAppendEntries(data : AppendEntriesData) : String =
 
 export fun encodeAppendEntriesResp(term : Int, success : Boolean, matchIndex : Int) : String =
     "term=" + term
-        + "|success=" + if (success) { "true" } else { "false" }
+        + "|success=" + if (success) "true" else "false"
         + "|matchIndex=" + matchIndex
 
 export fun isBlankOrComment(line : String) : Boolean =

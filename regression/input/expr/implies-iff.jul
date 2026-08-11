@@ -1,7 +1,7 @@
 import julay.funlib.exitProcess
 import julay.funlib.println
 
-fun bstr(b : Boolean) : String = if (b) { "T" } else { "F" }
+fun bstr(b : Boolean) : String = if (b) "T" else "F"
 
 proc S {
     var out : String

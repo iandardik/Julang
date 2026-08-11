@@ -12,7 +12,7 @@ Compact cheat sheet. For explanations, use the other chapters.
 `all` `exists` `if` `else` `let` `when` `in` `to`  
 `true` `false` `listOf` `setOf` `mapOf`
 
-`let` has two forms: expression `let (name : Type := init) { body }` ([Types and expressions](types-and-expressions.md#expression-let)) and transit statement `let name : Type := expr` ([Side effects](effects.md#transit-statement-let)).
+`let` has two forms: expression `let (name : Type := init) body` (braces optional; [Types and expressions](types-and-expressions.md#expression-let)) and transit statement `let name : Type := expr` ([Side effects](effects.md#transit-statement-let)).
 
 `to` is only legal inside `mapOf(...)`. `listOf` / `setOf` / `mapOf` require `import julay.funlib.<name>`.
 

@@ -15,7 +15,7 @@ proc S {
         guard:
             print & x = 0
         transit:
-            x := let (x : Int := x + 1) { x }
+            x := let (x : Int := x + 1) x
             print := false
     }
 

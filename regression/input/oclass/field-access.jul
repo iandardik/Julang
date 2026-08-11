@@ -18,7 +18,7 @@ proc Worker {
                 cur.x = newPos.x & cur.y = newPos.y
             }
         transit:
-            pos := let (next : Point := newPos) { next }
+            pos := let (next : Point := newPos) next
     }
 
     internal transition reportX(expected : Int) {
