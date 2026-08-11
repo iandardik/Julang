@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 
 obj Point {
     x : Int
@@ -44,7 +44,7 @@ proc Worker {
     internal transition exitSystem() {
         guard: count = 5
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

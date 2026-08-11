@@ -4,7 +4,7 @@ import julay.funlib.trim
 import julay.funlib.portFromUrl
 import julay.funlib.startsWith
 import julay.funlib.length
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 
 proc StringFileDemo {
@@ -69,7 +69,7 @@ proc StringFileDemo {
             phase = 5 & line = "hello-config"
         after:
             println(line + ":" + port)
-            exitProcess()
+            exitProgram(0)
     }
 }
 

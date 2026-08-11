@@ -176,16 +176,20 @@ object FunBuiltinRegistry {
         z3Codegen = { _ -> throw RuntimeException("Function \"println\" cannot be used in guards") },
     )
 
-    private val exitProcessBuiltin = FunBuiltin(
-        name = "exitProcess",
-        arity = 0,
+    private val exitProgramBuiltin = FunBuiltin(
+        name = "exitProgram",
+        arity = 1,
         returnType = null,
         checkArgs = { argTypes ->
-            if (argTypes.isEmpty()) null
-            else "Expected function \"exitProcess\" to take 0 argument(s) but got ${argTypes.size}"
+            when {
+                argTypes.size != 1 -> "Expected function \"exitProgram\" to take 1 argument(s) but got ${argTypes.size}"
+                argTypes[0] !is IntType ->
+                    "Expected argument of \"exitProgram\" to have an Int type but got ${argTypes[0]}"
+                else -> null
+            }
         },
-        kotlinCodegen = { _ -> "exitProcess(0)" },
-        z3Codegen = { _ -> throw RuntimeException("Function \"exitProcess\" cannot be used in guards") },
+        kotlinCodegen = { args -> "exitProcess(${args[0]})" },
+        z3Codegen = { _ -> throw RuntimeException("Function \"exitProgram\" cannot be used in guards") },
     )
 
     private val readlnBuiltin = FunBuiltin(
@@ -339,7 +343,7 @@ object FunBuiltinRegistry {
         portFromUrlBuiltin.name to portFromUrlBuiltin,
         startsWithBuiltin.name to startsWithBuiltin,
         printlnBuiltin.name to printlnBuiltin,
-        exitProcessBuiltin.name to exitProcessBuiltin,
+        exitProgramBuiltin.name to exitProgramBuiltin,
         readlnBuiltin.name to readlnBuiltin,
         delaySecondsBuiltin.name to delaySecondsBuiltin,
         exitSessionBuiltin.name to exitSessionBuiltin,

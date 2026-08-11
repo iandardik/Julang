@@ -1,5 +1,5 @@
 import julay.funlib.println
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.listOf
 import julay.funlib.mapOf
 import julay.funlib.setOf
@@ -61,7 +61,7 @@ proc SetOclassInDemo {
         guard:
             ~print & ok
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

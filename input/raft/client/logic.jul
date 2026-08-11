@@ -2,7 +2,7 @@ import julay.proclib.HttpClient
 import julay.funlib.length
 import julay.funlib.split
 import julay.funlib.startsWith
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 
 /*
@@ -91,7 +91,7 @@ proc RaftClientLogic {
     internal transition doneOk() {
         guard: step = "done"
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

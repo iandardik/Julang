@@ -1,5 +1,5 @@
 import julay.funlib.parseInt
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 
 proc ParseIntDemo {
@@ -25,7 +25,7 @@ proc ParseIntDemo {
         guard:
             ~print & n = 42
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

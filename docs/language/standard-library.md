@@ -40,7 +40,7 @@ Import as `julay.funlib.<name>`. Bare names are not available without an import.
 | `readFile` | Read file contents → `String` | **Yes** (file I/O; TLA+ havocs) | **No** |
 | `println` | Print a line (void) | **Yes** (stdout) | **No** |
 | `readln` | Read a line → `String` | **Yes** (stdin; TLA+ havocs) | **No** |
-| `exitProcess` | Halt the process (void) | **Yes** | **No** |
+| `exitProgram` | Halt the program with an `Int` return code (void) | **Yes** | **No** |
 | `delaySeconds` | Sleep for N seconds (void) | **Yes** | **No** |
 | `exitSession` | End session with named peer class (void; transition-only) | **Yes** | **No** |
 | `killSessionPeer` | End session and cancel peer (void; transition-only) | **Yes** | **No** |

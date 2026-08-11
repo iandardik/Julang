@@ -1,5 +1,5 @@
 import julay.funlib.length
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 import julay.funlib.listOf
 import julay.funlib.splice
@@ -63,7 +63,7 @@ proc ListSliceDemo {
         guard:
             phase = 4
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

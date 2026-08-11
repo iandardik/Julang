@@ -1,6 +1,6 @@
 import funmath.add
 import funmath.id
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 
 fun double(n : Int) : Int = add(id(n), id(n))
@@ -36,7 +36,7 @@ proc S {
         guard:
             ~print & x > 0
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

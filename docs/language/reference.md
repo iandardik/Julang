@@ -68,7 +68,7 @@ Procfuns cannot appear in `||`. List them in an [api](composition-and-actions.md
 Pure / expression helpers: `length` · `max` · `min` · `parseInt` · `startsWith` · `split` · `trim` · `portFromUrl`  
 (`split` / `trim` / `portFromUrl`: not for guards)
 
-Effectful: `println` · `readln` · `readFile` · `exitProcess` · `delaySeconds` · `exitSession(Peer)` · `killSessionPeer(Peer)`  
+Effectful: `println` · `readln` · `readFile` · `exitProgram(code)` · `delaySeconds` · `exitSession(Peer)` · `killSessionPeer(Peer)`  
 (`exitSession` / `killSessionPeer`: transitions only; Peer is a leaf proc-class name; no-op if affinity absent)
 
 Full tables: [Standard library](standard-library.md). Calling conventions: [Side effects](effects.md).

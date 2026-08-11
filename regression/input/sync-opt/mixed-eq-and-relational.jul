@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 
 /*
@@ -34,7 +34,7 @@ proc Q {
     internal transition exitSystem() {
         guard: done
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

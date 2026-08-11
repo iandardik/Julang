@@ -1,5 +1,5 @@
 import julay.funlib.length
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.mapOf
 
 proc MapEmptyDemo {
@@ -23,7 +23,7 @@ proc MapEmptyDemo {
         guard:
             done
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

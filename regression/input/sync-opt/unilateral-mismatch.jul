@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 
 /*
@@ -14,7 +14,7 @@ proc A {
         guard: n = 1
         after:
             println("A")
-            exitProcess()
+            exitProgram(0)
     }
 }
 
@@ -27,7 +27,7 @@ proc B {
         guard: n = 2
         after:
             println("B")
-            exitProcess()
+            exitProgram(0)
     }
 }
 

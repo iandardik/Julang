@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 
 fun add(x : Int, y : Int) : Int = x + y
@@ -36,7 +36,7 @@ proc S {
         guard:
             ~print & x > 0
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

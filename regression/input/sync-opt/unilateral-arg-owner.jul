@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 
 /*
@@ -27,7 +27,7 @@ proc Hub {
     internal transition exitSystem() {
         guard: done & seen = 3
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

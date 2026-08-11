@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.mapOf
 
 proc BadMap {
@@ -12,7 +12,7 @@ proc BadMap {
     internal transition exitSystem() {
         guard: true
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

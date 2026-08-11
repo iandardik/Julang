@@ -665,7 +665,7 @@ class AlphabetJsonTest {
         val file = dir.resolve("main.jul")
         file.writeText(
             """
-            import julay.funlib.exitProcess
+            import julay.funlib.exitProgram
             import julay.funlib.println
 
             proc S {

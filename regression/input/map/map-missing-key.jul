@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.mapOf
 
 proc MapMissingKey {
@@ -22,7 +22,7 @@ proc MapMissingKey {
         guard:
             false
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

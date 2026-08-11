@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 
 obj Point {
     x : Int
@@ -31,7 +31,7 @@ proc Worker {
             & pos.x = 11
             & pos.y = 22
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

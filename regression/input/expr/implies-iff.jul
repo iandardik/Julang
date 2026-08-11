@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 
 fun bstr(b : Boolean) : String = if (b) "T" else "F"
@@ -35,7 +35,7 @@ proc S {
         guard:
             ~print
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

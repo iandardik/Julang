@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 
 /*
@@ -39,7 +39,7 @@ proc LetStmtSimultaneousDemo {
         guard:
             ~print & x = 10 & y = 11
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

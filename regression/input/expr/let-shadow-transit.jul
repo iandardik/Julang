@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 
 proc S {
@@ -32,7 +32,7 @@ proc S {
         guard:
             print & x > 0
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

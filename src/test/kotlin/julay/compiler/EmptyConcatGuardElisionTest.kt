@@ -16,7 +16,7 @@ class EmptyConcatGuardElisionTest {
             val src = dir.resolve("coerce.jul")
             src.writeText(
                 """
-                import julay.funlib.exitProcess
+                import julay.funlib.exitProgram
                 import julay.funlib.println
 
                 proc S {
@@ -37,7 +37,7 @@ class EmptyConcatGuardElisionTest {
                     internal transition exitSystem() {
                         guard: done
                         after:
-                            exitProcess()
+                            exitProgram(0)
                     }
                 }
                 proc T {
@@ -82,7 +82,7 @@ class EmptyConcatGuardElisionTest {
             val src = dir.resolve("nested.jul")
             src.writeText(
                 """
-                import julay.funlib.exitProcess
+                import julay.funlib.exitProgram
                 import julay.funlib.println
 
                 proc S {
@@ -103,7 +103,7 @@ class EmptyConcatGuardElisionTest {
                     internal transition exitSystem() {
                         guard: done
                         after:
-                            exitProcess()
+                            exitProgram(0)
                     }
                 }
                 proc T {

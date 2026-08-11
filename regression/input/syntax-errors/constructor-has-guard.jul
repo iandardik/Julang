@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 
 proc S {
     var x : Int
@@ -12,7 +12,7 @@ proc S {
 
     internal transition done() {
         guard: true
-        after: exitProcess()
+        after: exitProgram(0)
     }
 }
 

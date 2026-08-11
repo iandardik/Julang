@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 
 obj Box<T> {
     value : T
@@ -35,7 +35,7 @@ proc Worker {
         guard:
             steps = 2
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

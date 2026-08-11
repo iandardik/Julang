@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 import api_calls_provider.HelperApi
 
@@ -17,7 +17,7 @@ proc Main {
         transit: done := true
         after:
             println(out + "")
-            exitProcess()
+            exitProgram(0)
     }
 }
 

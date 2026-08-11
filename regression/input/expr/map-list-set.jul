@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 import julay.funlib.map
 import julay.funlib.length
@@ -64,7 +64,7 @@ proc MapListSetTest {
     internal transition exitSystem() {
         guard: step = "done"
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

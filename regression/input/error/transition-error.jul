@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 
 proc S {
     var x : Int
@@ -16,7 +16,7 @@ proc S {
         transit:
             x := x + 1
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

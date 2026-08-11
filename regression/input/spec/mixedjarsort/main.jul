@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 import protocol.Sys
 
@@ -17,7 +17,7 @@ proc Peer {
 
     internal transition exitSystem() {
         guard: done
-        after: exitProcess()
+        after: exitProgram(0)
     }
 }
 

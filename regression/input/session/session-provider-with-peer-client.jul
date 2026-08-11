@@ -1,9 +1,9 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 
 proc A {
     constructor initially(args : List<String>) {
         after:
-            exitProcess()
+            exitProgram(0)
         transit:
     }
 

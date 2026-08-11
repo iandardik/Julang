@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.listOf
 import julay.funlib.splice
 
@@ -15,7 +15,7 @@ proc BadSlice {
     internal transition exitSystem() {
         guard: true
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

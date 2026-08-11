@@ -1,6 +1,6 @@
 import julay.funlib.length
 import julay.funlib.println
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.listOf
 
 proc ListIndexAssignDemo {
@@ -41,7 +41,7 @@ proc ListIndexAssignDemo {
         guard:
             ~print & n = 9 & xs[0] = 1 & xs[1] = 9 & xs[2] = 3
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

@@ -1,6 +1,6 @@
 import julay.proclib.HttpServer
 import julay.funlib.delaySeconds
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 
 proc Counter {
@@ -111,7 +111,7 @@ proc IncReqHandler {
     internal transition exitSystem() {
         guard: exit & (step = "D")
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

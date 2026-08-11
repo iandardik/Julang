@@ -1,6 +1,6 @@
 import julay.funlib.max
 import julay.funlib.min
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 
 proc S {
@@ -37,7 +37,7 @@ proc S {
         guard:
             ~print & done & x = 3
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

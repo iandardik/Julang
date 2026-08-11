@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 
 /*
@@ -45,7 +45,7 @@ proc SimultaneousTransitDemo {
         guard:
             ~print & x = 6 & y = 5 & peersLeft = 0 & step = "doneRound"
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

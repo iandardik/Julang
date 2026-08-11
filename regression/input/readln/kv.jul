@@ -1,4 +1,4 @@
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.println
 import julay.funlib.readln
 
@@ -50,7 +50,7 @@ proc FrontEnd {
         guard:
             keyReq = "exit"
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

@@ -1,6 +1,6 @@
 import julay.funlib.length
 import julay.funlib.println
-import julay.funlib.exitProcess
+import julay.funlib.exitProgram
 import julay.funlib.mapOf
 
 proc MapStringIntDemo {
@@ -49,7 +49,7 @@ proc MapStringIntDemo {
         guard:
             print & n = 3 & mp["c"] = 3
         after:
-            exitProcess()
+            exitProgram(0)
     }
 }
 

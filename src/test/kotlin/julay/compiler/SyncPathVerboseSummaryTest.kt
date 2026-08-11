@@ -16,7 +16,7 @@ class SyncPathVerboseSummaryTest {
         val file = dir.resolve("sync-path.jul")
         file.toFile().writeText(
             """
-            import julay.funlib.exitProcess
+            import julay.funlib.exitProgram
 
             proc FastPeer {
                 var done : Boolean
@@ -32,7 +32,7 @@ class SyncPathVerboseSummaryTest {
                 internal transition exitSystem() {
                     guard: done
                     after:
-                        exitProcess()
+                        exitProgram(0)
                 }
             }
             proc RelPeer {
@@ -49,7 +49,7 @@ class SyncPathVerboseSummaryTest {
                 internal transition exitSystem() {
                     guard: done
                     after:
-                        exitProcess()
+                        exitProgram(0)
                 }
             }
             proc SyncPathDemo := FastPeer || RelPeer

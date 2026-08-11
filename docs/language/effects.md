@@ -3,7 +3,7 @@
 In Julay, side effects are not ambient language primitives. They come from the **standard library** in one of two ways:
 
 1. **Library processes** that perform effects (for example `HttpServer`, `Timer`) — compose them into your system and synchronize on their actions.
-2. **Library functions** that perform effects (for example `println()`, `readln()`, `exitProcess()`) — import them from `julay.funlib` and call them from action bodies (`before:` / `after:` for void effects; `transit:` RHS for value-returning IO).
+2. **Library functions** that perform effects (for example `println()`, `readln()`, `exitProgram(code)`) — import them from `julay.funlib` and call them from action bodies (`before:` / `after:` for void effects; `transit:` RHS for value-returning IO).
 
 Which procs and functions are effectful is listed in [Standard library](standard-library.md).
 
