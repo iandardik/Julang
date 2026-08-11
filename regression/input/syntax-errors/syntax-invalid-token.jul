@@ -1,4 +1,4 @@
-p-classx S {
+procx S {
     var x : Int
 
     constructor initially(args : List<String>) {

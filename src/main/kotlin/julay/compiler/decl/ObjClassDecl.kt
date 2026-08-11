@@ -6,11 +6,11 @@ import julay.program.type.*
 import julay.program.action.*
 
 /**
- * A fully resolved o-class declaration, ready for code generation.
+ * A fully resolved obj declaration, ready for code generation.
  *
  * Field types are concrete [Type] values (primitives or [ObjClassType] for nested structs).
- * Produced by [ObjClassRegistry.build] after all cross-references between o-classes have
- * been resolved. Includes nullary o-classes and monomorphized parametric instantiations.
+ * Produced by [ObjClassRegistry.build] after all cross-references between objs have
+ * been resolved. Includes nullary objs and monomorphized parametric instantiations.
  */
 data class ObjClassDecl(
     val name: String,
@@ -19,9 +19,9 @@ data class ObjClassDecl(
 )
 
 /**
- * An unresolved o-class declaration collected from the AST.
+ * An unresolved obj declaration collected from the AST.
  *
- * Field types are [TypeExpr] trees. Parametric o-classes carry [typeParams]; nullary ones
+ * Field types are [TypeExpr] trees. Parametric objs carry [typeParams]; nullary ones
  * have an empty list. Resolution / monomorphization happens in [ObjClassRegistry].
  */
 data class RawObjClassDecl(

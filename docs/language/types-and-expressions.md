@@ -102,4 +102,4 @@ Collection methods (`.filter`, `.map`, `.fold`), properties (`.keys`, `.length`)
 - [Reference](reference.md)
 - [Collections](collections.md)
 - [Standard library](standard-library.md) — funlib catalog including `map`
-- Regression coverage under [`regression/input/list/`](../../regression/input/list/), [`map/`](../../regression/input/map/), [`set/`](../../regression/input/set/), [`oclass/`](../../regression/input/oclass/), [`expr/`](../../regression/input/expr/)
+- Regression coverage under [`regression/input/list/`](../../regression/input/list/), [`map/`](../../regression/input/map/), [`set/`](../../regression/input/set/), [`obj` fixtures](../../regression/input/oclass/), [`expr/`](../../regression/input/expr/)

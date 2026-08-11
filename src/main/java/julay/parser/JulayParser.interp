@@ -189,7 +189,7 @@ system_atom
 system_primary
 system_leaf
 invariant_decl
-pclass_body
+proc_body
 field
 var
 constructor
@@ -224,8 +224,8 @@ method_call
 fun_call
 call_arg
 lambda_expr
-oclass_literal
-oclass_field_assign
+obj_literal
+obj_field_assign
 field_access
 
 

@@ -165,7 +165,7 @@ data class MapType(val keyType: Type, val valueType: Type) : Type {
         is ListType -> emptyList<Any>()
         is SetType -> emptySet<Any>()
         is MapType -> emptyMap<Any, Any>()
-        is ObjClassType -> throw RuntimeException("Cannot default o-class $type")
+        is ObjClassType -> throw RuntimeException("Cannot default obj $type")
         is TypeVar -> throw RuntimeException("TypeVar default")
         else -> throw RuntimeException("Cannot default $type")
     }

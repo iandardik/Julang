@@ -7,7 +7,7 @@ import julay.program.library.httpServerRequestType
 import julay.program.library.httpServerResponseType
 
 /**
- * Kotlin-defined o-classes that Julay can name without a Julay `o-class` declaration.
+ * Kotlin-defined objs that Julay can name without a Julay `obj` declaration.
  * Codegen must not re-emit data classes / converters for these; they live in julay.program.library.
  */
 object ObjClassBuiltinRegistry {

@@ -1,5 +1,5 @@
 source: regression/input/oclass/oclass-struct-missing-field.jul
 expectCompileFailure: true
 expectCompileOutputContains:
-  - "O-class literal for \"Point\" is missing fields: [y]"
+  - "Obj literal for \"Point\" is missing fields: [y]"
   - "Found type errors; exiting."

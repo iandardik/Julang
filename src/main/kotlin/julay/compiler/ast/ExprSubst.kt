@@ -353,7 +353,7 @@ private fun projectLiteralField(
     }
     val fieldName = fieldPath.first()
     val fieldExpr = literal.fieldAssignments[fieldName]
-        ?: throw RuntimeException("Missing field \"$fieldName\" while projecting o-class literal")
+        ?: throw RuntimeException("Missing field \"$fieldName\" while projecting obj literal")
     val rest = fieldPath.drop(1)
     if (rest.isEmpty()) {
         return fieldExpr

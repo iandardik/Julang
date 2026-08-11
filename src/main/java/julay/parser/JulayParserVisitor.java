@@ -167,11 +167,11 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitInvariant_decl(JulayParser.Invariant_declContext ctx);
 	/**
-	 * Visit a parse tree produced by {@link JulayParser#pclass_body}.
+	 * Visit a parse tree produced by {@link JulayParser#proc_body}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
-	T visitPclass_body(JulayParser.Pclass_bodyContext ctx);
+	T visitProc_body(JulayParser.Proc_bodyContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link JulayParser#field}.
 	 * @param ctx the parse tree
@@ -377,17 +377,17 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitLambda_expr(JulayParser.Lambda_exprContext ctx);
 	/**
-	 * Visit a parse tree produced by {@link JulayParser#oclass_literal}.
+	 * Visit a parse tree produced by {@link JulayParser#obj_literal}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
-	T visitOclass_literal(JulayParser.Oclass_literalContext ctx);
+	T visitObj_literal(JulayParser.Obj_literalContext ctx);
 	/**
-	 * Visit a parse tree produced by {@link JulayParser#oclass_field_assign}.
+	 * Visit a parse tree produced by {@link JulayParser#obj_field_assign}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
-	T visitOclass_field_assign(JulayParser.Oclass_field_assignContext ctx);
+	T visitObj_field_assign(JulayParser.Obj_field_assignContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link JulayParser#field_access}.
 	 * @param ctx the parse tree

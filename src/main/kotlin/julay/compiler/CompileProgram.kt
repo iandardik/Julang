@@ -61,7 +61,7 @@ fun compileProgram(
     }
 
     // Each program gets its own generated source file; remove stale ones so Gradle
-    // does not compile multiple programs' p-classes into the same module.
+    // does not compile multiple programs' procs into the same module.
     File(buildDir).listFiles()?.filter { it.isFile && it.extension == "kt" }?.forEach { it.delete() }
     deleteDirectory(File("$buildDir/build"))
 

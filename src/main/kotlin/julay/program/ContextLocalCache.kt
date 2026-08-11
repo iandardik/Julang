@@ -11,7 +11,7 @@ import java.util.IdentityHashMap
  * Entries must be removed via [dropContext] when a [Context] is closed. Do **not** probe
  * other Contexts with Z3 APIs from here: [Context] is not thread-safe, and calling
  * e.g. [Context.boolSort] on a Context another thread is closing SIGSEGVs in native code
- * (seen under raft / multi-proc load after o-class metadata used this cache).
+ * (seen under raft / multi-proc load after obj metadata used this cache).
  */
 internal class ContextLocalCache<T> {
     private val lock = Any()

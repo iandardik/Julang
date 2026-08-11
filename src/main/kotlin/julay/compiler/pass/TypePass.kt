@@ -1113,10 +1113,10 @@ private fun ObjClassLiteralExprNode.typePassObjClassLiteral(
     val extraFields = providedFields - expectedFields
     val fieldSetErrors = buildList {
         if (missingFields.isNotEmpty()) {
-            add(OneLocCompileError(programLocation(), "O-class literal for \"$className\" is missing fields: $missingFields"))
+            add(OneLocCompileError(programLocation(), "Obj literal for \"$className\" is missing fields: $missingFields"))
         }
         if (extraFields.isNotEmpty()) {
-            add(OneLocCompileError(programLocation(), "O-class literal for \"$className\" has unknown fields: $extraFields"))
+            add(OneLocCompileError(programLocation(), "Obj literal for \"$className\" has unknown fields: $extraFields"))
         }
     }
     if (duplicateFieldErrors.isNotEmpty() || fieldSetErrors.isNotEmpty()) {
@@ -2010,7 +2010,7 @@ private fun FunCallExprNode.typePassFunCall(
                 val valueInlined = paramsForSubst.zip(callArgs()).fold(funNode.funBody()) { acc, (param, arg) ->
                     substituteExpr(acc, param.name, arg)
                 }
-                // Re-type the inlined body under the concrete type substitution so o-class
+                // Re-type the inlined body under the concrete type substitution so obj
                 // literals like `Box T { ... }` become `Box_Int` rather than schema `Box_T`.
                 val specializeErrors = valueInlined.typePass(symbolEnv, registry, funEnv, subst)
                 if (specializeErrors.isNotEmpty()) {

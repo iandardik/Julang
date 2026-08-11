@@ -140,7 +140,7 @@ fun httpClientResponseFromZ3(expr: Expr<*>, model: Model): HttpClientResponse {
 }
 
 /**
- * Deconstruct an o-class value using the model's Context. Constructor matching compares against
+ * Deconstruct an obj value using the model's Context. Constructor matching compares against
  * the stable [ObjClassType.constructorName] (metadata is built per Context like Set/Map).
  */
 private fun objClassFieldExprs(type: ObjClassType, expr: Expr<*>, model: Model): Array<Expr<*>> {

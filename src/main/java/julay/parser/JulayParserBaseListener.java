@@ -329,13 +329,13 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void enterPclass_body(JulayParser.Pclass_bodyContext ctx) { }
+	@Override public void enterProc_body(JulayParser.Proc_bodyContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void exitPclass_body(JulayParser.Pclass_bodyContext ctx) { }
+	@Override public void exitProc_body(JulayParser.Proc_bodyContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
@@ -749,25 +749,25 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void enterOclass_literal(JulayParser.Oclass_literalContext ctx) { }
+	@Override public void enterObj_literal(JulayParser.Obj_literalContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void exitOclass_literal(JulayParser.Oclass_literalContext ctx) { }
+	@Override public void exitObj_literal(JulayParser.Obj_literalContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void enterOclass_field_assign(JulayParser.Oclass_field_assignContext ctx) { }
+	@Override public void enterObj_field_assign(JulayParser.Obj_field_assignContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void exitOclass_field_assign(JulayParser.Oclass_field_assignContext ctx) { }
+	@Override public void exitObj_field_assign(JulayParser.Obj_field_assignContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *

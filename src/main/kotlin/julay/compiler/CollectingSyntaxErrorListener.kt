@@ -69,7 +69,7 @@ internal fun rewriteSyntaxError(
     // `pos := Point(x := 0)` — parser finishes `Point` as an expression, then `(` is
     // "extraneous" at statement level. Same shape for invalid named call args.
     if ((msg.contains("extraneous input '('") || msg.contains("mismatched input '('")) &&
-        looksLikeOclassFieldAssignAfterParen(offendingSymbol, recognizer)
+        looksLikeObjFieldAssignAfterParen(offendingSymbol, recognizer)
     ) {
         val name = previousIdentifier(offendingSymbol, recognizer) ?: "Name"
         return "Julay does not support $name(field := ...) with parentheses; " +
@@ -156,7 +156,7 @@ private fun looksLikeThenAfterIf(
 /**
  * After an offending `(`, look ahead for `ID :=` (object field assign syntax).
  */
-private fun looksLikeOclassFieldAssignAfterParen(
+private fun looksLikeObjFieldAssignAfterParen(
     offendingSymbol: Any?,
     recognizer: Recognizer<*, *>?,
 ): Boolean {

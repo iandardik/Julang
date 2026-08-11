@@ -1549,7 +1549,7 @@ class ObjClassLiteralExprNode(
         get() = when (val resolution = objClassLiteralResolution) {
             is ObjClassLiteralResolution.Resolved -> resolution.structType
             is ObjClassLiteralResolution.Unresolved ->
-                throw RuntimeException("O-class literal type not resolved at $loc")
+                throw RuntimeException("Obj literal type not resolved at $loc")
         }
 
     val fieldAssignments: Map<String, ExprNode> = fieldEntries.toMap()
@@ -2082,7 +2082,7 @@ class FieldAccessExprNode(
     override fun toString(): String = fieldPath.joinToString(".", prefix = "$baseSymbol.")
 }
 
-/** Postfix `.field` on an arbitrary expression (e.g. `xs[i].f` or `Pclass[i].sv`). */
+/** Postfix `.field` on an arbitrary expression (e.g. `xs[i].f` or `Proc[i].sv`). */
 class MemberAccessExprNode(
     val baseExpr: ExprNode,
     val fieldName: String,

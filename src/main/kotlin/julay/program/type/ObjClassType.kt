@@ -5,7 +5,7 @@ import julay.program.ContextLocalCache
 import julay.program.Value
 import julay.program.Variable
 
-// Z3 mkDatatypeSort artifacts for one o-class in a given Context.
+// Z3 mkDatatypeSort artifacts for one obj in a given Context.
 // sort: the record's Z3 sort; constructorDecl: mk-Name(...);
 // accessors: field getters in declaration order (e.g. x, y for Point).
 class JulangDatatypeMetadata(
@@ -40,7 +40,7 @@ class ObjClassType(
         metaByCtx.getOrPut(ctx) { buildMetadata(ctx) }
 
     private fun buildMetadata(ctx: Context): JulangDatatypeMetadata {
-        // Polymorphic o-class instantiations (fields still typed as TypeVar) must not reach here;
+        // Polymorphic obj instantiations (fields still typed as TypeVar) must not reach here;
         // concrete monomorphized types force this on first Z3 use.
         val fieldNames = fields.map { it.name }.toTypedArray()
         val fieldSorts = fields.map { field -> z3SortForField(field.type, ctx) }.toTypedArray()

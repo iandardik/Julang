@@ -200,7 +200,7 @@ public class JulayParserBaseVisitor<T> extends AbstractParseTreeVisitor<T> imple
 	 * <p>The default implementation returns the result of calling
 	 * {@link #visitChildren} on {@code ctx}.</p>
 	 */
-	@Override public T visitPclass_body(JulayParser.Pclass_bodyContext ctx) { return visitChildren(ctx); }
+	@Override public T visitProc_body(JulayParser.Proc_bodyContext ctx) { return visitChildren(ctx); }
 	/**
 	 * {@inheritDoc}
 	 *
@@ -445,14 +445,14 @@ public class JulayParserBaseVisitor<T> extends AbstractParseTreeVisitor<T> imple
 	 * <p>The default implementation returns the result of calling
 	 * {@link #visitChildren} on {@code ctx}.</p>
 	 */
-	@Override public T visitOclass_literal(JulayParser.Oclass_literalContext ctx) { return visitChildren(ctx); }
+	@Override public T visitObj_literal(JulayParser.Obj_literalContext ctx) { return visitChildren(ctx); }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation returns the result of calling
 	 * {@link #visitChildren} on {@code ctx}.</p>
 	 */
-	@Override public T visitOclass_field_assign(JulayParser.Oclass_field_assignContext ctx) { return visitChildren(ctx); }
+	@Override public T visitObj_field_assign(JulayParser.Obj_field_assignContext ctx) { return visitChildren(ctx); }
 	/**
 	 * {@inheritDoc}
 	 *

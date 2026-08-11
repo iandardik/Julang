@@ -35,7 +35,7 @@ public class JulayParser extends Parser {
 		RULE_api_call_list = 12, RULE_proc = 13, RULE_obj = 14, RULE_sort_decl = 15, 
 		RULE_compile_decl = 16, RULE_spec = 17, RULE_ag_spec = 18, RULE_assume_expr = 19, 
 		RULE_system_expr = 20, RULE_with_expr = 21, RULE_system_atom = 22, RULE_system_primary = 23, 
-		RULE_system_leaf = 24, RULE_invariant_decl = 25, RULE_pclass_body = 26, 
+		RULE_system_leaf = 24, RULE_invariant_decl = 25, RULE_proc_body = 26, 
 		RULE_field = 27, RULE_var = 28, RULE_constructor = 29, RULE_transition = 30, 
 		RULE_args = 31, RULE_arg = 32, RULE_constructor_body = 33, RULE_action_body = 34, 
 		RULE_return_clause = 35, RULE_guard = 36, RULE_transit = 37, RULE_error = 38, 
@@ -45,21 +45,21 @@ public class JulayParser extends Parser {
 		RULE_list_literal = 51, RULE_set_literal = 52, RULE_map_literal = 53, 
 		RULE_map_entry = 54, RULE_index_expr = 55, RULE_method_prop_expr = 56, 
 		RULE_method_call = 57, RULE_fun_call = 58, RULE_call_arg = 59, RULE_lambda_expr = 60, 
-		RULE_oclass_literal = 61, RULE_oclass_field_assign = 62, RULE_field_access = 63;
+		RULE_obj_literal = 61, RULE_obj_field_assign = 62, RULE_field_access = 63;
 	private static String[] makeRuleNames() {
 		return new String[] {
 			"root", "import_stmt", "qualified_name", "name_id", "decl", "typeExpr", 
 			"typeArgs", "typeParams", "fun_decl", "procfun_decl", "procfun_body", 
 			"api_decl", "api_call_list", "proc", "obj", "sort_decl", "compile_decl", 
 			"spec", "ag_spec", "assume_expr", "system_expr", "with_expr", "system_atom", 
-			"system_primary", "system_leaf", "invariant_decl", "pclass_body", "field", 
+			"system_primary", "system_leaf", "invariant_decl", "proc_body", "field", 
 			"var", "constructor", "transition", "args", "arg", "constructor_body", 
 			"action_body", "return_clause", "guard", "transit", "error", "error_arm", 
 			"var_transit", "before", "after", "call_stmt", "expr", "when_subject_arm", 
 			"when_guard_arm", "when_pattern", "proc_expr", "literal", "collection_literal", 
 			"list_literal", "set_literal", "map_literal", "map_entry", "index_expr", 
 			"method_prop_expr", "method_call", "fun_call", "call_arg", "lambda_expr", 
-			"oclass_literal", "oclass_field_assign", "field_access"
+			"obj_literal", "obj_field_assign", "field_access"
 		};
 	}
 	public static final String[] ruleNames = makeRuleNames();
@@ -1257,11 +1257,11 @@ public class JulayParser extends Parser {
 		public TerminalNode ID() { return getToken(JulayParser.ID, 0); }
 		public TerminalNode LCURLY() { return getToken(JulayParser.LCURLY, 0); }
 		public TerminalNode RCURLY() { return getToken(JulayParser.RCURLY, 0); }
-		public List<Pclass_bodyContext> pclass_body() {
-			return getRuleContexts(Pclass_bodyContext.class);
+		public List<Proc_bodyContext> proc_body() {
+			return getRuleContexts(Proc_bodyContext.class);
 		}
-		public Pclass_bodyContext pclass_body(int i) {
-			return getRuleContext(Pclass_bodyContext.class,i);
+		public Proc_bodyContext proc_body(int i) {
+			return getRuleContext(Proc_bodyContext.class,i);
 		}
 		public TerminalNode ASGN_EQ() { return getToken(JulayParser.ASGN_EQ, 0); }
 		public Proc_exprContext proc_expr() {
@@ -1310,7 +1310,7 @@ public class JulayParser extends Parser {
 					{
 					{
 					setState(270);
-					pclass_body();
+					proc_body();
 					}
 					}
 					setState(275);
@@ -1602,11 +1602,11 @@ public class JulayParser extends Parser {
 			return getRuleContext(TypeExprContext.class,0);
 		}
 		public TerminalNode RBRACK() { return getToken(JulayParser.RBRACK, 0); }
-		public List<Pclass_bodyContext> pclass_body() {
-			return getRuleContexts(Pclass_bodyContext.class);
+		public List<Proc_bodyContext> proc_body() {
+			return getRuleContexts(Proc_bodyContext.class);
 		}
-		public Pclass_bodyContext pclass_body(int i) {
-			return getRuleContext(Pclass_bodyContext.class,i);
+		public Proc_bodyContext proc_body(int i) {
+			return getRuleContext(Proc_bodyContext.class,i);
 		}
 		public TerminalNode ASGN_EQ() { return getToken(JulayParser.ASGN_EQ, 0); }
 		public Ag_specContext ag_spec() {
@@ -1680,7 +1680,7 @@ public class JulayParser extends Parser {
 					{
 					{
 					setState(331);
-					pclass_body();
+					proc_body();
 					}
 					}
 					setState(336);
@@ -2350,7 +2350,7 @@ public class JulayParser extends Parser {
 	}
 
 	@SuppressWarnings("CheckReturnValue")
-	public static class Pclass_bodyContext extends ParserRuleContext {
+	public static class Proc_bodyContext extends ParserRuleContext {
 		public VarContext var() {
 			return getRuleContext(VarContext.class,0);
 		}
@@ -2360,28 +2360,28 @@ public class JulayParser extends Parser {
 		public TransitionContext transition() {
 			return getRuleContext(TransitionContext.class,0);
 		}
-		public Pclass_bodyContext(ParserRuleContext parent, int invokingState) {
+		public Proc_bodyContext(ParserRuleContext parent, int invokingState) {
 			super(parent, invokingState);
 		}
-		@Override public int getRuleIndex() { return RULE_pclass_body; }
+		@Override public int getRuleIndex() { return RULE_proc_body; }
 		@Override
 		public void enterRule(ParseTreeListener listener) {
-			if ( listener instanceof JulayParserListener ) ((JulayParserListener)listener).enterPclass_body(this);
+			if ( listener instanceof JulayParserListener ) ((JulayParserListener)listener).enterProc_body(this);
 		}
 		@Override
 		public void exitRule(ParseTreeListener listener) {
-			if ( listener instanceof JulayParserListener ) ((JulayParserListener)listener).exitPclass_body(this);
+			if ( listener instanceof JulayParserListener ) ((JulayParserListener)listener).exitProc_body(this);
 		}
 		@Override
 		public <T> T accept(ParseTreeVisitor<? extends T> visitor) {
-			if ( visitor instanceof JulayParserVisitor ) return ((JulayParserVisitor<? extends T>)visitor).visitPclass_body(this);
+			if ( visitor instanceof JulayParserVisitor ) return ((JulayParserVisitor<? extends T>)visitor).visitProc_body(this);
 			else return visitor.visitChildren(this);
 		}
 	}
 
-	public final Pclass_bodyContext pclass_body() throws RecognitionException {
-		Pclass_bodyContext _localctx = new Pclass_bodyContext(_ctx, getState());
-		enterRule(_localctx, 52, RULE_pclass_body);
+	public final Proc_bodyContext proc_body() throws RecognitionException {
+		Proc_bodyContext _localctx = new Proc_bodyContext(_ctx, getState());
+		enterRule(_localctx, 52, RULE_proc_body);
 		try {
 			setState(424);
 			_errHandler.sync(this);
@@ -3766,8 +3766,8 @@ public class JulayParser extends Parser {
 		public Field_accessContext field_access() {
 			return getRuleContext(Field_accessContext.class,0);
 		}
-		public Oclass_literalContext oclass_literal() {
-			return getRuleContext(Oclass_literalContext.class,0);
+		public Obj_literalContext obj_literal() {
+			return getRuleContext(Obj_literalContext.class,0);
 		}
 		public Fun_callContext fun_call() {
 			return getRuleContext(Fun_callContext.class,0);
@@ -3904,7 +3904,7 @@ public class JulayParser extends Parser {
 			case 7:
 				{
 				setState(604);
-				oclass_literal();
+				obj_literal();
 				}
 				break;
 			case 8:
@@ -4589,8 +4589,8 @@ public class JulayParser extends Parser {
 		public LiteralContext literal() {
 			return getRuleContext(LiteralContext.class,0);
 		}
-		public Oclass_literalContext oclass_literal() {
-			return getRuleContext(Oclass_literalContext.class,0);
+		public Obj_literalContext obj_literal() {
+			return getRuleContext(Obj_literalContext.class,0);
 		}
 		public When_patternContext(ParserRuleContext parent, int invokingState) {
 			super(parent, invokingState);
@@ -4634,7 +4634,7 @@ public class JulayParser extends Parser {
 				enterOuterAlt(_localctx, 2);
 				{
 				setState(758);
-				oclass_literal();
+				obj_literal();
 				}
 				break;
 			default:
@@ -6024,44 +6024,44 @@ public class JulayParser extends Parser {
 	}
 
 	@SuppressWarnings("CheckReturnValue")
-	public static class Oclass_literalContext extends ParserRuleContext {
+	public static class Obj_literalContext extends ParserRuleContext {
 		public TypeExprContext typeExpr() {
 			return getRuleContext(TypeExprContext.class,0);
 		}
 		public TerminalNode LCURLY() { return getToken(JulayParser.LCURLY, 0); }
-		public List<Oclass_field_assignContext> oclass_field_assign() {
-			return getRuleContexts(Oclass_field_assignContext.class);
+		public List<Obj_field_assignContext> obj_field_assign() {
+			return getRuleContexts(Obj_field_assignContext.class);
 		}
-		public Oclass_field_assignContext oclass_field_assign(int i) {
-			return getRuleContext(Oclass_field_assignContext.class,i);
+		public Obj_field_assignContext obj_field_assign(int i) {
+			return getRuleContext(Obj_field_assignContext.class,i);
 		}
 		public TerminalNode RCURLY() { return getToken(JulayParser.RCURLY, 0); }
 		public List<TerminalNode> COMMA() { return getTokens(JulayParser.COMMA); }
 		public TerminalNode COMMA(int i) {
 			return getToken(JulayParser.COMMA, i);
 		}
-		public Oclass_literalContext(ParserRuleContext parent, int invokingState) {
+		public Obj_literalContext(ParserRuleContext parent, int invokingState) {
 			super(parent, invokingState);
 		}
-		@Override public int getRuleIndex() { return RULE_oclass_literal; }
+		@Override public int getRuleIndex() { return RULE_obj_literal; }
 		@Override
 		public void enterRule(ParseTreeListener listener) {
-			if ( listener instanceof JulayParserListener ) ((JulayParserListener)listener).enterOclass_literal(this);
+			if ( listener instanceof JulayParserListener ) ((JulayParserListener)listener).enterObj_literal(this);
 		}
 		@Override
 		public void exitRule(ParseTreeListener listener) {
-			if ( listener instanceof JulayParserListener ) ((JulayParserListener)listener).exitOclass_literal(this);
+			if ( listener instanceof JulayParserListener ) ((JulayParserListener)listener).exitObj_literal(this);
 		}
 		@Override
 		public <T> T accept(ParseTreeVisitor<? extends T> visitor) {
-			if ( visitor instanceof JulayParserVisitor ) return ((JulayParserVisitor<? extends T>)visitor).visitOclass_literal(this);
+			if ( visitor instanceof JulayParserVisitor ) return ((JulayParserVisitor<? extends T>)visitor).visitObj_literal(this);
 			else return visitor.visitChildren(this);
 		}
 	}
 
-	public final Oclass_literalContext oclass_literal() throws RecognitionException {
-		Oclass_literalContext _localctx = new Oclass_literalContext(_ctx, getState());
-		enterRule(_localctx, 122, RULE_oclass_literal);
+	public final Obj_literalContext obj_literal() throws RecognitionException {
+		Obj_literalContext _localctx = new Obj_literalContext(_ctx, getState());
+		enterRule(_localctx, 122, RULE_obj_literal);
 		int _la;
 		try {
 			enterOuterAlt(_localctx, 1);
@@ -6071,7 +6071,7 @@ public class JulayParser extends Parser {
 			setState(992);
 			match(LCURLY);
 			setState(993);
-			oclass_field_assign();
+			obj_field_assign();
 			setState(998);
 			_errHandler.sync(this);
 			_la = _input.LA(1);
@@ -6081,7 +6081,7 @@ public class JulayParser extends Parser {
 				setState(994);
 				match(COMMA);
 				setState(995);
-				oclass_field_assign();
+				obj_field_assign();
 				}
 				}
 				setState(1000);
@@ -6104,34 +6104,34 @@ public class JulayParser extends Parser {
 	}
 
 	@SuppressWarnings("CheckReturnValue")
-	public static class Oclass_field_assignContext extends ParserRuleContext {
+	public static class Obj_field_assignContext extends ParserRuleContext {
 		public TerminalNode ID() { return getToken(JulayParser.ID, 0); }
 		public TerminalNode ASGN_EQ() { return getToken(JulayParser.ASGN_EQ, 0); }
 		public ExprContext expr() {
 			return getRuleContext(ExprContext.class,0);
 		}
-		public Oclass_field_assignContext(ParserRuleContext parent, int invokingState) {
+		public Obj_field_assignContext(ParserRuleContext parent, int invokingState) {
 			super(parent, invokingState);
 		}
-		@Override public int getRuleIndex() { return RULE_oclass_field_assign; }
+		@Override public int getRuleIndex() { return RULE_obj_field_assign; }
 		@Override
 		public void enterRule(ParseTreeListener listener) {
-			if ( listener instanceof JulayParserListener ) ((JulayParserListener)listener).enterOclass_field_assign(this);
+			if ( listener instanceof JulayParserListener ) ((JulayParserListener)listener).enterObj_field_assign(this);
 		}
 		@Override
 		public void exitRule(ParseTreeListener listener) {
-			if ( listener instanceof JulayParserListener ) ((JulayParserListener)listener).exitOclass_field_assign(this);
+			if ( listener instanceof JulayParserListener ) ((JulayParserListener)listener).exitObj_field_assign(this);
 		}
 		@Override
 		public <T> T accept(ParseTreeVisitor<? extends T> visitor) {
-			if ( visitor instanceof JulayParserVisitor ) return ((JulayParserVisitor<? extends T>)visitor).visitOclass_field_assign(this);
+			if ( visitor instanceof JulayParserVisitor ) return ((JulayParserVisitor<? extends T>)visitor).visitObj_field_assign(this);
 			else return visitor.visitChildren(this);
 		}
 	}
 
-	public final Oclass_field_assignContext oclass_field_assign() throws RecognitionException {
-		Oclass_field_assignContext _localctx = new Oclass_field_assignContext(_ctx, getState());
-		enterRule(_localctx, 124, RULE_oclass_field_assign);
+	public final Obj_field_assignContext obj_field_assign() throws RecognitionException {
+		Obj_field_assignContext _localctx = new Obj_field_assignContext(_ctx, getState());
+		enterRule(_localctx, 124, RULE_obj_field_assign);
 		try {
 			enterOuterAlt(_localctx, 1);
 			{

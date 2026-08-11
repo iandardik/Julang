@@ -207,7 +207,7 @@ class StringType : Type {
 }
 
 /**
- * Rigid type parameter used while checking polymorphic function / o-class template bodies.
+ * Rigid type parameter used while checking polymorphic function / obj template bodies.
  * Must not reach codegen or Z3 emission.
  */
 class TypeVar(val name: String) : Type {

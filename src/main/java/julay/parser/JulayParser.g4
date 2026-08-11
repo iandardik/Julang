@@ -73,7 +73,7 @@ api_call_list
     ;
 
 proc
-    : PROC ID LCURLY pclass_body* RCURLY
+    : PROC ID LCURLY proc_body* RCURLY
     | PROC ID ASGN_EQ proc_expr
     ;
 
@@ -90,7 +90,7 @@ compile_decl
     ;
 
 spec
-    : SPEC ID (LBRACK ID COLON typeExpr RBRACK)? LCURLY pclass_body* RCURLY
+    : SPEC ID (LBRACK ID COLON typeExpr RBRACK)? LCURLY proc_body* RCURLY
     | SPEC ID ASGN_EQ ag_spec
     | SPEC ID ASGN_EQ system_expr MODELS expr
     | SPEC ID ASGN_EQ system_expr
@@ -135,7 +135,7 @@ invariant_decl
     : INVARIANT ID ASGN_EQ expr
     ;
 
-pclass_body
+proc_body
     : var
     | constructor
     | transition
@@ -228,7 +228,7 @@ expr
     | method_prop_expr
     | index_expr
     | field_access
-    | oclass_literal
+    | obj_literal
     | fun_call
     | NOT expr
     // Prefix & / | are no-ops (TLA+ style formatting); same precedence as ~
@@ -273,7 +273,7 @@ when_guard_arm
 
 when_pattern
     : literal
-    | oclass_literal
+    | obj_literal
     ;
 
 proc_expr
@@ -348,11 +348,11 @@ lambda_expr
     | LPAREN ID COMMA ID RPAREN ARROW expr
     ;
 
-oclass_literal
-    : typeExpr LCURLY oclass_field_assign (COMMA oclass_field_assign)* RCURLY
+obj_literal
+    : typeExpr LCURLY obj_field_assign (COMMA obj_field_assign)* RCURLY
     ;
 
-oclass_field_assign
+obj_field_assign
     : ID ASGN_EQ expr
     ;
 

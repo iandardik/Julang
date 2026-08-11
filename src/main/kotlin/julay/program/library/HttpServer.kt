@@ -166,7 +166,7 @@ class JulHttpServer(
         }
 
         override fun syncStepPlan(): SyncStepPlan {
-            // receiveRequest embeds an oclass value → residual Z3 for that step.
+            // receiveRequest embeds an obj value → residual Z3 for that step.
             if (initHttpReq) {
                 return SyncStepPlan.NeedsZ3
             }
