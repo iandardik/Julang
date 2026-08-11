@@ -182,7 +182,7 @@ Unsupported (or only partial) constructs may still degrade to `TRUE` or unusable
 | Bare infinite `Seq(S)` as `\E` bound | Replaced by `BoundedSeq`; do not reintroduce |
 | `SUBSET Int` / other infinite set domains for `\E` | Still problematic for TLC as action-arg domains |
 | Complex list updates beyond index `EXCEPT` / slices | Slices use `splice`; other bulk updates may degrade |
-| Named Julay `fun`s used in Init/action bodies | Emitted as TLA+ operators above `Init` (with a `\* fun` comment); call sites keep the fun name |
+| Named Julay `fun`s used in Init/action bodies | Emitted as TLA+ operators above `Init` (under `\* Julay lib funs` / `\* user defined funs`); call sites keep the fun name |
 | `split` / `parseInt` / `trim` / `portFromUrl` | Unsupported in TLA+ (compile warning; degrade to `TRUE`) |
 | IO / effectful funlib in guards | Existing havoc rules |
 | Procfuns not listed in an api `calls:` | Existing havoc warnings |
@@ -191,7 +191,7 @@ See also [Collections](collections.md).
 
 ### Action layout
 
-- Multi-leaf (and solo) actions group each participant under `\* <Proc> action logic`, with that leaf’s enablement gates, guards, and transits together — similar to Init’s `\* State variables for <Proc>` sections.
+- Multi-leaf (and solo) actions group each participant under `\* <Proc> <transition type> logic` (e.g. `transition`, `constructor`, `session transition`, `provider transition`), with that leaf’s enablement gates, guards, and transits together — similar to Init’s `\* State variables for <Proc>` sections.
 - Top-level `&` guard conjuncts become separate `/\\` lines (matching multi-line Julay guards). Nested multi-line `&` / `|` are formatted recursively as `/\\` and `\\/` branches (single-line boolean ops stay compact).
 - Multi-line Julay `Obj { ... }` literals become TLA records with one field per line; field lines are indented 2 spaces past the first non-`/\`/`\/` symbol on the opening line (single-line obj inits stay compact).
 - Multi-line Julay `if` / expression `let` / `when` / list / set literals use that same open-column indent for bodies, `ELSE`/`IN`/`[]`/`OTHER`, and closing brackets (not the full hanging left-hand text such as `EXCEPT` or `\cup`).
@@ -199,9 +199,9 @@ See also [Collections](collections.md).
 - Julay `when` becomes TLA `CASE` with `[]` arms and `OTHER` for the trailing else.
 - Invariants preserve multi-line structure (nested `\A` / `\E`, boolean trees). Parentheses written in the `.jul` source are kept; other parentheses are omitted when operator precedence makes them unnecessary.
 - `initially` constructors (`initially` / `*_initially`) are emitted first after `Init`, both as operator definitions and as the leading disjuncts of `Next`.
-- Julay `fun`s referenced from Init/action guards or transit RHS (and their transitive callees) are emitted as TLA+ operators immediately above `Init`, each preceded by `\* fun`. Operator parameters that collide with `VARIABLES` / `CONSTANT`s / other module operators are renamed (`p_…`).
-- `splice(xs, a, b)` becomes a call to a module-level `splice` operator (defined above `Init` with a `\* splice` comment when any call is used); splice params/binders are clash-renamed like fun params.
-- `startsWith` becomes a module-level helper (same placement) when used.
+- Julay `fun`s referenced from Init/action guards or transit RHS (and their transitive callees) are emitted as TLA+ operators immediately above `Init`, grouped under `\* Julay lib funs` (stdlib funlib / helpers) or `\* user defined funs`. Operator parameters that collide with `VARIABLES` / `CONSTANT`s / other module operators are renamed (`p_…`).
+- `splice(xs, a, b)` becomes a call to a module-level `splice` operator (defined above `Init` under `\* Julay lib funs` when any call is used); splice params/binders are clash-renamed like fun params.
+- `startsWith` becomes a module-level helper (same Julay-lib section) when used.
 
 ## Compiling specs
 

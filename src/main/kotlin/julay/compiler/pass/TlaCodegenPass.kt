@@ -204,7 +204,11 @@ fun tlaCodegenPass(
     val offers = collectTlaActionOffers(leaves, pclassesForTla, procFunDecls)
         // Coupled: child construct is folded into parent *_call. Standalone: keep F_call.
         .filterNot { it.isConstructor && it.leaf.isProcFun && !standaloneProcFun }
-    val usedFunOps = orderFunsForTlaEmit(collectUserFunsUsedInOffers(offers))
+    val usedFunOpsAll = collectUserFunsUsedInOffers(offers)
+    val (funlibFuns, userFuns) = usedFunOpsAll.partition { isJulayFunlibFun(it) }
+    val usedFunlibOps = orderFunsForTlaEmit(funlibFuns.toSet())
+    val usedUserFunOps = orderFunsForTlaEmit(userFuns.toSet())
+    val usedFunOps = usedFunlibOps + usedUserFunOps
     val needsSpliceOperator =
         offersUseSlice(offers) ||
             usedFunOps.any { exprContainsSlice(it.funBody()) } ||
@@ -336,7 +340,10 @@ fun tlaCodegenPass(
     val spliceOperatorDef = if (needsSpliceOperator) emitSpliceOperatorDef(funReservedNames) else null
     val startsWithOperatorDef =
         if (needsStartsWithOperator) emitStartsWithOperatorDef(funReservedNames) else null
-    val funOperatorDefs = usedFunOps.map { emitFunOperatorDef(it, funReservedNames) }
+    val funlibOperatorDefs = usedFunlibOps.map { emitFunOperatorDef(it, funReservedNames) }
+    val userFunOperatorDefs = usedUserFunOps.map { emitFunOperatorDef(it, funReservedNames) }
+    val hasJulayLibFuns =
+        needsSpliceOperator || needsStartsWithOperator || funlibOperatorDefs.isNotEmpty()
 
     val invDefs = if (invClosure.isNotEmpty()) {
         invClosure.flatMap { node ->
@@ -380,13 +387,20 @@ fun tlaCodegenPass(
             appendLine("BoundedSeq(S, N) == UNION { [1..k -> S] : k \\in 0..N }")
             appendLine()
         }
-        if (needsSpliceOperator) {
-            appendLine(spliceOperatorDef!!)
-            appendLine()
-        }
-        if (needsStartsWithOperator) {
-            appendLine(startsWithOperatorDef!!)
-            appendLine()
+        if (hasJulayLibFuns) {
+            appendLine("\\* Julay lib funs")
+            if (needsSpliceOperator) {
+                appendLine(spliceOperatorDef!!)
+                appendLine()
+            }
+            if (needsStartsWithOperator) {
+                appendLine(startsWithOperatorDef!!)
+                appendLine()
+            }
+            funlibOperatorDefs.forEach { def ->
+                appendLine(def)
+                appendLine()
+            }
         }
         if (helpers.isNotEmpty()) {
             helpers.forEach { helper ->
@@ -394,8 +408,9 @@ fun tlaCodegenPass(
                 appendLine()
             }
         }
-        if (funOperatorDefs.isNotEmpty()) {
-            funOperatorDefs.forEach { def ->
+        if (userFunOperatorDefs.isNotEmpty()) {
+            appendLine("\\* user defined funs")
+            userFunOperatorDefs.forEach { def ->
                 appendLine(def)
                 appendLine()
             }
@@ -517,6 +532,23 @@ internal data class TlaActionOffer(
     val role: TSAction.SyncRole,
     val isConstructor: Boolean,
 )
+
+/**
+ * Transition-type label for TLA section comments, matching analyze/`ListActions` wording:
+ * `constructor` / `transition`, optionally prefixed with `session` / `provider` / `client` / `internal`.
+ * Uses [TlaActionOffer.decl] modifier (not [TlaActionOffer.role]), since constructors are stored as
+ * Internal on the offer for codegen grouping while their decl modifier remains Default.
+ */
+internal fun tlaTransitionTypeLabel(offer: TlaActionOffer): String {
+    val kindStr = if (offer.isConstructor) "constructor" else "transition"
+    return when {
+        offer.decl.isSession -> "session $kindStr"
+        offer.decl.modifier == TSAction.SyncRole.Provider -> "provider $kindStr"
+        offer.decl.modifier == TSAction.SyncRole.Client -> "client $kindStr"
+        offer.decl.modifier == TSAction.SyncRole.Internal -> "internal $kindStr"
+        else -> kindStr
+    }
+}
 
 /** Two SpecLeaves that both offer at least one shared session action. */
 internal data class SessionLeafPair(
@@ -1553,7 +1585,7 @@ private fun emitConjoined(
 
     // Per-offer sections: comment + gates + guards + transits (Julay-like layout).
     offers.forEach { offer ->
-        parts += "\\* ${offer.leaf.name} action logic"
+        parts += "\\* ${offer.leaf.name} ${tlaTransitionTypeLabel(offer)} logic"
         val c = stateTlaName(offer.leaf.tlaName, "constructed", stateVarNames)
         val self = selfOf(offer.leaf)
         if (offer.isConstructor) {
@@ -2326,8 +2358,7 @@ internal fun emitSpliceOperatorDef(reservedNames: Set<String>): String {
     val e = allocTlaName("e", taken)
     val lo = allocTlaName("lo", taken)
     val hi = allocTlaName("hi", taken)
-    return "\\* splice\n" +
-        "splice($xs, $s, $e) ==\n" +
+    return "splice($xs, $s, $e) ==\n" +
         "  IF $e < 1 THEN <<>>\n" +
         "  ELSE LET $hi == IF $e > Len($xs) THEN Len($xs) ELSE $e\n" +
         "           $lo == $s\n" +
@@ -2339,8 +2370,7 @@ internal fun emitStartsWithOperatorDef(reservedNames: Set<String>): String {
     val taken = reservedNames.toMutableSet()
     val str = allocTlaName("s", taken)
     val prefix = allocTlaName("p", taken)
-    return "\\* startsWith\n" +
-        "startsWith($str, $prefix) ==\n" +
+    return "startsWith($str, $prefix) ==\n" +
         "  IF Len($prefix) > Len($str) THEN FALSE ELSE SubSeq($str, 1, Len($prefix)) = $prefix"
 }
 
@@ -2443,6 +2473,12 @@ internal fun collectUserFunsUsedInOffers(offers: List<TlaActionOffer>): LinkedHa
         }
     }
     return used
+}
+
+/** True when [funNode] comes from stdlib `julay/funlib/` (e.g. math.jul max/min). */
+internal fun isJulayFunlibFun(funNode: FunNode): Boolean {
+    val path = (funNode.programLocation() as? SourceLoc)?.filePath?.toString() ?: return false
+    return path.replace('\\', '/').contains("julay/funlib/")
 }
 
 /** Callees before callers when possible so nested fun operators appear first. */
@@ -2591,9 +2627,9 @@ internal fun emitFunOperatorDef(funNode: FunNode, reservedNames: Set<String> = e
         parentPrec = PREC_BOTTOM,
     )
     return if (body.contains('\n') || isMultiLineExpr(bodyExpr)) {
-        "\\* fun\n$header ==\n  $body"
+        "$header ==\n  $body"
     } else {
-        "\\* fun\n$header == $body"
+        "$header == $body"
     }
 }
 

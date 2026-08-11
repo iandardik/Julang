@@ -214,10 +214,11 @@ class SpecTlaTlcSmokeTest {
                 "expected disambiguation comment for Worker initially;\n$tlaText",
             )
             assertTrue(
-                spawnDef.contains("\\* Server action logic") &&
-                    spawnDef.contains("\\* Worker action logic") &&
-                    spawnDef.indexOf("\\* Server action logic") < spawnDef.indexOf("\\* Worker action logic"),
-                "expected per-proc action logic comments in spawnWorker;\n$spawnDef",
+                spawnDef.contains("\\* Server transition logic") &&
+                    spawnDef.contains("\\* Worker constructor logic") &&
+                    spawnDef.indexOf("\\* Server transition logic") <
+                    spawnDef.indexOf("\\* Worker constructor logic"),
+                "expected per-proc transition-type logic comments in spawnWorker;\n$spawnDef",
             )
             val afterInit = tlaText.substringAfter("Init ==")
             val serverInitIdx = afterInit.indexOf("Server_initially ==")
@@ -561,10 +562,10 @@ class SpecTlaTlcSmokeTest {
             val tlaText = tla.readText()
             val beforeInit = tlaText.substringBefore("Init ==")
             assertTrue(
-                beforeInit.contains("\\* fun") &&
+                beforeInit.contains("\\* user defined funs") &&
                     beforeInit.contains("entryTermAt(p_log, idx) ==") &&
                     beforeInit.contains("bumpTerm(t) =="),
-                "used funs should be operators above Init; params colliding with VARIABLES are renamed;\n$beforeInit",
+                "used funs should be operators above Init under user defined funs; params colliding with VARIABLES are renamed;\n$beforeInit",
             )
             assertTrue(
                 beforeInit.indexOf("entryTermAt(p_log, idx) ==") < beforeInit.indexOf("bumpTerm(t) =="),
@@ -647,8 +648,8 @@ class SpecTlaTlcSmokeTest {
             val tlaText = tla.readText()
             val beforeInit = tlaText.substringBefore("Init ==")
             assertTrue(
-                beforeInit.contains("\\* startsWith") && beforeInit.contains("startsWith("),
-                "startsWith helper should be above Init;\n$beforeInit",
+                beforeInit.contains("\\* Julay lib funs") && beforeInit.contains("startsWith("),
+                "startsWith helper should be above Init under Julay lib funs;\n$beforeInit",
             )
             assertTrue(
                 tlaText.contains("startsWith(msg, \"he\")"),
@@ -670,7 +671,7 @@ class SpecTlaTlcSmokeTest {
             assertTrue(tla.exists(), "expected SpliceClashLayout.tla")
             val beforeInit = tla.readText().substringBefore("Init ==")
             assertTrue(
-                beforeInit.contains("\\* splice") && beforeInit.contains("splice(p_xs,"),
+                beforeInit.contains("\\* Julay lib funs") && beforeInit.contains("splice(p_xs,"),
                 "splice param xs should be renamed when VARIABLES has xs;\n$beforeInit",
             )
         } finally {
@@ -1288,7 +1289,7 @@ class SpecTlaTlcSmokeTest {
                 "expected list literal, map comprehension, Len — not TRUE for nextIndex;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("\\* splice") &&
+                tlaText.contains("\\* Julay lib funs") &&
                     tlaText.contains("splice(xs, s, e) ==") &&
                     tlaText.contains("splice(") &&
                     tlaText.contains("SubSeq(") &&
