@@ -68,7 +68,7 @@ export fun encodeAppendEntries(data : AppendEntriesData) : String =
 
 export fun encodeAppendEntriesResp(term : Int, success : Boolean, matchIndex : Int) : String =
     "term=" + term
-        + "|success=" + if (success) "true" else "false"
+        + "|success=" + (if (success) "true" else "false")
         + "|matchIndex=" + matchIndex
 
 export fun isBlankOrComment(line : String) : Boolean =

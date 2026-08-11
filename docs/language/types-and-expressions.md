@@ -61,6 +61,15 @@ One-line form:
 n := if (ready) 1 else 0
 ```
 
+Brace-free `if`/`let` bind looser than `+` and most other operators, so parenthesize (or use braces) when an `if` sits inside a larger expression:
+
+```jul
+// wrong: else absorbs the trailing + …
+s := "a=" + if (ok) "t" else "f" + "|b=" + x
+// right:
+s := "a=" + (if (ok) "t" else "f") + "|b=" + x
+```
+
 ### Expression `let`
 
 Syntax: `let (name : Type := init) body`, or `let (name : Type := init) { body }` when you want braces (e.g. multi-line body).
