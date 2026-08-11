@@ -1,11 +1,12 @@
 import julay.funlib.exitProcess
+import julay.funlib.setOf
 
 proc BadSet {
     var s : Set<Int>
 
     constructor initially(args : List<String>) {
         transit:
-            s := {1, true}
+            s := setOf(1, true)
     }
 
     internal transition exitSystem() {

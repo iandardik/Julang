@@ -1,4 +1,5 @@
 import julay.funlib.length
+import julay.funlib.listOf
 
 obj Entry {
     term : Int
@@ -9,7 +10,7 @@ fun entryTermAt(log : List<Entry>, idx : Int) : Int =
     let (e : Entry := log[idx]) { e.term }
 
 fun bumpTerm(t : Int) : Int =
-    entryTermAt([Entry { term := t, value := "" }], 0) + 1
+    entryTermAt(listOf(Entry { term := t, value := "" }), 0) + 1
 
 proc LogNode {
     var log : List<Entry>
@@ -17,7 +18,7 @@ proc LogNode {
 
     constructor initially(args : List<String>) {
         transit:
-            log := []
+            log := listOf()
             currentTerm := 0
     }
 

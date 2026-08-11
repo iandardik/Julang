@@ -1,6 +1,7 @@
 import julay.funlib.length
 import julay.funlib.println
 import julay.funlib.exitProcess
+import julay.funlib.listOf
 
 proc ListIntDemo {
     var xs : List<Int>
@@ -10,7 +11,7 @@ proc ListIntDemo {
 
     constructor initially(args : List<String>) {
         transit:
-            xs := [1, 2]
+            xs := listOf(1, 2)
             n := 0
             print := false
             gotCli := length(args) = 1
@@ -22,7 +23,7 @@ proc ListIntDemo {
         guard:
             ~print & length(xs) = 2 & gotCli
         transit:
-            xs := xs + [3]
+            xs := xs + listOf(3)
             n := xs[0]
             print := true
     }

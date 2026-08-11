@@ -2,6 +2,8 @@ import julay.funlib.exitProcess
 import julay.funlib.println
 import julay.funlib.map
 import julay.funlib.length
+import julay.funlib.listOf
+import julay.funlib.setOf
 
 fun double(n : Int) : Int = n + n
 
@@ -17,10 +19,10 @@ proc MapListSetTest {
     constructor initially(args : List<String>) {
         transit:
             step := "mapList"
-            xs := [1, 2, 3]
-            ys := []
-            s := {10, 20}
-            t := {}
+            xs := listOf(1, 2, 3)
+            ys := listOf()
+            s := setOf(10, 20)
+            t := setOf()
     }
 
     internal transition doMapList() {

@@ -1,9 +1,11 @@
+import julay.funlib.listOf
+import julay.funlib.setOf
 proc BadSetOp {
     var s : Set<Int>
 
     constructor initially(args : List<String>) {
         transit:
-            s := {1} - [1]
+            s := setOf(1) - listOf(1)
     }
 }
 

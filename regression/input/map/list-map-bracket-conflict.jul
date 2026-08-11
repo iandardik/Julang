@@ -1,9 +1,10 @@
+import julay.funlib.mapOf
 proc BadBracket {
     var xs : List<Int>
 
     constructor initially(args : List<String>) {
         transit:
-            xs := ["a" -> 1]
+            xs := mapOf("a" to 1)
     }
 }
 

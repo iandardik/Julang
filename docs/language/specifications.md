@@ -157,13 +157,15 @@ See [`input/inc_server/main.jul`](../../input/inc_server/main.jul) and [`regress
 
 | Julay | TLA+ |
 |-------|------|
-| `[]` / list literals | `<<>>` / `<<…>>` |
+| `listOf()` / list literals | `<<>>` / `<<…>>` |
+| `setOf()` / set literals | `{}` / `{…}` |
+| `mapOf()` / map literals | `[x \in {} \|-> 0]` / `[k \|-> v, …]` |
+| `splice(xs, a, b)` | `splice(xs, a, b)` (helper above `Init`; 0-based exclusive → clamped `SubSeq`) |
 | `length(xs)` / `xs.length` on lists | `Len(xs)` |
 | `length` / `.length` on sets | `Cardinality(…)` |
 | list/set `.map` (lambda) | function/set comprehension |
 | list `.filter` | `SelectSeq` |
 | set `.filter` | set comprehension |
-| list slices `xs[a:b]` | `splice(xs, a, b)` (helper above `Init`; 0-based exclusive → clamped `SubSeq`) |
 | `startsWith(s, p)` | `startsWith` helper above `Init` (`SubSeq` prefix check) |
 | `when` | TLA `CASE` … `[]` … `OTHER` |
 
@@ -197,7 +199,7 @@ See also [Collections](collections.md).
 - Invariants preserve multi-line structure (nested `\A` / `\E`, boolean trees). Parentheses written in the `.jul` source are kept; other parentheses are omitted when operator precedence makes them unnecessary.
 - `initially` constructors (`initially` / `*_initially`) are emitted first after `Init`, both as operator definitions and as the leading disjuncts of `Next`.
 - Julay `fun`s referenced from Init/action guards or transit RHS (and their transitive callees) are emitted as TLA+ operators immediately above `Init`, each preceded by `\* fun`. Operator parameters that collide with `VARIABLES` / `CONSTANT`s / other module operators are renamed (`p_…`).
-- List slices `xs[a:b]` become calls to a module-level `splice` operator (defined above `Init` with a `\* splice` comment when any slice is used); splice params/binders are clash-renamed like fun params.
+- `splice(xs, a, b)` becomes a call to a module-level `splice` operator (defined above `Init` with a `\* splice` comment when any call is used); splice params/binders are clash-renamed like fun params.
 - `startsWith` becomes a module-level helper (same placement) when used.
 
 ## Compiling specs

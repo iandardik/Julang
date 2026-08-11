@@ -1,5 +1,6 @@
 import node.core.RaftProtocol
 import node.protocol.NodeSet
+import julay.funlib.setOf
 
 obj VoteRequestMsg {
     src : NodeSet
@@ -28,10 +29,10 @@ obj AppendEntriesResponseMsg {
 }
 
 export spec Net[n : NodeSet] {
-    var voteRequestMsgs : Set<VoteRequestMsg> := {}
-    var voteResponseMsgs : Set<VoteResponseMsg> := {}
-    var appendEntriesRequestMsgs : Set<AppendEntriesRequestMsg> := {}
-    var appendEntriesResponseMsgs : Set<AppendEntriesResponseMsg> := {}
+    var voteRequestMsgs : Set<VoteRequestMsg> := setOf()
+    var voteResponseMsgs : Set<VoteResponseMsg> := setOf()
+    var appendEntriesRequestMsgs : Set<AppendEntriesRequestMsg> := setOf()
+    var appendEntriesResponseMsgs : Set<AppendEntriesResponseMsg> := setOf()
     
     constructor initially(args : List<String>) {}
 
@@ -39,11 +40,11 @@ export spec Net[n : NodeSet] {
         guard:
             RaftProtocol[m].self = target
         transit:
-            voteRequestMsgs := voteRequestMsgs + {VoteRequestMsg {
+            voteRequestMsgs := voteRequestMsgs + setOf(VoteRequestMsg {
                 src := n,
                 dest := m,
                 msg := payload
-            }}
+            })
     }
 
     client transition handleRequestVoteRequest(
@@ -66,13 +67,13 @@ export spec Net[n : NodeSet] {
                 }
             } in voteRequestMsgs
         transit:
-            voteResponseMsgs := voteResponseMsgs + {VoteResponseMsg {
+            voteResponseMsgs := voteResponseMsgs + setOf(VoteResponseMsg {
                 src := n,
                 dest := m,
                 id := candidateId,
                 term := outTerm,
                 granted := voteGranted
-            }}
+            })
     }
 
     client transition handleRequestVoteResponse(peerId : Int, term : Int, granted : Boolean) also (m : NodeSet) {
@@ -90,11 +91,11 @@ export spec Net[n : NodeSet] {
         guard:
             RaftProtocol[m].self = target
         transit:
-            appendEntriesRequestMsgs := appendEntriesRequestMsgs + {AppendEntriesRequestMsg {
+            appendEntriesRequestMsgs := appendEntriesRequestMsgs + setOf(AppendEntriesRequestMsg {
                 src := n,
                 dest := m,
                 msg := payload
-            }}
+            })
     }
 
     client transition handleAppendEntriesRequest(
@@ -128,14 +129,14 @@ export spec Net[n : NodeSet] {
                 }
             } in appendEntriesRequestMsgs
         transit:
-            appendEntriesResponseMsgs := appendEntriesResponseMsgs + {AppendEntriesResponseMsg {
+            appendEntriesResponseMsgs := appendEntriesResponseMsgs + setOf(AppendEntriesResponseMsg {
                 src := n,
                 dest := m,
                 id := leaderId,
                 term := inTerm,
                 success := success,
                 matchIdx := matchIdx
-            }}
+            })
     }
 
     client transition handleAppendEntriesResponse(

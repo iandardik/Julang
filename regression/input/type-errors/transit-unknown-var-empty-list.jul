@@ -1,9 +1,10 @@
+import julay.funlib.listOf
 proc S {
     var list : List<String>
 
     constructor initially(args : List<String>) {
         transit:
-            listt := []
+            listt := listOf()
     }
 }
 

@@ -1,3 +1,4 @@
+import julay.funlib.setOf
 obj Msg {
     src : Int
     dest : Int
@@ -9,17 +10,17 @@ proc Mail {
 
     constructor initially(args : List<String>) {
         transit:
-            msgs := {}
+            msgs := setOf()
             longishStateVar := 0
     }
 
     transition send(n : Int, m : Int) {
         guard: true
         transit:
-            msgs := msgs + {Msg {
+            msgs := msgs + setOf(Msg {
                 src := n,
                 dest := m
-            }}
+            })
             longishStateVar := if (longishStateVar < 1) {
                 if (n > 0) {
                     n

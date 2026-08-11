@@ -1,4 +1,6 @@
 import julay.funlib.length
+import julay.funlib.listOf
+import julay.funlib.splice
 
 proc SpliceClash {
     var xs : List<Int>
@@ -6,7 +8,7 @@ proc SpliceClash {
 
     constructor initially(args : List<String>) {
         transit:
-            xs := [1, 2, 3]
+            xs := listOf(1, 2, 3)
             n := 0
     }
 
@@ -14,7 +16,7 @@ proc SpliceClash {
         guard:
             & k >= 0
             & k <= length(xs)
-            & xs = xs[0:k]
+            & xs = splice(xs, 0, k)
         transit: n := n + 1
     }
 }

@@ -1,9 +1,11 @@
+import julay.funlib.listOf
+import julay.funlib.length
 proc BadEmptyBracket {
     var n : Int
 
     constructor initially(args : List<String>) {
         transit:
-            n := length([])
+            n := length(listOf())
     }
 }
 

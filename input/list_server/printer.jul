@@ -1,5 +1,6 @@
 import julay.funlib.delaySeconds
 import julay.funlib.println
+import julay.funlib.listOf
 
 /* prints the current value of the counter every 5 seconds
 */
@@ -9,7 +10,7 @@ proc PeriodicPrint {
 
     constructor initially(args : List<String>) {
         transit:
-            list := []
+            list := listOf()
             step := "A"
     }
 

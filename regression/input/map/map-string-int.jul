@@ -1,6 +1,7 @@
 import julay.funlib.length
 import julay.funlib.println
 import julay.funlib.exitProcess
+import julay.funlib.mapOf
 
 proc MapStringIntDemo {
     var mp : Map<String, Int>
@@ -10,7 +11,7 @@ proc MapStringIntDemo {
 
     constructor initially(args : List<String>) {
         transit:
-            mp := ["a" -> 1, "b" -> 2]
+            mp := mapOf("a" to 1, "b" to 2)
             n := 0
             print := false
             gotCli := length(args) = 1

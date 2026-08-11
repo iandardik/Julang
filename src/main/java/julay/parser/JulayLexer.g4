@@ -36,9 +36,13 @@ ELSE : 'else' ;
 LET : 'let' ;
 WHEN : 'when' ;
 IN : 'in' ;
+TO : 'to' ;
 ARROW : '->' ;
 IMPORT : 'import' ;
 EXPORT : 'export' ;
+LISTOF : 'listOf' ;
+SETOF : 'setOf' ;
+MAPOF : 'mapOf' ;
 
 
 OBJ : 'obj' ;

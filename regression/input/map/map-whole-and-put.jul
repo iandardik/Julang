@@ -1,16 +1,17 @@
+import julay.funlib.mapOf
 proc BadMapTransit {
     var mp : Map<String, Int>
 
     constructor initially(args : List<String>) {
         transit:
-            mp := ["a" -> 1]
+            mp := mapOf("a" to 1)
     }
 
     internal transition bad() {
         guard:
             true
         transit:
-            mp := ["b" -> 2]
+            mp := mapOf("b" to 2)
             mp["c"] := 3
     }
 }

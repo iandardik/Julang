@@ -1,11 +1,12 @@
 import julay.funlib.exitProcess
+import julay.funlib.mapOf
 
 proc BadMap {
     var mp : Map<String, Int>
 
     constructor initially(args : List<String>) {
         transit:
-            mp := ["a" -> 1, "b" -> true]
+            mp := mapOf("a" to 1, "b" to true)
     }
 
     internal transition exitSystem() {

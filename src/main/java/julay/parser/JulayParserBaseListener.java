@@ -617,25 +617,25 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void enterBracket_literal(JulayParser.Bracket_literalContext ctx) { }
+	@Override public void enterCollection_literal(JulayParser.Collection_literalContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void exitBracket_literal(JulayParser.Bracket_literalContext ctx) { }
+	@Override public void exitCollection_literal(JulayParser.Collection_literalContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void enterMap_entry(JulayParser.Map_entryContext ctx) { }
+	@Override public void enterList_literal(JulayParser.List_literalContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void exitMap_entry(JulayParser.Map_entryContext ctx) { }
+	@Override public void exitList_literal(JulayParser.List_literalContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
@@ -648,6 +648,30 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 * <p>The default implementation does nothing.</p>
 	 */
 	@Override public void exitSet_literal(JulayParser.Set_literalContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void enterMap_literal(JulayParser.Map_literalContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitMap_literal(JulayParser.Map_literalContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void enterMap_entry(JulayParser.Map_entryContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitMap_entry(JulayParser.Map_entryContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
@@ -672,18 +696,6 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 * <p>The default implementation does nothing.</p>
 	 */
 	@Override public void exitMethod_prop_expr(JulayParser.Method_prop_exprContext ctx) { }
-	/**
-	 * {@inheritDoc}
-	 *
-	 * <p>The default implementation does nothing.</p>
-	 */
-	@Override public void enterIndex_or_slice(JulayParser.Index_or_sliceContext ctx) { }
-	/**
-	 * {@inheritDoc}
-	 *
-	 * <p>The default implementation does nothing.</p>
-	 */
-	@Override public void exitIndex_or_slice(JulayParser.Index_or_sliceContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *

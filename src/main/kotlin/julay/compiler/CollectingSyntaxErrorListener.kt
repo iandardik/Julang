@@ -58,13 +58,13 @@ internal fun rewriteSyntaxError(
 
     // `TypeName(field := ...)` — object literals use braces, not call parentheses.
     // ANTLR often reports this as "no viable alternative at input '{Message(\n  field :='"
-    // (inside a set) or similar snippets that include both `Name(` and `:=`.
-    val oclassParensWithFields = Regex(
-        """no viable alternative at input '(?:\{)?([A-Za-z_][A-Za-z0-9_]*)\([\s\S]*?:=""",
-    )
-    oclassParensWithFields.find(msg)?.let { match ->
-        val name = match.groupValues[1]
-        return "Object values use braces: $name { field := ... }, not $name(...)"
+    // (inside a set) or `setOf(Message(\n  field :='`. Prefer the innermost type name.
+    if (msg.contains("no viable alternative at input") && msg.contains(":=")) {
+        val names = Regex("""([A-Za-z_][A-Za-z0-9_]*)\(""").findAll(msg).map { it.groupValues[1] }.toList()
+        val name = names.lastOrNull { it !in setOf("listOf", "setOf", "mapOf") }
+        if (name != null && msg.substringAfter("$name(").contains(":=")) {
+            return "Object values use braces: $name { field := ... }, not $name(...)"
+        }
     }
 
     // `pos := Point(x := 0)` — parser finishes `Point` as an expression, then `(` is
@@ -79,11 +79,29 @@ internal fun rewriteSyntaxError(
 
     // `(1, 2)` mistaken for a list / tuple
     if (Regex("""no viable alternative at input '\([^']*,""").containsMatchIn(msg)) {
-        return "Unexpected \"(...)\"; list values use brackets: [a, b], not (a, b)"
+        return "Unexpected \"(...)\"; list values use listOf(a, b), not (a, b)"
     }
 
-    // Trailing comma in `{1,}` / `[1,]` / etc.
-    if (Regex("""no viable alternative at input '[\[{][^']*,\s*[\]}]'""").containsMatchIn(msg)) {
+    // Old bracket / brace value literals
+    if (
+        Regex("""no viable alternative at input '\[[^\]]*\]?'""").containsMatchIn(msg) ||
+        msg.contains("extraneous input '['") ||
+        msg.contains("mismatched input '['")
+    ) {
+        return "Unexpected \"[...]\"; list values use listOf(...), map values use mapOf(k to v)"
+    }
+    if (
+        Regex("""no viable alternative at input '\{[^}]*\}?'""").containsMatchIn(msg) ||
+        msg.contains("extraneous input '{'")
+    ) {
+        // Keep obj-literal and sort-domain braces distinguishable when possible
+        if (!msg.contains(":=")) {
+            return "Unexpected \"{...}\" value; set values use setOf(...)"
+        }
+    }
+
+    // Trailing comma in listOf(1,) / setOf(1,) / mapOf(...)
+    if (Regex("""no viable alternative at input '[^']*,\s*\)'""").containsMatchIn(msg)) {
         return "Unexpected trailing comma in collection literal"
     }
 

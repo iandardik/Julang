@@ -1,5 +1,8 @@
 import julay.funlib.println
 import julay.funlib.exitProcess
+import julay.funlib.listOf
+import julay.funlib.mapOf
+import julay.funlib.setOf
 
 obj Point {
     x : Int
@@ -22,9 +25,9 @@ proc SetOclassInDemo {
         transit:
             p := Point { x := 1, y := 2 }
             q := Point { x := 9, y := 9 }
-            s := {Point { x := 1, y := 2 }}
-            xs := [Point { x := 1, y := 2 }]
-            m := [Point { x := 1, y := 2 } -> 7]
+            s := setOf(Point { x := 1, y := 2 })
+            xs := listOf(Point { x := 1, y := 2 })
+            m := mapOf(Point { x := 1, y := 2 } to 7)
             ok := false
             print := false
         after:

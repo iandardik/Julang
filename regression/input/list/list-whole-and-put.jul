@@ -1,16 +1,17 @@
+import julay.funlib.listOf
 proc BadListTransit {
     var xs : List<Int>
 
     constructor initially(args : List<String>) {
         transit:
-            xs := [1, 2]
+            xs := listOf(1, 2)
     }
 
     internal transition bad() {
         guard:
             true
         transit:
-            xs := [3, 4]
+            xs := listOf(3, 4)
             xs[0] := 5
     }
 }

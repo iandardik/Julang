@@ -508,25 +508,25 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitLiteral(JulayParser.LiteralContext ctx);
 	/**
-	 * Enter a parse tree produced by {@link JulayParser#bracket_literal}.
+	 * Enter a parse tree produced by {@link JulayParser#collection_literal}.
 	 * @param ctx the parse tree
 	 */
-	void enterBracket_literal(JulayParser.Bracket_literalContext ctx);
+	void enterCollection_literal(JulayParser.Collection_literalContext ctx);
 	/**
-	 * Exit a parse tree produced by {@link JulayParser#bracket_literal}.
+	 * Exit a parse tree produced by {@link JulayParser#collection_literal}.
 	 * @param ctx the parse tree
 	 */
-	void exitBracket_literal(JulayParser.Bracket_literalContext ctx);
+	void exitCollection_literal(JulayParser.Collection_literalContext ctx);
 	/**
-	 * Enter a parse tree produced by {@link JulayParser#map_entry}.
+	 * Enter a parse tree produced by {@link JulayParser#list_literal}.
 	 * @param ctx the parse tree
 	 */
-	void enterMap_entry(JulayParser.Map_entryContext ctx);
+	void enterList_literal(JulayParser.List_literalContext ctx);
 	/**
-	 * Exit a parse tree produced by {@link JulayParser#map_entry}.
+	 * Exit a parse tree produced by {@link JulayParser#list_literal}.
 	 * @param ctx the parse tree
 	 */
-	void exitMap_entry(JulayParser.Map_entryContext ctx);
+	void exitList_literal(JulayParser.List_literalContext ctx);
 	/**
 	 * Enter a parse tree produced by {@link JulayParser#set_literal}.
 	 * @param ctx the parse tree
@@ -537,6 +537,26 @@ public interface JulayParserListener extends ParseTreeListener {
 	 * @param ctx the parse tree
 	 */
 	void exitSet_literal(JulayParser.Set_literalContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#map_literal}.
+	 * @param ctx the parse tree
+	 */
+	void enterMap_literal(JulayParser.Map_literalContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#map_literal}.
+	 * @param ctx the parse tree
+	 */
+	void exitMap_literal(JulayParser.Map_literalContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#map_entry}.
+	 * @param ctx the parse tree
+	 */
+	void enterMap_entry(JulayParser.Map_entryContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#map_entry}.
+	 * @param ctx the parse tree
+	 */
+	void exitMap_entry(JulayParser.Map_entryContext ctx);
 	/**
 	 * Enter a parse tree produced by {@link JulayParser#index_expr}.
 	 * @param ctx the parse tree
@@ -557,16 +577,6 @@ public interface JulayParserListener extends ParseTreeListener {
 	 * @param ctx the parse tree
 	 */
 	void exitMethod_prop_expr(JulayParser.Method_prop_exprContext ctx);
-	/**
-	 * Enter a parse tree produced by {@link JulayParser#index_or_slice}.
-	 * @param ctx the parse tree
-	 */
-	void enterIndex_or_slice(JulayParser.Index_or_sliceContext ctx);
-	/**
-	 * Exit a parse tree produced by {@link JulayParser#index_or_slice}.
-	 * @param ctx the parse tree
-	 */
-	void exitIndex_or_slice(JulayParser.Index_or_sliceContext ctx);
 	/**
 	 * Enter a parse tree produced by {@link JulayParser#method_call}.
 	 * @param ctx the parse tree

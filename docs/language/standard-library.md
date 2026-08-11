@@ -24,6 +24,10 @@ Import as `julay.funlib.<name>`. Bare names are not available without an import.
 
 | Function | Role | Effects / IO? | OK in guards? |
 |----------|------|---------------|----------------|
+| `listOf` | List constructor (`listOf(a, b)` / typed `listOf()`) | No | Yes |
+| `setOf` | Set constructor (`setOf(a, b)` / typed `setOf()`) | No | Yes |
+| `mapOf` | Map constructor (`mapOf(k to v, …)` / typed `mapOf()`) | No | Yes |
+| `splice` | List slice `splice(xs, start, end)` (0-based exclusive end, clamped) | No | Yes |
 | `length` | Size of list, set, or map | No | Yes |
 | `map` | Apply a unary named `fun` or lambda to each element of a list or set (`map(xs, f)`); returns `List`/`Set` of results. Prefer method form [`.map`](collections.md#methods-and-lambdas) | No | **No** (unless only concrete state; see [Collections](collections.md#guards)) |
 | `max` | Larger of two `Int`s | No | Yes |

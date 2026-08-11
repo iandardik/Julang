@@ -1,9 +1,10 @@
+import julay.funlib.listOf
 proc ListIndexAssignBadValue {
     var xs : List<Int>
 
     constructor initially(args : List<String>) {
         transit:
-            xs := [1, 2]
+            xs := listOf(1, 2)
             xs[0] := true
     }
 }

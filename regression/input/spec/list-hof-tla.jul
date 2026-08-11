@@ -1,4 +1,5 @@
 import julay.funlib.length
+import julay.funlib.splice
 
 sort Node := { "n1", "n2" }
 
@@ -33,7 +34,7 @@ proc Counter {
         guard:
             & k >= 0
             & k <= length(nextIndex)
-            & nextIndex = nextIndex[0:k].map(e -> e)
+            & nextIndex = splice(nextIndex, 0, k).map(e -> e)
         transit:
             n := n
     }

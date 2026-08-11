@@ -1,5 +1,6 @@
 import julay.funlib.length
 import julay.funlib.exitProcess
+import julay.funlib.mapOf
 
 proc MapEmptyDemo {
     var mp : Map<String, Int>
@@ -7,7 +8,7 @@ proc MapEmptyDemo {
 
     constructor initially(args : List<String>) {
         transit:
-            mp := []
+            mp := mapOf()
             done := false
     }
 

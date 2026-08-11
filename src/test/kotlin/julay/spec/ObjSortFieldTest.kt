@@ -53,14 +53,15 @@ class ObjSortFieldTest {
     fun leafSpecSortFieldObjTypeChecks() {
         val result = typeCheck(
             """
+            import julay.funlib.setOf
             sort NodeSet := { "n1", "n2" }
             obj VoteRequestMsg {
                 dest : NodeSet
                 msg : String
             }
             spec Env {
-                var msgs : Set<VoteRequestMsg> := {}
-                constructor initially(args : List<String>) { transit: msgs := {} }
+                var msgs : Set<VoteRequestMsg> := setOf()
+                constructor initially(args : List<String>) { transit: msgs := setOf() }
             }
             """.trimIndent(),
         )
@@ -92,13 +93,14 @@ class ObjSortFieldTest {
         val net = root.resolve("net.jul")
         net.writeText(
             """
+            import julay.funlib.setOf
             export sort NodeSet := { "n1", "n2" }
             obj VoteRequestMsg {
                 dest : NodeSet
                 msg : String
             }
             export spec Net {
-                var msgs : Set<VoteRequestMsg> := {}
+                var msgs : Set<VoteRequestMsg> := setOf()
                 constructor initially(args : List<String>) {}
             }
             """.trimIndent(),

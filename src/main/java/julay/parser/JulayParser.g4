@@ -20,6 +20,9 @@ name_id
     | PROVIDER
     | INTERNAL
     | SESSION
+    | LISTOF
+    | SETOF
+    | MAPOF
     ;
 
 decl
@@ -220,8 +223,7 @@ call_stmt
 expr
     : literal
     | LPAREN expr RPAREN
-    | bracket_literal
-    | set_literal
+    | collection_literal
     | method_prop_expr
     | index_expr
     | field_access
@@ -287,38 +289,41 @@ literal
     | STRING
     ;
 
-bracket_literal
-    : LBRACK RBRACK
-    | LBRACK map_entry (COMMA map_entry)* RBRACK
-    | LBRACK expr (COMMA expr)* RBRACK
+collection_literal
+    : list_literal
+    | set_literal
+    | map_literal
     ;
 
-map_entry
-    : expr ARROW expr
+list_literal
+    : LISTOF LPAREN (expr (COMMA expr)*)? RPAREN
     ;
 
 set_literal
-    : LCURLY (expr (COMMA expr)*)? RCURLY
+    : SETOF LPAREN (expr (COMMA expr)*)? RPAREN
+    ;
+
+map_literal
+    : MAPOF LPAREN (map_entry (COMMA map_entry)*)? RPAREN
+    ;
+
+map_entry
+    : expr TO expr
     ;
 
 index_expr
-    : index_expr LBRACK index_or_slice RBRACK
+    : index_expr LBRACK expr RBRACK
     | index_expr DOT ID LPAREN (call_arg (COMMA call_arg)*)? RPAREN
     | index_expr DOT ID
-    | (fun_call | field_access | bracket_literal | set_literal | LPAREN expr RPAREN) LBRACK index_or_slice RBRACK
-    | (fun_call | field_access | bracket_literal | set_literal | LPAREN expr RPAREN) DOT ID LPAREN (call_arg (COMMA call_arg)*)? RPAREN
+    | (fun_call | field_access | collection_literal | LPAREN expr RPAREN) LBRACK expr RBRACK
+    | (fun_call | field_access | collection_literal | LPAREN expr RPAREN) DOT ID LPAREN (call_arg (COMMA call_arg)*)? RPAREN
     // Do NOT include field_access here: ID.DOT.ID must stay field_access (Leaf.var / obj fields).
-    | (fun_call | bracket_literal | set_literal | LPAREN expr RPAREN) DOT ID
+    | (fun_call | collection_literal | LPAREN expr RPAREN) DOT ID
     ;
 
 // method call (requires LPAREN) with optional trailing property access: xs.filter(...).length
 method_prop_expr
     : method_call (DOT ID)*
-    ;
-
-index_or_slice
-    : expr COLON expr
-    | expr
     ;
 
 // method_call requires at least one DOT so bare ID(...) stays fun_call; LPAREN is mandatory

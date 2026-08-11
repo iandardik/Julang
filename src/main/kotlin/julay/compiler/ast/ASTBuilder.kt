@@ -639,8 +639,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 assert(valueNode is ExprNode, "Expected expr children to be ExprNodes")
                 valueNode
             }
-            ctx.bracket_literal() != null -> visit(ctx.bracket_literal())
-            ctx.set_literal() != null -> visit(ctx.set_literal())
+            ctx.collection_literal() != null -> visit(ctx.collection_literal())
             ctx.method_prop_expr() != null -> visit(ctx.method_prop_expr())
             ctx.index_expr() != null -> visit(ctx.index_expr())
             ctx.field_access() != null -> visit(ctx.field_access())
@@ -857,25 +856,32 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         }
     }
 
-    override fun visitBracket_literal(ctx: JulayParser.Bracket_literalContext?): ASTNode {
-        if (ctx!!.map_entry().isNotEmpty()) {
-            val entries = ctx.map_entry().map { entry ->
-                val key = visit(entry.expr(0)) as ExprNode
-                val value = visit(entry.expr(1)) as ExprNode
-                key to value
-            }
-            return MapLiteralExprNode(entries, sourceLocation(ctx))
+    override fun visitCollection_literal(ctx: JulayParser.Collection_literalContext?): ASTNode {
+        return when {
+            ctx!!.list_literal() != null -> visit(ctx.list_literal())
+            ctx.set_literal() != null -> visit(ctx.set_literal())
+            ctx.map_literal() != null -> visit(ctx.map_literal())
+            else -> throw RuntimeException("Invalid collection_literal: ${ctx.text}")
         }
-        if (ctx.expr().isEmpty()) {
-            return EmptyBracketLiteralExprNode(sourceLocation(ctx))
-        }
-        val elements = ctx.expr().map { visit(it) as ExprNode }
+    }
+
+    override fun visitList_literal(ctx: JulayParser.List_literalContext?): ASTNode {
+        val elements = ctx!!.expr().map { visit(it) as ExprNode }
         return ListLiteralExprNode(elements, sourceLocation(ctx))
     }
 
     override fun visitSet_literal(ctx: JulayParser.Set_literalContext?): ASTNode {
         val elements = ctx!!.expr().map { visit(it) as ExprNode }
         return SetLiteralExprNode(elements, sourceLocation(ctx))
+    }
+
+    override fun visitMap_literal(ctx: JulayParser.Map_literalContext?): ASTNode {
+        val entries = ctx!!.map_entry().map { entry ->
+            val key = visit(entry.expr(0)) as ExprNode
+            val value = visit(entry.expr(1)) as ExprNode
+            key to value
+        }
+        return MapLiteralExprNode(entries, sourceLocation(ctx))
     }
 
     override fun visitMethod_prop_expr(ctx: JulayParser.Method_prop_exprContext?): ASTNode {
@@ -894,9 +900,8 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 ctx.index_expr() != null -> visit(ctx.index_expr()) as ExprNode
                 ctx.fun_call() != null -> visit(ctx.fun_call()) as ExprNode
                 ctx.field_access() != null -> visit(ctx.field_access()) as ExprNode
-                ctx.bracket_literal() != null -> visit(ctx.bracket_literal()) as ExprNode
-                ctx.set_literal() != null -> visit(ctx.set_literal()) as ExprNode
-                ctx.expr() != null -> visit(ctx.expr()) as ExprNode
+                ctx.collection_literal() != null -> visit(ctx.collection_literal()) as ExprNode
+                ctx.expr().isNotEmpty() -> visit(ctx.expr(0)) as ExprNode
                 else -> throw RuntimeException("Invalid method call base at ${ctx.text}")
             }
             val args = ctx.call_arg().map { visitCallArg(it) }
@@ -908,33 +913,26 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 ctx.index_expr() != null -> visit(ctx.index_expr()) as ExprNode
                 ctx.fun_call() != null -> visit(ctx.fun_call()) as ExprNode
                 ctx.field_access() != null -> visit(ctx.field_access()) as ExprNode
-                ctx.bracket_literal() != null -> visit(ctx.bracket_literal()) as ExprNode
-                ctx.set_literal() != null -> visit(ctx.set_literal()) as ExprNode
-                ctx.expr() != null -> visit(ctx.expr()) as ExprNode
+                ctx.collection_literal() != null -> visit(ctx.collection_literal()) as ExprNode
+                ctx.expr().isNotEmpty() -> visit(ctx.expr(0)) as ExprNode
                 else -> throw RuntimeException("Invalid member-access base at ${ctx.text}")
             }
             return MemberAccessExprNode(base, ctx.ID().text, sourceLocation(ctx))
         }
-        val indexOrSlice = ctx.index_or_slice()
-            ?: throw RuntimeException("Invalid index_expr at ${ctx.text}")
+        // Indexing: base [ expr ]
+        val exprs = ctx.expr()
+        if (exprs.isEmpty()) {
+            throw RuntimeException("Invalid index_expr at ${ctx.text}")
+        }
+        val indexExpr = visit(exprs[exprs.size - 1]) as ExprNode
         val base: ExprNode = when {
             ctx.index_expr() != null -> visit(ctx.index_expr()) as ExprNode
             ctx.fun_call() != null -> visit(ctx.fun_call()) as ExprNode
             ctx.field_access() != null -> visit(ctx.field_access()) as ExprNode
-            ctx.bracket_literal() != null -> visit(ctx.bracket_literal()) as ExprNode
-            ctx.set_literal() != null -> visit(ctx.set_literal()) as ExprNode
-            ctx.expr() != null -> visit(ctx.expr()) as ExprNode
+            ctx.collection_literal() != null -> visit(ctx.collection_literal()) as ExprNode
+            exprs.size >= 2 -> visit(exprs[0]) as ExprNode
             else -> throw RuntimeException("Invalid index_expr at ${ctx.text}")
         }
-        return if (indexOrSlice.COLON() != null) {
-            SliceExprNode(
-                base,
-                visit(indexOrSlice.expr(0)) as ExprNode,
-                visit(indexOrSlice.expr(1)) as ExprNode,
-                sourceLocation(ctx),
-            )
-        } else {
-            IndexExprNode(base, visit(indexOrSlice.expr(0)) as ExprNode, sourceLocation(ctx))
-        }
+        return IndexExprNode(base, indexExpr, sourceLocation(ctx))
     }
 }

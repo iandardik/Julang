@@ -2286,10 +2286,12 @@ internal fun collectUserFunNodesFromExpr(expr: ExprNode, into: MutableSet<FunNod
     }
 }
 
-/** True when [expr] contains a Julay list slice `xs[a:b]`. */
+/** True when [expr] contains a Julay `splice(...)` call (list slice). */
 internal fun exprContainsSlice(expr: ExprNode): Boolean =
     when (expr) {
-        is SliceExprNode -> true
+        is FunCallExprNode ->
+            expr.callName() == "splice" ||
+                expr.callArgs().any { exprContainsSlice(it) }
         is ParenExprNode -> exprContainsSlice(expr.innerExpr())
         else -> expr.children.filterIsInstance<ExprNode>().any { exprContainsSlice(it) }
     }
@@ -2958,21 +2960,6 @@ internal fun exprToTla(
                 else -> sym
             }
         }
-        is EmptyBracketLiteralExprNode -> {
-            when {
-                expr.resolvedListTypeOrNull() != null -> "<<>>"
-                expr.resolvedMapTypeOrNull() != null -> "[x \\in {} |-> 0]"
-                else -> try {
-                    when (expr.getType()) {
-                        is ListType -> "<<>>"
-                        is MapType -> "[x \\in {} |-> 0]"
-                        else -> "<<>>"
-                    }
-                } catch (_: RuntimeException) {
-                    "<<>>"
-                }
-            }
-        }
         is ListLiteralExprNode -> {
             if (expr.elements.isEmpty()) {
                 "<<>>"
@@ -3080,13 +3067,6 @@ internal fun exprToTla(
                 }
             }
         }
-        is SliceExprNode -> {
-            // Julay xs[start:end) → splice (0-based exclusive-end, clamped).
-            val xs = rec(expr.base)
-            val start = rec(expr.start)
-            val end = rec(expr.end)
-            "splice($xs, $start, $end)"
-        }
         is FieldAccessOnExprNode -> {
             if (expr.fieldPath == listOf("length")) {
                 return tlaLengthOf(rec(expr.baseExpr), expr.baseExpr)
@@ -3101,6 +3081,11 @@ internal fun exprToTla(
                 "length" -> {
                     val arg = expr.callArgs().singleOrNull() ?: return "TRUE"
                     tlaLengthOf(rec(arg), arg)
+                }
+                "splice" -> {
+                    val args = expr.callArgs()
+                    if (args.size != 3) return "TRUE"
+                    "splice(${rec(args[0])}, ${rec(args[1])}, ${rec(args[2])})"
                 }
                 "map" -> {
                     // map(xs, f) — prefer method form; support freestanding.
@@ -3125,6 +3110,16 @@ internal fun exprToTla(
                             else -> "TRUE"
                         }
                     }
+                }
+            }
+        }
+        is MapLiteralExprNode -> {
+            if (expr.entries.isEmpty()) {
+                "[x \\in {} |-> 0]"
+            } else {
+                // TLC `:>` / `@@` (EXTENDS TLC).
+                expr.entries.joinToString(" @@ ") { (k, v) ->
+                    "(${rec(k)} :> ${rec(v)})"
                 }
             }
         }

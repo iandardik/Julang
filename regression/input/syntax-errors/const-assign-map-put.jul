@@ -1,9 +1,10 @@
+import julay.funlib.mapOf
 proc S {
     const mp : Map<String, Int>
 
     constructor initially(args : List<String>) {
         transit:
-            mp := ["a" -> 1]
+            mp := mapOf("a" to 1)
     }
 
     internal transition update() {

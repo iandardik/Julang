@@ -1,17 +1,18 @@
+import julay.funlib.setOf
 obj Message {
     msgType : String
 }
 
 proc Net {
-    var messages : Set<Message> := {}
+    var messages : Set<Message> := setOf()
 
     constructor initially(args : List<String>) {}
 
     internal transition send() {
         transit:
-            messages := messages + {Message(
+            messages := messages + setOf(Message(
                 msgType := "RequestVote"
-            )}
+            ))
     }
 }
 

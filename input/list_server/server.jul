@@ -1,4 +1,5 @@
 import julay.proclib.HttpServer
+import julay.funlib.listOf
 
 proc ServerStarter {
     var started : Boolean
@@ -29,7 +30,7 @@ proc IncReqHandler {
             step := "A"
             httpReq := req
             reqBody := req.body
-            list := []
+            list := listOf()
     }
 
     client transition getAndAppend(e : String, lst : List<String>) {
@@ -37,7 +38,7 @@ proc IncReqHandler {
             step = "A" & e = reqBody
         transit:
             step := "B"
-            list := lst + [reqBody]
+            list := lst + listOf(reqBody)
     }
 
     session transition sendResponse(resp : HttpServerResponse) {

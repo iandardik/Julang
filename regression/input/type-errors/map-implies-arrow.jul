@@ -1,9 +1,10 @@
+import julay.funlib.listOf
 proc Worker {
     var mp : Map<String, Int>
 
     constructor initially(args : List<String>) {
         transit:
-            mp := ["a" => 1]
+            mp := listOf("a" => 1)
     }
 }
 

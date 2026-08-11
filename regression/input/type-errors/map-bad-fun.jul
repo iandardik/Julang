@@ -1,4 +1,5 @@
 import julay.funlib.map
+import julay.funlib.listOf
 
 fun add(a : Int, b : Int) : Int = a + b
 
@@ -7,7 +8,7 @@ proc MapBadFun {
 
     constructor initially(args : List<String>) {
         transit:
-            xs := map([1, 2], add)
+            xs := map(listOf(1, 2), add)
     }
 }
 

@@ -311,23 +311,35 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitLiteral(JulayParser.LiteralContext ctx);
 	/**
-	 * Visit a parse tree produced by {@link JulayParser#bracket_literal}.
+	 * Visit a parse tree produced by {@link JulayParser#collection_literal}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
-	T visitBracket_literal(JulayParser.Bracket_literalContext ctx);
+	T visitCollection_literal(JulayParser.Collection_literalContext ctx);
 	/**
-	 * Visit a parse tree produced by {@link JulayParser#map_entry}.
+	 * Visit a parse tree produced by {@link JulayParser#list_literal}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
-	T visitMap_entry(JulayParser.Map_entryContext ctx);
+	T visitList_literal(JulayParser.List_literalContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link JulayParser#set_literal}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
 	 */
 	T visitSet_literal(JulayParser.Set_literalContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#map_literal}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitMap_literal(JulayParser.Map_literalContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#map_entry}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitMap_entry(JulayParser.Map_entryContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link JulayParser#index_expr}.
 	 * @param ctx the parse tree
@@ -340,12 +352,6 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 * @return the visitor result
 	 */
 	T visitMethod_prop_expr(JulayParser.Method_prop_exprContext ctx);
-	/**
-	 * Visit a parse tree produced by {@link JulayParser#index_or_slice}.
-	 * @param ctx the parse tree
-	 * @return the visitor result
-	 */
-	T visitIndex_or_slice(JulayParser.Index_or_sliceContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link JulayParser#method_call}.
 	 * @param ctx the parse tree

@@ -1,6 +1,8 @@
 import julay.funlib.length
 import julay.funlib.exitProcess
 import julay.funlib.println
+import julay.funlib.listOf
+import julay.funlib.splice
 
 proc ListSliceDemo {
     var xs : List<Int>
@@ -13,11 +15,11 @@ proc ListSliceDemo {
 
     constructor initially(args : List<String>) {
         transit:
-            xs := [10, 20, 30, 40]
-            mid := []
-            emptyEq := [1]
-            emptyRev := [1]
-            clamped := []
+            xs := listOf(10, 20, 30, 40)
+            mid := listOf()
+            emptyEq := listOf(1)
+            emptyRev := listOf(1)
+            clamped := listOf()
             nested := 0
             phase := 0
     }
@@ -26,16 +28,16 @@ proc ListSliceDemo {
         guard:
             phase = 0
         transit:
-            mid := xs[1:3]
+            mid := splice(xs, 1, 3)
             phase := 1
     }
 
     internal transition sliceEmpty() {
         guard:
-            phase = 1 & mid = [20, 30] & length(mid) = 2
+            phase = 1 & mid = listOf(20, 30) & length(mid) = 2
         transit:
-            emptyEq := xs[2:2]
-            emptyRev := xs[3:1]
+            emptyEq := splice(xs, 2, 2)
+            emptyRev := splice(xs, 3, 1)
             phase := 2
     }
 
@@ -43,14 +45,14 @@ proc ListSliceDemo {
         guard:
             phase = 2 & length(emptyEq) = 0 & length(emptyRev) = 0
         transit:
-            clamped := xs[2:99]
-            nested := xs[1:3][0]
+            clamped := splice(xs, 2, 99)
+            nested := splice(xs, 1, 3)[0]
             phase := 3
     }
 
     internal transition println(msg : String) {
         guard:
-            phase = 3 & clamped = [30, 40] & nested = 20 & (msg = mid + "")
+            phase = 3 & clamped = listOf(30, 40) & nested = 20 & (msg = mid + "")
         transit:
             phase := 4
         after:

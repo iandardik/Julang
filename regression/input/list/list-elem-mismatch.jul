@@ -1,11 +1,12 @@
 import julay.funlib.exitProcess
+import julay.funlib.listOf
 
 proc BadList {
     var xs : List<Int>
 
     constructor initially(args : List<String>) {
         transit:
-            xs := [1, true]
+            xs := listOf(1, true)
     }
 
     internal transition exitSystem() {

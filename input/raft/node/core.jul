@@ -10,6 +10,9 @@ import node.lib.entryTermAt
 import node.rpc_in.RpcIn
 import node.rpc_out.RpcOut
 import node.vote_requester.VoteRequester
+import julay.funlib.listOf
+import julay.funlib.setOf
+import julay.funlib.splice
 
 export api RaftCore {
     proc: RaftProtocol || ElectionTimeout || VoteRequester || LeaderHeartbeat || RpcIn || RpcOut
@@ -38,11 +41,11 @@ export proc RaftProtocol {
             currentTerm := 0
             state := "Follower"
             votedFor := -1
-            log := []
+            log := listOf()
             lastLogTermVar := 0
             commitIndex := -1
-            votesGranted := {}
-            votesResponded := {}
+            votesGranted := setOf()
+            votesResponded := setOf()
             knownLeaderId := -1
             nextIndex := cluster.map(n -> 0)
             matchIndex := cluster.map(n -> -1)
@@ -59,8 +62,8 @@ export proc RaftProtocol {
             state := "Candidate"
             currentTerm := currentTerm + 1
             votedFor := self.id
-            votesGranted := {self.id}
-            votesResponded := {self.id}
+            votesGranted := setOf(self.id)
+            votesResponded := setOf(self.id)
             knownLeaderId := -1
     }
 
@@ -140,7 +143,7 @@ export proc RaftProtocol {
             & state = "Leader"
             & idx = length(log) + 1
         transit:
-            log := log + [Entry { term := currentTerm, value := value }]
+            log := log + listOf(Entry { term := currentTerm, value := value })
             lastLogTermVar := currentTerm
     }
 
@@ -183,8 +186,8 @@ export proc RaftProtocol {
             & state = "Candidate"
             & term = currentTerm
         transit:
-            votesGranted := if (granted) { votesGranted + {peerId} } else { votesGranted }
-            votesResponded := votesResponded + {peerId}
+            votesGranted := if (granted) { votesGranted + setOf(peerId) } else { votesGranted }
+            votesResponded := votesResponded + setOf(peerId)
     }
 
     provider transition handleAppendEntriesRequest(
@@ -203,7 +206,7 @@ export proc RaftProtocol {
         guard:
             & inTerm <= currentTerm
             & outTerm = currentTerm
-            & (entriesLen in {0, 1})
+            & (entriesLen in setOf(0, 1))
             & (
                 | (
                     & ~success
@@ -258,9 +261,9 @@ export proc RaftProtocol {
                     log
                 } else {
                     if (length(log) > index) {
-                        log[0:index] + [Entry { term := entryTerm, value := entryValue }]
+                        splice(log, 0, index) + listOf(Entry { term := entryTerm, value := entryValue })
                     } else {
-                        log + [Entry { term := entryTerm, value := entryValue }]
+                        log + listOf(Entry { term := entryTerm, value := entryValue })
                     }
                 }
             } else {
@@ -346,7 +349,7 @@ export proc RaftProtocol {
     }
 
     provider transition getCommitted(stateMachine : List<String>) {
-        guard: stateMachine = log[0:commitIndex+1].map(e -> e.value)
+        guard: stateMachine = splice(log, 0, commitIndex+1).map(e -> e.value)
     }
 
     provider transition staleTerm(term : Int) {

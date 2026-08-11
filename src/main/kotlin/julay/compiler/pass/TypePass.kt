@@ -190,11 +190,9 @@ fun ASTNode.typePass(
         ),
     )
     is ListLiteralExprNode -> typePassListLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
-    is EmptyBracketLiteralExprNode -> typePassEmptyBracketLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is SetLiteralExprNode -> typePassSetLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is MapLiteralExprNode -> typePassMapLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is IndexExprNode -> typePassIndex(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
-    is SliceExprNode -> typePassSlice(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is FunCallExprNode -> typePassFunCall(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is SymbolValueExprNode -> typePassSymbol(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is ExprNode -> typePassExpr(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
@@ -300,7 +298,7 @@ private fun VarNode.typePassVarNode(
             val sortErr = listOfNotNull(sortDomainBan(result.type, programLocation()))
             val init = initExpr ?: return sortErr
             val expectedInitType = typingView(result.type)
-            // Empty {} / [] need the declared type before typePass (same as transit assigns).
+            // Empty listOf()/setOf()/mapOf() need the declared type before typePass (same as transit assigns).
             applyExpectedCollectionType(init, expectedInitType)
             val initErrors = init.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
             if (initErrors.isNotEmpty()) return sortErr + initErrors
@@ -1811,7 +1809,18 @@ private fun FunCallExprNode.typePassFunCall(
         builtin.checkArgs(argTypes)?.let { msg ->
             return listOf(OneLocCompileError(programLocation(), msg))
         }
-        resolveInstantiatedReturnType(returnType)
+        if (builtin.name == "splice") {
+            val listTy = argTypes[0] as? ListType
+                ?: return listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "Expected first argument of \"splice\" to have a List type but got ${argTypes[0]}",
+                    ),
+                )
+            resolveInstantiatedReturnType(listTy)
+        } else {
+            resolveInstantiatedReturnType(returnType)
+        }
         inferExprType(symbolEnv)
         return emptyList()
     }
@@ -2042,10 +2051,6 @@ private fun applyExpectedCollectionType(expr: ExprNode, expected: Type) {
     when {
         expr is ListLiteralExprNode && expr.elements.isEmpty() && expected is ListType ->
             expr.resolveListType(expected)
-        expr is EmptyBracketLiteralExprNode && expected is ListType ->
-            expr.resolveListType(expected)
-        expr is EmptyBracketLiteralExprNode && expected is MapType ->
-            expr.resolveMapType(expected)
         expr is SetLiteralExprNode && expr.elements.isEmpty() && expected is SetType ->
             expr.resolveSetType(expected)
         expr is MapLiteralExprNode && expr.entries.isEmpty() && expected is MapType ->
@@ -2053,29 +2058,16 @@ private fun applyExpectedCollectionType(expr: ExprNode, expected: Type) {
     }
 }
 
-private fun EmptyBracketLiteralExprNode.typePassEmptyBracketLiteral(
-    symbolEnv: Map<String, Type>,
-    registry: ObjClassRegistry,
-    funEnv: Map<String, FunNode>,
-    typeParamEnv: Map<String, Type>,
+private fun requireCollectionFunlib(
+    name: String,
     funBuiltinEnv: Map<String, FunBuiltin>,
-    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
-): List<CompileError> {
-    resolvedListTypeOrNull()?.let {
-        inferExprType(symbolEnv)
-        return emptyList()
+    loc: ProgramLoc,
+): CompileError? =
+    if (funBuiltinEnv.containsKey(name)) {
+        null
+    } else {
+        OneLocCompileError(loc, "Unknown function \"$name\"")
     }
-    resolvedMapTypeOrNull()?.let {
-        inferExprType(symbolEnv)
-        return emptyList()
-    }
-    return listOf(
-        OneLocCompileError(
-            programLocation(),
-            "Empty [] literal requires a known List or Map target type",
-        ),
-    )
-}
 
 private fun ListLiteralExprNode.typePassListLiteral(
     symbolEnv: Map<String, Type>,
@@ -2085,6 +2077,7 @@ private fun ListLiteralExprNode.typePassListLiteral(
     funBuiltinEnv: Map<String, FunBuiltin>,
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
+    requireCollectionFunlib("listOf", funBuiltinEnv, programLocation())?.let { return listOf(it) }
     val childErrors = elements.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (childErrors.isNotEmpty()) {
         return childErrors
@@ -2097,7 +2090,7 @@ private fun ListLiteralExprNode.typePassListLiteral(
         return listOf(
             OneLocCompileError(
                 programLocation(),
-                "Empty list literal requires a known List target type",
+                "Empty listOf() requires a known List target type",
             ),
         )
     }
@@ -2233,6 +2226,7 @@ private fun SetLiteralExprNode.typePassSetLiteral(
     funBuiltinEnv: Map<String, FunBuiltin>,
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
+    requireCollectionFunlib("setOf", funBuiltinEnv, programLocation())?.let { return listOf(it) }
     val childErrors = elements.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (childErrors.isNotEmpty()) {
         return childErrors
@@ -2245,7 +2239,7 @@ private fun SetLiteralExprNode.typePassSetLiteral(
         return listOf(
             OneLocCompileError(
                 programLocation(),
-                "Empty set literal requires a known Set target type",
+                "Empty setOf() requires a known Set target type",
             ),
         )
     }
@@ -2272,6 +2266,7 @@ private fun MapLiteralExprNode.typePassMapLiteral(
     funBuiltinEnv: Map<String, FunBuiltin>,
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
+    requireCollectionFunlib("mapOf", funBuiltinEnv, programLocation())?.let { return listOf(it) }
     val childErrors = entries.flatMap { (k, v) ->
         k.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) +
             v.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
@@ -2287,7 +2282,7 @@ private fun MapLiteralExprNode.typePassMapLiteral(
         return listOf(
             OneLocCompileError(
                 programLocation(),
-                "Empty map literal requires a known Map target type",
+                "Empty mapOf() requires a known Map target type",
             ),
         )
     }
@@ -2314,35 +2309,6 @@ private fun MapLiteralExprNode.typePassMapLiteral(
     resolveMapType(mapType(keyType, valueType))
     inferExprType(symbolEnv)
     return emptyList()
-}
-
-private fun SliceExprNode.typePassSlice(
-    symbolEnv: Map<String, Type>,
-    registry: ObjClassRegistry,
-    funEnv: Map<String, FunNode>,
-    typeParamEnv: Map<String, Type>,
-    funBuiltinEnv: Map<String, FunBuiltin>,
-    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
-): List<CompileError> {
-    val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
-    if (childErrors.isNotEmpty()) {
-        return childErrors
-    }
-    val errors = mutableListOf<CompileError>()
-    val baseType = base.getType()
-    if (baseType !is ListType) {
-        errors.add(OneLocCompileError(base.programLocation(), "Expected list type for slice base but got $baseType"))
-    }
-    if (start.getType() !is IntType) {
-        errors.add(OneLocCompileError(start.programLocation(), "Expected Int slice start but got ${start.getType()}"))
-    }
-    if (end.getType() !is IntType) {
-        errors.add(OneLocCompileError(end.programLocation(), "Expected Int slice end but got ${end.getType()}"))
-    }
-    if (errors.isEmpty()) {
-        inferExprType(symbolEnv)
-    }
-    return errors
 }
 
 private fun FunNode.typePassFunBody(

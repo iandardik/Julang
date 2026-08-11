@@ -1,6 +1,7 @@
 import julay.funlib.length
 import julay.funlib.println
 import julay.funlib.exitProcess
+import julay.funlib.setOf
 
 proc SetIntDemo {
     var s : Set<Int>
@@ -10,7 +11,7 @@ proc SetIntDemo {
 
     constructor initially(args : List<String>) {
         transit:
-            s := {1, 2}
+            s := setOf(1, 2)
             n := 0
             print := false
             gotCli := length(args) = 1
@@ -22,7 +23,7 @@ proc SetIntDemo {
         guard:
             ~print & length(s) = 2 & gotCli & 1 in s & ~(3 in s)
         transit:
-            s := s + {3}
+            s := s + setOf(3)
             n := length(s) + 1
             print := true
     }
@@ -31,7 +32,7 @@ proc SetIntDemo {
         guard:
             print & n = 3 & 3 in s
         transit:
-            s := s - {1}
+            s := s - setOf(1)
             n := length(s) - 1
             print := false
     }
@@ -47,7 +48,7 @@ proc SetIntDemo {
 
     internal transition exitSystem() {
         guard:
-            print & n = 2 & s = {2, 3}
+            print & n = 2 & s = setOf(2, 3)
         after:
             exitProcess()
     }

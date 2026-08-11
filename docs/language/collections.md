@@ -4,16 +4,18 @@ Built-in `List`, `Map`, and `Set` values. Collection values are updated by reass
 
 Julay does **not** have first-class function values: lambdas exist only as arguments to higher-order collection calls, and bodies are inlined at compile time.
 
+Collection constructors and `splice` are funlib: import each name you use (`julay.funlib.listOf`, `setOf`, `mapOf`, `splice`).
+
 ## Quick comparison
 
 | | `List<T>` | `Map<K, V>` | `Set<T>` |
 |--|-----------|-------------|----------|
-| Literal | `[a, b]`, typed `[]` | `[k -> v, …]`, typed `[]` | `{a, b}`, typed `{}` |
+| Constructor | `listOf(…)`, typed `listOf()` | `mapOf(k to v, …)`, typed `mapOf()` | `setOf(…)`, typed `setOf()` |
 | `+` | concat | — | union |
 | `-` | — | — | difference |
 | `in` | element | **key** | element |
 | Index read | `xs[i]` (`Int`) | `m[k]` | — |
-| Slice | `xs[a:b]` | — | — |
+| Slice | `splice(xs, start, end)` | — | — |
 | Index assign (transit) | `xs[i] := v` | `m[k] := v` | — |
 | `.length` | yes | yes | yes |
 | `.keys` | — | → `Set<K>` | — |
@@ -24,11 +26,13 @@ Julay does **not** have first-class function values: lambdas exist only as argum
 ### Literals
 
 ```jul
-xs := [1, 2, 3]
-ys : List<Int> := []   // empty needs a known List target type
+import julay.funlib.listOf
+
+xs := listOf(1, 2, 3)
+ys : List<Int> := listOf()   // empty needs a known List target type
 ```
 
-Elements must share one type. Untyped empty `[]` is a compile error.
+Elements must share one type. Untyped empty `listOf()` is a compile error.
 
 ### Operators and membership
 
@@ -37,8 +41,8 @@ Elements must share one type. Untyped empty `[]` is a compile error.
 - `e in xs` — element membership
 
 ```jul
-xs := [1, 2]
-xs := xs + [3]   // [1, 2, 3]
+xs := listOf(1, 2)
+xs := xs + listOf(3)   // listOf(1, 2, 3)
 ok := 2 in xs
 ```
 
@@ -50,22 +54,24 @@ ok := 2 in xs
 n := xs[0]
 ```
 
-### Slicing
+### Splicing
 
-`xs[start:end]` yields a `List<T>`. Both bounds must be `Int`.
+`splice(xs, start, end)` (import `julay.funlib.splice`) yields a `List<T>`. Both bounds must be `Int`.
 
 At runtime:
 
 - bounds must be non-negative
 - `end` is clamped to `xs.length`
-- if `start >= end`, the result is empty (including reversed bounds such as `xs[3:1]`)
+- if `start >= end`, the result is empty (including reversed bounds such as `splice(xs, 3, 1)`)
 
 ```jul
-xs := [10, 20, 30, 40]
-mid := xs[1:3]       // [20, 30]
-empty := xs[2:2]     // []
-clamped := xs[2:99]  // [30, 40]
-nested := xs[1:3][0] // 20
+import julay.funlib.splice
+
+xs := listOf(10, 20, 30, 40)
+mid := splice(xs, 1, 3)       // listOf(20, 30)
+empty := splice(xs, 2, 2)     // empty
+clamped := splice(xs, 2, 99)  // listOf(30, 40)
+nested := splice(xs, 1, 3)[0] // 20
 ```
 
 ### Updates
@@ -73,8 +79,8 @@ nested := xs[1:3][0] // 20
 Whole-list reassignment:
 
 ```jul
-xs := [1, 2]
-xs := xs + [3]
+xs := listOf(1, 2)
+xs := xs + listOf(3)
 ```
 
 Index assignment in `transit` only:
@@ -98,9 +104,13 @@ xs[1] := 99
 ### Literals
 
 ```jul
-mp := ["a" -> 1, "b" -> 2]
-empty : Map<String, Int> := []   // same [] token as empty list; target type decides
+import julay.funlib.mapOf
+
+mp := mapOf("a" to 1, "b" to 2)
+empty : Map<String, Int> := mapOf()
 ```
+
+The keyword `to` is only legal inside `mapOf(...)`.
 
 ### Operators and membership
 
@@ -121,7 +131,7 @@ missing := ~("z" in mp)
 Whole-map reassignment:
 
 ```jul
-mp := ["a" -> 1]
+mp := mapOf("a" to 1)
 ```
 
 Put in `transit` (insert or overwrite):
@@ -149,8 +159,10 @@ agree := mp.keys.filter(k -> mp[k] >= commitIndex)
 ### Literals
 
 ```jul
-s := {1, 2}
-empty : Set<Int> := {}
+import julay.funlib.setOf
+
+s := setOf(1, 2)
+empty : Set<Int> := setOf()
 ```
 
 ### Operators and membership
@@ -161,32 +173,33 @@ empty : Set<Int> := {}
 - `e in s` — element membership
 
 ```jul
-s := {1, 2}
-s := s + {3}   // {1, 2, 3}
-s := s - {1}   // {2, 3}
+s := setOf(1, 2)
+s := s + setOf(3)   // setOf(1, 2, 3)
+s := s - setOf(1)   // setOf(2, 3)
 ```
 
-No indexing, slicing, or index assignment. Update only by whole reassignment.
+No indexing, splicing, or index assignment. Update only by whole reassignment.
 
 ### Size and methods
 
 `s.length` / `length(s)`. Sets support `.filter` / `.map` / `.fold` (see below). **Set `.fold` iteration order is unspecified** — prefer `List` when order matters.
 
-## Empty literals and typing
+## Empty constructors and typing
 
-| Literal | Needs |
-|---------|--------|
-| `[]` | known `List<…>` or `Map<…>` target |
-| `{}` | known `Set<…>` target |
+| Form | Needs |
+|------|--------|
+| `listOf()` | known `List<…>` target |
+| `mapOf()` | known `Map<…>` target |
+| `setOf()` | known `Set<…>` target |
 
 ```jul
 var xs : List<Int>
-xs := []                    // OK
+xs := listOf()                    // OK
 var mp : Map<String, Int>
-mp := []                    // OK — Map, not List
+mp := mapOf()                     // OK
 ```
 
-Assigning a map literal to a list variable (or the reverse) is a type error.
+Assigning a map constructor result to a list variable (or the reverse) is a type error.
 
 ## Properties
 
@@ -256,7 +269,7 @@ Runtime list/map indexing throws on out-of-bounds or missing keys. Symbolic map 
 ## See also
 
 - [Types and expressions](types-and-expressions.md)
-- [Standard library](standard-library.md) — funlib `length` / `map`
+- [Standard library](standard-library.md) — funlib `listOf` / `setOf` / `mapOf` / `splice` / `length` / `map`
 - [Reference](reference.md)
 - [List server example](../examples/list-server.md)
 - Regression coverage: [`regression/input/list/`](../../regression/input/list/), [`map/`](../../regression/input/map/), [`set/`](../../regression/input/set/), [`expr/`](../../regression/input/expr/)

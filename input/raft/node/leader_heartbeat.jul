@@ -3,6 +3,7 @@ import julay.funlib.delaySeconds
 import node.lib.Node
 import node.lib.AppendEntriesData
 import node.rpc_out.RpcOut
+import julay.funlib.setOf
 
 export api LeaderHeartbeat {
     proc: LeaderHeartbeatImpl
@@ -32,7 +33,7 @@ proc LeaderHeartbeatImpl {
             leaderTerm := term
             cluster := cluster
             step := "sleep"
-            sentThisRound := {me}
+            sentThisRound := setOf(me)
     }
 
     internal transition sleep() {
@@ -48,7 +49,7 @@ proc LeaderHeartbeatImpl {
         transit:
             // TODO this should probably be asynchronous
             let _ : Boolean := RpcOut.outAppendEntriesRPC(target, payload)
-            let newSentThisRound : Set<Node> := sentThisRound + {target}
+            let newSentThisRound : Set<Node> := sentThisRound + setOf(target)
             // Finish the full heartbeat round before sleeping so every follower
             // is contacted within one election-timeout window.
             sentThisRound := if (length(newSentThisRound) = length(cluster)) { {me} } else { newSentThisRound }

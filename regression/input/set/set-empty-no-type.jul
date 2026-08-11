@@ -1,9 +1,10 @@
+import julay.funlib.setOf
 proc BadEmptySet {
     var n : Int
 
     constructor initially(args : List<String>) {
         transit:
-            n := length({})
+            n := length(setOf())
     }
 }
 

@@ -1,5 +1,6 @@
 import julay.funlib.length
 import julay.funlib.exitProcess
+import julay.funlib.setOf
 
 proc SetEmptyDemo {
     var s : Set<Int>
@@ -7,7 +8,7 @@ proc SetEmptyDemo {
 
     constructor initially(args : List<String>) {
         transit:
-            s := {}
+            s := setOf()
             done := false
     }
 

@@ -15,11 +15,13 @@ Same architectural pattern as the [inc server](inc-server.md), but the resource 
 ## The list as an interface
 
 ```jul
+import julay.funlib.listOf
+
 proc RunningList {
     var list : List<String>
 
     constructor initially(args : List<String>) {
-        transit: list := []
+        transit: list := listOf()
     }
 
     provider transition getList(lst : List<String>) {
@@ -28,13 +30,13 @@ proc RunningList {
 
     provider transition getAndAppend(e : String, lst : List<String>) {
         guard: lst = list
-        transit: list := list + [e]
+        transit: list := list + listOf(e)
     }
 }
 ```
 
 - `getList` publishes the current list by synchronizing on an equal copy.
-- `getAndAppend` takes the element to append and the pre-image list (must match), then updates to `list + [e]`.
+- `getAndAppend` takes the element to append and the pre-image list (must match), then updates to `list + listOf(e)`.
 
 Peers never share a reference to `list`; they agree on values at sync time ([philosophy](../language/README.md)).
 

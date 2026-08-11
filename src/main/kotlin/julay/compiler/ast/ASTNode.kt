@@ -537,6 +537,18 @@ class FunCallExprNode(
                     else -> builtin.z3Codegen(argStrs)
                 }
             }
+            if (builtin.name == "splice" && args.size == 3) {
+                if (forceString) {
+                    return "ctx.mkString(${toTransitString(symbolTypes, argSymbols)}.toString())"
+                }
+                val baseType = args[0].getType()
+                if (baseType !is ListType) {
+                    throw RuntimeException("Cannot splice non-list type $baseType at $loc")
+                }
+                val empty = "ctx.mkEmptySeq(${baseType.toCodegenTypeVal()}.sort(ctx))"
+                val extract = "ctx.mkSeqExtractAny(${argStrs[0]}, ${argStrs[1]}, ctx.mkSub(${argStrs[2]}, ${argStrs[1]}))"
+                return "ctx.mkITE(ctx.mkGt(${argStrs[2]}, ${argStrs[1]}), $extract, $empty)"
+            }
             return builtin.z3Codegen(argStrs)
         }
         return inlinedBody().toZ3GuardString(symbolTypes, argSymbols, forceString)
@@ -1222,7 +1234,7 @@ class BinaryOpExprNode(
             "&", "|", "=>" -> {
                 if (lhsType !is BoolType || rhsType !is BoolType) {
                     val hint = if (op == "=>") {
-                        " (\"=>\" is Boolean implication; for map entries use \"->\", e.g. [\"k\" -> v])"
+                        " (\"=>\" is Boolean implication; for map entries use \"to\", e.g. mapOf(\"k\" to v))"
                     } else {
                         ""
                     }
@@ -1613,59 +1625,9 @@ class ListLiteralExprNode(
         return listType ?: throw RuntimeException("List literal type not resolved at $loc")
     }
 
-    override fun toString(): String = elements.joinToString(", ", prefix = "[", postfix = "]")
-}
-
-class EmptyBracketLiteralExprNode(
-    private val loc: ProgramLoc,
-) : ExprNode(emptyList()) {
-    private var listType: ListType? = null
-    private var mapType: MapType? = null
-
-    override fun programLocation() = loc
-
-    internal fun resolveListType(type: ListType) {
-        listType = type
-        mapType = null
-    }
-
-    internal fun resolveMapType(type: MapType) {
-        mapType = type
-        listType = null
-    }
-
-    internal fun resolvedListTypeOrNull(): ListType? = listType
-    internal fun resolvedMapTypeOrNull(): MapType? = mapType
-
-    override fun toZ3GuardString(
-        symbolTypes: Map<String, Type>,
-        argSymbols: Set<String>,
-        forceString: Boolean,
-    ): String {
-        if (forceString) {
-            return "ctx.mkString(${toTransitString(symbolTypes, argSymbols)}.toString())"
-        }
-        mapType?.let { ty ->
-            return MapLiteralExprNode(emptyList(), loc, ty).toZ3GuardString(symbolTypes, argSymbols, forceString)
-        }
-        listType?.let { ty ->
-            return ListLiteralExprNode(emptyList(), loc, ty).toZ3GuardString(symbolTypes, argSymbols, forceString)
-        }
-        throw RuntimeException("Empty bracket literal type not resolved at $loc")
-    }
-
-    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
-        return when {
-            mapType != null -> "emptyMap()"
-            else -> "emptyList()"
-        }
-    }
-
-    override fun inferType(symbolEnv: Map<String, Type>): Type {
-        return mapType ?: listType ?: throw RuntimeException("Empty bracket literal type not resolved at $loc")
-    }
-
-    override fun toString(): String = "[]"
+    override fun toString(): String =
+        if (elements.isEmpty()) "listOf()"
+        else elements.joinToString(", ", prefix = "listOf(", postfix = ")")
 }
 
 class MapLiteralExprNode(
@@ -1727,7 +1689,8 @@ class MapLiteralExprNode(
     }
 
     override fun toString(): String =
-        entries.joinToString(", ", prefix = "[", postfix = "]") { (k, v) -> "$k -> $v" }
+        if (entries.isEmpty()) "mapOf()"
+        else entries.joinToString(", ", prefix = "mapOf(", postfix = ")") { (k, v) -> "$k to $v" }
 }
 
 class SetLiteralExprNode(
@@ -1780,7 +1743,9 @@ class SetLiteralExprNode(
         return setType ?: throw RuntimeException("Set literal type not resolved at $loc")
     }
 
-    override fun toString(): String = elements.joinToString(", ", prefix = "{", postfix = "}")
+    override fun toString(): String =
+        if (elements.isEmpty()) "setOf()"
+        else elements.joinToString(", ", prefix = "setOf(", postfix = ")")
 }
 
 class IndexExprNode(
@@ -1833,55 +1798,6 @@ class IndexExprNode(
     }
 
     override fun toString(): String = "$base[$index]"
-}
-
-class SliceExprNode(
-    val base: ExprNode,
-    val start: ExprNode,
-    val end: ExprNode,
-    private val loc: ProgramLoc,
-) : ExprNode(listOf(base, start, end)) {
-    override fun programLocation() = loc
-
-    override fun toZ3GuardString(
-        symbolTypes: Map<String, Type>,
-        argSymbols: Set<String>,
-        forceString: Boolean,
-    ): String {
-        if (forceString) {
-            return "ctx.mkString(${toTransitString(symbolTypes, argSymbols)}.toString())"
-        }
-        val baseType = base.getType()
-        if (baseType !is ListType) {
-            throw RuntimeException("Cannot slice non-list type $baseType at $loc")
-        }
-        val baseStr = base.toZ3GuardString(symbolTypes, argSymbols)
-        val startStr = start.toZ3GuardString(symbolTypes, argSymbols)
-        val endStr = end.toZ3GuardString(symbolTypes, argSymbols)
-        val empty = "ctx.mkEmptySeq(${baseType.toCodegenTypeVal()}.sort(ctx))"
-        val extract = "ctx.mkSeqExtractAny($baseStr, $startStr, ctx.mkSub($endStr, $startStr))"
-        return "ctx.mkITE(ctx.mkGt($endStr, $startStr), $extract, $empty)"
-    }
-
-    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
-        val baseStr = base.toTransitString(symbolTypes, argSymbols)
-        val startStr = start.toTransitString(symbolTypes, argSymbols)
-        val endStr = end.toTransitString(symbolTypes, argSymbols)
-        return "run { val __xs = $baseStr; val __s = $startStr; val __e = $endStr; " +
-            "require(__s >= 0 && __e >= 0) { \"slice bounds must be non-negative\" }; " +
-            "val __lo = minOf(__s, __xs.size); val __hi = minOf(__e, __xs.size); " +
-            "if (__lo >= __hi) emptyList() else __xs.subList(__lo, __hi).toList() }"
-    }
-
-    override fun inferType(symbolEnv: Map<String, Type>): Type {
-        val baseType = base.getType()
-        if (baseType !is ListType) {
-            throw RuntimeException("Cannot slice non-list type $baseType at $loc")
-        }
-        return baseType
-    }
-
-    override fun toString(): String = "$base[$start:$end]"
 }
 
 class LiteralValueExprNode(

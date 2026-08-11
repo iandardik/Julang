@@ -13,6 +13,7 @@ import julay.proclib.Timer
 import node.election_timeout.ElectionTimeout
 import node.leader_heartbeat.LeaderHeartbeat
 import node.vote_requester.VoteRequester
+import julay.funlib.listOf
 
 export proc Raft := RaftNodeMain || RaftCore
 export proc NodeLogic := Raft
@@ -27,7 +28,7 @@ procfun parseCfg(cfg : String, myIdx : Int) : CfgPair {
     var idx : Int := 0
     var entryIdx : Int := 0
     var meBuilder : Node := Node { id := 0, url := "" }
-    var clusterBuilder : List<Node> := []
+    var clusterBuilder : List<Node> := listOf()
 
     internal transition parseAndBuildCluster() {
         guard:
@@ -43,7 +44,7 @@ procfun parseCfg(cfg : String, myIdx : Int) : CfgPair {
                 meBuilder
             }
             clusterBuilder := if (isEntry) {
-                clusterBuilder + [nextNode]
+                clusterBuilder + listOf(nextNode)
             } else {
                 clusterBuilder
             }

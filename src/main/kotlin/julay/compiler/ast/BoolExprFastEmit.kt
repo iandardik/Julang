@@ -227,7 +227,6 @@ private fun ExprNode.opaqueFastGuardKind(
     is WhenExprNode -> "when"
     is LetExprNode -> "let"
     is IndexExprNode -> "index"
-    is SliceExprNode -> "slice"
     is FieldAccessExprNode, is FieldAccessOnExprNode, is MemberAccessExprNode -> "field access"
     is ListLiteralExprNode, is MapLiteralExprNode, is SetLiteralExprNode -> "collection literal"
     is LambdaExprNode -> "lambda"

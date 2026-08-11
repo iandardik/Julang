@@ -1,10 +1,11 @@
+import julay.funlib.mapOf
 proc BadMapKey {
     var mp : Map<String, Int>
     var n : Int
 
     constructor initially(args : List<String>) {
         transit:
-            mp := ["a" -> 1]
+            mp := mapOf("a" to 1)
             n := 0
     }
 

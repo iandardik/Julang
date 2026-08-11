@@ -1,4 +1,5 @@
 import julay.funlib.exitProcess
+import julay.funlib.mapOf
 
 proc MapMissingKey {
     var mp : Map<String, Int>
@@ -6,7 +7,7 @@ proc MapMissingKey {
 
     constructor initially(args : List<String>) {
         transit:
-            mp := ["a" -> 1]
+            mp := mapOf("a" to 1)
             n := 0
     }
 

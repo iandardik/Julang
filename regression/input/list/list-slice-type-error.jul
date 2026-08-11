@@ -1,4 +1,6 @@
 import julay.funlib.exitProcess
+import julay.funlib.listOf
+import julay.funlib.splice
 
 proc BadSlice {
     var xs : List<Int>
@@ -6,8 +8,8 @@ proc BadSlice {
 
     constructor initially(args : List<String>) {
         transit:
-            xs := [1, 2, 3]
-            ys := xs[true:2]
+            xs := listOf(1, 2, 3)
+            ys := splice(xs, true, 2)
     }
 
     internal transition exitSystem() {

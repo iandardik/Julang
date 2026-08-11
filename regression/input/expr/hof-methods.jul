@@ -1,6 +1,9 @@
 import julay.funlib.exitProcess
 import julay.funlib.println
 import julay.funlib.map
+import julay.funlib.listOf
+import julay.funlib.mapOf
+import julay.funlib.setOf
 
 fun double(n : Int) : Int = n + n
 
@@ -16,12 +19,12 @@ proc HofTest {
     constructor initially(args : List<String>) {
         transit:
             step := "props"
-            xs := [1, 2, 3, 4]
-            ys := []
-            s := {1, 2, 3}
-            m := [1 -> 10, 2 -> 20, 3 -> 5]
+            xs := listOf(1, 2, 3, 4)
+            ys := listOf()
+            s := setOf(1, 2, 3)
+            m := mapOf(1 to 10, 2 to 20, 3 to 5)
             n := 0
-            keysFiltered := {}
+            keysFiltered := setOf()
     }
 
     internal transition checkProps() {

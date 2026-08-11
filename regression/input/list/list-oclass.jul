@@ -1,4 +1,5 @@
 import julay.funlib.exitProcess
+import julay.funlib.listOf
 
 obj Point {
     x : Int
@@ -11,7 +12,7 @@ proc ListOClassDemo {
 
     constructor initially(args : List<String>) {
         transit:
-            pts := [Point { x := 1, y := 2 }, Point { x := 3, y := 4 }]
+            pts := listOf(Point { x := 1, y := 2 }, Point { x := 3, y := 4 })
             done := false
     }
 

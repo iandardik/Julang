@@ -1,3 +1,4 @@
+import julay.funlib.setOf
 export sort NodeSet := { "n1", "n2" }
 
 obj VoteRequestMsg {
@@ -6,12 +7,12 @@ obj VoteRequestMsg {
 }
 
 export spec Net {
-    var msgs : Set<VoteRequestMsg> := {}
+    var msgs : Set<VoteRequestMsg> := setOf()
 
     constructor initially(args : List<String>) {}
 
     transition send() {
         transit:
-            msgs := msgs + { VoteRequestMsg { dest := "n1", msg := "hi" } }
+            msgs := msgs + setOf(VoteRequestMsg { dest := "n1", msg := "hi" })
     }
 }

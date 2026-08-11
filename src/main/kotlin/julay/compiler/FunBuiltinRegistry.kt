@@ -268,6 +268,68 @@ object FunBuiltinRegistry {
         namedFunArg = true,
     )
 
+    /** Import-only marker for grammar `listOf(...)` literals (not a callable FunCall). */
+    private val listOfBuiltin = FunBuiltin(
+        name = "listOf",
+        arity = -1,
+        returnType = listType(stringType),
+        checkArgs = { _ -> "listOf is a collection literal, not a function call" },
+        kotlinCodegen = { _ -> throw RuntimeException("listOf is a collection literal, not a call") },
+        z3Codegen = { _ -> throw RuntimeException("listOf is a collection literal, not a call") },
+    )
+
+    /** Import-only marker for grammar `setOf(...)` literals (not a callable FunCall). */
+    private val setOfBuiltin = FunBuiltin(
+        name = "setOf",
+        arity = -1,
+        returnType = listType(stringType),
+        checkArgs = { _ -> "setOf is a collection literal, not a function call" },
+        kotlinCodegen = { _ -> throw RuntimeException("setOf is a collection literal, not a call") },
+        z3Codegen = { _ -> throw RuntimeException("setOf is a collection literal, not a call") },
+    )
+
+    /** Import-only marker for grammar `mapOf(...)` literals (not a callable FunCall). */
+    private val mapOfBuiltin = FunBuiltin(
+        name = "mapOf",
+        arity = -1,
+        returnType = listType(stringType),
+        checkArgs = { _ -> "mapOf is a collection literal, not a function call" },
+        kotlinCodegen = { _ -> throw RuntimeException("mapOf is a collection literal, not a call") },
+        z3Codegen = { _ -> throw RuntimeException("mapOf is a collection literal, not a call") },
+    )
+
+    /**
+     * List slice: `splice(xs, start, end)` — 0-based exclusive-end with clamp.
+     * Return type is specialized from arg0's ListType in TypePass.
+     * Z3 path is handled in FunCallExprNode (registry throws).
+     */
+    private val spliceBuiltin = FunBuiltin(
+        name = "splice",
+        arity = 3,
+        returnType = listType(stringType), // placeholder; real return set via resolveInstantiatedReturnType
+        checkArgs = { argTypes ->
+            when {
+                argTypes.size != 3 -> "Expected function \"splice\" to take 3 argument(s) but got ${argTypes.size}"
+                argTypes[0] !is ListType ->
+                    "Expected first argument of \"splice\" to have a List type but got ${argTypes[0]}"
+                argTypes[1] !is IntType ->
+                    "Expected second argument of \"splice\" to have an Int type but got ${argTypes[1]}"
+                argTypes[2] !is IntType ->
+                    "Expected third argument of \"splice\" to have an Int type but got ${argTypes[2]}"
+                else -> null
+            }
+        },
+        kotlinCodegen = { args ->
+            "run { val __xs = ${args[0]}; val __s = ${args[1]}; val __e = ${args[2]}; " +
+                "require(__s >= 0 && __e >= 0) { \"slice bounds must be non-negative\" }; " +
+                "val __lo = minOf(__s, __xs.size); val __hi = minOf(__e, __xs.size); " +
+                "if (__lo >= __hi) emptyList() else __xs.subList(__lo, __hi).toList() }"
+        },
+        z3Codegen = { _ ->
+            throw RuntimeException("Function \"splice\" Z3 codegen is handled by FunCallExprNode")
+        },
+    )
+
     private val builtins = mapOf(
         lengthBuiltin.name to lengthBuiltin,
         parseIntBuiltin.name to parseIntBuiltin,
@@ -283,6 +345,10 @@ object FunBuiltinRegistry {
         exitSessionBuiltin.name to exitSessionBuiltin,
         killSessionPeerBuiltin.name to killSessionPeerBuiltin,
         mapBuiltin.name to mapBuiltin,
+        listOfBuiltin.name to listOfBuiltin,
+        setOfBuiltin.name to setOfBuiltin,
+        mapOfBuiltin.name to mapOfBuiltin,
+        spliceBuiltin.name to spliceBuiltin,
     )
 
     val namedFunArgEffects: Set<String> =

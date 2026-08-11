@@ -1,5 +1,6 @@
 import julay.funlib.exitProcess
 import julay.funlib.println
+import julay.funlib.listOf
 
 proc S {
     var x : Int
@@ -9,7 +10,7 @@ proc S {
     constructor initially(args : List<String>) {
         transit:
             x := let (inc : Int := 2) { inc + 3 }
-            nested := let (ys : List<List<Int>> := [[1], [2, 3]]) { ys }
+            nested := let (ys : List<List<Int>> := listOf(listOf(1), listOf(2, 3))) { ys }
             print := true
     }
 

@@ -43,17 +43,26 @@ class RewriteSyntaxErrorTest {
     }
 
     @Test
-    fun tupleParensSuggestListBrackets() {
+    fun tupleParensSuggestListOf() {
         val msg = rewriteSyntaxError("no viable alternative at input '(1,'")
         assertEquals(
-            "Unexpected \"(...)\"; list values use brackets: [a, b], not (a, b)",
+            "Unexpected \"(...)\"; list values use listOf(a, b), not (a, b)",
             msg,
         )
     }
 
     @Test
-    fun trailingCommaInSet() {
-        val msg = rewriteSyntaxError("no viable alternative at input '{1,}'")
+    fun oldBracketLiteralSuggestsListOf() {
+        val msg = rewriteSyntaxError("no viable alternative at input '[1, 2]'")
+        assertEquals(
+            "Unexpected \"[...]\"; list values use listOf(...), map values use mapOf(k to v)",
+            msg,
+        )
+    }
+
+    @Test
+    fun trailingCommaInCollectionCall() {
+        val msg = rewriteSyntaxError("no viable alternative at input 'listOf(1,)'")
         assertEquals("Unexpected trailing comma in collection literal", msg)
     }
 

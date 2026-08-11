@@ -1,16 +1,17 @@
 import printer.Printer
 import server.ServerLogic
+import julay.funlib.listOf
 
 proc RunningList {
     var list : List<String>
     
     constructor initially(args : List<String>) {
-        transit: list := []
+        transit: list := listOf()
     }
 
     /*
     provider transition append(e : String) {
-        transit: list := list + [e]
+        transit: list := list + listOf(e)
     }*/
 
     provider transition getList(lst : List<String>) {
@@ -19,7 +20,7 @@ proc RunningList {
 
     provider transition getAndAppend(e : String, lst : List<String>) {
         guard: lst = list
-        transit: list := list + [e]
+        transit: list := list + listOf(e)
     }
 }
 

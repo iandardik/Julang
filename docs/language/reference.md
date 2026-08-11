@@ -9,10 +9,12 @@ Compact cheat sheet. For explanations, use the other chapters.
 `internal` `provider` `client` `session`  
 `guard` `before` `transit` `error` `after` `return`  
 `also` `with`  
-`all` `exists` `if` `else` `let` `when` `in`  
-`true` `false`
+`all` `exists` `if` `else` `let` `when` `in` `to`  
+`true` `false` `listOf` `setOf` `mapOf`
 
 `let` has two forms: expression `let (name : Type := init) { body }` ([Types and expressions](types-and-expressions.md#expression-let)) and transit statement `let name : Type := expr` ([Side effects](effects.md#transit-statement-let)).
+
+`to` is only legal inside `mapOf(...)`. `listOf` / `setOf` / `mapOf` require `import julay.funlib.<name>`.
 
 ## Operators
 
@@ -24,7 +26,7 @@ Compact cheat sheet. For explanations, use the other chapters.
 | Assign | `:=` |
 | Models | `\|=` (system with guarantee) |
 | Parallel | `\|\|` |
-| Other | `.` `->` (map entries / lambdas), list/map/set literals; collection `.keys` / `.length` / `.filter` / `.map` / `.fold` — [Collections](collections.md); TLA limits — [Specifications](specifications.md#tla-translation-limits) |
+| Other | `.` `->` (lambdas / `when` / `error` arms), `to` (only inside `mapOf`); funlib `listOf` / `setOf` / `mapOf` / `splice`; collection `.keys` / `.length` / `.filter` / `.map` / `.fold` — [Collections](collections.md); TLA limits — [Specifications](specifications.md#tla-translation-limits) |
 
 ## Top-level declarations
 

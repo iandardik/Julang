@@ -1,4 +1,4 @@
 source: regression/input/list/list-slice-type-error.jul
 expectCompileFailure: true
 expectCompileOutputContains:
-  - "Expected Int slice start but got Boolean"
+  - "Expected second argument of \"splice\" to have an Int type but got Boolean"
