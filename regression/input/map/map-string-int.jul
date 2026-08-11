@@ -16,7 +16,7 @@ proc MapStringIntDemo {
             print := false
             gotCli := length(args) = 1
         after:
-            println(args[0])
+            println(args[1])
     }
 
     internal transition read() {

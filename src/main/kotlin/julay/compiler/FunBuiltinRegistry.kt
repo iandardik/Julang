@@ -315,7 +315,9 @@ object FunBuiltinRegistry {
     )
 
     /**
-     * List slice: `splice(xs, start, end)` — 0-based exclusive-end with clamp.
+     * List slice: `splice(xs, start, end)` — 1-based inclusive (TLA SubSeq-style) with clamp.
+     * `start` must be `>= 1`; `end` may be `0` for an empty prefix (e.g. Raft commitIndex).
+     * `hi = min(end, length)`; `lo = start`; empty if `end < 1` or `lo > hi`; else elements lo..hi inclusive.
      * Return type is specialized from arg0's ListType in TypePass.
      * Z3 path is handled in FunCallExprNode (registry throws).
      */
@@ -337,9 +339,10 @@ object FunBuiltinRegistry {
         },
         kotlinCodegen = { args ->
             "run { val __xs = ${args[0]}; val __s = ${args[1]}; val __e = ${args[2]}; " +
-                "require(__s >= 0 && __e >= 0) { \"slice bounds must be non-negative\" }; " +
-                "val __lo = minOf(__s, __xs.size); val __hi = minOf(__e, __xs.size); " +
-                "if (__lo >= __hi) emptyList() else __xs.subList(__lo, __hi).toList() }"
+                "require(__s >= 1 && __e >= 0) { \"slice start must be >= 1 and end >= 0\" }; " +
+                "if (__e < 1) emptyList() else { " +
+                "val __hi = minOf(__e, __xs.size); val __lo = __s; " +
+                "if (__lo > __hi) emptyList() else __xs.subList(__lo - 1, __hi).toList() } }"
         },
         z3Codegen = { _ ->
             throw RuntimeException("Function \"splice\" Z3 codegen is handled by FunCallExprNode")

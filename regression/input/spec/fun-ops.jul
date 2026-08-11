@@ -10,7 +10,7 @@ fun entryTermAt(log : List<Entry>, idx : Int) : Int =
     let (e : Entry := log[idx]) e.term
 
 fun bumpTerm(t : Int) : Int =
-    entryTermAt(listOf(Entry { term := t, value := "" }), 0) + 1
+    entryTermAt(listOf(Entry { term := t, value := "" }), 1) + 1
 
 proc LogNode {
     var log : List<Entry>
@@ -24,8 +24,8 @@ proc LogNode {
 
     transition advance(newCommitIndex : Int) {
         guard:
-            & newCommitIndex >= 0
-            & newCommitIndex < length(log)
+            & newCommitIndex >= 1
+            & newCommitIndex <= length(log)
             & entryTermAt(log, newCommitIndex) = currentTerm
         transit:
             currentTerm := bumpTerm(currentTerm)

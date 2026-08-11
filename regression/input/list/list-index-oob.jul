@@ -1,0 +1,27 @@
+import julay.funlib.exitProgram
+import julay.funlib.listOf
+
+// Reading index 0 must fail at runtime (lists are 1-based).
+proc ListIndexOob {
+    var xs : List<Int>
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            xs := listOf(1, 2, 3)
+            n := 0
+    }
+
+    internal transition boom() {
+        guard:
+            true
+        transit:
+            n := xs[0]
+        after:
+            exitProgram(0)
+    }
+}
+
+proc ListIndexOobTest := ListIndexOob
+
+compile ListIndexOobTest

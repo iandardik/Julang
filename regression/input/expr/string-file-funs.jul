@@ -21,7 +21,7 @@ proc StringFileDemo {
             url := "http://127.0.0.1:5001"
             port := 0
             line := "  # comment  "
-            path := args[0]
+            path := args[1]
             n := 0
     }
 
@@ -60,7 +60,7 @@ proc StringFileDemo {
         guard:
             phase = 4 & n = 3
         transit:
-            line := trim(split(readFile(path), "\n")[0])
+            line := trim(split(readFile(path), "\n")[1])
             phase := 5
     }
 

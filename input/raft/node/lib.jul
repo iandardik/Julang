@@ -48,7 +48,7 @@ fun isQuorum(n : Int, granted : Set<Int>) : Boolean =
     length(granted) * 2 > n
 
 export fun fieldValue(line : String) : String =
-    split(line, "=")[1]
+    split(line, "=")[2]
 
 export fun encodeRequestVote(data : VoteRequestData) : String =
     "term=" + data.term + "|candidateId=" + data.candidateId + "|lastLogIndex=" + data.lastLogIndex + "|lastLogTerm=" + data.lastLogTerm

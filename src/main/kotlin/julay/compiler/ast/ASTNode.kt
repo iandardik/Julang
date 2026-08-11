@@ -545,9 +545,22 @@ class FunCallExprNode(
                 if (baseType !is ListType) {
                     throw RuntimeException("Cannot splice non-list type $baseType at $loc")
                 }
+                // 1-based inclusive: end < 1 → empty; else lo = start; hi = min(end, Len);
+                // empty if lo > hi; else extract at offset lo-1 with length hi-lo+1.
                 val empty = "ctx.mkEmptySeq(${baseType.toCodegenTypeVal()}.sort(ctx))"
-                val extract = "ctx.mkSeqExtractAny(${argStrs[0]}, ${argStrs[1]}, ctx.mkSub(${argStrs[2]}, ${argStrs[1]}))"
-                return "ctx.mkITE(ctx.mkGt(${argStrs[2]}, ${argStrs[1]}), $extract, $empty)"
+                val xs = argStrs[0]
+                val s = argStrs[1]
+                val e = argStrs[2]
+                val len = "ctx.mkSeqLengthAny($xs)"
+                return "run { " +
+                    "val __empty = $empty; " +
+                    "ctx.mkITE(ctx.mkLt($e, ctx.mkInt(1)), __empty, run { " +
+                    "val __hi = ctx.mkITE(ctx.mkGt($e, $len), $len, $e); " +
+                    "val __lo = $s; " +
+                    "val __off = ctx.mkSub(__lo, ctx.mkInt(1)); " +
+                    "val __n = ctx.mkAdd(ctx.mkSub(__hi, __lo), ctx.mkInt(1)); " +
+                    "ctx.mkITE(ctx.mkGt(__lo, __hi), __empty, ctx.mkSeqExtractAny($xs, __off, __n)) " +
+                    "}) }"
             }
             return builtin.z3Codegen(argStrs)
         }
@@ -1777,7 +1790,8 @@ class IndexExprNode(
         val indexStr = index.toZ3GuardString(symbolTypes, argSymbols)
         return when (val baseType = base.getType()) {
             is ListType -> {
-                val nth = "ctx.mkSeqNthAny($baseStr, $indexStr)"
+                // Julay lists are 1-based; Z3 Seq is 0-based.
+                val nth = "ctx.mkSeqNthAny($baseStr, ctx.mkSub($indexStr, ctx.mkInt(1)))"
                 castFieldZ3(nth, baseType.elementType, forceString)
             }
             is MapType -> {
@@ -1798,7 +1812,9 @@ class IndexExprNode(
         val indexStr = index.toTransitString(symbolTypes, argSymbols)
         return when (typeForTransit(base, symbolTypes)) {
             is MapType -> "($baseStr.getValue($indexStr))"
-            else -> "$baseStr[$indexStr]"
+            // Julay lists are 1-based; Kotlin List is 0-based.
+            is ListType -> "$baseStr[($indexStr) - 1]"
+            else -> "$baseStr[($indexStr) - 1]"
         }
     }
 

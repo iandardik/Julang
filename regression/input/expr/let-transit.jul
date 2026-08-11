@@ -16,7 +16,7 @@ proc S {
 
     internal transition println(msg : String) {
         guard:
-            print & (msg = x + "") & nested[1][0] = 2
+            print & (msg = x + "") & nested[2][1] = 2
         transit:
             print := false
         after:

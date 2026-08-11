@@ -1,0 +1,8 @@
+source: regression/input/list/list-index-oob.jul
+programs:
+  - name: ListIndexOobTest
+    expectFailure: true
+    expectFailureOutputContains:
+      - "IndexOutOfBoundsException"
+    run:
+      timeoutMs: 60000

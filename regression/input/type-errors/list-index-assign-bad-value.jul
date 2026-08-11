@@ -5,7 +5,7 @@ proc ListIndexAssignBadValue {
     constructor initially(args : List<String>) {
         transit:
             xs := listOf(1, 2)
-            xs[0] := true
+            xs[1] := true
     }
 }
 

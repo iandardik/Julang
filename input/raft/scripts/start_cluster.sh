@@ -63,13 +63,13 @@ CONFIG_ABS="$(cd "$(dirname "$CONFIG")" && pwd)/$(basename "$CONFIG")"
 : > "$PIDFILE"
 echo "Starting $N RaftNode(s) from $CONFIG_ABS using $JAR"
 
-i=0
-while [[ "$i" -lt "$N" ]]; do
+i=1
+while [[ "$i" -le "$N" ]]; do
   log="$LOGDIR/raft-node-$i.log"
   "$JAVA" -jar "$JAR" "$CONFIG_ABS" "$i" >"$log" 2>&1 &
   pid=$!
   echo "$pid" >> "$PIDFILE"
-  echo "  node $i (${URLS[$i]}) pid=$pid log=$log"
+  echo "  node $i (${URLS[$((i - 1))]}) pid=$pid log=$log"
   i=$((i + 1))
 done
 

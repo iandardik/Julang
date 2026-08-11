@@ -8,7 +8,7 @@ proc ParseIntDemo {
 
     constructor initially(args : List<String>) {
         transit:
-            n := parseInt(args[0])
+            n := parseInt(args[1])
             print := true
     }
 

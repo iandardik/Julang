@@ -18,7 +18,7 @@ proc ListOClassDemo {
 
     internal transition check() {
         guard:
-            ~done & pts[0] = Point { x := 1, y := 2 } & pts[1] = Point { x := 3, y := 4 }
+            ~done & pts[1] = Point { x := 1, y := 2 } & pts[2] = Point { x := 3, y := 4 }
         transit:
             done := true
     }

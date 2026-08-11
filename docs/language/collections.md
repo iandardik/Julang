@@ -50,30 +50,47 @@ missing := 9 ~in xs
 
 ### Indexing
 
-`xs[i]` requires an `Int` index and yields the element type. Out-of-bounds reads throw at runtime (`IndexOutOfBoundsException`). There is no compile-time bounds check.
+Lists are **1-based**: valid indices are `1 .. xs.length`. `xs[i]` requires an `Int` index and yields the element type. Out-of-bounds reads (including `0`) throw at runtime (`IndexOutOfBoundsException`). There is no compile-time bounds check.
 
 ```jul
-n := xs[0]
+n := xs[1]
 ```
 
 ### Splicing
 
-`splice(xs, start, end)` (import `julay.funlib.splice`) yields a `List<T>`. Both bounds must be `Int`.
+`splice(xs, start, end)` (import `julay.funlib.splice`) yields a `List<T>`. Both bounds must be `Int`. Semantics match TLA+ `SubSeq`: **1-based inclusive** (elements from `start` through `end`, inclusive).
 
-At runtime:
+#### Clamp and empty rules
 
-- bounds must be non-negative
-- `end` is clamped to `xs.length`
-- if `start >= end`, the result is empty (including reversed bounds such as `splice(xs, 3, 1)`)
+Evaluation order:
+
+1. **Reject illegal bounds** (runtime): `start` must be `>= 1`, and `end` must be `>= 0`. Otherwise throw.
+2. **Empty prefix:** if `end < 1` (i.e. `end = 0`), the result is empty. This is useful when a “last included index” can be `0` (nothing selected).
+3. **Clamp only `end`:** let `hi = min(end, xs.length)`. Oversized `end` does **not** throw; it is capped at the last element.
+4. **Do not clamp `start` down:** let `lo = start`. If `start` is past the end of the list (`lo > hi`), the result is empty — not a singleton of the last element.
+5. **Inclusive slice:** if `lo > hi` (reversed bounds, or `start` past `hi`), return empty; otherwise return elements at indexes `lo .. hi` inclusive.
+
+| Call on `listOf(10, 20, 30, 40)` | Result | Why |
+|---------------------------------|--------|-----|
+| `splice(xs, 1, 3)` | `10, 20, 30` | Inclusive mid-range |
+| `splice(xs, 2, 2)` | `20` | Singleton |
+| `splice(xs, 1, 4)` | whole list | Full span |
+| `splice(xs, 2, 99)` | `20, 30, 40` | `end` clamped to `4` |
+| `splice(xs, 5, 99)` | empty | `start > length` → `lo > hi` |
+| `splice(xs, 3, 1)` | empty | Reversed (`lo > hi`) |
+| `splice(xs, 1, 0)` | empty | `end = 0` empty prefix |
+| `splice(xs, 0, 2)` | **throws** | `start` must be `>= 1` |
 
 ```jul
 import julay.funlib.splice
 
 xs := listOf(10, 20, 30, 40)
-mid := splice(xs, 1, 3)       // listOf(20, 30)
-empty := splice(xs, 2, 2)     // empty
-clamped := splice(xs, 2, 99)  // listOf(30, 40)
-nested := splice(xs, 1, 3)[0] // 20
+mid := splice(xs, 1, 3)       // listOf(10, 20, 30)
+single := splice(xs, 2, 2)    // listOf(20)
+clamped := splice(xs, 2, 99)  // listOf(20, 30, 40)
+pastEnd := splice(xs, 5, 99)  // listOf()
+emptyPrefix := splice(xs, 1, 0) // listOf()
+nested := splice(xs, 1, 3)[1] // 10
 ```
 
 ### Updates
@@ -267,7 +284,7 @@ Freestanding `map(xs, f)` from `julay.funlib.map` accepts a named fun or a lambd
 
 Higher-order calls that only depend on concrete process state are encoded by evaluating the Kotlin form and embedding the result in Z3 (so patterns like `mp.keys.filter(...).length` work in guards). Calls that depend on **symbolic action arguments** are rejected in guards.
 
-For **TLA+ / TLC**, list and set `.map` / `.filter` / `.length` are emitted (with list indexes shifted `+ 1`); `.fold` and map HOFs are not — see [Specifications — TLA+ translation limits](specifications.md#tla-translation-limits).
+For **TLA+ / TLC**, list and set `.map` / `.filter` / `.length` are emitted (Julay list indexes already match TLA `Sequences`); `.fold` and map HOFs are not — see [Specifications — TLA+ translation limits](specifications.md#tla-translation-limits).
 
 Runtime list/map indexing throws on out-of-bounds or missing keys. Symbolic map reads in guards may soft-default missing keys — do not rely on that for executable behavior; check `k in mp` first.
 

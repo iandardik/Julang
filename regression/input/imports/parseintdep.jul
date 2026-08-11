@@ -9,7 +9,7 @@ proc ParseIntDep {
     constructor initially(args : List<String>) {
         transit:
             n := if (true) {
-                parseInt(args[0])
+                parseInt(args[1])
             } else {
                 0
             }

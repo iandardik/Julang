@@ -1479,17 +1479,7 @@ private fun emitConjoined(
                 is TransitUpdate.IndexPut -> {
                     val v = stateTlaName(offer.leaf.tlaName, update.collectionVar, stateVarNames)
                     targetChanged += v
-                    val kRaw = emitExpr(update.index, "")
-                    val collType = try {
-                        pclasses[offer.leaf.name]
-                            ?.localDecls()
-                            ?.filterIsInstance<VarNode>()
-                            ?.firstOrNull { it.name == update.collectionVar }
-                            ?.type
-                    } catch (_: RuntimeException) {
-                        null
-                    }
-                    val k = if (collType is ListType) "(($kRaw) + 1)" else kRaw
+                    val k = emitExpr(update.index, "")
                     if (exprContainsIoHavoc(update.value)) {
                         val domain = typeToTlaDomain(update.value.getType())
                         addAssignPart(
@@ -2324,7 +2314,9 @@ internal fun offersUseSlice(offers: List<TlaActionOffer>): Boolean =
     }
 
 /**
- * Julay `xs[s:e)` helper: 0-based exclusive-end with clamp, via TLA `SubSeq`.
+ * Julay `splice(xs, s, e)` helper: 1-based inclusive with clamp, via TLA `SubSeq`.
+ * `e < 1` → empty (empty prefix); else `hi = min(e, Len)`; `lo = s`; empty if `lo > hi`;
+ * else `SubSeq(xs, lo, hi)`.
  * Parameter / binder names are clash-renamed against [reservedNames].
  */
 internal fun emitSpliceOperatorDef(reservedNames: Set<String>): String {
@@ -2336,9 +2328,10 @@ internal fun emitSpliceOperatorDef(reservedNames: Set<String>): String {
     val hi = allocTlaName("hi", taken)
     return "\\* splice\n" +
         "splice($xs, $s, $e) ==\n" +
-        "  LET $lo == IF $s > Len($xs) THEN Len($xs) ELSE $s\n" +
-        "      $hi == IF $e > Len($xs) THEN Len($xs) ELSE $e\n" +
-        "  IN IF $lo >= $hi THEN <<>> ELSE SubSeq($xs, ($lo) + 1, $hi)"
+        "  IF $e < 1 THEN <<>>\n" +
+        "  ELSE LET $hi == IF $e > Len($xs) THEN Len($xs) ELSE $e\n" +
+        "           $lo == $s\n" +
+        "       IN IF $lo > $hi THEN <<>> ELSE SubSeq($xs, $lo, $hi)"
 }
 
 /** Julay `startsWith` as a TLA operator (TLC strings are sequences). */
@@ -3231,12 +3224,7 @@ internal fun exprToTla(
         }
         is IndexExprNode -> {
             val idx = rec(expr.index, linePrefix, PREC_BOTTOM)
-            val idxAdj = if (exprIsListTyped(expr.base) && !exprIsMapTyped(expr.base)) {
-                "($idx + 1)"
-            } else {
-                idx
-            }
-            "${rec(expr.base, linePrefix, PREC_ATOM)}[$idxAdj]"
+            "${rec(expr.base, linePrefix, PREC_ATOM)}[$idx]"
         }
         is UnaryOpExprNode -> {
             when (expr.op()) {

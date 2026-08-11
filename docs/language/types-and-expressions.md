@@ -50,7 +50,7 @@ Example (braces optional; useful for multi-line arms):
 
 ```jul
 targetNumReqs := if (length(args) > 0) {
-    parseInt(args[0])
+    parseInt(args[1])
 } else {
     25
 }

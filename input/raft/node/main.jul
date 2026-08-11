@@ -25,14 +25,14 @@ obj CfgPair {
 
 procfun parseCfg(cfg : String, myIdx : Int) : CfgPair {
     var rawLines : List<String> := split(readFile(cfg), "\n")
-    var idx : Int := 0
-    var entryIdx : Int := 0
+    var idx : Int := 1
+    var entryIdx : Int := 1
     var meBuilder : Node := Node { id := 0, url := "" }
     var clusterBuilder : List<Node> := listOf()
 
     internal transition parseAndBuildCluster() {
         guard:
-            idx < length(rawLines)
+            idx <= length(rawLines)
         transit:
             let line : String := trim(rawLines[idx])
             let isEntry : Boolean := ~isBlankOrComment(line)
@@ -54,7 +54,7 @@ procfun parseCfg(cfg : String, myIdx : Int) : CfgPair {
 
     internal transition endParse() {
         guard:
-            idx = length(rawLines)
+            idx = length(rawLines) + 1
         return:
             CfgPair { me := meBuilder, cluster := clusterBuilder }
     }
@@ -68,8 +68,8 @@ proc RaftNodeMain {
 
     constructor initially(args : List<String>) {
         transit:
-            let id : Int := parseInt(args[1])
-            let cfg : CfgPair := parseCfg(args[0], id)
+            let id : Int := parseInt(args[2])
+            let cfg : CfgPair := parseCfg(args[1], id)
             self := cfg.me
             theCluster := cfg.cluster
             listenPort := portFromUrl(cfg.me.url)

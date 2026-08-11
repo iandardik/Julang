@@ -15,14 +15,14 @@ proc Counter {
     constructor initially(args : List<String>, peers : List<Peer>) {
         transit:
             cluster := peers
-            nextIndex := peers.map(p -> 0)
+            nextIndex := peers.map(p -> 1)
             n := 0
     }
 
     transition bump(target : Peer) {
         guard:
-            & target.id >= 0
-            & target.id < length(cluster)
+            & target.id >= 1
+            & target.id <= length(cluster)
             & cluster[target.id] = target
         transit:
             n := n + 1
@@ -32,9 +32,9 @@ proc Counter {
     // Slice + map: exercises SubSeq and lambda field access (e.value).
     transition takePrefix(k : Int) {
         guard:
-            & k >= 0
+            & k >= 1
             & k <= length(nextIndex)
-            & nextIndex = splice(nextIndex, 0, k).map(e -> e)
+            & nextIndex = splice(nextIndex, 1, k).map(e -> e)
         transit:
             n := n
     }

@@ -64,8 +64,8 @@ Inside `transit:`, you may declare temporary bindings that are **not** process s
 
 ```jul
 transit:
-    let id : Int := parseInt(args[1])
-    let cfg : CfgPair := parseCfg(args[0], id)
+    let id : Int := parseInt(args[2])
+    let cfg : CfgPair := parseCfg(args[1], id)
     self := cfg.me
     theCluster := cfg.cluster
     listenPort := portFromUrl(cfg.me.url)

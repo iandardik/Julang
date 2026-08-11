@@ -16,7 +16,7 @@ proc ListIntDemo {
             print := false
             gotCli := length(args) = 1
         after:
-            println(args[0])
+            println(args[1])
     }
 
     internal transition step() {
@@ -24,7 +24,7 @@ proc ListIntDemo {
             ~print & length(xs) = 2 & gotCli
         transit:
             xs := xs + listOf(3)
-            n := xs[0]
+            n := xs[1]
             print := true
     }
 

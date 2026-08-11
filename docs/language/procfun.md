@@ -159,8 +159,8 @@ proc RaftNodeMain {
 
     constructor initially(args : List<String>) {
         transit:
-            let id : Int := parseInt(args[1])
-            let cfg : CfgPair := ParseApi.parseCfg(args[0], id)
+            let id : Int := parseInt(args[2])
+            let cfg : CfgPair := ParseApi.parseCfg(args[1], id)
             self := cfg.me
             cluster := cfg.cluster
             listenPort := portFromUrl(cfg.me.url)

@@ -26,11 +26,11 @@ proc RaftClientLogic {
 
     constructor initially(args : List<String>) {
         transit:
-            targetUrl := args[0]
-            command := args[1]
-            value := if (length(args) > 2) args[2] else ""
-            path := if (args[1] = "append") "/client/append" else "/client/get"
-            reqBody := if (args[1] = "append") args[2] else ""
+            targetUrl := args[1]
+            command := args[2]
+            value := if (length(args) > 2) args[3] else ""
+            path := if (args[2] = "append") "/client/append" else "/client/get"
+            reqBody := if (args[2] = "append") args[3] else ""
             respBody := ""
             respCode := 0
             retried := false
@@ -76,7 +76,7 @@ proc RaftClientLogic {
             & respCode = 303
             & startsWith(respBody, "LEADER ")
         transit:
-            targetUrl := split(respBody, " ")[1]
+            targetUrl := split(respBody, " ")[2]
             retried := true
             step := "send"
     }

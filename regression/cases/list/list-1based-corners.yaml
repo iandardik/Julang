@@ -1,0 +1,6 @@
+source: regression/input/list/list-1based-corners.jul
+programs:
+  - name: ListOneBasedCornersTest
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/list-list-1based-corners.stdout

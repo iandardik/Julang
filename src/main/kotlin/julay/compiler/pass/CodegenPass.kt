@@ -780,8 +780,9 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
                             "val $valTemp: ${collectionType.elementType.toKotlinTypeString()} = ${substTransitLets(update.value).toTransitString(transitSymbolTypes, transitArgSymbols)}"
                         // Index/value are pre-state; applying sets in order composes multiple updates
                         // to the same list (TLA+-style EXCEPT with several fields).
+                        // Julay lists are 1-based; Kotlin List is 0-based.
                         transitApplyLines +=
-                            "$collectionVar = $collectionVar.toMutableList().also { it[$idxTemp] = $valTemp }"
+                            "$collectionVar = $collectionVar.toMutableList().also { it[($idxTemp) - 1] = $valTemp }"
                     }
                     else -> throw RuntimeException(
                         "IndexPut expected map or list state var but \"${update.collectionVar}\" has type $collectionType",

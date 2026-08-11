@@ -34,7 +34,7 @@ proc ListSliceDemo {
 
     internal transition sliceEmpty() {
         guard:
-            phase = 1 & mid = listOf(20, 30) & length(mid) = 2
+            phase = 1 & mid = listOf(10, 20, 30) & length(mid) = 3
         transit:
             emptyEq := splice(xs, 2, 2)
             emptyRev := splice(xs, 3, 1)
@@ -43,16 +43,16 @@ proc ListSliceDemo {
 
     internal transition sliceClampAndNest() {
         guard:
-            phase = 2 & length(emptyEq) = 0 & length(emptyRev) = 0
+            phase = 2 & emptyEq = listOf(20) & length(emptyEq) = 1 & length(emptyRev) = 0
         transit:
             clamped := splice(xs, 2, 99)
-            nested := splice(xs, 1, 3)[0]
+            nested := splice(xs, 1, 3)[1]
             phase := 3
     }
 
     internal transition println(msg : String) {
         guard:
-            phase = 3 & clamped = listOf(30, 40) & nested = 20 & (msg = mid + "")
+            phase = 3 & clamped = listOf(20, 30, 40) & nested = 10 & (msg = mid + "")
         transit:
             phase := 4
         after:

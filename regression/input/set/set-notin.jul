@@ -22,7 +22,7 @@ proc SetNotInDemo {
             ok := false
             print := false
         after:
-            println(args[0])
+            println(args[1])
     }
 
     internal transition check() {

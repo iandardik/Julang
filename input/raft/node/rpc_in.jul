@@ -68,10 +68,10 @@ proc ServerInitializer {
 
 procfun inRequestVoteRPC(req : HttpServerRequest) : HttpServerResponse {
     // TODO right now a malformed req body can crash the server
-    const rvTerm : Int := parseInt(fieldValue(split(req.body, "|")[0]))
-    const rvCand : Int := parseInt(fieldValue(split(req.body, "|")[1]))
-    const rvLastIdx : Int := parseInt(fieldValue(split(req.body, "|")[2]))
-    const rvLastTerm : Int := parseInt(fieldValue(split(req.body, "|")[3]))
+    const rvTerm : Int := parseInt(fieldValue(split(req.body, "|")[1]))
+    const rvCand : Int := parseInt(fieldValue(split(req.body, "|")[2]))
+    const rvLastIdx : Int := parseInt(fieldValue(split(req.body, "|")[3]))
+    const rvLastTerm : Int := parseInt(fieldValue(split(req.body, "|")[4]))
     var step : String := "updateTerm"
 
     client transition updateTerm(inTerm : Int) {
@@ -106,14 +106,14 @@ procfun inRequestVoteRPC(req : HttpServerRequest) : HttpServerResponse {
 
 procfun inAppendEntriesRPC(req :  HttpServerRequest) : HttpServerResponse {
     var step : String := "updateTerm"
-    var aeTerm : Int := parseInt(fieldValue(split(req.body, "|")[0]))
-    var aeLeaderId : Int := parseInt(fieldValue(split(req.body, "|")[1]))
-    var aePrevIdx : Int := parseInt(fieldValue(split(req.body, "|")[2]))
-    var aePrevTerm : Int := parseInt(fieldValue(split(req.body, "|")[3]))
-    var aeEntriesLen : Int := parseInt(fieldValue(split(req.body, "|")[4]))
-    var aeEntryTerm : Int := parseInt(fieldValue(split(req.body, "|")[5]))
-    var aeEntryValue : String := fieldValue(split(req.body, "|")[6])
-    var aeLeaderCommit : Int := parseInt(fieldValue(split(req.body, "|")[7]))
+    var aeTerm : Int := parseInt(fieldValue(split(req.body, "|")[1]))
+    var aeLeaderId : Int := parseInt(fieldValue(split(req.body, "|")[2]))
+    var aePrevIdx : Int := parseInt(fieldValue(split(req.body, "|")[3]))
+    var aePrevTerm : Int := parseInt(fieldValue(split(req.body, "|")[4]))
+    var aeEntriesLen : Int := parseInt(fieldValue(split(req.body, "|")[5]))
+    var aeEntryTerm : Int := parseInt(fieldValue(split(req.body, "|")[6]))
+    var aeEntryValue : String := fieldValue(split(req.body, "|")[7])
+    var aeLeaderCommit : Int := parseInt(fieldValue(split(req.body, "|")[8]))
 
     client transition updateTerm(inTerm : Int) {
         guard:

@@ -150,7 +150,7 @@ See [`input/inc_server/main.jul`](../../input/inc_server/main.jul) and [`regress
 
 ### Lists and sequences
 
-- Julay lists are **0-based**; TLA `Sequences` are **1-based**. Reads and `EXCEPT` updates on list-typed state emit `xs[(i) + 1]`.
+- Julay lists are **1-based**, matching TLA `Sequences`. Reads and `EXCEPT` updates on list-typed state use the Julay index as-is.
 - List **action-argument / havoc domains** use a finite `BoundedSeq(S, MaxListLen)` (not bare `Seq(S)`, which TLC cannot enumerate). `MaxListLen` is a module `CONSTANT` (default `3` in the `.cfg`); raise it for longer lists.
 - Emitted helpers include `BoundedSeq(S, N) == UNION { [1..k -> S] : k \in 0..N }` when list domains appear.
 
@@ -161,7 +161,7 @@ See [`input/inc_server/main.jul`](../../input/inc_server/main.jul) and [`regress
 | `listOf()` / list literals | `<<>>` / `<<…>>` |
 | `setOf()` / set literals | `{}` / `{…}` |
 | `mapOf()` / map literals | `[x \in {} \|-> 0]` / `[k \|-> v, …]` |
-| `splice(xs, a, b)` | `splice(xs, a, b)` (helper above `Init`; 0-based exclusive → clamped `SubSeq`) |
+| `splice(xs, a, b)` | `splice(xs, a, b)` (helper above `Init`; 1-based inclusive; `b < 1` → `<<>>`; else clamp `b` to `Len` and `SubSeq`) |
 | `length(xs)` / `xs.length` on lists | `Len(xs)` |
 | `length` / `.length` on sets | `Cardinality(…)` |
 | list/set `.map` (lambda) | function/set comprehension |

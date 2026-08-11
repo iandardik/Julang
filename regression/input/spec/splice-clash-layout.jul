@@ -16,7 +16,7 @@ proc SpliceClash {
         guard:
             & k >= 0
             & k <= length(xs)
-            & xs = splice(xs, 0, k)
+            & xs = splice(xs, 1, k)
         transit: n := n + 1
     }
 }

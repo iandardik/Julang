@@ -1297,8 +1297,21 @@ class SpecTlaTlcSmokeTest {
                 "expected splice operator for slices (SubSeq inside splice) and substituted map binders;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("((target.id) + 1)") || tlaText.contains("(target.id) + 1"),
-                "expected list index + 1;\n$tlaText",
+                (tlaText.contains("[target.id]") || tlaText.contains("cluster[i][target.id]")) &&
+                    !tlaText.contains("((target.id) + 1)") &&
+                    !tlaText.contains("[(target.id) + 1]") &&
+                    !tlaText.contains("[((target.id) + 1)]"),
+                "expected 1-based list indexes without +1 shift;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("SubSeq(") &&
+                    !tlaText.contains("(lo) + 1") &&
+                    !tlaText.contains("(lo)+1") &&
+                    (
+                        Regex("""IF \w+ > \w+ THEN <<>> ELSE SubSeq""").containsMatchIn(tlaText) ||
+                            Regex("""IF \w+ < 1 THEN <<>>""").containsMatchIn(tlaText)
+                    ),
+                "expected inclusive SubSeq splice helper;\n$tlaText",
             )
             assertTrue(
                 tlaText.contains("BoundedSeq(") && tlaText.contains("MaxListLen"),

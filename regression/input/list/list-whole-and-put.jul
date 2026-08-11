@@ -12,7 +12,7 @@ proc BadListTransit {
             true
         transit:
             xs := listOf(3, 4)
-            xs[0] := 5
+            xs[1] := 5
     }
 }
 

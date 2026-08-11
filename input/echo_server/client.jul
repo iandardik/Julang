@@ -15,7 +15,7 @@ proc ClientDispatcher {
             numReqs := 1
             numResps := 0
             targetNumReqs := if (length(args) > 0) {
-                parseInt(args[0])
+                parseInt(args[1])
             } else {
                 25
             }
