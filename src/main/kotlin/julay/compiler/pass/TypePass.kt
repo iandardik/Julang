@@ -687,30 +687,31 @@ private fun BinaryOpExprNode.typePassBinaryOp(
     val rhsType = rhsOperand().getType()
     // Membership is about the RHS collection; handle before obj/list/set/map branches
     // so obj elements/keys (e.g. Node in Set<Node>) are not rejected as invalid obj ops.
-    val structOpErrors = if (op() == "in") {
+    val structOpErrors = if (op() == "in" || op() == "~in") {
+        val membershipOp = op()
         when (rhsType) {
             is ListType -> assertOrCompileError(
                 lhsType == rhsType.elementType,
                 OneLocCompileError(
                     programLocation(),
-                    "Expected \"in\" list element type $lhsType to match ${rhsType.elementType}",
+                    "Expected \"$membershipOp\" list element type $lhsType to match ${rhsType.elementType}",
                 ),
             )
             is SetType -> assertOrCompileError(
                 lhsType == rhsType.elementType,
                 OneLocCompileError(
                     programLocation(),
-                    "Expected \"in\" set element type $lhsType to match ${rhsType.elementType}",
+                    "Expected \"$membershipOp\" set element type $lhsType to match ${rhsType.elementType}",
                 ),
             )
             is MapType -> assertOrCompileError(
                 lhsType == rhsType.keyType,
                 OneLocCompileError(
                     programLocation(),
-                    "Expected \"in\" map key type $lhsType to match ${rhsType.keyType}",
+                    "Expected \"$membershipOp\" map key type $lhsType to match ${rhsType.keyType}",
                 ),
             )
-            else -> listOf(OneLocCompileError(programLocation(), "Cannot apply \"in\" to types $lhsType and $rhsType"))
+            else -> listOf(OneLocCompileError(programLocation(), "Cannot apply \"$membershipOp\" to types $lhsType and $rhsType"))
         }
     } else if (op() == "+" && (lhsType is StringType || rhsType is StringType)) {
         // If either side of "+" is String, coerce the other via toString (string concat).

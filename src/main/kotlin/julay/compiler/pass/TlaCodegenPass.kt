@@ -3262,6 +3262,7 @@ internal fun exprToTla(
                 ">" -> bin(" > ", PREC_REL)
                 ">=" -> bin(" >= ", PREC_REL)
                 "in" -> bin(" \\in ", PREC_REL)
+                "~in" -> bin(" \\notin ", PREC_REL)
                 "+" -> {
                     when {
                         exprIsSetTyped(expr) || exprIsSetTyped(expr.lhsOperand()) || exprIsSetTyped(expr.rhsOperand()) ->

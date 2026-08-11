@@ -7,9 +7,10 @@ Julay is verification-aware: the same program text can declare **invariants** an
 ```jul
 invariant NonNegative := Counter.counter >= 0
 invariant AllInvs := NonNegative & CorrectCounter
+invariant Bound := forall k : Int, Counter.n <= 3
 ```
 
-Invariants are Boolean expressions over proc state. Quantifiers (`all`, `exists`) are common.
+Invariants are Boolean expressions over proc state. Quantifiers (`forall`, `exists`) are common.
 
 ## Specs
 

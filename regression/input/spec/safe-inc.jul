@@ -29,7 +29,7 @@ proc Counter {
     }
 }
 
-invariant Bound := all k : Int, Counter.n <= 3
+invariant Bound := forall k : Int, Counter.n <= 3
 
 spec SafeInc := <Env> Counter <Bound>
 

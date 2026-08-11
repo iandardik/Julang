@@ -13,7 +13,7 @@ proc Counter {
     }
 }
 
-invariant G := all i : Node, Counter[i].n <= 3
+invariant G := forall i : Node, Counter[i].n <= 3
 
 spec SortIndex := <true> Counter[i : Node] <G>
 

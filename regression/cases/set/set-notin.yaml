@@ -1,0 +1,8 @@
+source: regression/input/set/set-notin.jul
+programs:
+  - name: SetNotInTest
+    run:
+      timeoutMs: 60000
+      args:
+        - "cli"
+      expectStdout: regression/expected/set-set-notin.stdout

@@ -1147,6 +1147,18 @@ class BinaryOpExprNode(
                 }
                 else -> throw RuntimeException("Cannot apply \"in\" to type $rhsType")
             }
+            "~in" -> {
+                val member = when (rhsType) {
+                    is ListType -> "ctx.mkListMemberAny($lhsGuardStr, $rhsGuardStr)"
+                    is SetType -> "ctx.mkSetMemberAny($lhsGuardStr, setCellArrExpr(ctx, $rhsGuardStr, ${rhsType.toCodegenTypeVal()}.cellMetadata(ctx).arrAccessor))"
+                    is MapType -> {
+                        val mapVal = rhsType.toCodegenTypeVal()
+                        "ctx.mkSetMemberAny($lhsGuardStr, mapCellKeysExpr(ctx, $rhsGuardStr, $mapVal.cellMetadata(ctx).keysAccessor))"
+                    }
+                    else -> throw RuntimeException("Cannot apply \"~in\" to type $rhsType")
+                }
+                "ctx.mkNot($member)"
+            }
             else -> throw RuntimeException("Invalid binary op: $op")
         }
     }
@@ -1203,6 +1215,7 @@ class BinaryOpExprNode(
                 }
             }
             "in" -> "($lhs in $rhs)"
+            "~in" -> "($lhs !in $rhs)"
             "<" -> numericTransit("<")
             "<=" -> numericTransit("<=")
             ">" -> numericTransit(">")
@@ -1259,7 +1272,7 @@ class BinaryOpExprNode(
                         ?: throw RuntimeException("Cannot apply \"-\" to types $lhsType and $rhsType")
                 }
             }
-            "in" -> boolType
+            "in", "~in" -> boolType
             else -> throw RuntimeException("Invalid binary op: $op")
         }
     }
@@ -2431,7 +2444,7 @@ class CompositeProcExprNode(
 }
 
 /**
- * First-order quantifier for invariant formulas: `all x : T, body` / `exists x : T, body`.
+ * First-order quantifier for invariant formulas: `forall x : T, body` / `exists x : T, body`.
  */
 class QuantifiedExprNode(
     private val universal: Boolean,
@@ -2461,7 +2474,7 @@ class QuantifiedExprNode(
     override fun inferType(symbolEnv: Map<String, Type>): Type = boolType
 
     override fun toString(): String {
-        val q = if (universal) "all" else "exists"
+        val q = if (universal) "forall" else "exists"
         return "$q $binder : $binderType, $body"
     }
 }

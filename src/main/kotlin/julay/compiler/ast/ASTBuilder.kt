@@ -620,6 +620,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 ctx.IMPLIES() != null -> "=>"
                 ctx.IFF() != null -> "<=>"
                 ctx.IN() != null -> "in"
+                ctx.NIN() != null -> "~in"
                 ctx.PLUS() != null -> "+"
                 ctx.MINUS() != null -> "-"
                 else -> "N/A"
@@ -712,7 +713,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                     WhenExprNode(null, arms, sourceLocation(ctx))
                 }
             }
-            ctx.ALL() != null || ctx.EXISTS() != null -> {
+            ctx.FORALL() != null || ctx.EXISTS() != null -> {
                 val binder = ctx.ID().text
                 val binderType = parseTypeExpr(ctx.typeExpr())
                 val bodyNode = visit(ctx.expr(0))
@@ -720,7 +721,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                     throw RuntimeException("Expected quantified body to be an expression")
                 }
                 QuantifiedExprNode(
-                    universal = ctx.ALL() != null,
+                    universal = ctx.FORALL() != null,
                     binder = binder,
                     binderType = binderType,
                     body = bodyNode,

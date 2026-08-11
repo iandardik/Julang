@@ -243,6 +243,7 @@ expr
     | expr GT expr
     | expr GTE expr
     | expr IN expr
+    | expr NIN expr
     | expr EQ expr
     | expr NEQ expr
     | expr AND expr
@@ -255,7 +256,7 @@ expr
     | LET LPAREN ID COLON typeExpr ASGN_EQ expr RPAREN (LCURLY expr RCURLY | expr)
     | WHEN LPAREN expr RPAREN LCURLY when_subject_arm+ RCURLY
     | WHEN LCURLY when_guard_arm+ RCURLY
-    | ALL ID COLON typeExpr COMMA expr
+    | FORALL ID COLON typeExpr COMMA expr
     | EXISTS ID COLON typeExpr COMMA expr
     ;
 

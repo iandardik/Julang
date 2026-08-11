@@ -67,8 +67,8 @@ From [`main.jul`](../../input/inc_server/main.jul):
 
 ```jul
 invariant NonNegative := Counter.counter >= 0
-invariant CorrectCounter := all t1 : Int,
-    (IncReqHandler[t1].step = "C" & all t2 : Int, IncReqHandler[t2].step ~= "B")
+invariant CorrectCounter := forall t1 : Int,
+    (IncReqHandler[t1].step = "C" & forall t2 : Int, IncReqHandler[t2].step ~= "B")
         => (IncReqHandler[t1].localCounter = Counter.counter)
 invariant AllInvs := NonNegative & CorrectCounter
 

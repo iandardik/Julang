@@ -39,11 +39,13 @@ Elements must share one type. Untyped empty `listOf()` is a compile error.
 - `xs + ys` — concatenation (same `List<T>`)
 - `=` / `~=` — structural equality
 - `e in xs` — element membership
+- `e ~in xs` — not an element (`~(e in xs)`)
 
 ```jul
 xs := listOf(1, 2)
 xs := xs + listOf(3)   // listOf(1, 2, 3)
 ok := 2 in xs
+missing := 9 ~in xs
 ```
 
 ### Indexing
@@ -116,10 +118,11 @@ The keyword `to` is only legal inside `mapOf(...)`.
 
 - `=` / `~=` only (no `+` / `-` on maps)
 - `k in mp` tests **key** membership, not value membership
+- `k ~in mp` — key absent
 
 ```jul
 hasA := "a" in mp
-missing := ~("z" in mp)
+missing := "z" ~in mp
 ```
 
 ### Indexing
@@ -171,11 +174,13 @@ empty : Set<Int> := setOf()
 - `s - t` — difference
 - `=` / `~=`
 - `e in s` — element membership
+- `e ~in s` — not an element
 
 ```jul
 s := setOf(1, 2)
 s := s + setOf(3)   // setOf(1, 2, 3)
 s := s - setOf(1)   // setOf(2, 3)
+absent := 9 ~in s
 ```
 
 No indexing, splicing, or index assignment. Update only by whole reassignment.

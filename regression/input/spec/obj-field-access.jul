@@ -26,7 +26,7 @@ proc Router {
     }
 }
 
-invariant Ok := all i : Int, Router[i].step ~= ""
+invariant Ok := forall i : Int, Router[i].step ~= ""
 
 spec ObjFieldAccess := <true> Router[i : Int] <Ok>
 

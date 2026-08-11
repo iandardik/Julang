@@ -9,7 +9,7 @@ Compact cheat sheet. For explanations, use the other chapters.
 `internal` `provider` `client` `session`  
 `guard` `before` `transit` `error` `after` `return`  
 `also` `with`  
-`all` `exists` `if` `else` `let` `when` `in` `to`  
+`forall` `exists` `if` `else` `let` `when` `in` `to`  
 `true` `false` `listOf` `setOf` `mapOf`
 
 `let` has two forms: expression `let (name : Type := init) body` (braces optional; [Types and expressions](types-and-expressions.md#expression-let)) and transit statement `let name : Type := expr` ([Side effects](effects.md#transit-statement-let)).
@@ -22,6 +22,7 @@ Compact cheat sheet. For explanations, use the other chapters.
 |-------|-----------|
 | Logic | `&` `\|` `~` `=>` `<=>` |
 | Compare | `=` `~=` `<` `<=` `>` `>=` |
+| Membership | `in` `~in` |
 | Arithmetic | `+` `-` `*` `/` `%` |
 | Assign | `:=` |
 | Models | `\|=` (system with guarantee) |

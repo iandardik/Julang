@@ -42,8 +42,8 @@ Declares a finite homogeneous domain for **spec index, quantifier, and leaf-spec
 - Arithmetic and comparisons: `+`, `-`, `*`, `/`, `%`, `<`, `<=`, `>`, `>=`, `=`, `~=`
 - Logic: `&`, `|`, `~`, `=>`, `<=>`
 - `if` / `else`, `let`, `when` (subject and guard forms)
-- Membership: `in`
-- Quantifiers (especially in invariants): `all`, `exists`
+- Membership: `in`, `~in` (not in)
+- Quantifiers (especially in invariants): `forall`, `exists`
 
 Example (braces optional; useful for multi-line arms):
 

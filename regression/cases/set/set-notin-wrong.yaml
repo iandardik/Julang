@@ -1,0 +1,4 @@
+source: regression/input/set/set-notin-wrong.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Cannot apply \"~in\""

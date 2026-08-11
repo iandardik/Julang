@@ -76,7 +76,7 @@ export proc RaftProtocol {
             & target.id >= 0
             & target.id < length(cluster)
             & cluster[target.id] = target
-            & ~(target.id in votesResponded)
+            & target.id ~in votesResponded
             & payload = VoteRequestData {
                 term := currentTerm,
                 candidateId := self.id,

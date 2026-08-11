@@ -27,7 +27,7 @@ proc Worker {
     }
 }
 
-invariant G := all i : Int, Worker[i].id >= 0
+invariant G := forall i : Int, Worker[i].id >= 0
 
 spec SpawnWorker := <true> Server || Worker[i : Int] <G>
 

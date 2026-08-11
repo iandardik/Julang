@@ -1,0 +1,12 @@
+proc BadNotIn {
+    var b : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            b := 1 ~in 2
+    }
+}
+
+proc P := BadNotIn
+
+compile P

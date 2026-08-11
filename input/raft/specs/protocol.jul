@@ -2,7 +2,7 @@ import specs.net.Net
 import node.core.RaftProtocol
 import node.protocol.NodeSet
 
-invariant OneLeaderPerTerm := all n1 : NodeSet, all n2 : NodeSet,
+invariant OneLeaderPerTerm := forall n1 : NodeSet, forall n2 : NodeSet,
     (RaftProtocol[n1].state = "Leader" & RaftProtocol[n2].state = "Leader" & RaftProtocol[n1].currentTerm = RaftProtocol[n2].currentTerm) => (n1 = n2)
 
 spec ClusterSpec := RaftProtocol[n : NodeSet]

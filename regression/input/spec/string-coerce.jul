@@ -16,7 +16,7 @@ proc Printer {
     }
 }
 
-invariant DoneOk := all i : Int, Printer[i].done | ~Printer[i].done
+invariant DoneOk := forall i : Int, Printer[i].done | ~Printer[i].done
 
 spec StringCoerce := <true> Printer[i : Int] <DoneOk>
 

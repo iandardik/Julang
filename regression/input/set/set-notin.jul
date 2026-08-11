@@ -1,0 +1,61 @@
+import julay.funlib.println
+import julay.funlib.exitProcess
+import julay.funlib.listOf
+import julay.funlib.mapOf
+import julay.funlib.setOf
+
+/*
+ * Not-membership (`~in`) against Set, List, and Map.
+ */
+proc SetNotInDemo {
+    var s : Set<Int>
+    var xs : List<Int>
+    var m : Map<String, Int>
+    var ok : Boolean
+    var print : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            s := setOf(1, 2)
+            xs := listOf(1, 2)
+            m := mapOf("a" to 1)
+            ok := false
+            print := false
+        after:
+            println(args[0])
+    }
+
+    internal transition check() {
+        guard:
+            & ~ok
+            & 1 in s
+            & 3 ~in s
+            & 1 in xs
+            & 3 ~in xs
+            & "a" in m
+            & "z" ~in m
+        transit:
+            ok := true
+            print := true
+    }
+
+    internal transition println(msg : String) {
+        guard:
+            print & ok & (msg = "ok")
+        transit:
+            print := false
+        after:
+            println(msg)
+    }
+
+    internal transition exitSystem() {
+        guard:
+            ~print & ok
+        after:
+            exitProcess()
+    }
+}
+
+proc SetNotInTest := SetNotInDemo
+
+compile SetNotInTest
