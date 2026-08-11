@@ -1851,6 +1851,113 @@ class LiteralValueExprNode(
     }
 }
 
+/**
+ * Explicit proc-state access: `this.x` / `this.obj.f`.
+ * Always refers to enclosing leaf state, never action args of the same name.
+ */
+class ThisAccessExprNode(
+    val fieldPath: List<String>,
+    private val loc: ProgramLoc,
+    resolvedLeafType: Type? = null,
+    resolvedRelPath: String? = null,
+    resolvedRootType: Type? = null,
+) : ExprNode(listOf()) {
+    private sealed interface ThisAccessResolution {
+        data object Unresolved : ThisAccessResolution
+        data class Resolved(val rootType: Type, val leafType: Type, val relPath: String) : ThisAccessResolution
+    }
+
+    private var resolution: ThisAccessResolution =
+        if (resolvedLeafType != null && resolvedRelPath != null && resolvedRootType != null) {
+            ThisAccessResolution.Resolved(resolvedRootType, resolvedLeafType, resolvedRelPath)
+        } else {
+            ThisAccessResolution.Unresolved
+        }
+
+    init {
+        require(fieldPath.isNotEmpty()) { "this access requires at least one field at $loc" }
+        if (resolvedLeafType != null) {
+            setInferredType(TypePassType.Inferred(resolvedLeafType))
+        }
+    }
+
+    override fun programLocation() = loc
+
+    fun stateVarName(): String = fieldPath[0]
+
+    fun nestedFieldPath(): List<String> = fieldPath.drop(1)
+
+    internal fun resolveThisAccess(rootType: Type, leafType: Type, relPath: String) {
+        resolution = ThisAccessResolution.Resolved(rootType, leafType, relPath)
+        setInferredType(TypePassType.Inferred(leafType))
+    }
+
+    internal fun resolvedRootTypeOrNull(): Type? =
+        (resolution as? ThisAccessResolution.Resolved)?.rootType
+
+    internal fun resolvedLeafTypeOrNull(): Type? =
+        (resolution as? ThisAccessResolution.Resolved)?.leafType
+
+    internal fun resolvedRelPathOrNull(): String? =
+        (resolution as? ThisAccessResolution.Resolved)?.relPath
+
+    /** State-only view: root is never treated as an action arg. */
+    private fun stateForced(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+    ): Pair<Map<String, Type>, Set<String>> {
+        val root = stateVarName()
+        val rootType = resolvedRootTypeOrNull() ?: symbolTypes[root]
+            ?: throw RuntimeException("Unresolved this.${fieldPath.joinToString(".")} at $loc")
+        return (symbolTypes + (root to rootType)) to (argSymbols - root)
+    }
+
+    private fun asFieldOrSymbol(): ExprNode {
+        val root = stateVarName()
+        val rest = nestedFieldPath()
+        val resolved = resolution as? ThisAccessResolution.Resolved
+        return if (rest.isEmpty()) {
+            SymbolValueExprNode(root, loc).also {
+                if (resolved != null) {
+                    it.setInferredType(TypePassType.Inferred(resolved.leafType))
+                }
+            }
+        } else {
+            FieldAccessExprNode(
+                root,
+                rest,
+                loc,
+                resolved?.leafType,
+                resolved?.relPath,
+            )
+        }
+    }
+
+    override fun toZ3GuardString(
+        symbolTypes: Map<String, Type>,
+        argSymbols: Set<String>,
+        forceString: Boolean,
+    ): String {
+        val (types, args) = stateForced(symbolTypes, argSymbols)
+        return asFieldOrSymbol().toZ3GuardString(types, args, forceString)
+    }
+
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        val (types, args) = stateForced(symbolTypes, argSymbols)
+        val inner = asFieldOrSymbol().toTransitString(types, args)
+        // Qualify with this. so Kotlin field wins if a same-named local ever appears.
+        return if (inner.startsWith("this.")) inner else "this.$inner"
+    }
+
+    override fun inferType(symbolEnv: Map<String, Type>): Type {
+        val resolved = resolution as? ThisAccessResolution.Resolved
+            ?: throw RuntimeException("Unresolved this.${fieldPath.joinToString(".")} at $loc")
+        return resolved.leafType
+    }
+
+    override fun toString(): String = "this.${fieldPath.joinToString(".")}"
+}
+
 class FieldAccessExprNode(
     val baseSymbol: String,
     val fieldPath: List<String>,

@@ -58,6 +58,7 @@ fun substituteExpr(expr: ExprNode, name: String, replacement: ExprNode): ExprNod
             expr.programLocation(),
         ).withTypeOf(expr)
         is LiteralValueExprNode -> expr
+        is ThisAccessExprNode -> expr // state path is not a substitutable binder
         is FieldAccessExprNode -> substituteFieldAccess(expr, name, replacement)
         is MemberAccessExprNode -> MemberAccessExprNode(
             substituteExpr(expr.baseExpr, name, replacement),
@@ -203,6 +204,8 @@ fun exprReferencesSymbol(expr: ExprNode, symbol: String): Boolean {
             }
         }
         is LiteralValueExprNode -> false
+        // `this.x` is always process state, never a binder / action arg named x.
+        is ThisAccessExprNode -> false
         is FieldAccessExprNode -> expr.baseSymbol == symbol
         is MemberAccessExprNode -> exprReferencesSymbol(expr.baseExpr, symbol)
         is MethodCallExprNode ->
@@ -264,6 +267,7 @@ fun collectFunCallNames(expr: ExprNode): Set<String> {
             }
         }
         is LiteralValueExprNode -> emptySet()
+        is ThisAccessExprNode -> emptySet()
         is FieldAccessExprNode -> emptySet()
         is MemberAccessExprNode -> collectFunCallNames(expr.baseExpr)
         is MethodCallExprNode ->

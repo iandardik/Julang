@@ -1,0 +1,5 @@
+source: regression/input/type-errors/this-in-fun.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "\"this\" is only allowed in proc action bodies"
+  - "Found type errors; exiting."

@@ -2960,6 +2960,27 @@ internal fun exprToTla(
                 else -> sym
             }
         }
+        is ThisAccessExprNode -> {
+            // Force state: never treat the root as an action arg even when names collide.
+            val root = expr.stateVarName()
+            val rest = expr.nestedFieldPath()
+            val forcedArgs = argNames - root
+            val inner: ExprNode = if (rest.isEmpty()) {
+                SymbolValueExprNode(root, expr.programLocation())
+            } else {
+                FieldAccessExprNode(
+                    root,
+                    rest,
+                    expr.programLocation(),
+                    expr.resolvedLeafTypeOrNull(),
+                    expr.resolvedRelPathOrNull(),
+                )
+            }
+            exprToTla(
+                inner, leafCtx, forcedArgs, self, bareStateVars, reservedNames, stateVarNames,
+                symbolOverrides, linePrefix, parentPrec,
+            )
+        }
         is ListLiteralExprNode -> {
             if (expr.elements.isEmpty()) {
                 "<<>>"

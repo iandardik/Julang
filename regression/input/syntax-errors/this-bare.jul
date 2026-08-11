@@ -1,0 +1,19 @@
+proc S {
+    var x : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            x := 0
+    }
+
+    transition tick() {
+        guard:
+            this = true
+        transit:
+            x := x + 1
+    }
+}
+
+proc P := S
+
+compile P

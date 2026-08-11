@@ -1,0 +1,5 @@
+source: regression/input/type-errors/this-unknown.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "unknown state variable \"this.y\""
+  - "Found type errors; exiting."

@@ -80,6 +80,19 @@ internal transition println(msg : String) {
 
 Omitted clauses default sensibly (`guard` true when absent on a transition, empty `before` / `transit` / `after` when absent).
 
+## `this` vs action args
+
+Inside a constructor or transition body, a bare name prefers an **action arg** (or transit `let`) when it shares a name with state. Use **`this.x`** to mean the process state variable `x` instead:
+
+```jul
+provider transition set(counter : Int) {
+    guard: this.counter ~= counter
+    transit: this.counter := counter
+}
+```
+
+`this.x.f` walks fields on a state `obj` (or collection properties like `this.xs.length`). Bare `this` is illegal. `this` is only allowed in proc / procfun / leaf-spec action bodies—not in `fun` bodies or invariants.
+
 ## Choosing actions
 
 At each step a proc offers the actions it can currently take (enabled by guards). Synchronization with peers decides which joint step occurs. The same action name can appear on different proc classes so they can sync; see [Composition and actions](composition-and-actions.md).

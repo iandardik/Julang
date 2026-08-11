@@ -1,0 +1,14 @@
+fun add(x : Int) : Int = this.x + 1
+
+proc S {
+    var x : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            x := add(0)
+    }
+}
+
+proc P := S
+
+compile P

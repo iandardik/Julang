@@ -28,13 +28,16 @@ fun ExprNode.toBoolExprFastOrNull(
     is UnaryOpExprNode -> when (op()) {
         "~" -> {
             val inner = operand()
-            if (inner is SymbolValueExprNode &&
-                inner.symbol !in argSymbols &&
-                symbolTypes[inner.symbol] is BoolType
-            ) {
-                "BoolExprFast.NotLocalBool(\"${inner.symbol.escapeKotlinStringLiteral()}\")"
-            } else {
-                null
+            when {
+                inner is SymbolValueExprNode &&
+                    inner.symbol !in argSymbols &&
+                    symbolTypes[inner.symbol] is BoolType ->
+                    "BoolExprFast.NotLocalBool(\"${inner.symbol.escapeKotlinStringLiteral()}\")"
+                inner is ThisAccessExprNode &&
+                    inner.fieldPath.size == 1 &&
+                    (inner.resolvedRootTypeOrNull() ?: symbolTypes[inner.stateVarName()]) is BoolType ->
+                    "BoolExprFast.NotLocalBool(\"${inner.stateVarName().escapeKotlinStringLiteral()}\")"
+                else -> null
             }
         }
         else -> null
@@ -44,6 +47,15 @@ fun ExprNode.toBoolExprFastOrNull(
     is SymbolValueExprNode -> {
         if (symbol !in argSymbols && symbolTypes[symbol] is BoolType) {
             "BoolExprFast.LocalBool(\"${symbol.escapeKotlinStringLiteral()}\")"
+        } else {
+            null
+        }
+    }
+    is ThisAccessExprNode -> {
+        if (fieldPath.size == 1 &&
+            (resolvedRootTypeOrNull() ?: symbolTypes[stateVarName()]) is BoolType
+        ) {
+            "BoolExprFast.LocalBool(\"${stateVarName().escapeKotlinStringLiteral()}\")"
         } else {
             null
         }
@@ -90,6 +102,16 @@ fun ExprNode.toSyncTermOrNull(
                 }
                 ty is IntType || ty is BoolType || ty is StringType ->
                     "SyncTerm.Local(\"${symbol.escapeKotlinStringLiteral()}\")"
+                else -> null
+            }
+        }
+        is ThisAccessExprNode -> {
+            if (fieldPath.size != 1) return null
+            val sym = stateVarName()
+            val ty = resolvedRootTypeOrNull() ?: symbolTypes[sym] ?: return null
+            when (ty) {
+                is IntType, is BoolType, is StringType ->
+                    "SyncTerm.Local(\"${sym.escapeKotlinStringLiteral()}\")"
                 else -> null
             }
         }
@@ -227,7 +249,7 @@ private fun ExprNode.opaqueFastGuardKind(
     is WhenExprNode -> "when"
     is LetExprNode -> "let"
     is IndexExprNode -> "index"
-    is FieldAccessExprNode, is FieldAccessOnExprNode, is MemberAccessExprNode -> "field access"
+    is FieldAccessExprNode, is FieldAccessOnExprNode, is MemberAccessExprNode, is ThisAccessExprNode -> "field access"
     is ListLiteralExprNode, is MapLiteralExprNode, is SetLiteralExprNode -> "collection literal"
     is LambdaExprNode -> "lambda"
     else -> this::class.simpleName?.removeSuffix("ExprNode")?.lowercase() ?: "opaque"

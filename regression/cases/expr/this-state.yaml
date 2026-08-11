@@ -1,0 +1,6 @@
+source: regression/input/expr/this-state.jul
+programs:
+  - name: ThisStateTest
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/expr-this-state.stdout

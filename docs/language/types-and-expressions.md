@@ -44,6 +44,7 @@ Declares a finite homogeneous domain for **spec index, quantifier, and leaf-spec
 - `if` / `else`, `let`, `when` (subject and guard forms)
 - Membership: `in`, `~in` (not in)
 - Quantifiers (especially in invariants): `forall`, `exists`
+- In proc action bodies: `this.x` for state when an arg shadows the same name ([Processes](processes.md#this-vs-action-args))
 
 Example (braces optional; useful for multi-line arms):
 

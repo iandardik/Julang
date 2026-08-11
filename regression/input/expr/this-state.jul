@@ -1,0 +1,45 @@
+import julay.funlib.exitProcess
+import julay.funlib.println
+
+/*
+ * `this.x` always means process state, even when an action arg is also named `x`.
+ * Bare `x` still refers to the arg (args shadow state).
+ */
+proc ThisStateDemo {
+    var counter : Int
+    var print : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            counter := 0
+            print := false
+    }
+
+    internal transition set(counter : Int) {
+        guard:
+            ~print & this.counter = 0 & counter = 7
+        transit:
+            this.counter := counter
+            print := true
+    }
+
+    internal transition println(msg : String) {
+        guard:
+            print & (msg = this.counter + "")
+        transit:
+            print := false
+        after:
+            println(msg)
+    }
+
+    internal transition exitSystem() {
+        guard:
+            ~print & this.counter = 7
+        after:
+            exitProcess()
+    }
+}
+
+proc ThisStateTest := ThisStateDemo
+
+compile ThisStateTest

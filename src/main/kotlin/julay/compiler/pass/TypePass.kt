@@ -26,6 +26,11 @@ private var typePassInsideProcFun: Boolean = false
 private var typePassAllowSortDomains: Boolean = false
 /** Proc/leaf-spec classes visible for peer state reads in leaf-spec bodies. */
 private var typePassPeerClasses: Map<String, ProcClassNode> = emptyMap()
+/**
+ * State var/const types for the enclosing proc/procfun/leaf-spec body.
+ * Null outside those bodies (`this` illegal). Empty map means a leaf with no state.
+ */
+private var typePassStateEnv: Map<String, Type>? = null
 
 /** Prefer an obj-literal hint when `Name(...)` names a known obj type rather than a function. */
 internal fun unknownFunctionMessage(name: String, registry: ObjClassRegistry): String =
@@ -181,6 +186,7 @@ fun ASTNode.typePass(
     is WhenExprNode -> typePassWhen(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is ObjClassLiteralExprNode -> typePassObjClassLiteral(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is FieldAccessExprNode -> typePassFieldAccess(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is ThisAccessExprNode -> typePassThisAccess(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is MemberAccessExprNode -> typePassMemberAccess(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is MethodCallExprNode -> typePassMethodCall(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is LambdaExprNode -> listOf(
@@ -214,11 +220,18 @@ private fun ProcClassNode.typePassProcClass(
     if (varErrors.isNotEmpty()) {
         return varErrors
     }
-    val localSymbolEnv = symbolEnv + localDecls
+    val stateEnv = localDecls
         .filterIsInstance<VarNode>()
         .associate { it.name to typingView(it.type) }
-    return varErrors + localDecls.flatMap { decl ->
-        if (decl is VarNode) emptyList() else decl.typePass(localSymbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    val localSymbolEnv = symbolEnv + stateEnv
+    val prevState = typePassStateEnv
+    typePassStateEnv = stateEnv
+    try {
+        return varErrors + localDecls.flatMap { decl ->
+            if (decl is VarNode) emptyList() else decl.typePass(localSymbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+        }
+    } finally {
+        typePassStateEnv = prevState
     }
 }
 
@@ -519,7 +532,9 @@ private fun VarTransitNode.typePassVarTransit(
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
     rhsEnv: Map<String, Type> = symbolEnv,
 ): List<CompileError> {
-    val varType = symbolEnv[varName]
+    // Transit targets are always process state (never action args), even when names collide.
+    val lhsEnv = typePassStateEnv ?: symbolEnv
+    val varType = lhsEnv[varName]
     // Undeclared targets take priority over RHS errors (e.g. untyped empty list literals).
     if (varType == null) {
         return listOf(
@@ -1171,6 +1186,49 @@ private fun FieldAccessExprNode.typePassFieldAccess(
             val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
             inferExprType(symbolEnv)
             childErrors
+        }
+    }
+}
+
+private fun ThisAccessExprNode.typePassThisAccess(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
+): List<CompileError> {
+    val stateEnv = typePassStateEnv
+        ?: return listOf(
+            OneLocCompileError(programLocation(), "\"this\" is only allowed in proc action bodies"),
+        )
+    val root = stateVarName()
+    val rest = nestedFieldPath()
+    val rootType = stateEnv[root]
+        ?: return listOf(
+            OneLocCompileError(programLocation(), "unknown state variable \"this.$root\""),
+        )
+    if (rest.isEmpty()) {
+        resolveThisAccess(rootType, valueView(rootType), root)
+        inferExprType(symbolEnv)
+        return emptyList()
+    }
+    when (val coll = resolveCollectionPropertyPath(rootType, rest)) {
+        is CollectionPropResult.Resolved -> {
+            resolveThisAccess(rootType, valueView(coll.type), rest.joinToString("."))
+            inferExprType(symbolEnv)
+            return emptyList()
+        }
+        is CollectionPropResult.Error ->
+            return listOf(OneLocCompileError(programLocation(), coll.message))
+        is CollectionPropResult.NotCollectionProp -> {}
+    }
+    return when (val result = resolveFieldPath(rootType, rest)) {
+        is FieldPathResult.Error -> listOf(OneLocCompileError(programLocation(), result.message))
+        is FieldPathResult.Resolved -> {
+            resolveThisAccess(rootType, valueView(result.type), result.relPath)
+            inferExprType(symbolEnv)
+            emptyList()
         }
     }
 }
@@ -2157,7 +2215,9 @@ private fun IndexTransitNode.typePassIndexTransit(
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
     rhsEnv: Map<String, Type> = symbolEnv,
 ): List<CompileError> {
-    val collectionType = symbolEnv[collectionVar]
+    // Index assignment targets are always process state (never action args).
+    val lhsEnv = typePassStateEnv ?: symbolEnv
+    val collectionType = lhsEnv[collectionVar]
     if (collectionType == null) {
         return listOf(OneLocCompileError(programLocation(), "Unknown variable \"$collectionVar\" in transit assignment"))
     }
@@ -2427,27 +2487,33 @@ private fun ProcFunNode.typePassProcFunBody(
     } catch (_: RuntimeException) {
         return emptyList()
     }
-    val bodyErrors = localDecls().flatMap { decl ->
-        when (decl) {
-            is VarNode -> emptyList()
-            is TransitionNode -> {
-                val transErrors = decl.typePass(localSymbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
-                val returnExprs = decl.body().flatMap { it.returns() }
-                val retTypeErrors = returnExprs.flatMap { expr ->
-                    assertOrCompileError(
-                        expr.getType() == returnType,
-                        OneLocCompileError(
-                            expr.programLocation(),
-                            "Expected return of procfun \"${name()}\" to have type $returnType but got ${expr.getType()}",
-                        ),
-                    )
+    val stateEnv = vars.associate { it.name to typingView(it.type) }
+    val prevState = typePassStateEnv
+    typePassStateEnv = stateEnv
+    try {
+        return localDecls().flatMap { decl ->
+            when (decl) {
+                is VarNode -> emptyList()
+                is TransitionNode -> {
+                    val transErrors = decl.typePass(localSymbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+                    val returnExprs = decl.body().flatMap { it.returns() }
+                    val retTypeErrors = returnExprs.flatMap { expr ->
+                        assertOrCompileError(
+                            expr.getType() == returnType,
+                            OneLocCompileError(
+                                expr.programLocation(),
+                                "Expected return of procfun \"${name()}\" to have type $returnType but got ${expr.getType()}",
+                            ),
+                        )
+                    }
+                    transErrors + retTypeErrors
                 }
-                transErrors + retTypeErrors
+                else -> decl.typePass(localSymbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
             }
-            else -> decl.typePass(localSymbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
         }
+    } finally {
+        typePassStateEnv = prevState
     }
-    return bodyErrors
 }
 
 private fun ReturnNode.typePassReturn(

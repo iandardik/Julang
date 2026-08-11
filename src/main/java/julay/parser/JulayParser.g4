@@ -203,6 +203,7 @@ error_arm
 
 var_transit
     : field_access ASGN_EQ expr
+    | THIS DOT ID LBRACK expr RBRACK ASGN_EQ expr
     | ID LBRACK expr RBRACK ASGN_EQ expr
     | LET ID COLON typeExpr ASGN_EQ expr
     ;
@@ -329,7 +330,8 @@ method_prop_expr
 
 // method_call requires at least one DOT so bare ID(...) stays fun_call; LPAREN is mandatory
 method_call
-    : ID (DOT ID)+ LPAREN (call_arg (COMMA call_arg)*)? RPAREN
+    : THIS (DOT ID)+ LPAREN (call_arg (COMMA call_arg)*)? RPAREN
+    | ID (DOT ID)+ LPAREN (call_arg (COMMA call_arg)*)? RPAREN
     ;
 
 fun_call
@@ -355,5 +357,6 @@ oclass_field_assign
     ;
 
 field_access
-    : ID (DOT ID)*
+    : THIS DOT ID (DOT ID)*
+    | ID (DOT ID)*
     ;

@@ -159,6 +159,15 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
 
     override fun visitMethod_call(ctx: JulayParser.Method_callContext?): ASTNode {
         val ids = ctx!!.ID().map { it.text }
+        val args = ctx.call_arg().map { visitCallArg(it) }
+        if (ctx.THIS() != null) {
+            // this.xs.filter(...) — at least one ID after THIS (receiver + method).
+            require(ids.size >= 2) { "method_call on this requires a dotted receiver at ${ctx.text}" }
+            val methodName = ids.last()
+            val basePath = ids.dropLast(1)
+            val base = ThisAccessExprNode(basePath, sourceLocation(ctx))
+            return MethodCallExprNode(base, methodName, args, sourceLocation(ctx))
+        }
         require(ids.size >= 2) { "method_call requires a dotted receiver at ${ctx.text}" }
         val methodName = ids.last()
         val baseIds = ids.dropLast(1)
@@ -167,7 +176,6 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         } else {
             FieldAccessExprNode(baseIds[0], baseIds.drop(1), sourceLocation(ctx))
         }
-        val args = ctx.call_arg().map { visitCallArg(it) }
         return MethodCallExprNode(base, methodName, args, sourceLocation(ctx))
     }
 
@@ -574,7 +582,8 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             }
             return LetTransitNode(name, typeExpr, init, sourceLocation(ctx))
         }
-        if (ctx.ID() != null && ctx.LBRACK() != null) {
+        if (ctx.LBRACK() != null) {
+            // xs[i] := … or this.xs[i] := … (both mean state collection update)
             val collectionVar = ctx.ID().text
             val index = visit(ctx.expr(0))
             val value = visit(ctx.expr(1))
@@ -589,6 +598,8 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             throw RuntimeException("Expected transit to be assigned an expr")
         }
         return when (lhs) {
+            is ThisAccessExprNode ->
+                VarTransitNode(lhs.stateVarName(), lhs.nestedFieldPath(), transit, sourceLocation(ctx))
             is FieldAccessExprNode -> VarTransitNode(lhs.baseSymbol, lhs.fieldPath, transit, sourceLocation(ctx))
             is SymbolValueExprNode -> VarTransitNode(lhs.symbol, emptyList(), transit, sourceLocation(ctx))
             else -> throw RuntimeException("Expected field access on left-hand side of transit assignment")
@@ -833,6 +844,10 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
 
     override fun visitField_access(ctx: JulayParser.Field_accessContext?): ASTNode {
         val ids = ctx!!.ID().map { it.text }
+        if (ctx.THIS() != null) {
+            require(ids.isNotEmpty()) { "this access requires a state field at ${ctx.text}" }
+            return ThisAccessExprNode(ids, sourceLocation(ctx))
+        }
         if (ids.size == 1) {
             return SymbolValueExprNode(ids[0], sourceLocation(ctx))
         }

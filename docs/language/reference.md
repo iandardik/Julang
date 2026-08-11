@@ -8,11 +8,13 @@ Compact cheat sheet. For explanations, use the other chapters.
 `var` `const` `constructor` `transition`  
 `internal` `provider` `client` `session`  
 `guard` `before` `transit` `error` `after` `return`  
-`also` `with`  
+`also` `with` `this`  
 `forall` `exists` `if` `else` `let` `when` `in` `to`  
 `true` `false` `listOf` `setOf` `mapOf`
 
 `let` has two forms: expression `let (name : Type := init) body` (braces optional; [Types and expressions](types-and-expressions.md#expression-let)) and transit statement `let name : Type := expr` ([Side effects](effects.md#transit-statement-let)).
+
+`this.x` in a proc/procfun/leaf-spec action body always means state variable `x` (even when an action arg is also named `x`); bare names still prefer args. See [Processes](processes.md#this-vs-action-args).
 
 `to` is only legal inside `mapOf(...)`. `listOf` / `setOf` / `mapOf` require `import julay.funlib.<name>`.
 
