@@ -241,7 +241,7 @@ When a spec includes **two-sided** session actions (both peer classes appear as 
 
 **Omitted when unused:**
 
-- `*_killed` — only for leaves that are a `killSessionPeer(Peer)` peer target somewhere in the module. Those leaves also get `~killed` enablement gates, and their `*_dead` includes a kill disjunct. Specs with no `killSessionPeer` omit all `*_killed` variables.
+- `*_killed` — for leaves that are a `killSessionPeer(Peer)` peer target **or** that call `exitProc` somewhere in the module. Those leaves also get `~killed` enablement gates, and their `*_dead` includes a kill disjunct. Specs with neither omit all `*_killed` variables.
 - `sessionException` and `SessionIntegrity == ~sessionException` (checked in the `.cfg`) — only when a **session constructor** action exists (models rebind `JulayException`). Transition-only or exit-only session specs omit them. A stdlib Timer bug caught by `SessionIntegrity` is written up under [Bugs found with Julay](../examples/bugs-found-with-julay.md).
 - Actions whose TLA body updates no variables (guard-only / no primed updates) are omitted from action definitions and from `Next`; stuttering remains via `[][Next]_vars`. Constructors, session sticky/teardown, and procfun terminate still update bookkeeping vars and are kept.
 
@@ -251,12 +251,13 @@ When a spec includes **two-sided** session actions (both peer classes appear as 
 |--------|------|
 | `exitSession(Peer)` | `IF anyLive THEN session /\ session_*' = FALSE ELSE UNCHANGED` |
 | `killSessionPeer(Peer)` | `IF anyLive THEN session /\ clear and peer `*_killed' = TRUE ELSE UNCHANGED` |
+| `exitProc()` | caller `*_killed' = TRUE` (self-exit; compile error inside procfuns) |
 
 The peer leaf is taken from the effect argument (caller ↔ named peer among SpecLeaves).
 
 **IO in transit (havoc):** assignments whose RHS involves `readln()` or `readFile(...)` do not emit a concrete next-state expression. The target is **havoc’d**: `stateVar' \in String` (or an `\E` form for indexed leaves). See [Before/after and IO](effects.md#tla-translation-io-havoc).
 
-Examples under [`regression/input/spec/`](../../regression/input/spec/): `session-pair.jul` (affinity only), `session-exit.jul`, `session-kill.jul`, `session-spawn-rebind.jul` (session ctor + `SessionIntegrity`).
+Examples under [`regression/input/spec/`](../../regression/input/spec/): `session-pair.jul` (affinity only), `session-exit.jul`, `session-kill.jul`, `exit-proc.jul` (`exitProc` / `*_killed`), `session-spawn-rebind.jul` (session ctor + `SessionIntegrity`).
 
 ## What else to expect
 

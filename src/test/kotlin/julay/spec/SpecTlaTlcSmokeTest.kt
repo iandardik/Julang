@@ -1108,6 +1108,44 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun exitProcSetsSelfKilledInTla() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-exit-proc").toFile()
+        try {
+            val source = File("regression/input/spec/exit-proc.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("ExitProcSpec.tla")
+            val cfg = File("ExitProcSpec.cfg")
+            assertTrue(tla.exists(), "expected ExitProcSpec.tla")
+            assertTrue(cfg.exists(), "expected ExitProcSpec.cfg")
+            val tlaText = tla.readText()
+            assertTrue(
+                tlaText.contains("Leaf_killed"),
+                "expected Leaf_killed for exitProc caller;\n$tlaText",
+            )
+            val dieDef = tlaText.substringAfter("die ==").substringBefore("\n\n")
+            assertTrue(
+                dieDef.contains("Leaf_killed' = TRUE"),
+                "expected exitProc action to set Leaf_killed;\n$dieDef",
+            )
+            assertTrue(
+                tlaText.contains("~Leaf_killed"),
+                "expected ~Leaf_killed enablement gates;\n$tlaText",
+            )
+            tla.copyTo(File(work, "ExitProcSpec.tla"), overwrite = true)
+            cfg.copyTo(File(work, "ExitProcSpec.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "ExitProcSpec")
+        } finally {
+            work.deleteRecursively()
+            File("ExitProcSpec.tla").delete()
+            File("ExitProcSpec.cfg").delete()
+        }
+    }
+
+    @Test
     fun procfunCountUpEmitsTerminatedAndTlcParses() {
         assumeTlcPresent()
         val work = Files.createTempDirectory("julay-spec-procfun").toFile()

@@ -1,0 +1,6 @@
+source: regression/input/exit-proc/exit-proc.jul
+programs:
+  - name: P
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/exit-proc-exit-proc.stdout

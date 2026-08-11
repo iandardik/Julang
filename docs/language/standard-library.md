@@ -41,6 +41,7 @@ Import as `julay.funlib.<name>`. Bare names are not available without an import.
 | `println` | Print a line (void) | **Yes** (stdout) | **No** |
 | `readln` | Read a line → `String` | **Yes** (stdin; TLA+ havocs) | **No** |
 | `exitProgram` | Halt the program with an `Int` return code (void) | **Yes** | **No** |
+| `exitProc` | Cancel the calling proc’s coroutine (void); **not allowed in procfuns (compile error)** | **Yes** | **No** |
 | `delaySeconds` | Sleep for N seconds (void) | **Yes** | **No** |
 | `exitSession` | End session with named peer class (void; transition-only) | **Yes** | **No** |
 | `killSessionPeer` | End session and cancel peer (void; transition-only) | **Yes** | **No** |

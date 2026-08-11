@@ -192,6 +192,18 @@ object FunBuiltinRegistry {
         z3Codegen = { _ -> throw RuntimeException("Function \"exitProgram\" cannot be used in guards") },
     )
 
+    private val exitProcBuiltin = FunBuiltin(
+        name = "exitProc",
+        arity = 0,
+        returnType = null,
+        checkArgs = { argTypes ->
+            if (argTypes.isEmpty()) null
+            else "Expected function \"exitProc\" to take 0 argument(s) but got ${argTypes.size}"
+        },
+        kotlinCodegen = { _ -> "hostProc.requestSilentKill()" },
+        z3Codegen = { _ -> throw RuntimeException("Function \"exitProc\" cannot be used in guards") },
+    )
+
     private val readlnBuiltin = FunBuiltin(
         name = "readln",
         arity = 0,
@@ -344,6 +356,7 @@ object FunBuiltinRegistry {
         startsWithBuiltin.name to startsWithBuiltin,
         printlnBuiltin.name to printlnBuiltin,
         exitProgramBuiltin.name to exitProgramBuiltin,
+        exitProcBuiltin.name to exitProcBuiltin,
         readlnBuiltin.name to readlnBuiltin,
         delaySecondsBuiltin.name to delaySecondsBuiltin,
         exitSessionBuiltin.name to exitSessionBuiltin,

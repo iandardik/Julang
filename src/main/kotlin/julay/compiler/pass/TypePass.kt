@@ -627,6 +627,14 @@ private fun CallStmtNode.typePassCallStmt(
                 ),
             )
         }
+        if (typePassInsideProcFun && callName() == "exitProc") {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "exitProc is not allowed in procfun bodies; procfuns must complete via return:",
+                ),
+            )
+        }
         if (builtin.sessionPeerClassArg) {
             if (builtin.arity != callArgs().size) {
                 return listOf(

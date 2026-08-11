@@ -22,7 +22,8 @@ alwaysApply: false
 
 - Two-sided session specs emit `session_*`, `CanStartSession_*`, `EndSession_*`, and `*_dead`.
 - `sessionException` (init FALSE) and `SessionIntegrity == ~sessionException` (checked in the `.cfg`) are emitted **only** when a session-constructor (hybrid) action exists — models rebind `JulayException`. Transition-only session specs omit them.
-- SpecLeaves always have `*_constructed`. `*_killed` (init FALSE) is emitted **only** for leaves that are a `killSessionPeer` peer target somewhere in the module; those leaves gate actions with `~killed`, and their `*_dead` includes the kill disjunct. Specs with no `killSessionPeer` omit all `*_killed`.
+- SpecLeaves always have `*_constructed`. `*_killed` (init FALSE) is emitted for leaves that are a `killSessionPeer` peer target **or** that call `exitProc` somewhere in the module; those leaves gate actions with `~killed`, and their `*_dead` includes the kill disjunct. Specs with neither omit all `*_killed`.
 - Transition-only session actions: sticky `(session \/ CanStart)` under `\* Session connection semantics`.
 - Session ctor-bearing (hybrid) actions: under the same comment, `IF CanStart THEN` session assign + spawn updates `ELSE sessionException' = TRUE` (no spawn) — mirrors runtime `JulayException` on rebind.
+- `exitProc()`: action sets caller `*_killed' = TRUE` (self-exit); runtime is `hostProc.requestSilentKill()`. Banned in procfun bodies at compile time.
 - `exitSession(Peer)` / `killSessionPeer(Peer)`: resolve session pair as caller ↔ named peer leaf; `IF anyLive THEN lookup /\ clear (and kill) ELSE UNCHANGED` — no-op when affinity absent; when some peer session exists, the quantified index must match. When the same pair is torn down on a sticky session action, skip `session' = TRUE` and leave clearing to the effect block. Natural `EndSession_*` remains for enablement death.

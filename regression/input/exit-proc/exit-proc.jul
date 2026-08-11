@@ -1,0 +1,43 @@
+import julay.funlib.delaySeconds
+import julay.funlib.exitProc
+import julay.funlib.exitProgram
+import julay.funlib.println
+
+/*
+ * Sync on A: Printer prints "A"; Exiter calls exitProc in before.
+ * Survivor then takes internal B and prints "B".
+ */
+proc Printer {
+    var phase : String
+
+    constructor initially(args : List<String>) {
+        transit: phase := "A"
+    }
+
+    transition A() {
+        guard: phase = "A"
+        before: println("A")
+        transit: phase := "B"
+        after: delaySeconds(1)
+    }
+
+    internal transition B() {
+        guard:
+            phase = "B"
+        after:
+            println("B")
+            exitProgram(0)
+    }
+}
+
+proc Exiter {
+    constructor initially(args : List<String>) {}
+
+    transition A() {
+        before: exitProc()
+    }
+}
+
+proc P := Printer || Exiter
+
+compile P

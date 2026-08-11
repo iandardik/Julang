@@ -1,0 +1,18 @@
+import julay.funlib.exitProc
+
+procfun bad() : Int {
+    internal transition go() {
+        before: exitProc()
+        return: 0
+    }
+}
+
+proc Main {
+    var out : Int
+
+    constructor initially(args : List<String>) {
+        transit: out := bad()
+    }
+}
+
+compile Main

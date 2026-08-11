@@ -125,6 +125,7 @@ procfun parseCfg(cfg : String) : Set<Node> {
 | Step modifiers | Any of bare / `internal` / `client` / `session`. **`provider` is forbidden.** |
 | Reserved names | User transitions/ctors/vars cannot be named `initially`, `F_call`, `F_ret`, or `retVal`. |
 | Return | `return: expr` on a transition (any allowed modifier). Mutually exclusive with `transit:` / `error:`. Desugars to `retVal := expr` without changing the transition's sync tag. Synthetic `_ret` is the completion edge (alphabet / TLA); runtime still delivers the value when the return-bearing step fires. ≥1 return required. |
+| `exitProc` | **Compile error** inside procfun bodies. Procfuns must finish via `return:`; `exitProc` is only for ordinary procs. Without `return:`, a silent child exit would leave the host with `JulayException("… exited without return")` and TLA `Host_blocking` stuck. |
 | Call sites | Only in **transit RHS** (like value-returning effectful funlib). Not in guards or pure `fun` bodies. |
 | Recursion | Direct/mutual recursion among procfuns is rejected (loop with `internal` transitions instead). |
 

@@ -1,0 +1,5 @@
+source: regression/input/type-errors/exit-proc-in-procfun.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "exitProc is not allowed in procfun bodies"
+  - "Found type errors; exiting."

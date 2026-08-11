@@ -3,7 +3,7 @@
 In Julay, side effects are not ambient language primitives. They come from the **standard library** in one of two ways:
 
 1. **Library processes** that perform effects (for example `HttpServer`, `Timer`) — compose them into your system and synchronize on their actions.
-2. **Library functions** that perform effects (for example `println()`, `readln()`, `exitProgram(code)`) — import them from `julay.funlib` and call them from action bodies (`before:` / `after:` for void effects; `transit:` RHS for value-returning IO).
+2. **Library functions** that perform effects (for example `println()`, `readln()`, `exitProgram(code)`, `exitProc()`) — import them from `julay.funlib` and call them from action bodies (`before:` / `after:` for void effects; `transit:` RHS for value-returning IO).
 
 Which procs and functions are effectful is listed in [Standard library](standard-library.md).
 
@@ -40,6 +40,8 @@ internal transition step() {
 ```
 
 `after:` is the former `effect:` clause (renamed). Session teardown functions (`exitSession`, `killSessionPeer`) are **transition-only** and may appear in `before:` or `after:` (not constructors). Their argument is a bare leaf proc-class name. See [Sessions](sessions.md).
+
+`exitProc()` cancels the **calling** proc’s coroutine after the current action finishes (prefer `after:` so state updates commit first). It is a **compile-time error inside procfun bodies** — procfuns must complete via `return:` (otherwise the host would get no return value, and TLA+ `Host_blocking` would stick). See [Procfuns](procfun.md).
 
 ### IO in `transit:`
 

@@ -1,0 +1,24 @@
+import julay.funlib.exitProc
+
+/*
+ * exitProc marks the calling leaf killed after the action.
+ */
+proc Leaf {
+    var phase : String
+
+    constructor initially(args : List<String>) {
+        transit: phase := "live"
+    }
+
+    internal transition die() {
+        guard: phase = "live"
+        transit: phase := "done"
+        after: exitProc()
+    }
+}
+
+invariant Inv := true
+
+spec ExitProcSpec := <true> Leaf <Inv>
+
+compile ExitProcSpec

@@ -644,13 +644,18 @@ private fun collectEmittedOfferLists(offers: List<TlaActionOffer>): List<List<Tl
     return result
 }
 
-/** Leaf names that are `killSessionPeer` targets somewhere in the module. */
+/** Leaf names that are kill targets: `killSessionPeer` peers or `exitProc` callers. */
 private fun collectKillTargets(
     emittedOfferLists: List<List<TlaActionOffer>>,
     sessionPairs: List<SessionLeafPair>,
 ): Set<String> {
     val targets = linkedSetOf<String>()
     emittedOfferLists.forEach { offerList ->
+        offerList.forEach { offer ->
+            if (offerHasExitProc(offer)) {
+                targets += offer.leaf.tlaName
+            }
+        }
         if (offerList.none { "killSessionPeer" in sessionEffectNames(it) }) return@forEach
         val actionPair = sessionPairForOffers(offerList, sessionPairs)
         val effectPair = resolveSessionEffectPair(offerList, actionPair, sessionPairs) ?: return@forEach
@@ -659,6 +664,9 @@ private fun collectKillTargets(
     }
     return targets
 }
+
+private fun offerHasExitProc(offer: TlaActionOffer): Boolean =
+    (offer.decl.befores + offer.decl.afters).any { it.callName() == "exitProc" }
 
 private fun sessionEffectNames(offer: TlaActionOffer): List<String> =
     (offer.decl.befores + offer.decl.afters).map { it.callName() }.filter {
@@ -1614,6 +1622,11 @@ private fun emitConjoined(
             emitTransitUpdates(offer, deferredSpawnParts, deferredSpawnChanged)
         } else {
             emitTransitUpdates(offer, parts, changed)
+            if (offerHasExitProc(offer)) {
+                val killedVar = stateTlaName(offer.leaf.tlaName, "killed", stateVarNames)
+                parts += "/\\ ${killedAssignTrueExpr(offer.leaf, self, stateVarNames)}"
+                changed += killedVar
+            }
         }
     }
 
