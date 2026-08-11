@@ -563,6 +563,96 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun transitLetsEmitAsTlaLet() {
+        val source = File("regression/input/spec/transit-let-layout.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        try {
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("TransitLetLayout.tla")
+            assertTrue(tla.exists(), "expected TransitLetLayout.tla")
+            val stepDef = tla.readText().substringAfter("step ==").substringBefore("\n\n")
+            assertTrue(
+                stepDef.contains("LET alreadyDone =="),
+                "transit let should emit TLA LET;\n$stepDef",
+            )
+            assertTrue(
+                stepDef.contains("alreadyDone") &&
+                    !stepDef.contains("IF flag /\\ n > 0 THEN n ELSE n + 1"),
+                "later assigns should reference the let name, not inline the init;\n$stepDef",
+            )
+        } finally {
+            File("TransitLetLayout.tla").delete()
+            File("TransitLetLayout.cfg").delete()
+        }
+    }
+
+    @Test
+    fun whenEmitsAsTlaCase() {
+        val source = File("regression/input/spec/when-case-layout.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        try {
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("WhenCaseLayout.tla")
+            assertTrue(tla.exists(), "expected WhenCaseLayout.tla")
+            val stepDef = tla.readText().substringAfter("step ==").substringBefore("\n\n")
+            assertTrue(
+                stepDef.contains("CASE") && stepDef.contains("OTHER"),
+                "when should emit TLA CASE with OTHER;\n$stepDef",
+            )
+            assertFalse(
+                Regex("""n' = TRUE\b""").containsMatchIn(stepDef),
+                "when must not degrade to TRUE;\n$stepDef",
+            )
+        } finally {
+            File("WhenCaseLayout.tla").delete()
+            File("WhenCaseLayout.cfg").delete()
+        }
+    }
+
+    @Test
+    fun startsWithEmitsHelperOperator() {
+        val source = File("regression/input/spec/starts-with-layout.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        try {
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("StartsWithLayout.tla")
+            assertTrue(tla.exists(), "expected StartsWithLayout.tla")
+            val tlaText = tla.readText()
+            val beforeInit = tlaText.substringBefore("Init ==")
+            assertTrue(
+                beforeInit.contains("\\* startsWith") && beforeInit.contains("startsWith("),
+                "startsWith helper should be above Init;\n$beforeInit",
+            )
+            assertTrue(
+                tlaText.contains("startsWith(msg, \"he\")"),
+                "call site should use startsWith;\n$tlaText",
+            )
+        } finally {
+            File("StartsWithLayout.tla").delete()
+            File("StartsWithLayout.cfg").delete()
+        }
+    }
+
+    @Test
+    fun spliceParamsClashRenamedAgainstVariables() {
+        val source = File("regression/input/spec/splice-clash-layout.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        try {
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("SpliceClashLayout.tla")
+            assertTrue(tla.exists(), "expected SpliceClashLayout.tla")
+            val beforeInit = tla.readText().substringBefore("Init ==")
+            assertTrue(
+                beforeInit.contains("\\* splice") && beforeInit.contains("splice(p_xs,"),
+                "splice param xs should be renamed when VARIABLES has xs;\n$beforeInit",
+            )
+        } finally {
+            File("SpliceClashLayout.tla").delete()
+            File("SpliceClashLayout.cfg").delete()
+        }
+    }
+
+    @Test
     fun stringCoerceElidesEmptyConcat() {
         val source = File("regression/input/spec/string-coerce.jul")
         assertTrue(source.exists(), "missing ${source.path}")

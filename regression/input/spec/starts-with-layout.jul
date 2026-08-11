@@ -1,0 +1,21 @@
+import julay.funlib.startsWith
+
+proc StartsWithP {
+    var msg : String
+    var ok : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            msg := "hello"
+            ok := false
+    }
+
+    transition check() {
+        guard: startsWith(msg, "he")
+        transit: ok := true
+    }
+}
+
+spec StartsWithLayout := <true> StartsWithP <true>
+
+compile StartsWithLayout

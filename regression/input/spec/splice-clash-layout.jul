@@ -1,0 +1,24 @@
+import julay.funlib.length
+
+proc SpliceClash {
+    var xs : List<Int>
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            xs := [1, 2, 3]
+            n := 0
+    }
+
+    transition take(k : Int) {
+        guard:
+            & k >= 0
+            & k <= length(xs)
+            & xs = xs[0:k]
+        transit: n := n + 1
+    }
+}
+
+spec SpliceClashLayout := <true> SpliceClash <true>
+
+compile SpliceClashLayout

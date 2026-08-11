@@ -1,0 +1,25 @@
+import julay.funlib.length
+import julay.funlib.startsWith
+
+proc TransitLet {
+    var flag : Boolean
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            flag := false
+            n := 0
+    }
+
+    transition step() {
+        guard: true
+        transit:
+            let alreadyDone : Boolean := flag & n > 0
+            n := if (alreadyDone) { n } else { n + 1 }
+            flag := if (alreadyDone) { flag } else { true }
+    }
+}
+
+spec TransitLetLayout := <true> TransitLet <true>
+
+compile TransitLetLayout

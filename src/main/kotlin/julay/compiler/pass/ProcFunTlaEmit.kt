@@ -2,6 +2,7 @@ package julay.compiler.pass
 
 import julay.compiler.ast.*
 import julay.compiler.decl.TransitUpdate
+import julay.compiler.isDiscardBinding
 import julay.program.type.transitRootVar
 
 internal fun callFlagName(occurrence: SpecLeaf): String = "call_${occurrence.tlaName}"
@@ -166,43 +167,72 @@ internal fun emitProcFunCallAndRet(
         retChanged += v
     }
 
-    var letBindings = emptyMap<String, ExprNode>()
-    fun substLets(expr: ExprNode): ExprNode {
-        var result = expr
-        for ((name, init) in letBindings) {
-            result = substituteExpr(result, name, init)
-        }
-        return result
+    var letOverrides = linkedMapOf<String, String>()
+    val letBindings = mutableListOf<TransitLetEmit>()
+    val prefixRetParts = mutableListOf<String>()
+    val scopedRetParts = mutableListOf<String>()
+    var seenLet = false
+    val taken = mutableSetOf<String>()
+    taken += hostArgNames
+    taken += hostBare
+    hostBinder?.let { taken += it }
+
+    fun effectiveArgs(): Set<String> = hostArgNames + letOverrides.values
+    fun emitHostExpr(expr: ExprNode, linePrefix: String = ""): String =
+        exprToTla(
+            expr, hostCtx, effectiveArgs(), hostBinder, hostBare,
+            stateVarNames = stateVarNames,
+            symbolOverrides = letOverrides.toMap(),
+            linePrefix = linePrefix,
+        )
+    fun addRetPart(part: String) {
+        if (seenLet) scopedRetParts += part else prefixRetParts += part
     }
+
     hostOffer.decl.transits.forEach { update ->
         when (update) {
             is TransitUpdate.Let -> {
-                letBindings = letBindings + (update.name to substLets(update.init))
+                // Discard `let _ := …` has no TLA binder and is omitted from the spec.
+                if (update.name.isDiscardBinding()) return@forEach
+                seenLet = true
+                val tlaName = allocTlaName(update.name, taken)
+                val io = exprContainsIoHavoc(update.init)
+                val ioDomain = if (io) typeToTlaDomain(update.type) else null
+                val initTla = if (io) tlaName else emitHostExpr(update.init, "/\\ LET $tlaName == ")
+                letBindings += TransitLetEmit(tlaName, initTla, ioDomain)
+                letOverrides[update.name] = tlaName
             }
             is TransitUpdate.Assign -> {
                 val root = transitRootVar(update.key)
                 if (root in site.assignVars) return@forEach
-                val expr = substLets(update.expr)
+                val expr = update.expr
                 if (expr is FunCallExprNode && expr.resolvedProcFunOrNull() != null) return@forEach
                 val v = stateTlaName(hostLeaf.tlaName, root, stateVarNames)
-                val rhs = exprToTla(expr, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)
-                retParts += "/\\ ${assignVal(v, hostBinder, rhs)}"
+                val rhs = emitHostExpr(expr)
+                addRetPart("/\\ ${assignVal(v, hostBinder, rhs)}")
                 retChanged += v
             }
             is TransitUpdate.IndexPut -> {
-                val valueExpr = substLets(update.value)
+                val valueExpr = update.value
                 if (valueExpr is FunCallExprNode && valueExpr.resolvedProcFunOrNull() != null) return@forEach
                 val v = stateTlaName(hostLeaf.tlaName, update.collectionVar, stateVarNames)
-                val k = exprToTla(substLets(update.index), hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)
-                val vv = exprToTla(valueExpr, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)
+                val k = emitHostExpr(update.index)
+                val vv = emitHostExpr(valueExpr)
                 if (hostBinder != null) {
-                    retParts += "/\\ $v' = [$v EXCEPT ![$hostBinder] = [@ EXCEPT ![$k] = $vv]]"
+                    addRetPart("/\\ $v' = [$v EXCEPT ![$hostBinder] = [@ EXCEPT ![$k] = $vv]]")
                 } else {
-                    retParts += "/\\ $v' = [$v EXCEPT ![$k] = $vv]"
+                    addRetPart("/\\ $v' = [$v EXCEPT ![$k] = $vv]")
                 }
                 retChanged += v
             }
         }
+    }
+
+    retParts += prefixRetParts
+    if (letBindings.isNotEmpty() && (scopedRetParts.isNotEmpty() || letBindings.any { it.ioDomain != null })) {
+        retParts += wrapTransitLetBlock(letBindings, scopedRetParts)
+    } else {
+        retParts += scopedRetParts
     }
 
     if (site.isHostConstructor) {

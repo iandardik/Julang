@@ -1,0 +1,29 @@
+proc WhenCase {
+    var mode : String
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            mode := "a"
+            n := 0
+    }
+
+    transition step() {
+        guard: true
+        transit:
+            n := when (mode) {
+                "a" -> 1
+                "b" -> 2
+                else -> 0
+            }
+            mode := when {
+                n = 1 -> "b"
+                n = 2 -> "a"
+                else -> mode
+            }
+    }
+}
+
+spec WhenCaseLayout := <true> WhenCase <true>
+
+compile WhenCaseLayout
