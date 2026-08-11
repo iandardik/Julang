@@ -524,6 +524,33 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun openColumnIndentForCupAndNestedIf() {
+        val source = File("regression/input/spec/open-column-indent.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        try {
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("OpenColumnIndent.tla")
+            assertTrue(tla.exists(), "expected OpenColumnIndent.tla")
+            val sendDef = tla.readText().substringAfter("send(n, m) ==").substringBefore("\n\n")
+            assertTrue(
+                sendDef.contains("msgs' = msgs \\cup {\n       [\n         src |-> n,\n         dest |-> m\n       ]\n     }"),
+                "set-union record should indent from conjunct open column, not under \\cup;\n$sendDef",
+            )
+            assertTrue(
+                sendDef.contains("longishStateVar' = IF longishStateVar < 1 THEN\n       IF n > 0 THEN\n         n\n       ELSE\n         0\n     ELSE\n       longishStateVar"),
+                "nested IF under a long assign should use open-column indent, not full prefix length;\n$sendDef",
+            )
+            assertFalse(
+                Regex("""\\cup \{\n {20,}\[""").containsMatchIn(sendDef),
+                "must not hang set contents under the full LHS+\\cup prefix;\n$sendDef",
+            )
+        } finally {
+            File("OpenColumnIndent.tla").delete()
+            File("OpenColumnIndent.cfg").delete()
+        }
+    }
+
+    @Test
     fun userFunsBecomeTlaOperatorsAboveInit() {
         val source = File("regression/input/spec/fun-ops.jul")
         assertTrue(source.exists(), "missing ${source.path}")

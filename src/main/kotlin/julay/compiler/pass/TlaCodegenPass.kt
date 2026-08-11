@@ -2613,13 +2613,26 @@ internal fun isMultiLineExpr(expr: ExprNode): Boolean {
     return loc is SourceLoc && loc.startLine != loc.endLine
 }
 
-/** Indent for continuation body lines of a multi-line IF / LET opened at [linePrefix]. */
-internal fun exprBodyIndent(linePrefix: String): String =
-    " ".repeat(visualObjOpenLinePrefix(linePrefix).length + 2)
+/** Indent for continuation body lines of a multi-line IF / LET / WHEN / list / set. */
+internal fun exprBodyIndent(linePrefix: String): String = bodyColumnSpaces(linePrefix)
 
-/** Column-aligned indent for keywords like ELSE / IN under a multi-line IF / LET. */
-internal fun exprKeywordIndent(linePrefix: String): String =
-    " ".repeat(visualObjOpenLinePrefix(linePrefix).length)
+/** Column-aligned indent for keywords like ELSE / IN / closers under a multi-line form. */
+internal fun exprKeywordIndent(linePrefix: String): String = openColumnSpaces(linePrefix)
+
+/**
+ * Spaces to the conjunct open column (first non-`/\\`/`\\/` symbol on the visual opening line).
+ * Shared by IF/LET/WHEN/list/set/obj continuation layout.
+ */
+internal fun openColumnSpaces(linePrefix: String): String {
+    val col = firstNonSlashConjunctColumn(visualObjOpenLinePrefix(linePrefix))
+    return " ".repeat((col - 1).coerceAtLeast(0))
+}
+
+/** Spaces to open column + 2 (body / field content under a multi-line form). */
+internal fun bodyColumnSpaces(linePrefix: String): String {
+    val col = firstNonSlashConjunctColumn(visualObjOpenLinePrefix(linePrefix))
+    return " ".repeat((col - 1 + 2).coerceAtLeast(0))
+}
 
 /**
  * Multi-line Julay `if` → TLA IF/THEN/ELSE with THEN and ELSE bodies on following lines.
@@ -2897,9 +2910,8 @@ internal fun emitObjClassLiteralToTla(
         }
         return "[$fields]"
     }
-    val base = firstNonSlashConjunctColumn(visualObjOpenLinePrefix(linePrefix))
-    val fieldIndent = " ".repeat(base + 1) // content at column base+2
-    val closeIndent = " ".repeat((base - 1).coerceAtLeast(0)) // `]` at column base
+    val fieldIndent = bodyColumnSpaces(linePrefix)
+    val closeIndent = openColumnSpaces(linePrefix)
     val fields = expr.fieldEntries.joinToString(",\n$fieldIndent") { (name, e) ->
         val valuePrefix = fieldIndent + "$name |-> "
         "$name |-> ${render(e, valuePrefix)}"

@@ -1,0 +1,37 @@
+obj Msg {
+    src : Int
+    dest : Int
+}
+
+proc Mail {
+    var msgs : Set<Msg>
+    var longishStateVar : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            msgs := {}
+            longishStateVar := 0
+    }
+
+    transition send(n : Int, m : Int) {
+        guard: true
+        transit:
+            msgs := msgs + {Msg {
+                src := n,
+                dest := m
+            }}
+            longishStateVar := if (longishStateVar < 1) {
+                if (n > 0) {
+                    n
+                } else {
+                    0
+                }
+            } else {
+                longishStateVar
+            }
+    }
+}
+
+spec OpenColumnIndent := <true> Mail <true>
+
+compile OpenColumnIndent

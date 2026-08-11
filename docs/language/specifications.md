@@ -191,7 +191,7 @@ See also [Collections](collections.md).
 - Multi-leaf (and solo) actions group each participant under `\* <Proc> action logic`, with that leaf’s enablement gates, guards, and transits together — similar to Init’s `\* State variables for <Proc>` sections.
 - Top-level `&` guard conjuncts become separate `/\\` lines (matching multi-line Julay guards). Nested multi-line `&` / `|` are formatted recursively as `/\\` and `\\/` branches (single-line boolean ops stay compact).
 - Multi-line Julay `Obj { ... }` literals become TLA records with one field per line; field lines are indented 2 spaces past the first non-`/\`/`\/` symbol on the opening line (single-line obj inits stay compact).
-- Multi-line Julay `if` / expression `let` become TLA `IF`/`THEN`/`ELSE` and `LET`/`IN` with bodies on following lines (same indent rule). Multi-line list/set literals put one element per line.
+- Multi-line Julay `if` / expression `let` / `when` / list / set literals use that same open-column indent for bodies, `ELSE`/`IN`/`[]`/`OTHER`, and closing brackets (not the full hanging left-hand text such as `EXCEPT` or `\cup`).
 - Transit-level `let` bindings become nested TLA `LET` around later assign conjuncts (not AST-inlined). Discard `let _ := …` is omitted.
 - Julay `when` becomes TLA `CASE` with `[]` arms and `OTHER` for the trailing else.
 - Invariants preserve multi-line structure (nested `\A` / `\E`, boolean trees). Parentheses written in the `.jul` source are kept; other parentheses are omitted when operator precedence makes them unnecessary.
