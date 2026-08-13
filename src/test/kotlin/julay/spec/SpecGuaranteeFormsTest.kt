@@ -5,7 +5,6 @@ import java.io.File
 import java.nio.file.Files
 import kotlin.io.path.writeText
 import kotlin.test.Test
-import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class SpecGuaranteeFormsTest {
@@ -26,10 +25,22 @@ class SpecGuaranteeFormsTest {
             "TrueAg", "TrueModels", "Plain",
         ) { artifacts ->
             for (name in listOf("TrueAg", "TrueModels", "Plain")) {
-                val cfg = artifacts.getValue(name).second.readText()
-                assertFalse(
-                    cfg.lineSequence().any { it.startsWith("INVARIANT ") },
-                    "$name should omit INVARIANT;\n$cfg",
+                val (tla, cfgFile) = artifacts.getValue(name)
+                val tlaText = tla.readText()
+                val cfg = cfgFile.readText()
+                val invLines = cfg.lineSequence().filter { it.startsWith("INVARIANT ") }.toList()
+                assertTrue(
+                    invLines == listOf("INVARIANT TypeOK"),
+                    "$name should list only INVARIANT TypeOK;\n$cfg",
+                )
+                assertTrue(
+                    tlaText.contains("\\* automatically generated invariants") &&
+                        tlaText.contains("TypeOK =="),
+                    "$name missing TypeOK;\n$tlaText",
+                )
+                assertTrue(
+                    !tlaText.contains("\\* user-specified invariants"),
+                    "$name should omit user-specified invariants;\n$tlaText",
                 )
             }
         }
@@ -59,6 +70,11 @@ class SpecGuaranteeFormsTest {
                 assertTrue(
                     cfgText.contains("INVARIANT Bound"),
                     "$name missing INVARIANT Bound;\n$cfgText",
+                )
+                val invLines = cfgText.lineSequence().filter { it.startsWith("INVARIANT ") }.toList()
+                assertTrue(
+                    invLines.firstOrNull() == "INVARIANT TypeOK",
+                    "$name should list INVARIANT TypeOK first;\n$cfgText",
                 )
             }
         }

@@ -254,6 +254,7 @@ private fun emitProjectedTla(
     collectProjectedSortConstants(leaves, pclassesForTla, leafSpecNodes, emittedOffers, constants)
     collectActionArgDomainModels(emittedOffers, pclassesForTla, cfgOverrides)
     collectIoHavocDomainModels(emittedOffers, cfgOverrides)
+    collectTypeOkDomainModels(leaves, pclassesForTla, cfgOverrides)
     havocSites.forEach { site ->
         if (site.assignVars.isNotEmpty() &&
             site.assignVars.none { TlaVarProjection.get().isRelevant(site.hostName, it) }
@@ -306,8 +307,13 @@ private fun emitProjectedTla(
     }
     val stateVarNames = buildStateVarNames(leaves, pclassesForTla, reservedTlaIds, killTargets)
 
+    // cfg Int/Nat may be finite \E bounds; TypeOK uses TypeOKInt (Int \cup Nat \cup extras).
+    val typeOkIntRange = "TypeOKInt"
+    val typeOkIntDef = emitTypeOkIntDef(intModelValues)
+
     val variables = mutableListOf<String>()
     val initParts = mutableListOf<String>()
+    val typeOkParts = mutableListOf<String>()
     leaves.forEach { leaf ->
         val pc = pclassesForTla[leaf.name] ?: return@forEach
         initParts += "\\* State variables for ${leaf.name}"
@@ -315,42 +321,51 @@ private fun emitProjectedTla(
         val hasKilled = leaf.tlaName in killTargets
         val killed = if (hasKilled) stateTlaName(leaf.tlaName, "killed", stateVarNames) else null
         val terminated = if (leaf.isProcFun) stateTlaName(leaf.tlaName, "terminated", stateVarNames) else null
+        val paramDomain = leafParamDomain(leaf)
         if (leaf.isParameterized) {
-            val domain = typeDomainConstant(leaf.paramType!!) ?: leaf.paramType.toString()
+            val domain = paramDomain!!
             val bareStateVars = pc.localDecls().filterIsInstance<VarNode>().map { it.name }.toSet()
             val binder = indexBinderName(leaf, bareStateVars)
             variables += constructed
             initParts += "/\\ $constructed = [$binder \\in $domain |-> FALSE]"
+            typeOkParts += typeOkConjunct(constructed, "BOOLEAN", domain)
             if (killed != null) {
                 variables += killed
                 initParts += "/\\ $killed = [$binder \\in $domain |-> FALSE]"
+                typeOkParts += typeOkConjunct(killed, "BOOLEAN", domain)
             }
             if (terminated != null) {
                 variables += terminated
                 initParts += "/\\ $terminated = [$binder \\in $domain |-> FALSE]"
+                typeOkParts += typeOkConjunct(terminated, "BOOLEAN", domain)
             }
             pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
                 if (!TlaVarProjection.get().isRelevant(leaf.name, vn.name)) return@forEach
                 val v = stateTlaName(leaf.tlaName, vn.name, stateVarNames)
                 variables += v
                 initParts += "/\\ $v = [$binder \\in $domain |-> ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}]"
+                typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange), domain)
             }
         } else {
             variables += constructed
             initParts += "/\\ $constructed = FALSE"
+            typeOkParts += typeOkConjunct(constructed, "BOOLEAN", null)
             if (killed != null) {
                 variables += killed
                 initParts += "/\\ $killed = FALSE"
+                typeOkParts += typeOkConjunct(killed, "BOOLEAN", null)
             }
             if (terminated != null) {
                 variables += terminated
                 initParts += "/\\ $terminated = FALSE"
+                typeOkParts += typeOkConjunct(terminated, "BOOLEAN", null)
             }
             pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
                 if (!TlaVarProjection.get().isRelevant(leaf.name, vn.name)) return@forEach
                 val v = stateTlaName(leaf.tlaName, vn.name, stateVarNames)
                 variables += v
                 initParts += "/\\ $v = ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
+                typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange), null)
             }
         }
     }
@@ -361,44 +376,49 @@ private fun emitProjectedTla(
         handshake.blockingByHost.forEach { (hostTla, varName) ->
             val host = hostByTla[hostTla]
             variables += varName
+            val domain = host?.let { leafParamDomain(it) }
             if (host != null && host.isParameterized) {
-                val domain = typeDomainConstant(host.paramType!!) ?: host.paramType.toString()
                 val binder = indexBinderName(host, emptySet())
                 initParts += "/\\ $varName = [$binder \\in $domain |-> FALSE]"
             } else {
                 initParts += "/\\ $varName = FALSE"
             }
+            typeOkParts += typeOkConjunct(varName, "BOOLEAN", domain)
         }
         handshake.callFlags.forEach { (occ, varName) ->
             variables += varName
+            val domain = leafParamDomain(occ)
             if (occ.isParameterized) {
-                val domain = typeDomainConstant(occ.paramType!!) ?: occ.paramType.toString()
                 val binder = indexBinderName(occ, emptySet())
                 initParts += "/\\ $varName = [$binder \\in $domain |-> FALSE]"
             } else {
                 initParts += "/\\ $varName = FALSE"
             }
+            typeOkParts += typeOkConjunct(varName, "BOOLEAN", domain)
         }
         handshake.returnToByKey.forEach { (key, varName) ->
             val (hostTla, _) = key
             val host = hostByTla[hostTla]
             variables += varName
+            val domain = host?.let { leafParamDomain(it) }
             if (host != null && host.isParameterized) {
-                val domain = typeDomainConstant(host.paramType!!) ?: host.paramType.toString()
                 val binder = indexBinderName(host, emptySet())
                 initParts += "/\\ $varName = [$binder \\in $domain |-> FALSE]"
             } else {
                 initParts += "/\\ $varName = FALSE"
             }
+            typeOkParts += typeOkConjunct(varName, "BOOLEAN", domain)
         }
     }
     sessionPairs.forEach { pair ->
         variables += pair.varName
         initParts += sessionVarInit(pair)
+        typeOkParts += typeOkConjunct(pair.varName, sessionVarTypeOkRange(pair), null)
     }
     if (needsSessionException) {
         variables += "sessionException"
         initParts += "/\\ sessionException = FALSE"
+        typeOkParts += typeOkConjunct("sessionException", "BOOLEAN", null)
     }
 
     val built = buildTlaActions(
@@ -415,7 +435,7 @@ private fun emitProjectedTla(
             actions.map { it.name } +
             setOf(
                 "vars", "BoundedSeq", "splice", "startsWith",
-                "Init", "Next", "Spec", "GF", "dummy",
+                "Init", "Next", "Spec", "TypeOK", "TypeOKInt", "GF", "dummy",
             )
         ).toSet()
     val spliceOperatorDef = if (needsSpliceOperator) emitSpliceOperatorDef(funReservedNames) else null
@@ -445,7 +465,17 @@ private fun emitProjectedTla(
     val varsTuple = if (variables.isEmpty()) "<<dummy>>" else "<<${variables.joinToString(", ")}>>"
     if (variables.isEmpty()) {
         initParts += "/\\ dummy = 0"
+        typeOkParts += typeOkConjunct("dummy", typeOkIntRange, null)
     }
+
+    val typeOkDef = buildString {
+        appendLine("TypeOK ==")
+        if (typeOkParts.isEmpty()) {
+            appendLine("  /\\ TRUE")
+        } else {
+            typeOkParts.forEach { appendLine("  $it") }
+        }
+    }.trimEnd()
 
     val actionDefs = actions.joinToString("\n\n") { action ->
         if (action.comment != null) "\\* ${action.comment}\n${action.def}" else action.def
@@ -496,6 +526,9 @@ private fun emitProjectedTla(
                 appendLine()
             }
         }
+        appendLine()
+        appendLine("\\* system definition")
+        appendLine()
         appendLine("Init ==")
         if (initParts.isEmpty()) {
             appendLine("  /\\ TRUE")
@@ -516,11 +549,22 @@ private fun emitProjectedTla(
         appendLine("Next ==$nextBody")
         appendLine()
         appendLine("Spec == Init /\\ [][Next]_vars")
+        appendLine()
+        appendLine()
+        appendLine("\\* Invariants")
+        appendLine()
+        appendLine("\\* automatically generated invariants")
+        appendLine()
+        appendLine(typeOkIntDef)
+        appendLine()
+        appendLine(typeOkDef)
         if (sessionIntegrityDef != null) {
             appendLine()
             appendLine(sessionIntegrityDef)
         }
         if (invDefs.isNotEmpty()) {
+            appendLine()
+            appendLine("\\* user-specified invariants")
             appendLine()
             invDefs.forEach { appendLine(it) }
         }
@@ -539,6 +583,7 @@ private fun emitProjectedTla(
 
     val cfg = buildString {
         appendLine("SPECIFICATION Spec")
+        appendLine("INVARIANT TypeOK")
         if (needsSessionException) {
             appendLine("INVARIANT SessionIntegrity")
         }
@@ -877,6 +922,120 @@ private fun killedAssignTrueExpr(
         "$k' = [$k EXCEPT ![$binder] = TRUE]"
     } else {
         "$k' = TRUE"
+    }
+}
+
+private fun leafParamDomain(leaf: SpecLeaf): String? =
+    if (leaf.isParameterized) {
+        typeDomainConstant(leaf.paramType!!) ?: leaf.paramType.toString()
+    } else {
+        null
+    }
+
+private const val DEFAULT_MAX_LIST_LEN = 3
+
+/** Contiguous extras: lowest negative literal .. max(highest literal, MaxListLen+1). */
+internal fun typeOkIntExtras(intLiterals: Set<Int>, maxListLen: Int = DEFAULT_MAX_LIST_LEN): List<Int> {
+    val lo = intLiterals.minOrNull()?.coerceAtMost(0) ?: 0
+    val hi = maxOf(intLiterals.maxOrNull() ?: 0, maxListLen + 1)
+    return (lo..hi).toList()
+}
+
+internal fun emitTypeOkIntDef(intLiterals: Set<Int>, maxListLen: Int = DEFAULT_MAX_LIST_LEN): String {
+    val extras = typeOkIntExtras(intLiterals, maxListLen)
+    return "\\* cfg Int is a finite non-negative \\E bound and cannot include negatives; TypeOKInt unions Int, Nat, and that closed interval.\n" +
+        "TypeOKInt == Int \\cup Nat \\cup {${extras.joinToString(", ")}}"
+}
+
+private fun typeOkVarRange(
+    type: Type,
+    intRange: String,
+    fieldOfObj: String? = null,
+    fieldName: String? = null,
+): String {
+    if (type is StringType && fieldOfObj != null && fieldName != null) {
+        val lits = TlaLiteralDomainProjection.get().objFieldSet(fieldOfObj, fieldName)
+        if (!lits.isNullOrEmpty()) return TlaLiteralDomainProjection.get().render(lits)
+    }
+    return when (type) {
+        is BoolType -> "BOOLEAN"
+        is IntType, is RealType -> intRange
+        is StringType -> "String"
+        is SortType -> type.name
+        is ListType -> "Seq(${typeOkVarRange(type.elementType, intRange)})"
+        is SetType -> "SUBSET ${typeOkVarRange(type.elementType, intRange)}"
+        is MapType ->
+            "[${typeOkVarRange(type.keyType, intRange)} -> ${typeOkVarRange(type.valueType, intRange)}]"
+        is ObjClassType -> {
+            val single = TlaFieldProjection.get().singletonField(type)
+            if (single != null) {
+                typeOkVarRange(single.type, intRange, type.name, single.name)
+            } else {
+                val fields = TlaFieldProjection.get().fieldsFor(type)
+                if (fields.isEmpty()) {
+                    "[dummy: {0}]"
+                } else {
+                    val rendered = fields.joinToString(", ") { f ->
+                        "${f.name}: ${typeOkVarRange(f.type, intRange, type.name, f.name)}"
+                    }
+                    "[$rendered]"
+                }
+            }
+        }
+        else -> intRange
+    }
+}
+
+private fun typeOkConjunct(name: String, range: String, paramDomain: String?): String {
+    val ty = if (paramDomain != null) "[$paramDomain -> $range]" else range
+    return "/\\ $name \\in $ty"
+}
+
+/** Domains TypeOK mentions that must be module CONSTANTs (`String`). */
+private fun collectTypeOkDomainModels(
+    leaves: List<SpecLeaf>,
+    pclasses: Map<String, ProcClassNode>,
+    cfgOverrides: MutableSet<String>,
+) {
+    fun walk(type: Type) {
+        when (type) {
+            is StringType -> cfgOverrides += "String"
+            is ListType -> walk(type.elementType)
+            is SetType -> walk(type.elementType)
+            is MapType -> {
+                walk(type.keyType)
+                walk(type.valueType)
+            }
+            is ObjClassType -> TlaFieldProjection.get().fieldsFor(type).forEach { walk(it.type) }
+            else -> {}
+        }
+    }
+    leaves.forEach { leaf ->
+        val pc = pclasses[leaf.name] ?: return@forEach
+        pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
+            if (TlaVarProjection.get().isRelevant(leaf.name, vn.name)) walk(safeType(vn))
+        }
+    }
+}
+
+private fun sessionVarTypeOkRange(pair: SessionLeafPair): String {
+    val a = pair.leafA
+    val b = pair.leafB
+    return when {
+        a.isParameterized && b.isParameterized -> {
+            val da = typeDomainConstant(a.paramType!!) ?: a.paramType.toString()
+            val db = typeDomainConstant(b.paramType!!) ?: b.paramType.toString()
+            "[$da -> [$db -> BOOLEAN]]"
+        }
+        a.isParameterized && !b.isParameterized -> {
+            val da = typeDomainConstant(a.paramType!!) ?: a.paramType.toString()
+            "[$da -> BOOLEAN]"
+        }
+        !a.isParameterized && b.isParameterized -> {
+            val db = typeDomainConstant(b.paramType!!) ?: b.paramType.toString()
+            "[$db -> BOOLEAN]"
+        }
+        else -> "BOOLEAN"
     }
 }
 
@@ -2197,7 +2356,7 @@ internal fun typeDomainConstant(typeExpr: TypeExpr): String? = when (typeExpr) {
 
 internal fun cfgConstantModel(name: String): String = when (name) {
     "Boolean" -> "BOOLEAN"
-    "MaxListLen" -> "3"
+    "MaxListLen" -> "$DEFAULT_MAX_LIST_LEN"
     else -> error("TLA+ cfg: no model for CONSTANT $name")
 }
 
@@ -2336,6 +2495,7 @@ internal fun typeToTlaDomain(
     // Seq(S) is infinite; TLC needs a length-bounded set of sequences.
     is ListType -> "BoundedSeq(${typeToTlaDomain(type.elementType)}, MaxListLen)"
     is SetType -> "SUBSET ${typeToTlaDomain(type.elementType)}"
+    is MapType -> "[${typeToTlaDomain(type.keyType)} -> ${typeToTlaDomain(type.valueType)}]"
     is ObjClassType -> {
         val single = TlaFieldProjection.get().singletonField(type)
         if (single != null) {
@@ -3210,12 +3370,10 @@ internal fun wrapTlaLet(bindings: List<Pair<String, String>>, body: String): Str
     }
 }
 
-/**
- * Consecutive `\E` binders over the same domain become `\E n, m \in D : …`.
- * [params] is outermost-first.
- */
-internal fun wrapTlaExists(params: List<Pair<String, String>>, body: String): String {
-    if (params.isEmpty()) return body
+/** Consecutive binders over the same domain become one group. [params] is outermost-first. */
+internal fun groupConsecutiveSameDomain(
+    params: List<Pair<String, String>>,
+): List<Pair<List<String>, String>> {
     val groups = mutableListOf<Pair<MutableList<String>, String>>()
     for ((name, domain) in params) {
         val last = groups.lastOrNull()
@@ -3225,10 +3383,47 @@ internal fun wrapTlaExists(params: List<Pair<String, String>>, body: String): St
             groups += mutableListOf(name) to domain
         }
     }
-    return groups.asReversed().fold(body) { acc, (names, domain) ->
-        "\\E ${names.joinToString(", ")} \\in $domain : $acc"
+    return groups.map { it.first to it.second }
+}
+
+/**
+ * Consecutive binders over the same domain become `\E n, m \in D : …` (or `\A`).
+ * [params] is outermost-first. Multi-line layout puts each group header on its own line.
+ */
+internal fun wrapTlaQuantifier(
+    q: String,
+    params: List<Pair<String, String>>,
+    body: String,
+    multiLine: Boolean = false,
+    linePrefix: String = "",
+): String {
+    if (params.isEmpty()) return body
+    val groups = groupConsecutiveSameDomain(params)
+    return if (!multiLine) {
+        groups.asReversed().fold(body) { acc, (names, domain) ->
+            "$q ${names.joinToString(", ")} \\in $domain : $acc"
+        }
+    } else {
+        buildString {
+            groups.forEachIndexed { i, (names, domain) ->
+                if (i > 0) {
+                    append('\n')
+                    append(linePrefix)
+                    append("  ".repeat(i))
+                }
+                append("$q ${names.joinToString(", ")} \\in $domain :")
+            }
+            append('\n')
+            append(linePrefix)
+            append("  ".repeat(groups.size))
+            append(body)
+        }
     }
 }
+
+/** Consecutive `\E` binders over the same domain become `\E n, m \in D : …`. */
+internal fun wrapTlaExists(params: List<Pair<String, String>>, body: String): String =
+    wrapTlaQuantifier("\\E", params, body)
 
 /**
  * Julay `let` → TLA `LET name == init IN body`. Multi-line source uses line breaks;
@@ -3956,25 +4151,41 @@ internal fun exprToTla(
             }
         }
         is QuantifiedExprNode -> {
-            val domain = when (val t = expr.binderTypeExpr()) {
-                is TypeExpr.Simple -> t.name
-                else -> t.toString()
-            }
-            val origBinder = expr.binderName()
-            val binder = if (origBinder in reservedNames) "q_$origBinder" else origBinder
-            fun fixBinder(b: String): String =
-                if (binder != origBinder) {
-                    b.replace(Regex("\\b${Regex.escape(origBinder)}\\b"), binder)
-                } else {
-                    b
+            val universal = expr.isUniversal()
+            val q = if (universal) "\\A" else "\\E"
+            val binders = mutableListOf<Pair<String, String>>()
+            val renames = mutableListOf<Pair<String, String>>()
+            var cur: ExprNode = expr
+            var multiLine = false
+            while (cur is QuantifiedExprNode && cur.isUniversal() == universal) {
+                if (isMultiLineExpr(cur)) multiLine = true
+                val domain = when (val t = cur.binderTypeExpr()) {
+                    is TypeExpr.Simple -> t.name
+                    else -> t.toString()
                 }
-            val q = if (expr.isUniversal()) "\\A" else "\\E"
-            val header = "$q $binder \\in $domain :"
-            if (isMultiLineExpr(expr)) {
-                val body = fixBinder(rec(expr.quantifiedBody(), "$linePrefix  ", PREC_BOTTOM))
-                "$header\n$linePrefix  $body"
+                val origBinder = cur.binderName()
+                val binder = if (origBinder in reservedNames) "q_$origBinder" else origBinder
+                binders += binder to domain
+                if (binder != origBinder) renames += origBinder to binder
+                cur = cur.quantifiedBody()
+            }
+            fun fixBinders(s: String): String {
+                var out = s
+                for ((orig, binder) in renames) {
+                    out = out.replace(Regex("\\b${Regex.escape(orig)}\\b"), binder)
+                }
+                return out
+            }
+            if (multiLine) {
+                val groups = groupConsecutiveSameDomain(binders)
+                val bodyPrefix = linePrefix + "  ".repeat(groups.size)
+                val body = fixBinders(rec(cur, bodyPrefix, PREC_BOTTOM))
+                wrapTlaQuantifier(q, binders, body, multiLine = true, linePrefix = linePrefix)
             } else {
-                val body = fixBinder(rec(expr.quantifiedBody(), "$linePrefix$header ", PREC_BOTTOM))
+                val header = groupConsecutiveSameDomain(binders).joinToString(" ") { (names, domain) ->
+                    "$q ${names.joinToString(", ")} \\in $domain :"
+                }
+                val body = fixBinders(rec(cur, "$linePrefix$header ", PREC_BOTTOM))
                 "$header $body"
             }
         }

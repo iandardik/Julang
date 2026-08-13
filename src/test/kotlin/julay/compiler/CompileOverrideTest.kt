@@ -151,9 +151,10 @@ class CompileOverrideTest {
             assertTrue(cfg.exists(), "expected Solo.cfg")
             assertFalse(File(cwd, "Solo.jar").exists(), "should not emit JAR for --compile-tla alone")
             val cfgText = cfg.readText()
-            assertFalse(
-                cfgText.contains("INVARIANT"),
-                "plain <true> P <true> should not list INVARIANT;\n$cfgText",
+            val invLines = cfgText.lineSequence().filter { it.startsWith("INVARIANT ") }.toList()
+            assertTrue(
+                invLines == listOf("INVARIANT TypeOK"),
+                "plain <true> P <true> should list only INVARIANT TypeOK;\n$cfgText",
             )
         } finally {
             tla.delete()

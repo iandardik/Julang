@@ -695,7 +695,9 @@ class SpecTlaTlcSmokeTest {
     fun raftNodeSpecOmitsUrlAndWarns() {
         val source = File("input/raft/sys.jul")
         assertTrue(source.exists(), "missing ${source.path}")
-        val (tlaText, warnings) = compileSpecTla(source, "RaftNodeSpec", compileNames = listOf("RaftNodeSpec"))
+        val emit = compileSpecEmit(source, "RaftNodeSpec", compileNames = listOf("RaftNodeSpec"))
+        val tlaText = emit.tlaText
+        val warnings = emit.warnings
         assertTrue(
             !tlaText.contains("url"),
             "Node.url should be omitted from RaftNodeSpec TLA;\n${tlaText.take(2000)}",
@@ -724,6 +726,22 @@ class SpecTlaTlcSmokeTest {
             tlaText.contains("\\E n, m \\in NodeSet : requestVote(n, m)") &&
                 !tlaText.contains("\\E n \\in NodeSet : \\E m \\in NodeSet"),
             "consecutive \\E over NodeSet should combine;\n${tlaText.substringAfter("Next ==").take(2000)}",
+        )
+        assertTrue(
+            tlaText.contains("self \\in [NodeSet -> TypeOKInt]"),
+            "TypeOK should type self as [NodeSet -> TypeOKInt];\n${tlaText.substringAfter("TypeOK ==").take(1500)}",
+        )
+        assertTrue(
+            tlaText.contains("\\A n1, n2 \\in NodeSet :") &&
+                !tlaText.contains("\\A n1 \\in NodeSet :"),
+            "consecutive \\A over NodeSet should combine;\n${tlaText.substringAfter("OneLeaderPerTerm ==").take(500)}",
+        )
+        assertTrue(
+            tlaText.contains("votedFor \\in [NodeSet -> TypeOKInt]") &&
+                tlaText.contains("TypeOKInt == Int \\cup Nat \\cup {") &&
+                tlaText.contains("-1") &&
+                Regex("""\\* cfg Int[^\n]+\nTypeOKInt ==""").containsMatchIn(tlaText),
+            "TypeOKInt should union Int, Nat, and extras including -1;\n${tlaText.substringAfter("automatically generated").take(2500)}",
         )
         assertTrue(
             !Regex("""LET nextLogIndex ==[^\n]* IN\s+LET prevLogIndex""").containsMatchIn(tlaText) &&
@@ -824,11 +842,41 @@ class SpecTlaTlcSmokeTest {
             val tla = File("InvLayout.tla")
             assertTrue(tla.exists(), "expected InvLayout.tla")
             val tlaText = tla.readText()
+            val cfgText = File("InvLayout.cfg").readText()
+            assertTrue(
+                tlaText.contains("\n\n\\* system definition\n\nInit =="),
+                "system definition should sit two blanks after funs/vars and one blank before Init;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains(
+                    "Spec == Init /\\ [][Next]_vars\n\n\n\\* Invariants\n\n" +
+                        "\\* automatically generated invariants\n\n",
+                ) &&
+                    Regex("""\\* cfg Int[^\n]+\nTypeOKInt == Int \\cup Nat \\cup \{""").containsMatchIn(tlaText) &&
+                    tlaText.contains("TypeOKInt == Int \\cup Nat \\cup {") &&
+                    Regex("""TypeOKInt ==[^\n]+\n\nTypeOK ==""").containsMatchIn(tlaText),
+                "Invariants section layout after Spec, with TypeOKInt then TypeOK;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("currentTerm \\in [NodeSet -> TypeOKInt]"),
+                "TypeOK should type parametric Int vars as [NodeSet -> TypeOKInt];\n$tlaText",
+            )
+            val invLines = cfgText.lineSequence().filter { it.startsWith("INVARIANT ") }.toList()
+            assertTrue(
+                invLines.firstOrNull() == "INVARIANT TypeOK" &&
+                    invLines.contains("INVARIANT OneLeaderPerTerm"),
+                "cfg should list TypeOK first then OneLeaderPerTerm;\n$cfgText",
+            )
             val invDef = tlaText.substringAfter("OneLeaderPerTerm ==").substringBefore("\n====")
             assertTrue(
-                invDef.contains("\\A n1 \\in NodeSet :") &&
-                    invDef.contains("\\A n2 \\in NodeSet :"),
-                "multi-line quantifiers should be nested on separate lines;\n$invDef",
+                invDef.contains("\\A n1, n2 \\in NodeSet :") &&
+                    !invDef.contains("\\A n1 \\in NodeSet :") &&
+                    !invDef.contains("\\A n2 \\in NodeSet :"),
+                "consecutive \\A over NodeSet should combine;\n$invDef",
+            )
+            assertTrue(
+                tlaText.contains("\\* user-specified invariants\n\nOneLeaderPerTerm =="),
+                "user-specified comment should precede OneLeaderPerTerm;\n$tlaText",
             )
             assertTrue(
                 invDef.contains(
@@ -1675,9 +1723,10 @@ class SpecTlaTlcSmokeTest {
                 tlaText.contains("BoundedSeq(") && tlaText.contains("MaxListLen"),
                 "expected BoundedSeq / MaxListLen;\n$tlaText",
             )
+            val nextBody = tlaText.substringAfter("Next ==").substringBefore("Spec ==")
             assertTrue(
-                !Regex("""(?<!Bounded)(?<!Sub)Seq\(""").containsMatchIn(tlaText),
-                "must not use bare Seq(...) as a domain;\n$tlaText",
+                !Regex("""(?<!Bounded)(?<!Sub)Seq\(""").containsMatchIn(nextBody),
+                "must not use bare Seq(...) as a Next/action domain;\n$nextBody",
             )
             assertTrue(
                 cfgText.contains("MaxListLen") && cfgText.contains("CONSTANT MaxListLen = 3"),
