@@ -22,14 +22,17 @@ spec Net[n : Node] {
 
     transition observe(target : String) also (m : Node) {
         guard: Peer[m].self = target
-        transit: lastSeen := Peer[m].self
+        transit: lastSeen := n
     }
 }
 
 spec PeerIndexed := Peer[n : Node]
 
+invariant SeenOk := Net.lastSeen = "" | Net.lastSeen ~= ""
+
 spec AlsoPeerSys := with (n : Node) {
     PeerIndexed[n] || Net[n]
 }
 
-compile AlsoPeerSys
+spec AlsoPeerChecked := AlsoPeerSys |= SeenOk
+compile AlsoPeerChecked

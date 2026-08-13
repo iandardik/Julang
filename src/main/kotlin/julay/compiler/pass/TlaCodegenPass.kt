@@ -1545,6 +1545,14 @@ private fun emitConjoined(
     // Instance binders for parameterized leaves: paramName indexes into the type domain.
     val selfBinders = linkedMapOf<String, String>() // leafName -> binder
     val sharedWithBinders = linkedMapOf<String, String>() // withScopeId -> binder
+    fun registerWithBinder(leaf: SpecLeaf) {
+        val scope = leaf.withScopeId ?: return
+        val name = leaf.paramName ?: return
+        sharedWithBinders.putIfAbsent(scope, name)
+    }
+    // Pre-register before clash-rename: a reserved leaf-spec decl param (Net's `n`)
+    // must not force `n_RaftProtocol` on a peer that shares the same `with` scope.
+    offers.forEach { registerWithBinder(it.leaf) }
     val reserved = usedArgNames.toMutableSet()
     offers.forEach { offer ->
         if (offer.leaf.isParameterized) {
@@ -1560,6 +1568,7 @@ private fun emitConjoined(
     val pairsNeedingBinders = listOfNotNull(sessionPair, effectSessionPair).distinctBy { it.varName }
     pairsNeedingBinders.forEach { pair ->
         listOf(pair.leafA, pair.leafB).forEach { leaf ->
+            registerWithBinder(leaf)
             if (leaf.isParameterized) {
                 reserved += stateVarsByLeaf[leaf.tlaName].orEmpty()
             }

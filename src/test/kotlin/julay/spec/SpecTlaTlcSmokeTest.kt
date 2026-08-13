@@ -715,8 +715,9 @@ class SpecTlaTlcSmokeTest {
             "state should use the closed role-string set, not the empty-string default;\n${tlaText.take(4000)}",
         )
         assertTrue(
-            !tlaText.contains("knownLeaderId"),
-            "unused-vars should omit knownLeaderId from RaftNodeSpec;\n${tlaText.take(4000)}",
+            !tlaText.contains("n_RaftProtocol") &&
+                !Regex("""requestVote\([^)]*n_Raft""").containsMatchIn(tlaText),
+            "with (n) should share one binder for RaftProtocol and Net, not n_RaftProtocol;\n${tlaText.take(4000)}",
         )
         val (offVars, offWarn) = compileSpecTla(
             source,

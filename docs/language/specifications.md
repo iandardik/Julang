@@ -62,14 +62,14 @@ spec Net[n : Node] {
 spec Ag := <Net> Peer <true>
 ```
 
-When the parameter type is a `sort`, the body treats `n` as the sort’s element type (e.g. `String`); the TLA domain remains the sort. Assigning to a leaf-spec parameter is an error. If the action body mentions the decl param, TLA emits it as a leading auxiliary action parameter (`\E n \in Node: …`).
+When the parameter type is a `sort`, the body treats `n` as the sort’s element type (e.g. `String`); the TLA domain remains the sort. Assigning to a leaf-spec parameter is an error. If the action body mentions the decl param, TLA emits it as a leading auxiliary action parameter (`\E n \in Node: …`), except under `with (n : …)` where it shares that binder instead of a second `\E`.
 
 Leaf-spec actions may also declare explicit auxiliaries with `also (…)` (leaf specs only — illegal on ordinary `proc` / `procfun`):
 
 ```jul
 transition observe(target : String) also (m : Node) {
     guard: Peer[m].self = target
-    transit: lastSeen := Peer[m].self
+    transit: lastSeen := n
 }
 ```
 

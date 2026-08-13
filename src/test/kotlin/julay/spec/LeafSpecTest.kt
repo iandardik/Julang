@@ -267,6 +267,32 @@ class LeafSpecTest {
     }
 
     @Test
+    fun withApplyLeafSpecDeclParamSharesBinder() {
+        val cwd = java.io.File(".").absoluteFile
+        val tla = java.io.File(cwd, "AlsoPeerChecked.tla")
+        val cfg = java.io.File(cwd, "AlsoPeerChecked.cfg")
+        tla.delete()
+        cfg.delete()
+        try {
+            compileJulFile(java.io.File("regression/input/spec/also-peer-with.jul").toPath(), keepBuild = false)
+            assertTrue(tla.exists(), "expected AlsoPeerChecked.tla")
+            val text = tla.readText()
+            assertTrue(
+                Regex("""observe\(n,\s*m""").containsMatchIn(text),
+                "observe should take shared n then also-arg m, not a clash-renamed binder;\n$text",
+            )
+            assertTrue(
+                !text.contains("n_Peer") && !text.contains("n_Net") &&
+                    !text.contains("\\E n_"),
+                "leaf-spec decl param n must not clash-rename the with-binder;\n$text",
+            )
+        } finally {
+            tla.delete()
+            cfg.delete()
+        }
+    }
+
+    @Test
     fun createIndexInsideWithIsError() {
         val result = typeCheck(
             """
