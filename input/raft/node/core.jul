@@ -56,7 +56,7 @@ export proc RaftProtocol {
     */
     transition electionTimeout() {
         guard:
-            state = "Follower" | state = "Candidate"
+            state in setOf("Follower", "Candidate")
         transit:
             let _ : Boolean := ElectionTimeout.startElectionTimeout(self, currentTerm + 1)
             state := "Candidate"

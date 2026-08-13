@@ -221,6 +221,13 @@ private fun parametricTypeValsSection(
 
     val collected = linkedSetOf<Type>()
     roots.forEach { collectParametricTypes(it, collected) }
+    // Ephemeral literals in guards/transits (e.g. `state in setOf("Follower", "Candidate")`)
+    // are not state/arg types but still emit `setType_String` in Z3 guards.
+    procClasses.forEach { pc ->
+        (pc.constructors + pc.transitions).forEach { action ->
+            collectActionParametricTypes(action, collected)
+        }
+    }
     if (collected.isEmpty()) return ""
 
     val ordered = collected.sortedWith(
@@ -238,6 +245,58 @@ private fun parametricTypeValsSection(
         "val $name = $rhs"
     }
     return "$decls\n\n"
+}
+
+private fun collectActionParametricTypes(action: ActionDecl, out: MutableSet<Type>) {
+    action.guards.forEach { collectExprParametricTypes(it, out) }
+    action.transits.forEach { update ->
+        when (update) {
+            is TransitUpdate.Assign -> collectExprParametricTypes(update.expr, out)
+            is TransitUpdate.IndexPut -> {
+                collectExprParametricTypes(update.index, out)
+                collectExprParametricTypes(update.value, out)
+            }
+            is TransitUpdate.Let -> {
+                collectParametricTypes(update.type, out)
+                collectExprParametricTypes(update.init, out)
+            }
+        }
+    }
+    action.returnExpr?.let { collectExprParametricTypes(it, out) }
+    fun collectCall(stmt: CallStmtNode) {
+        stmt.callArgs().forEach { collectExprParametricTypes(it, out) }
+        stmt.resolvedFunOrNull()?.let { collectExprParametricTypes(it.funBody(), out) }
+    }
+    action.befores.forEach(::collectCall)
+    action.afters.forEach(::collectCall)
+    action.errors.forEach { arm ->
+        collectExprParametricTypes(arm.condExpr(), out)
+        collectExprParametricTypes(arm.msgExpr(), out)
+    }
+}
+
+private fun collectExprParametricTypes(
+    expr: ExprNode,
+    out: MutableSet<Type>,
+    seenFuns: MutableSet<FunNode> = mutableSetOf(),
+) {
+    try {
+        val t = expr.getType()
+        if (!t.containsSortType()) collectParametricTypes(t, out)
+    } catch (_: RuntimeException) {
+        // Uninferred — skip
+    }
+    when (expr) {
+        is FunCallExprNode -> {
+            expr.specializedBodyOrNull()?.let { collectExprParametricTypes(it, out, seenFuns) }
+            expr.namedFunBodyOrNull()?.let { collectExprParametricTypes(it, out, seenFuns) }
+            expr.resolvedFunOrNull()?.let { fn ->
+                if (seenFuns.add(fn)) collectExprParametricTypes(fn.funBody(), out, seenFuns)
+            }
+        }
+        else -> {}
+    }
+    expr.children.filterIsInstance<ExprNode>().forEach { collectExprParametricTypes(it, out, seenFuns) }
 }
 
 private fun collectParametricTypes(type: Type, out: MutableSet<Type>) {
