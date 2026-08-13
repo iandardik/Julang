@@ -546,8 +546,12 @@ class SpecTlaTlcSmokeTest {
         val source = File("regression/input/spec/tla-from-collection-struct.jul")
         val (tlaText, _) = compileSpecTla(source, "FromCollectionStruct")
         assertTrue(
-            tlaText.contains("\\E __s0 \\in") && tlaText.contains("LET x =="),
-            "expected struct-in-set tmp binder and LET x;\n$tlaText",
+            tlaText.contains("\\E msg \\in") && tlaText.contains("LET x =="),
+            "expected struct-in-set collection binder and LET x;\n$tlaText",
+        )
+        assertTrue(
+            !tlaText.contains("__s0"),
+            "struct-in-set binder should not be __s0;\n$tlaText",
         )
         assertTrue(
             !Regex("""\\E x \\in Int""").containsMatchIn(tlaText),
@@ -613,6 +617,54 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun unusedVarsOmitsWriteOnlyGhost() {
+        val source = File("regression/input/spec/tla-unused-vars-write.jul")
+        val (tlaText, _) = compileSpecTla(source, "UnusedVarsWrite")
+        assertTrue(
+            !tlaText.contains("ghost"),
+            "write-only ghost should be omitted;\n$tlaText",
+        )
+        val (offText, _) = compileSpecTla(
+            source,
+            "UnusedVarsWrite",
+            tlaOptConfig = TlaOptConfig.fromDisableTlaOptFlag("unused-vars"),
+        )
+        assertTrue(
+            offText.contains("ghost"),
+            "disabling unused-vars should keep ghost;\n$offText",
+        )
+    }
+
+    @Test
+    fun unusedVarsOmitsGuardOnlyReads() {
+        val source = File("regression/input/spec/tla-unused-vars-guard-only.jul")
+        val (tlaText, _) = compileSpecTla(source, "UnusedVarsGuardOnly")
+        assertTrue(
+            !tlaText.contains("secret"),
+            "var read only in a guard-only action should be omitted;\n$tlaText",
+        )
+        val (offText, _) = compileSpecTla(
+            source,
+            "UnusedVarsGuardOnly",
+            tlaOptConfig = TlaOptConfig.fromDisableTlaOptFlag("unused-vars"),
+        )
+        assertTrue(
+            offText.contains("secret"),
+            "disabling unused-vars should keep secret;\n$offText",
+        )
+    }
+
+    @Test
+    fun unusedVarsKeepsInvariantReads() {
+        val source = File("regression/input/spec/tla-unused-vars-inv.jul")
+        val (tlaText, _) = compileSpecTla(source, "UnusedVarsInv")
+        assertTrue(
+            tlaText.contains("watched"),
+            "var read in the guarantee should stay;\n$tlaText",
+        )
+    }
+
+    @Test
     fun raftNodeSpecOmitsUrlAndWarns() {
         val source = File("input/raft/sys.jul")
         assertTrue(source.exists(), "missing ${source.path}")
@@ -635,6 +687,24 @@ class SpecTlaTlcSmokeTest {
             !Regex("""RaftProtocol_state\s*=\s*\[.*\|->\s*""\]""").containsMatchIn(tlaText) &&
                 (tlaText.contains("\"Follower\"") || tlaText.contains("\"Candidate\"") || tlaText.contains("\"Leader\"")),
             "state should use the closed role-string set, not the empty-string default;\n${tlaText.take(4000)}",
+        )
+        assertTrue(
+            !tlaText.contains("knownLeaderId"),
+            "unused-vars should omit knownLeaderId from RaftNodeSpec;\n${tlaText.take(4000)}",
+        )
+        val (offVars, offWarn) = compileSpecTla(
+            source,
+            "RaftNodeSpec",
+            compileNames = listOf("RaftNodeSpec"),
+            tlaOptConfig = TlaOptConfig.fromDisableTlaOptFlag("unused-vars"),
+        )
+        assertTrue(
+            offVars.contains("knownLeaderId"),
+            "disabling unused-vars should restore knownLeaderId;\n${offVars.take(4000)}",
+        )
+        assertTrue(
+            offWarn.any { it.contains("unused-fields") && it.contains("\"url\"") },
+            "unused-fields url warning should still fire;\n$offWarn",
         )
         File("RaftNodeSpec.tla").delete()
         File("RaftNodeSpec.cfg").delete()

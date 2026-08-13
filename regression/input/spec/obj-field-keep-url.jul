@@ -14,7 +14,7 @@ proc Router {
     }
 
     transition pick(peerArg : Peer) {
-        guard: peerArg.url ~= ""
+        guard: peerArg.url ~= "" & (step = "idle" | step = "have")
         transit:
             peer := peerArg
             step := "have"

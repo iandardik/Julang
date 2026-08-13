@@ -16,6 +16,8 @@ proc Modes {
     }
 }
 
-spec LiteralDomains := <true> Modes <true>
+invariant Keep := Modes.step >= 0 & Modes.payload ~= ""
+
+spec LiteralDomains := Modes |= Keep
 
 compile LiteralDomains

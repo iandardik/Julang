@@ -17,7 +17,7 @@ proc Mail {
     }
 
     transition send(n : Int, m : Int) {
-        guard: last.src >= 0 & last.dest >= 0
+        guard: last.src >= 0 & last.dest >= 0 & longishStateVar >= 0 & (last in msgs | last ~in msgs)
         transit:
             msgs := msgs + setOf(Msg {
                 src := n,

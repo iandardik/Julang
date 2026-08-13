@@ -61,7 +61,9 @@ internal fun analyzeTlaLiteralDomains(
                 return@forEach
             }
             if (t is StringType || t is IntType) {
-                varSite(leaf.name, vn.name)
+                if (TlaVarProjection.get().isRelevant(leaf.name, vn.name)) {
+                    varSite(leaf.name, vn.name)
+                }
             }
         }
     }
@@ -71,12 +73,16 @@ internal fun analyzeTlaLiteralDomains(
         offer.decl.transits.forEach { update ->
             when (update) {
                 is TransitUpdate.Assign -> {
-                    noteWrite(update.transitRootVar(), update.expr, offer.leaf.name, ::varSite, ::fieldSite)
-                    walkLits(update.expr, offer.leaf.name, ::varSite, ::fieldSite, inWrite = true)
+                    if (TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar())) {
+                        noteWrite(update.transitRootVar(), update.expr, offer.leaf.name, ::varSite, ::fieldSite)
+                        walkLits(update.expr, offer.leaf.name, ::varSite, ::fieldSite, inWrite = true)
+                    }
                 }
                 is TransitUpdate.IndexPut -> {
-                    walkLits(update.index, offer.leaf.name, ::varSite, ::fieldSite, inWrite = false)
-                    walkLits(update.value, offer.leaf.name, ::varSite, ::fieldSite, inWrite = true)
+                    if (TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar())) {
+                        walkLits(update.index, offer.leaf.name, ::varSite, ::fieldSite, inWrite = false)
+                        walkLits(update.value, offer.leaf.name, ::varSite, ::fieldSite, inWrite = true)
+                    }
                 }
                 is TransitUpdate.Let ->
                     walkLits(update.init, offer.leaf.name, ::varSite, ::fieldSite, inWrite = false)

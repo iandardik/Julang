@@ -11,7 +11,7 @@ proc StartsWithP {
     }
 
     transition check() {
-        guard: startsWith(msg, "he")
+        guard: startsWith(msg, "he") & (ok | ~ok)
         transit: ok := true
     }
 }

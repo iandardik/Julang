@@ -54,6 +54,7 @@ Some of these are **equivalent rewrites** of the same transition relation. Other
 | ID | Role | Kind |
 |----|------|------|
 | `unused-fields` | Omit obj fields that the TLA-relevant fragment never projects (field access / struct patterns / comparison-operand literals) | Projection |
+| `unused-vars` | Omit state vars/consts the TLA-relevant fragment never reads (emitted-action guards/transits and the guarantee). Not TLA+ liveness (`WF`/`SF`). | Equivalent rewrite (of the emitted spec) |
 | `determined-args` | Drop `\E` for action args fixed by `arg = expr` or `arg <=> expr`; substitute with `LET`. Not the same as JAR `directed-eval` | Equivalent rewrite |
 | `from-collection` | Quantify remaining args from a state collection: `a in S` on a set, `S[a.f] = a` on a list (index binder `i \in 1..Len(S)`), or a struct literal `in` a set | Equivalent rewrite |
 | `literal-domains` | Per-site finite `{…}` for String/Int that only use a closed literal set. Does **not** shrink the global `String` CONSTANT (so e.g. `Entry.value` stays open) | Projection (when it excludes values the type would otherwise allow) |
@@ -71,6 +72,9 @@ java -jar build/libs/julayc.jar --disable-tla-opt --compile RaftNodeSpec path/to
 
 # Disable only unused-field projection (use '=' so the source path is not consumed)
 java -jar build/libs/julayc.jar --disable-tla-opt=unused-fields path/to/file.jul
+
+# Keep unread state vars in TLA (e.g. Raft knownLeaderId)
+java -jar build/libs/julayc.jar --disable-tla-opt=unused-vars path/to/file.jul
 
 # Disable a mix
 java -jar build/libs/julayc.jar --disable-tla-opt=determined-args,from-collection path/to/file.jul

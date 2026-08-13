@@ -21,6 +21,7 @@ proc Core {
             & target.id >= 1
             & target.id <= length(cluster)
             & cluster[target.id] = target
+            & seen >= 0
         transit: seen := target.id
     }
 }

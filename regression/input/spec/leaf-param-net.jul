@@ -6,6 +6,7 @@ spec Net[n : Node] {
     constructor initially(args : List<String>) {}
 
     transition send() {
+        guard: lastDest ~= "unused"
         transit:
             lastDest := n
     }

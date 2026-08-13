@@ -1,0 +1,22 @@
+proc Counter {
+    var n : Int
+    var watched : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            n := 0
+            watched := 0
+    }
+
+    transition bump() {
+        transit:
+            n := n + 1
+            watched := n
+    }
+}
+
+invariant WatchedOk := Counter.watched >= 0
+
+spec UnusedVarsInv := Counter |= WatchedOk
+
+compile UnusedVarsInv

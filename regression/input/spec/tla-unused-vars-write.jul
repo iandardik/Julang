@@ -1,0 +1,21 @@
+proc Box {
+    var n : Int
+    var ghost : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            n := 0
+            ghost := 0
+    }
+
+    transition bump() {
+        guard: n < 3
+        transit:
+            n := n + 1
+            ghost := ghost + 1
+    }
+}
+
+spec UnusedVarsWrite := <true> Box <true>
+
+compile UnusedVarsWrite

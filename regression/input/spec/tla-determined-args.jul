@@ -14,7 +14,7 @@ proc Box {
     }
 
     transition send(payload : Rec) {
-        guard: payload = Rec { x := n, y := 1 }
+        guard: payload = Rec { x := n, y := 1 } & box.y >= 0
         transit: box := payload
     }
 }

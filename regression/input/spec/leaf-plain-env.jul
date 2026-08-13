@@ -6,6 +6,7 @@ spec Env {
     }
 
     transition mark() {
+        guard: ready | ~ready
         transit: ready := true
     }
 }

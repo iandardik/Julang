@@ -1,0 +1,24 @@
+proc Store {
+    var n : Int
+    var secret : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            n := 0
+            secret := 0
+    }
+
+    transition bump() {
+        transit:
+            n := n + 1
+            secret := 1
+    }
+
+    transition peek() {
+        guard: secret > 0
+    }
+}
+
+spec UnusedVarsGuardOnly := <true> Store <true>
+
+compile UnusedVarsGuardOnly

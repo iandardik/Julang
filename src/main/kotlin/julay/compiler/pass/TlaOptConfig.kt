@@ -8,6 +8,7 @@ package julay.compiler.pass
  */
 data class TlaOptConfig(
     val unusedFields: Boolean = true,
+    val unusedVars: Boolean = true,
     val determinedArgs: Boolean = true,
     val fromCollection: Boolean = true,
     val literalDomains: Boolean = true,
@@ -17,6 +18,7 @@ data class TlaOptConfig(
         val ALL_ON = TlaOptConfig()
         val ALL_OFF = TlaOptConfig(
             unusedFields = false,
+            unusedVars = false,
             determinedArgs = false,
             fromCollection = false,
             literalDomains = false,
@@ -26,6 +28,7 @@ data class TlaOptConfig(
         /** Stable CLI / docs IDs. */
         val OPT_IDS: Set<String> = setOf(
             "unused-fields",
+            "unused-vars",
             "determined-args",
             "from-collection",
             "literal-domains",
@@ -52,6 +55,7 @@ data class TlaOptConfig(
             val disabled = names.toSet()
             return TlaOptConfig(
                 unusedFields = "unused-fields" !in disabled,
+                unusedVars = "unused-vars" !in disabled,
                 determinedArgs = "determined-args" !in disabled,
                 fromCollection = "from-collection" !in disabled,
                 literalDomains = "literal-domains" !in disabled,

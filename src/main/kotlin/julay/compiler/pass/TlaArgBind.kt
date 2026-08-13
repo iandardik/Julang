@@ -78,7 +78,7 @@ internal fun analyzeTlaArgBind(
     val conflicted = mutableSetOf<String>()
     val skip = IdentityHashMap<ExprNode, Boolean>()
     val structBinds = mutableListOf<StructInSetBind>()
-    var structTmp = 0
+    val takenStructNames = argNames.toMutableSet()
 
     fun progress(): Boolean {
         var changed = false
@@ -119,8 +119,7 @@ internal fun analyzeTlaArgBind(
                     return@let
                 }
                 if (skip.containsKey(c)) continue
-                matchStructInSet(c, unbound, structTmp)?.let { struct ->
-                    structTmp++
+                matchStructInSet(c, unbound, takenStructNames)?.let { struct ->
                     structBinds += struct
                     struct.argPaths.forEach { (arg, path) ->
                         bound[arg] = Bound.StructField(struct.tmp, path)
@@ -305,7 +304,7 @@ private fun sameStateExpr(a: ExprNode, b: ExprNode): Boolean {
 private fun matchStructInSet(
     conjunct: ExprNode,
     unbound: Set<String>,
-    tmpN: Int,
+    taken: MutableSet<String>,
 ): StructInSetBind? {
     val e = unwrapParen(conjunct)
     if (e !is BinaryOpExprNode || e.op() != "in") return null
@@ -317,7 +316,25 @@ private fun matchStructInSet(
     if (paths.isEmpty()) return null
     val keep = mutableListOf<Pair<List<String>, ExprNode>>()
     collectKeep(lit, emptyList(), unbound, keep)
-    return StructInSetBind("__s$tmpN", set, paths, keep)
+    val tmp = allocTlaName(collectionBinderBase(set), taken)
+    return StructInSetBind(tmp, set, paths, keep)
+}
+
+internal fun collectionBinderBase(set: ExprNode): String {
+    val e = unwrapParen(set)
+    val raw = when (e) {
+        is SymbolValueExprNode -> e.symbol
+        is FieldAccessExprNode -> e.fieldPath.lastOrNull() ?: e.baseSymbol
+        is MemberAccessExprNode -> e.fieldName
+        else -> "elem"
+    }
+    return singularizeCollectionName(raw)
+}
+
+internal fun singularizeCollectionName(name: String): String = when {
+    name.endsWith("Msgs") && name.length > 4 -> name.removeSuffix("s")
+    name.endsWith("s") && name.length > 1 && !name.endsWith("ss") -> name.dropLast(1)
+    else -> name
 }
 
 private fun collectArgPaths(

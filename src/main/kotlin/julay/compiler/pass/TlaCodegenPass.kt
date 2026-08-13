@@ -175,6 +175,19 @@ fun tlaCodegenPass(
     }
     val unusedFieldWarnings =
         if (tlaOptConfig.unusedFields) relevantFields.comparisonWarnings() else emptyList()
+    val relevantVars = if (tlaOptConfig.unusedVars) {
+        analyzeTlaRelevantVars(
+            pclassesForTla,
+            offers,
+            usedFunOps,
+            invClosure,
+            procFunLeafNames = leaves.filter { it.isProcFun }.map { it.name }.toSet(),
+            callSites = callSites,
+        )
+    } else {
+        TlaRelevantVars.IDENTITY
+    }
+    TlaVarProjection.set(relevantVars)
     val literalDomains = if (tlaOptConfig.literalDomains) {
         analyzeTlaLiteralDomains(leaves, pclassesForTla, offers, usedFunOps, invClosure)
     } else {
@@ -220,6 +233,7 @@ fun tlaCodegenPass(
         TlaLiteralDomainProjection.set(TlaLiteralDomains.NONE)
         TlaEmitOpts.set(TlaOptConfig.ALL_ON)
         TlaSymbolTypes.set(emptyMap())
+        TlaVarProjection.set(TlaRelevantVars.IDENTITY)
     }
 }
 
@@ -307,6 +321,7 @@ private fun emitProjectedTla(
                 initParts += "/\\ $terminated = [$binder \\in $domain |-> FALSE]"
             }
             pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
+                if (!TlaVarProjection.get().isRelevant(leaf.name, vn.name)) return@forEach
                 val v = stateTlaName(leaf.tlaName, vn.name, stateVarNames)
                 variables += v
                 initParts += "/\\ $v = [$binder \\in $domain |-> ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}]"
@@ -323,6 +338,7 @@ private fun emitProjectedTla(
                 initParts += "/\\ $terminated = FALSE"
             }
             pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
+                if (!TlaVarProjection.get().isRelevant(leaf.name, vn.name)) return@forEach
                 val v = stateTlaName(leaf.tlaName, vn.name, stateVarNames)
                 variables += v
                 initParts += "/\\ $v = ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
@@ -699,7 +715,7 @@ private fun sessionPairForOffers(
  * Offer lists that [buildTlaActions] would pass to [emitConjoined], in the same grouping order.
  * Used to precompute kill targets and whether sessionException is needed.
  */
-private fun collectEmittedOfferLists(offers: List<TlaActionOffer>): List<List<TlaActionOffer>> {
+internal fun collectEmittedOfferLists(offers: List<TlaActionOffer>): List<List<TlaActionOffer>> {
     val result = mutableListOf<List<TlaActionOffer>>()
     offers.groupBy { it.decl.action.name }.forEach { (_, group) ->
         val providers = group.filter { it.role == TSAction.SyncRole.Provider }
@@ -1421,7 +1437,9 @@ private fun allTlaVars(
         if (leaf.isProcFun) {
             base += stateTlaName(leaf.tlaName, "terminated", stateVarNames)
         }
-        base + pc.localDecls().filterIsInstance<VarNode>().map {
+        base + pc.localDecls().filterIsInstance<VarNode>().filter {
+            TlaVarProjection.get().isRelevant(leaf.name, it.name)
+        }.map {
             stateTlaName(leaf.tlaName, it.name, stateVarNames)
         }
     }
@@ -1633,6 +1651,9 @@ private fun emitConjoined(
                     letOverrides[update.name] = tlaName
                 }
                 is TransitUpdate.Assign -> {
+                    if (!TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar())) {
+                        return@forEach
+                    }
                     val root = update.key.substringBefore('.')
                     val v = stateTlaName(offer.leaf.tlaName, root, stateVarNames)
                     targetChanged += v
@@ -1663,6 +1684,9 @@ private fun emitConjoined(
                     }
                 }
                 is TransitUpdate.IndexPut -> {
+                    if (!TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar())) {
+                        return@forEach
+                    }
                     val v = stateTlaName(offer.leaf.tlaName, update.collectionVar, stateVarNames)
                     targetChanged += v
                     val k = emitExpr(update.index, "")
@@ -2307,6 +2331,7 @@ private fun collectProjectedSortConstants(
     leaves.forEach { leaf ->
         val pc = pclasses[leaf.name] ?: return@forEach
         pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
+            if (!TlaVarProjection.get().isRelevant(leaf.name, vn.name)) return@forEach
             collectSortConstants(safeType(vn), into)
         }
         leafSpecs[leaf.name]?.leafSpecParamType()?.let { te ->

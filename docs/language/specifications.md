@@ -151,6 +151,7 @@ See [`input/inc_server/main.jul`](../../input/inc_server/main.jul) and [`regress
 TLA+ emit may rewrite the composed spec (JAR codegen is unchanged). Named ids, all default-on; see [Compiler optimizations](compiler-optimizations.md#tla-emission-optimizations):
 
 - `unused-fields` — project unread `obj` fields out of TLA records and TLC domains
+- `unused-vars` — omit state vars/consts the TLA-relevant fragment never reads
 - `determined-args` — substitute args fixed by `arg = expr` / `<=>` with `LET` instead of `\E`
 - `from-collection` — quantify remaining args from a state set/list (or a struct literal `in` a set)
 - `literal-domains` — per-site finite `{…}` for String/Int that only use a closed literal set

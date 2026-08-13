@@ -9,7 +9,7 @@ proc Nest {
     }
 
     transition step() {
-        guard: true
+        guard: x >= 0 & y >= 0
         transit:
             x := if (x < 1) {
                 let (n : Int := x + 1) {

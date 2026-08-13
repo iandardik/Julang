@@ -16,7 +16,7 @@ proc Net {
     }
 
     transition recv(x : Int) {
-        guard: Msg { dest := 0, value := x } in msgs
+        guard: got >= 0 & Msg { dest := 0, value := x } in msgs
         transit: got := x
     }
 }

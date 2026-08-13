@@ -102,11 +102,13 @@ internal fun emitProcFunCallAndRet(
     argNodes.zip(callArgs).forEach { (arg, expr) ->
         val rhs = exprToTla(expr, hostCtx, hostArgNames, hostBinder, hostBare, stateVarNames = stateVarNames)
         argTla[arg.argName()] = rhs
+        if (!TlaVarProjection.get().isRelevant(child.name, arg.argName())) return@forEach
         val v = stateTlaName(child.tlaName, arg.argName(), stateVarNames)
         callParts += "/\\ ${assignVal(v, childBinder, rhs)}"
         callChanged += v
     }
     procFun.localDecls().filterIsInstance<VarNode>().forEach { vn ->
+        if (!TlaVarProjection.get().isRelevant(child.name, vn.name)) return@forEach
         val init = vn.initExpr ?: return@forEach
         val rhs = exprToTla(
             init, childCtx, argTla.keys, childBinder, childBare,
@@ -162,6 +164,7 @@ internal fun emitProcFunCallAndRet(
     val retValTla = stateTlaName(child.tlaName, PROC_FUN_RET_VAL, stateVarNames)
     val retRhs = idx(retValTla, childBinder)
     site.assignVars.forEach { varName ->
+        if (!TlaVarProjection.get().isRelevant(hostLeaf.name, varName)) return@forEach
         val v = stateTlaName(hostLeaf.tlaName, varName, stateVarNames)
         retParts += "/\\ ${assignVal(v, hostBinder, retRhs)}"
         retChanged += v
@@ -205,6 +208,7 @@ internal fun emitProcFunCallAndRet(
             is TransitUpdate.Assign -> {
                 val root = transitRootVar(update.key)
                 if (root in site.assignVars) return@forEach
+                if (!TlaVarProjection.get().isRelevant(hostLeaf.name, root)) return@forEach
                 val expr = update.expr
                 if (expr is FunCallExprNode && expr.resolvedProcFunOrNull() != null) return@forEach
                 val v = stateTlaName(hostLeaf.tlaName, root, stateVarNames)
@@ -215,6 +219,7 @@ internal fun emitProcFunCallAndRet(
             is TransitUpdate.IndexPut -> {
                 val valueExpr = update.value
                 if (valueExpr is FunCallExprNode && valueExpr.resolvedProcFunOrNull() != null) return@forEach
+                if (!TlaVarProjection.get().isRelevant(hostLeaf.name, update.collectionVar)) return@forEach
                 val v = stateTlaName(hostLeaf.tlaName, update.collectionVar, stateVarNames)
                 val k = emitHostExpr(update.index)
                 val vv = emitHostExpr(valueExpr)
@@ -312,6 +317,7 @@ internal fun emitProcFunHavocAction(
     val retDomain = typeToTlaDomain(procFun.returnType)
     collectDomainModelName(retDomain, cfgOverrides)
     site.assignVars.forEach { varName ->
+        if (!TlaVarProjection.get().isRelevant(hostLeaf.name, varName)) return@forEach
         val v = stateTlaName(hostLeaf.tlaName, varName, stateVarNames)
         if (hostBinder != null) {
             parts += "/\\ \\E __pf \\in $retDomain: $v' = [$v EXCEPT ![$hostBinder] = __pf]"
