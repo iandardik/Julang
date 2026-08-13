@@ -6,7 +6,7 @@ proc Server {
     }
 
     session transition spawnWorker(id : Int) {
-        guard: ready
+        guard: ready & id <= 1
     }
 
     session transition ping() {

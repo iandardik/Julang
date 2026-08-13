@@ -104,6 +104,15 @@ class SpecTlaTlcSmokeTest {
                 !bumpDef.trimStart().startsWith("\\E i \\in String :"),
                 "index quantification should be in Next, not inside bump;\n$tlaText",
             )
+            val cfgText = cfg.readText()
+            assertTrue(
+                cfgText.contains("CONSTANT String = {\"\"}"),
+                "String model should be used literals only (none → empty string);\n$cfgText",
+            )
+            assertTrue(
+                !cfgText.contains("\"a\"") && !cfgText.contains("\"1\""),
+                "String model should not inject a, b, or int-as-string;\n$cfgText",
+            )
             tla.copyTo(File(work, "ParamCounters.tla"), overwrite = true)
             cfg.copyTo(File(work, "ParamCounters.cfg"), overwrite = true)
             tla.delete()
@@ -571,7 +580,8 @@ class SpecTlaTlcSmokeTest {
     @Test
     fun literalDomainsShrinkArgNotGlobalString() {
         val source = File("regression/input/spec/tla-literal-domains.jul")
-        val (tlaText, _) = compileSpecTla(source, "LiteralDomains")
+        val emit = compileSpecEmit(source, "LiteralDomains")
+        val tlaText = emit.tlaText
         assertTrue(
             tlaText.contains("\\E mode \\in {\"a\", \"b\"}") ||
                 tlaText.contains("\\E mode \\in {\"b\", \"a\"}"),
@@ -581,11 +591,27 @@ class SpecTlaTlcSmokeTest {
             tlaText.contains("String"),
             "open payload String site should keep the global String model;\n$tlaText",
         )
-        val (offText, _) = compileSpecTla(
+        val stringConst = emit.cfgText.lineSequence().firstOrNull { it.startsWith("CONSTANT String") }
+        assertTrue(
+            stringConst != null,
+            "open note site should keep CONSTANT String in cfg;\n${emit.cfgText}",
+        )
+        assertTrue(
+            stringConst!!.contains("\"seed\"") &&
+                stringConst.contains("\"a\"") &&
+                stringConst.contains("\"b\"") &&
+                stringConst.contains("\"\""),
+            "String model should be used literals, including seed/a/b/empty;\n$stringConst",
+        )
+        assertTrue(
+            !stringConst.contains("\"0\"") && !stringConst.contains("\"1\""),
+            "String model should not inject int-as-string;\n$stringConst",
+        )
+        val offText = compileSpecTla(
             source,
             "LiteralDomains",
             tlaOptConfig = TlaOptConfig.fromDisableTlaOptFlag("literal-domains"),
-        )
+        ).first
         assertTrue(
             offText.contains("\\E mode \\in String"),
             "disabling literal-domains should restore String for mode;\n$offText",
@@ -1633,8 +1659,8 @@ class SpecTlaTlcSmokeTest {
                 "must not use bare Seq(...) as a domain;\n$tlaText",
             )
             assertTrue(
-                cfgText.contains("MaxListLen"),
-                "expected MaxListLen in cfg;\n$cfgText",
+                cfgText.contains("MaxListLen") && cfgText.contains("CONSTANT MaxListLen = 3"),
+                "expected MaxListLen = 3 in cfg;\n$cfgText",
             )
             tla.copyTo(File(work, "ListHof.tla"), overwrite = true)
             cfg.copyTo(File(work, "ListHof.cfg"), overwrite = true)
@@ -1808,6 +1834,16 @@ class SpecTlaTlcSmokeTest {
         compileNames: List<String> = emptyList(),
         tlaOptConfig: TlaOptConfig = TlaOptConfig.ALL_ON,
     ): Pair<String, List<String>> {
+        val emit = compileSpecEmit(source, specName, compileNames, tlaOptConfig)
+        return emit.tlaText to emit.warnings
+    }
+
+    private fun compileSpecEmit(
+        source: File,
+        specName: String,
+        compileNames: List<String> = emptyList(),
+        tlaOptConfig: TlaOptConfig = TlaOptConfig.ALL_ON,
+    ): SpecTlaEmit {
         val checked = prepareCheckedCompilation(
             source.toPath(),
             compileNames = compileNames,
@@ -1817,6 +1853,12 @@ class SpecTlaTlcSmokeTest {
             .firstOrNull { it.specNodeName() == specName }
             ?: fail("spec $specName not found in ${source.path}")
         val result = tlaCodegenPass(spec, checked.ast, checked.unit, tlaOptConfig)
-        return result.tlaText to result.warnings.map { it.toString() }
+        return SpecTlaEmit(result.tlaText, result.cfgText, result.warnings.map { it.toString() })
     }
 }
+
+private data class SpecTlaEmit(
+    val tlaText: String,
+    val cfgText: String,
+    val warnings: List<String>,
+)

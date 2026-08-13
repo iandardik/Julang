@@ -144,18 +144,7 @@ fun tlaCodegenPass(
     }
     invClosure.forEach { collectTypeConstants(it.invariantFormula(), constants) }
 
-    // Finite TLC models for built-in domains used in the module (assigned in .cfg only).
     val cfgOverrides = linkedSetOf<String>()
-    invClosure.forEach { collectBuiltinDomainUses(it.invariantFormula(), cfgOverrides) }
-    leaves.forEach { leaf ->
-        leaf.paramType?.let { typeDomainConstant(it) }?.let { name ->
-            if (name in setOf("Int", "Nat", "Real")) cfgOverrides += name
-        }
-    }
-
-    val intModelValues = linkedSetOf(0, 1, 2, 3, 4, 5)
-    collectIntLiteralsFromLeaves(leaves, pclassesForTla, intModelValues)
-    invClosure.forEach { collectIntLiteralsFromExpr(it.invariantFormula(), intModelValues) }
 
     val offers = collectTlaActionOffers(leaves, pclassesForTla, procFunDecls)
         // Coupled: child construct is folded into parent *_call. Standalone: keep F_call.
@@ -219,7 +208,6 @@ fun tlaCodegenPass(
             handshake = handshake,
             constants = constants,
             cfgOverrides = cfgOverrides,
-            intModelValues = intModelValues,
             invClosure = invClosure,
             sortModels = sortModels,
             offers = offers,
@@ -248,7 +236,6 @@ private fun emitProjectedTla(
     handshake: ProcFunHandshakeVars,
     constants: LinkedHashSet<String>,
     cfgOverrides: LinkedHashSet<String>,
-    intModelValues: LinkedHashSet<Int>,
     invClosure: List<InvariantNode>,
     sortModels: Map<String, String>,
     offers: List<TlaActionOffer>,
@@ -257,10 +244,22 @@ private fun emitProjectedTla(
     usedFunOps: List<FunNode>,
     unusedFieldWarnings: List<OneLocCompileWarning>,
 ): TlaCodegenResult {
-    collectProjectedSortConstants(leaves, pclassesForTla, leafSpecNodes, offers, constants)
-    collectActionArgDomainModels(offers, pclassesForTla, cfgOverrides)
-    collectIoHavocDomainModels(leaves, pclassesForTla, cfgOverrides)
+    val emittedOffers = collectEmittedOfferLists(offers).filter { offerGroupHasEmittedUpdate(it) }.flatten()
+    invClosure.forEach { collectBuiltinDomainUses(it.invariantFormula(), cfgOverrides) }
+    leaves.forEach { leaf ->
+        leaf.paramType?.let { typeDomainConstant(it) }?.let { name ->
+            if (name in setOf("Int", "Nat", "Real")) cfgOverrides += name
+        }
+    }
+    collectProjectedSortConstants(leaves, pclassesForTla, leafSpecNodes, emittedOffers, constants)
+    collectActionArgDomainModels(emittedOffers, pclassesForTla, cfgOverrides)
+    collectIoHavocDomainModels(emittedOffers, cfgOverrides)
     havocSites.forEach { site ->
+        if (site.assignVars.isNotEmpty() &&
+            site.assignVars.none { TlaVarProjection.get().isRelevant(site.hostName, it) }
+        ) {
+            return@forEach
+        }
         procFunNodes[site.procFunName]?.let { pf ->
             try {
                 val d = typeToTlaDomain(pf.returnType)
@@ -275,6 +274,16 @@ private fun emitProjectedTla(
     if ("MaxListLen" in cfgOverrides) {
         constants += "MaxListLen"
     }
+
+    val intModelValues = linkedSetOf<Int>()
+    val stringModelValues = linkedSetOf<String>()
+    emittedOffers.forEach { collectCfgLiteralsFromOffer(it, intModelValues, stringModelValues) }
+    invClosure.forEach { collectCfgLiteralsFromExpr(it.invariantFormula(), intModelValues, stringModelValues) }
+    usedFunOps.forEach { collectCfgLiteralsFromExpr(it.funBody(), intModelValues, stringModelValues) }
+    val coerceIntToString =
+        emittedOffers.any { offerContainsIntToStringCoerce(it) } ||
+            invClosure.any { exprContainsIntToStringCoerce(it.invariantFormula()) } ||
+            usedFunOps.any { exprContainsIntToStringCoerce(it.funBody()) }
 
     val reservedTlaIds = constants + setOf("Int", "Nat", "Boolean", "Real") +
         actionArgNames(leaves, pclassesForTla) +
@@ -546,7 +555,7 @@ private fun emitProjectedTla(
         fun modelFor(name: String): String = when {
             name in sortModels -> sortModels.getValue(name)
             name == "Int" || name == "Nat" || name == "Real" -> cfgIntModel(intModelValues)
-            name == "String" -> cfgStringModel(intModelValues)
+            name == "String" -> cfgStringModel(stringModelValues, intModelValues, coerceIntToString)
             else -> cfgConstantModel(name)
         }
         constants.forEach { c ->
@@ -747,6 +756,19 @@ internal fun collectEmittedOfferLists(offers: List<TlaActionOffer>): List<List<T
     }
     return result
 }
+
+/** True when the group still primes a var after unused-vars (constructor / return always emit). */
+internal fun offerGroupHasEmittedUpdate(group: List<TlaActionOffer>): Boolean =
+    group.any { offer ->
+        if (offer.isConstructor || offer.decl.isReturn) return@any true
+        offer.decl.transits.any { update ->
+            when (update) {
+                is TransitUpdate.Assign, is TransitUpdate.IndexPut ->
+                    TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar())
+                is TransitUpdate.Let -> false
+            }
+        }
+    }
 
 /** Leaf names that are kill targets: `killSessionPeer` peers or `exitProc` callers. */
 private fun collectKillTargets(
@@ -2169,45 +2191,100 @@ internal fun typeDomainConstant(typeExpr: TypeExpr): String? = when (typeExpr) {
 }
 
 internal fun cfgConstantModel(name: String): String = when (name) {
-    "Int", "Nat", "Real" -> "{0, 1, 2, 3, 4, 5}"
-    "String" -> "{\"\", \"0\", \"1\", \"2\", \"3\", \"4\", \"5\", \"a\", \"b\"}"
     "Boolean" -> "BOOLEAN"
     "MaxListLen" -> "3"
-    else -> "{\"a\", \"b\"}" // parameter sets and other domains
+    else -> error("TLA+ cfg: no model for CONSTANT $name")
 }
 
-internal fun cfgIntModel(values: Set<Int>): String =
-    // TLC .cfg parsers reject unary-minus in set literals; negatives still appear via assignments.
-    "{${values.filter { it >= 0 }.sorted().joinToString(", ")}}"
-
-internal fun cfgStringModel(intValues: Set<Int>): String {
-    val strs = linkedSetOf("", "a", "b")
-    intValues.forEach { strs += it.toString() }
-    return "{${strs.joinToString(", ") { "\"$it\"" }}}"
+internal fun cfgIntModel(values: Set<Int>): String {
+    val nums = values.filter { it >= 0 }.toMutableSet()
+    nums += 0
+    return "{${nums.sorted().joinToString(", ")}}"
 }
 
-private fun collectIntLiteralsFromLeaves(
-    leaves: List<SpecLeaf>,
-    pclasses: Map<String, ProcClassNode>,
-    into: MutableSet<Int>,
+internal fun cfgStringModel(
+    literals: Set<String>,
+    intValues: Set<Int>,
+    coerceIntToString: Boolean,
+): String {
+    val strs = linkedSetOf<String>()
+    strs.addAll(literals)
+    if (coerceIntToString) {
+        intValues.filter { it >= 0 }.forEach { strs += it.toString() }
+    }
+    if (strs.isEmpty()) strs += ""
+    return "{${strs.sorted().joinToString(", ") { "\"$it\"" }}}"
+}
+
+private fun collectCfgLiteralsFromOffer(
+    offer: TlaActionOffer,
+    ints: MutableSet<Int>,
+    strs: MutableSet<String>,
 ) {
-    leaves.forEach { leaf ->
-        val pc = pclasses[leaf.name] ?: return@forEach
-        (pc.localDecls().flatMap { it.constructors() } + pc.localDecls().flatMap { it.transitions() })
-            .forEach { action ->
-                action.guards.forEach { collectIntLiteralsFromExpr(it, into) }
-                action.transits.forEach { update ->
-                    when (update) {
-                        is TransitUpdate.Assign -> collectIntLiteralsFromExpr(update.expr, into)
-                        is TransitUpdate.IndexPut -> {
-                            collectIntLiteralsFromExpr(update.index, into)
-                            collectIntLiteralsFromExpr(update.value, into)
-                        }
-                        is TransitUpdate.Let -> collectIntLiteralsFromExpr(update.init, into)
-                    }
+    offer.decl.guards.forEach { collectCfgLiteralsFromExpr(it, ints, strs) }
+    offer.decl.returnExpr?.let { collectCfgLiteralsFromExpr(it, ints, strs) }
+    offer.decl.transits.forEach { update ->
+        when (update) {
+            is TransitUpdate.Let -> collectCfgLiteralsFromExpr(update.init, ints, strs)
+            is TransitUpdate.Assign -> {
+                if (TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar())) {
+                    collectCfgLiteralsFromExpr(update.expr, ints, strs)
                 }
             }
+            is TransitUpdate.IndexPut -> {
+                if (TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar())) {
+                    collectCfgLiteralsFromExpr(update.index, ints, strs)
+                    collectCfgLiteralsFromExpr(update.value, ints, strs)
+                }
+            }
+        }
     }
+}
+
+private fun collectCfgLiteralsFromExpr(expr: ExprNode, ints: MutableSet<Int>, strs: MutableSet<String>) {
+    collectIntLiteralsFromExpr(expr, ints)
+    collectStringLiteralsFromExpr(expr, strs)
+}
+
+private fun collectStringLiteralsFromExpr(expr: ExprNode, into: MutableSet<String>) {
+    when (expr) {
+        is LiteralValueExprNode -> {
+            val t = try {
+                expr.getType()
+            } catch (_: RuntimeException) {
+                expr.inferType(emptyMap())
+            }
+            if (t is StringType) into += expr.literalText()
+        }
+        else -> expr.children.filterIsInstance<ExprNode>().forEach { collectStringLiteralsFromExpr(it, into) }
+    }
+}
+
+private fun offerContainsIntToStringCoerce(offer: TlaActionOffer): Boolean {
+    if (offer.decl.guards.any { exprContainsIntToStringCoerce(it) }) return true
+    if (offer.decl.returnExpr?.let { exprContainsIntToStringCoerce(it) } == true) return true
+    return offer.decl.transits.any { update ->
+        when (update) {
+            is TransitUpdate.Let -> exprContainsIntToStringCoerce(update.init)
+            is TransitUpdate.Assign ->
+                TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar()) &&
+                    exprContainsIntToStringCoerce(update.expr)
+            is TransitUpdate.IndexPut ->
+                TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar()) &&
+                    (exprContainsIntToStringCoerce(update.index) || exprContainsIntToStringCoerce(update.value))
+        }
+    }
+}
+
+private fun exprContainsIntToStringCoerce(expr: ExprNode): Boolean {
+    if (expr is BinaryOpExprNode && expr.op() == "+") {
+        val lhs = expr.lhsOperand()
+        val rhs = expr.rhsOperand()
+        val stringOp =
+            exprIsStringTyped(expr) || exprIsStringTyped(lhs) || exprIsStringTyped(rhs)
+        if (stringOp && exprIsStringTyped(lhs) != exprIsStringTyped(rhs)) return true
+    }
+    return expr.children.filterIsInstance<ExprNode>().any { exprContainsIntToStringCoerce(it) }
 }
 
 private fun collectIntLiteralsFromExpr(expr: ExprNode, into: MutableSet<Int>) {
@@ -2419,37 +2496,38 @@ internal fun offerRefsArg(offer: TlaActionOffer, argName: String): Boolean =
         (offer.decl.returnExpr?.let { exprReferencesSymbol(it, argName) } == true)
 
 private fun collectIoHavocDomainModels(
-    leaves: List<SpecLeaf>,
-    pclasses: Map<String, ProcClassNode>,
+    offers: List<TlaActionOffer>,
     into: MutableSet<String>,
 ) {
-    leaves.forEach { leaf ->
-        val pc = pclasses[leaf.name] ?: return@forEach
-        (pc.localDecls().flatMap { it.constructors() } + pc.localDecls().flatMap { it.transitions() })
-            .forEach { action ->
-                action.transits.forEach { update ->
-                    when (update) {
-                        is TransitUpdate.Assign -> if (exprContainsIoHavoc(update.expr)) {
-                            try {
-                                collectDomainModelNames(update.expr.getType(), into)
-                            } catch (_: RuntimeException) {
-                            }
-                        }
-                        is TransitUpdate.IndexPut -> if (exprContainsIoHavoc(update.value)) {
-                            try {
-                                collectDomainModelNames(update.value.getType(), into)
-                            } catch (_: RuntimeException) {
-                            }
-                        }
-                        is TransitUpdate.Let -> if (exprContainsIoHavoc(update.init)) {
-                            try {
-                                collectDomainModelNames(update.init.getType(), into)
-                            } catch (_: RuntimeException) {
-                            }
-                        }
+    offers.forEach { offer ->
+        offer.decl.transits.forEach { update ->
+            when (update) {
+                is TransitUpdate.Assign -> if (
+                    TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar()) &&
+                    exprContainsIoHavoc(update.expr)
+                ) {
+                    try {
+                        collectDomainModelNames(update.expr.getType(), into)
+                    } catch (_: RuntimeException) {
+                    }
+                }
+                is TransitUpdate.IndexPut -> if (
+                    TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar()) &&
+                    exprContainsIoHavoc(update.value)
+                ) {
+                    try {
+                        collectDomainModelNames(update.value.getType(), into)
+                    } catch (_: RuntimeException) {
+                    }
+                }
+                is TransitUpdate.Let -> if (exprContainsIoHavoc(update.init)) {
+                    try {
+                        collectDomainModelNames(update.init.getType(), into)
+                    } catch (_: RuntimeException) {
                     }
                 }
             }
+        }
     }
 }
 

@@ -49,6 +49,8 @@ When compiling a `spec` (or `--compile-tla`), Julay may rewrite generated `.tla`
 
 Some of these are **equivalent rewrites** of the same transition relation. Others are **projections**: they exclude values the Julay type would otherwise allow, so `=` / `in` / `~=` can diverge from the program.
 
+TLC `.cfg` `Int` / `String` universes are sized from literals in the emitted spec (open `\E` / index / havoc sites). That projection is always on and is not a `--disable-tla-opt` id. `MaxListLen` stays `3`.
+
 ### Named TLA+ optimizations
 
 | ID | Role | Kind |
@@ -57,7 +59,7 @@ Some of these are **equivalent rewrites** of the same transition relation. Other
 | `unused-vars` | Omit state vars/consts the TLA-relevant fragment never reads (emitted-action guards/transits and the guarantee). Not TLA+ liveness (`WF`/`SF`). | Equivalent rewrite (of the emitted spec) |
 | `determined-args` | Drop `\E` for action args fixed by `arg = expr` or `arg <=> expr`; substitute with `LET`. Not the same as JAR `directed-eval` | Equivalent rewrite |
 | `from-collection` | Quantify remaining args from a state collection: `a in S` on a set, `S[a.f] = a` on a list (index binder `i \in 1..Len(S)`), or a struct literal `in` a set | Equivalent rewrite |
-| `literal-domains` | Per-site finite `{…}` for String/Int that only use a closed literal set. Does **not** shrink the global `String` CONSTANT (so e.g. `Entry.value` stays open) | Projection (when it excludes values the type would otherwise allow) |
+| `literal-domains` | Per-site finite `{…}` for String/Int that only use a closed literal set. Does **not** by itself shrink the global `String` CONSTANT (so e.g. `Entry.value` stays open); the cfg String/Int models are still the residual open-site literals | Projection (when it excludes values the type would otherwise allow) |
 | `unwrap-singletons` | After unused-fields, an obj with one remaining field emits as that field’s type (Raft `Node` → `Int`) | Equivalent rewrite |
 
 If a field is omitted from a type that still appears in whole-record comparison or set containment, `julayc` warns and points at `--disable-tla-opt=unused-fields`. Values that differed only in omitted fields become equal.

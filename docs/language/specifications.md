@@ -159,6 +159,8 @@ TLA+ emit may rewrite the composed spec (JAR codegen is unchanged). Named ids, a
 
 Disable with `--disable-tla-opt` / `--disable-tla-opt=ID,...`.
 
+Open `Int` / `String` sites that still need a TLC universe (leaf index, remaining `\E`, havoc) get a `.cfg` assignment from literals in the emitted spec — not a fixed `{0..5}` or a 9-string set. If nothing enumerates `Int`/`String`, that CONSTANT is omitted. Always-on; not a named opt. `MaxListLen` default remains `3`.
+
 ### Lists and sequences
 
 - Julay lists are **1-based**, matching TLA `Sequences`. Reads and `EXCEPT` updates on list-typed state use the Julay index as-is.
