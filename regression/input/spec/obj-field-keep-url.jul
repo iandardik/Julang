@@ -1,0 +1,26 @@
+obj Peer {
+    id : Int
+    url : String
+}
+
+proc Router {
+    var peer : Peer
+    var step : String
+
+    constructor initially(args : List<String>) {
+        transit:
+            peer := Peer { id := 0, url := "" }
+            step := "idle"
+    }
+
+    transition pick(peerArg : Peer) {
+        guard: peerArg.url ~= ""
+        transit:
+            peer := peerArg
+            step := "have"
+    }
+}
+
+spec ObjFieldKeepUrl := <true> Router <true>
+
+compile ObjFieldKeepUrl

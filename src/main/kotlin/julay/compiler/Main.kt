@@ -13,6 +13,7 @@ import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.path
 import com.github.ajalt.clikt.parameters.options.optionalValue
 import julay.compiler.analysis.AnalyzeOptions
+import julay.compiler.pass.TlaOptConfig
 import julay.program.sync.SyncResolveConfig
 
 class Julayc : CliktCommand(name = "julayc") {
@@ -75,6 +76,15 @@ class Julayc : CliktCommand(name = "julayc") {
             "See docs/language/compiler-optimizations.md",
     ).optionalValue("ALL", acceptsUnattachedValue = false)
 
+    private val disableTlaOpt by option(
+        "--disable-tla-opt",
+        metavar = "OPT,...",
+        help = "Disable TLA+ emission optimizations. Use bare --disable-tla-opt to disable all " +
+            "(unused-fields), or --disable-tla-opt=ID,ID for a subset. " +
+            "The '=' form is required when passing ids so the input path is not consumed. " +
+            "See docs/language/compiler-optimizations.md",
+    ).optionalValue("ALL", acceptsUnattachedValue = false)
+
     private val verbose by option(
         "--verbose",
         help = "Print sync-path summary (FastOnly vs NeedsZ3).",
@@ -94,6 +104,11 @@ class Julayc : CliktCommand(name = "julayc") {
         } catch (e: IllegalArgumentException) {
             throw UsageError(e.message ?: "Invalid --disable-opt")
         }
+        val tlaOptConfig = try {
+            TlaOptConfig.fromDisableTlaOptFlag(disableTlaOpt)
+        } catch (e: IllegalArgumentException) {
+            throw UsageError(e.message ?: "Invalid --disable-tla-opt")
+        }
         compileJulFile(
             file,
             keepBuild,
@@ -102,6 +117,7 @@ class Julayc : CliktCommand(name = "julayc") {
             compileNames = compileNames,
             compileTlaNames = compileTlaNames,
             syncResolveConfig = syncResolveConfig,
+            tlaOptConfig = tlaOptConfig,
             verbose = verbose,
         )
     }

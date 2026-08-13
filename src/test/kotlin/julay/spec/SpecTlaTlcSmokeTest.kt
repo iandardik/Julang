@@ -1,6 +1,10 @@
 package julay.spec
 
+import julay.compiler.ast.SpecNode
 import julay.compiler.compileJulFile
+import julay.compiler.prepareCheckedCompilation
+import julay.compiler.pass.TlaOptConfig
+import julay.compiler.pass.tlaCodegenPass
 import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
@@ -389,6 +393,14 @@ class SpecTlaTlcSmokeTest {
                 !tlaText.contains("peer_id"),
                 "state-var field must not use underscore peer_id;\n$tlaText",
             )
+            assertTrue(
+                !tlaText.contains("url"),
+                "unread Peer.url should be omitted from TLA;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("[id: Int]") || tlaText.contains("[id |->"),
+                "Peer domain/default should keep only id;\n$tlaText",
+            )
             tla.copyTo(File(work, "ObjFieldAccess.tla"), overwrite = true)
             cfg.copyTo(File(work, "ObjFieldAccess.cfg"), overwrite = true)
             tla.delete()
@@ -399,6 +411,90 @@ class SpecTlaTlcSmokeTest {
             File("ObjFieldAccess.tla").delete()
             File("ObjFieldAccess.cfg").delete()
         }
+    }
+
+    @Test
+    fun objFieldAccessOmitsUrlWithoutComparisonWarning() {
+        val source = File("regression/input/spec/obj-field-access.jul")
+        val (tlaText, warnings) = compileSpecTla(source, "ObjFieldAccess")
+        assertTrue(!tlaText.contains("url"), "unread url should be omitted;\n$tlaText")
+        assertTrue(
+            warnings.none { it.contains("unused-fields") },
+            "no whole-record comparison, so no unused-fields warning;\n$warnings",
+        )
+    }
+
+    @Test
+    fun unusedFieldsDisableKeepsUrl() {
+        val source = File("regression/input/spec/obj-field-access.jul")
+        val configs = listOf(
+            TlaOptConfig.fromDisableTlaOptFlag("unused-fields"),
+            TlaOptConfig.fromDisableTlaOptFlag("ALL"),
+        )
+        for (cfg in configs) {
+            try {
+                compileJulFile(
+                    source.toPath(),
+                    keepBuild = false,
+                    tlaOptConfig = cfg,
+                )
+                val tlaText = File("ObjFieldAccess.tla").readText()
+                assertTrue(
+                    tlaText.contains("url"),
+                    "url should remain when unused-fields is disabled ($cfg);\n$tlaText",
+                )
+            } finally {
+                File("ObjFieldAccess.tla").delete()
+                File("ObjFieldAccess.cfg").delete()
+            }
+        }
+    }
+
+    @Test
+    fun unusedFieldsKeptWhenRead() {
+        val source = File("regression/input/spec/obj-field-keep-url.jul")
+        val (tlaText, warnings) = compileSpecTla(source, "ObjFieldKeepUrl")
+        assertTrue(tlaText.contains("url"), "read url field must stay;\n$tlaText")
+        assertTrue(
+            warnings.none { it.contains("unused-fields") },
+            "no unused-fields warning when url is read;\n$warnings",
+        )
+        File("ObjFieldKeepUrl.tla").delete()
+        File("ObjFieldKeepUrl.cfg").delete()
+    }
+
+    @Test
+    fun unusedFieldsWarnsOnRecordEquality() {
+        val source = File("regression/input/spec/obj-field-eq-unused.jul")
+        val (tlaText, warnings) = compileSpecTla(source, "ObjFieldEq")
+        assertTrue(!tlaText.contains("url"), "unread url should be omitted;\n$tlaText")
+        val hit = warnings.firstOrNull { it.contains("unused-fields") && it.contains("\"url\"") }
+        assertTrue(hit != null, "expected unused-fields warning for url;\n$warnings")
+        assertTrue(
+            hit!!.contains("diverge from the actual semantics"),
+            "warning should mention semantic divergence;\n$hit",
+        )
+        assertTrue(
+            hit.contains("--disable-tla-opt=unused-fields"),
+            "warning should mention disable flag;\n$hit",
+        )
+        File("ObjFieldEq.tla").delete()
+        File("ObjFieldEq.cfg").delete()
+    }
+
+    @Test
+    fun raftNodeSpecOmitsUrlAndWarns() {
+        val source = File("input/raft/sys.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        val (tlaText, warnings) = compileSpecTla(source, "RaftNodeSpec", compileNames = listOf("RaftNodeSpec"))
+        assertTrue(
+            !tlaText.contains("url"),
+            "Node.url should be omitted from RaftNodeSpec TLA;\n${tlaText.take(2000)}",
+        )
+        val hit = warnings.firstOrNull { it.contains("unused-fields") && it.contains("\"url\"") }
+        assertTrue(hit != null, "expected unused-fields warning for Node.url;\n$warnings")
+        File("RaftNodeSpec.tla").delete()
+        File("RaftNodeSpec.cfg").delete()
     }
 
     @Test
@@ -1490,5 +1586,22 @@ class SpecTlaTlcSmokeTest {
                     text.contains("violated", ignoreCase = true)),
             "expected TLC to report violation of $invariantName.\n$text",
         )
+    }
+
+    private fun compileSpecTla(
+        source: File,
+        specName: String,
+        compileNames: List<String> = emptyList(),
+    ): Pair<String, List<String>> {
+        val checked = prepareCheckedCompilation(
+            source.toPath(),
+            compileNames = compileNames,
+        ) ?: fail("prepareCheckedCompilation failed for ${source.path}")
+        val spec = checked.unit.modules
+            .flatMap { it.root.declNodes().filterIsInstance<SpecNode>() }
+            .firstOrNull { it.specNodeName() == specName }
+            ?: fail("spec $specName not found in ${source.path}")
+        val result = tlaCodegenPass(spec, checked.ast, checked.unit)
+        return result.tlaText to result.warnings.map { it.toString() }
     }
 }

@@ -94,10 +94,10 @@ export proc RaftProtocol {
             & state = "Leader"
             & payload = if (nextIndex[target.id] <= length(log)) {
                 // if there's at least one entry to send
-                let (nextLogIndex : Int := nextIndex[target.id]) {
+                let (nextLogIndex : Int := nextIndex[target.id])
                 // prevLogIndex is the previous entry's index, or 0 if none
-                let (prevLogIndex : Int := nextLogIndex - 1) {
-                let (prevLogTerm : Int := if (prevLogIndex > 0) entryTermAt(log, prevLogIndex) else 0) {
+                let (prevLogIndex : Int := nextLogIndex - 1)
+                let (prevLogTerm : Int := if (prevLogIndex > 0) entryTermAt(log, prevLogIndex) else 0)
                     AppendEntriesData {
                         term := currentTerm,
                         leaderId := self.id,
@@ -107,7 +107,6 @@ export proc RaftProtocol {
                         entriesLen := 1,
                         leaderCommit := commitIndex
                     }
-                }}}
             }
             else {
                 // The log is caught up so send a heartbeat. prevLogIndex = last log index, or 0 if empty.
@@ -249,7 +248,7 @@ export proc RaftProtocol {
             // Reset only on accepted AE; avoids blocking gotHeartbeat when leader has stopped its timer.
             let _ : Boolean := if (success) {
                 ElectionTimeout.gotHeartbeat()
-            } else { true }
+            } else true
             let index : Int := prevLogIndex + 1
             let alreadyDone : Boolean :=
                 success & entriesLen = 1 & length(log) >= index & entryTermAt(log, index) = entryTerm
@@ -260,17 +259,15 @@ export proc RaftProtocol {
             log := if (success & entriesLen = 1) {
                 if (alreadyDone) {
                     log
-                } else {
-                    if (length(log) >= index) {
-                        if (prevLogIndex = 0) {
-                            listOf(Entry { term := entryTerm, value := entryValue })
-                        } else {
-                            splice(log, 1, prevLogIndex)
-                                + listOf(Entry { term := entryTerm, value := entryValue })
-                        }
+                } else if (length(log) >= index) {
+                    if (prevLogIndex = 0) {
+                        listOf(Entry { term := entryTerm, value := entryValue })
                     } else {
-                        log + listOf(Entry { term := entryTerm, value := entryValue })
+                        splice(log, 1, prevLogIndex)
+                            + listOf(Entry { term := entryTerm, value := entryValue })
                     }
+                } else {
+                    log + listOf(Entry { term := entryTerm, value := entryValue })
                 }
             } else {
                 log

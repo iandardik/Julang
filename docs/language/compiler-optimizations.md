@@ -42,3 +42,31 @@ Unknown optimization ids are a usage error.
 Fast paths apply to **pairwise compatibility** and **commit-time argument binding**. Local action **enablement** still uses Z3 so mixed embeddings (string concat, collections) cannot falsely skip steps.
 
 See also [Composition and actions](composition-and-actions.md) and [Tooling](../tooling.md).
+
+## TLA+ emission optimizations
+
+When compiling a `spec` (or `--compile-tla`), Julay may **project unread `obj` fields** out of generated TLA+ records and TLC argument domains. That shrinks `\E` binders (e.g. dropping `Node.url` when the spec only reads `.id`). Executable JAR codegen is unchanged.
+
+This is a **projection**: values that differed only in omitted fields become equal, so `=` / `in` / `~=` on those records can diverge from the Julay program. If a field is omitted from a type that still appears in whole-record comparison or set containment, `julayc` warns and points at `--disable-tla-opt=unused-fields`.
+
+Default: all named TLA+ optimizations are **on**.
+
+### Named TLA+ optimizations
+
+| ID | Role |
+|----|------|
+| `unused-fields` | Omit obj fields that the TLA-relevant fragment never projects (field access / struct patterns / comparison-operand literals) |
+
+### `--disable-tla-opt`
+
+Separate from `--disable-opt` (JAR sync). Does not affect generated program JARs.
+
+```bash
+# Disable every named TLA+ optimization
+java -jar build/libs/julayc.jar --disable-tla-opt --compile RaftNodeSpec path/to/file.jul
+
+# Disable only unused-field projection (use '=' so the source path is not consumed)
+java -jar build/libs/julayc.jar --disable-tla-opt=unused-fields path/to/file.jul
+```
+
+Unknown TLA+ optimization ids are a usage error. `--disable-opt` and `--disable-tla-opt` may be passed together; they do not interact.

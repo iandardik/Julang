@@ -6,16 +6,18 @@ obj Msg {
 
 proc Mail {
     var msgs : Set<Msg>
+    var last : Msg
     var longishStateVar : Int
 
     constructor initially(args : List<String>) {
         transit:
             msgs := setOf()
+            last := Msg { src := 0, dest := 0 }
             longishStateVar := 0
     }
 
     transition send(n : Int, m : Int) {
-        guard: true
+        guard: last.src >= 0 & last.dest >= 0
         transit:
             msgs := msgs + setOf(Msg {
                 src := n,

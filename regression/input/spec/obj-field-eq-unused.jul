@@ -1,0 +1,21 @@
+obj NodeLike {
+    id : Int
+    url : String
+}
+
+proc Store {
+    var node : NodeLike
+
+    constructor initially(args : List<String>) {
+        transit: node := NodeLike { id := 0, url := "" }
+    }
+
+    transition collide(other : NodeLike) {
+        guard: other.id >= 0 & node = other
+        transit: node := other
+    }
+}
+
+spec ObjFieldEq := <true> Store <true>
+
+compile ObjFieldEq

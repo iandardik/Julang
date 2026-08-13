@@ -148,6 +148,8 @@ See [`input/inc_server/main.jul`](../../input/inc_server/main.jul) and [`regress
 
 ## TLA+ translation notes
 
+Unread `obj` fields in the composed spec are **projected out** of TLA records and TLC domains (`unused-fields`, on by default). JAR codegen keeps the full type. Disable with `--disable-tla-opt=unused-fields`; see [Compiler optimizations](compiler-optimizations.md#tla-emission-optimizations).
+
 ### Lists and sequences
 
 - Julay lists are **1-based**, matching TLA `Sequences`. Reads and `EXCEPT` updates on list-typed state use the Julay index as-is.

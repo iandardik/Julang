@@ -29,6 +29,7 @@ Compiling a **proc** fails (no `.jar`) if that target reaches a sort-bearing typ
 | `--allow-unindexed-spec` | Warn instead of error when a multi-instance proc appears unindexed in a spec |
 | `--verbose` | Print a compile-time sync-path summary (`FastOnly` vs `NeedsZ3` procs, and per-action `fastGuard` vs opaque). See [Compiler optimizations](language/compiler-optimizations.md) |
 | `--disable-opt` / `--disable-opt=ID,...` | Disable sync optimizations (bare `--disable-opt` = all). Ids: `eq-unify`, `arg-ownership`, `directed-eval`. Use `=` when passing ids. See [Compiler optimizations](language/compiler-optimizations.md) |
+| `--disable-tla-opt` / `--disable-tla-opt=ID,...` | Disable TLA+ emission optimizations (bare `--disable-tla-opt` = all). Ids: `unused-fields`. Independent of `--disable-opt`. Use `=` when passing ids. See [Compiler optimizations](language/compiler-optimizations.md) |
 
 ### Environment
 

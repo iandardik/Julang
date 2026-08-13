@@ -24,8 +24,9 @@ fun compileSpecToTla(
     ast: RootNode,
     unit: CompilationUnit,
     outputDir: File = File("."),
+    tlaOptConfig: TlaOptConfig = TlaOptConfig.ALL_ON,
 ): TlaCodegenResult {
-    val result = tlaCodegenPass(spec, ast, unit)
+    val result = tlaCodegenPass(spec, ast, unit, tlaOptConfig)
     result.warnings.forEach { System.err.println(it) }
     File(outputDir, "${result.moduleName}.tla").writeText(result.tlaText)
     File(outputDir, "${result.moduleName}.cfg").writeText(result.cfgText)
@@ -36,6 +37,7 @@ fun tlaCodegenPass(
     spec: SpecNode,
     ast: RootNode,
     unit: CompilationUnit,
+    tlaOptConfig: TlaOptConfig = TlaOptConfig.ALL_ON,
 ): TlaCodegenResult {
     val moduleName = spec.specNodeName()
     val leafSpecNodes = unit.modules
@@ -109,7 +111,9 @@ fun tlaCodegenPass(
         }
     }
 
-    val invariants = ast.declNodes().filterIsInstance<InvariantNode>().associateBy { it.name() }
+    val invariants = unit.modules
+        .flatMap { it.root.declNodes().filterIsInstance<InvariantNode>() }
+        .associateBy { it.name() }
     val ag = spec.specNodeValue() as? AgSpecExprNode
     val invNode = ag?.let { resolveGuaranteeInvariant(it, spec.specNodeName(), invariants) }
     val invClosure = if (invNode != null) {
@@ -124,46 +128,6 @@ fun tlaCodegenPass(
     }
     invClosure.forEach { collectTypeConstants(it.invariantFormula(), constants) }
 
-    // Sort domains mentioned in leaf state (and nested objs) must be CONSTANTs.
-    leaves.forEach { leaf ->
-        val pc = pclassesForTla[leaf.name] ?: return@forEach
-        pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
-            collectSortConstants(safeType(vn), constants)
-        }
-        (pc.localDecls().flatMap { it.constructors() } + pc.localDecls().flatMap { it.transitions() })
-            .forEach { action ->
-                action.action.args.forEach { collectSortConstants(it.type, constants) }
-            }
-        // Leaf-spec decl binders and also-args (aux domains).
-        leafSpecNodes[leaf.name]?.leafSpecParamType()?.let { te ->
-            typeDomainConstant(te)?.let { name ->
-                if (name !in setOf("Int", "Nat", "Boolean", "Real")) constants += name
-            }
-        }
-        pc.localDecls().filterIsInstance<TransitionNode>().forEach { tr ->
-            tr.alsoArgs()?.children?.filterIsInstance<ArgNode>()?.forEach { arg ->
-                try {
-                    collectSortConstants(arg.type, constants)
-                } catch (_: RuntimeException) {
-                    typeDomainConstant(arg.argTypeExpr())?.let { name ->
-                        if (name !in setOf("Int", "Nat", "Boolean", "Real")) constants += name
-                    }
-                }
-            }
-        }
-        pc.localDecls().filterIsInstance<ConstructorNode>().forEach { ctor ->
-            ctor.alsoArgs()?.children?.filterIsInstance<ArgNode>()?.forEach { arg ->
-                try {
-                    collectSortConstants(arg.type, constants)
-                } catch (_: RuntimeException) {
-                    typeDomainConstant(arg.argTypeExpr())?.let { name ->
-                        if (name !in setOf("Int", "Nat", "Boolean", "Real")) constants += name
-                    }
-                }
-            }
-        }
-    }
-
     // Finite TLC models for built-in domains used in the module (assigned in .cfg only).
     val cfgOverrides = linkedSetOf<String>()
     invClosure.forEach { collectBuiltinDomainUses(it.invariantFormula(), cfgOverrides) }
@@ -172,34 +136,10 @@ fun tlaCodegenPass(
             if (name in setOf("Int", "Nat", "Real")) cfgOverrides += name
         }
     }
-    collectActionArgDomainModels(leaves, pclassesForTla, cfgOverrides)
-    collectIoHavocDomainModels(leaves, pclassesForTla, cfgOverrides)
-    // Collect domains for havoc'd procfun returns.
-    havocSites.forEach { site ->
-        procFunNodes[site.procFunName]?.let { pf ->
-            try {
-                val d = typeToTlaDomain(pf.returnType)
-                val base = d.trim().removePrefix("(").substringBefore(" ")
-                if (base in setOf("Int", "Nat", "Real", "String")) cfgOverrides += base
-            } catch (_: RuntimeException) {}
-        }
-    }
-    // String is not provided by EXTENDS; declare it CONSTANT when used as a domain.
-    if ("String" in cfgOverrides) {
-        constants += "String"
-    }
-    // MaxListLen bounds BoundedSeq domains; must be a module CONSTANT (assigned in .cfg).
-    if ("MaxListLen" in cfgOverrides) {
-        constants += "MaxListLen"
-    }
 
     val intModelValues = linkedSetOf(0, 1, 2, 3, 4, 5)
     collectIntLiteralsFromLeaves(leaves, pclassesForTla, intModelValues)
     invClosure.forEach { collectIntLiteralsFromExpr(it.invariantFormula(), intModelValues) }
-
-    val reservedTlaIds = constants + setOf("Int", "Nat", "Boolean", "Real") +
-        actionArgNames(leaves, pclassesForTla) +
-        leaves.mapNotNull { it.paramName }.toSet()
 
     val offers = collectTlaActionOffers(leaves, pclassesForTla, procFunDecls)
         // Coupled: child construct is folded into parent *_call. Standalone: keep F_call.
@@ -209,6 +149,85 @@ fun tlaCodegenPass(
     val usedFunlibOps = orderFunsForTlaEmit(funlibFuns.toSet())
     val usedUserFunOps = orderFunsForTlaEmit(userFuns.toSet())
     val usedFunOps = usedFunlibOps + usedUserFunOps
+    val relevantFields = if (tlaOptConfig.unusedFields) {
+        analyzeTlaRelevantFields(
+            pclassesForTla, offers, usedFunOps, invClosure,
+        )
+    } else {
+        TlaRelevantFields.IDENTITY
+    }
+    val unusedFieldWarnings =
+        if (tlaOptConfig.unusedFields) relevantFields.comparisonWarnings() else emptyList()
+
+    TlaFieldProjection.set(relevantFields)
+    try {
+        return emitProjectedTla(
+            moduleName = moduleName,
+            leaves = leaves,
+            pclassesForTla = pclassesForTla,
+            procFunNodes = procFunNodes,
+            leafSpecNodes = leafSpecNodes,
+            callSites = callSites,
+            havocSites = havocSites,
+            handshake = handshake,
+            constants = constants,
+            cfgOverrides = cfgOverrides,
+            intModelValues = intModelValues,
+            invClosure = invClosure,
+            sortModels = sortModels,
+            offers = offers,
+            usedFunlibOps = usedFunlibOps,
+            usedUserFunOps = usedUserFunOps,
+            usedFunOps = usedFunOps,
+            unusedFieldWarnings = unusedFieldWarnings,
+        )
+    } finally {
+        TlaFieldProjection.set(TlaRelevantFields.IDENTITY)
+    }
+}
+
+private fun emitProjectedTla(
+    moduleName: String,
+    leaves: List<SpecLeaf>,
+    pclassesForTla: Map<String, ProcClassNode>,
+    procFunNodes: Map<String, ProcFunNode>,
+    leafSpecNodes: Map<String, LeafSpecNode>,
+    callSites: List<ProcFunCallSite>,
+    havocSites: List<ProcFunCallSite>,
+    handshake: ProcFunHandshakeVars,
+    constants: LinkedHashSet<String>,
+    cfgOverrides: LinkedHashSet<String>,
+    intModelValues: LinkedHashSet<Int>,
+    invClosure: List<InvariantNode>,
+    sortModels: Map<String, String>,
+    offers: List<TlaActionOffer>,
+    usedFunlibOps: List<FunNode>,
+    usedUserFunOps: List<FunNode>,
+    usedFunOps: List<FunNode>,
+    unusedFieldWarnings: List<OneLocCompileWarning>,
+): TlaCodegenResult {
+    collectProjectedSortConstants(leaves, pclassesForTla, leafSpecNodes, offers, constants)
+    collectActionArgDomainModels(offers, pclassesForTla, cfgOverrides)
+    collectIoHavocDomainModels(leaves, pclassesForTla, cfgOverrides)
+    havocSites.forEach { site ->
+        procFunNodes[site.procFunName]?.let { pf ->
+            try {
+                val d = typeToTlaDomain(pf.returnType)
+                val base = d.trim().removePrefix("(").substringBefore(" ")
+                if (base in setOf("Int", "Nat", "Real", "String")) cfgOverrides += base
+            } catch (_: RuntimeException) {}
+        }
+    }
+    if ("String" in cfgOverrides) {
+        constants += "String"
+    }
+    if ("MaxListLen" in cfgOverrides) {
+        constants += "MaxListLen"
+    }
+
+    val reservedTlaIds = constants + setOf("Int", "Nat", "Boolean", "Real") +
+        actionArgNames(leaves, pclassesForTla) +
+        leaves.mapNotNull { it.paramName }.toSet()
     val needsSpliceOperator =
         offersUseSlice(offers) ||
             usedFunOps.any { exprContainsSlice(it.funBody()) } ||
@@ -488,7 +507,7 @@ fun tlaCodegenPass(
         }
     }
 
-    return TlaCodegenResult(moduleName, tla, cfg, unsupportedBuiltinWarnings)
+    return TlaCodegenResult(moduleName, tla, cfg, unsupportedBuiltinWarnings + unusedFieldWarnings)
 }
 
 private fun emitTerminatesProperty(
@@ -1840,10 +1859,15 @@ internal fun defaultTlaValue(type: Type): String = when (type) {
     is SetType -> "{}"
     is MapType -> "[x \\in {} |-> 0]"
     is ObjClassType -> {
-        val fields = type.fields.joinToString(", ") { f ->
-            "${f.name} |-> ${defaultTlaValue(f.type)}"
+        val fields = TlaFieldProjection.get().fieldsFor(type)
+        if (fields.isEmpty()) {
+            "[dummy |-> 0]"
+        } else {
+            val rendered = fields.joinToString(", ") { f ->
+                "${f.name} |-> ${defaultTlaValue(f.type)}"
+            }
+            "[$rendered]"
         }
-        "[$fields]"
     }
     else -> "0"
 }
@@ -2012,10 +2036,15 @@ internal fun typeToTlaDomain(type: Type): String = when (type) {
     is ListType -> "BoundedSeq(${typeToTlaDomain(type.elementType)}, MaxListLen)"
     is SetType -> "SUBSET ${typeToTlaDomain(type.elementType)}"
     is ObjClassType -> {
-        val fields = type.fields.joinToString(", ") { f ->
-            "${f.name}: ${typeToTlaDomain(f.type)}"
+        val fields = TlaFieldProjection.get().fieldsFor(type)
+        if (fields.isEmpty()) {
+            "[dummy: {0}]"
+        } else {
+            val rendered = fields.joinToString(", ") { f ->
+                "${f.name}: ${typeToTlaDomain(f.type)}"
+            }
+            "[$rendered]"
         }
-        "[$fields]"
     }
     else -> "Int"
 }
@@ -2024,7 +2053,7 @@ internal fun typeToTlaDomain(type: Type): String = when (type) {
 internal fun collectSortConstants(type: Type, into: MutableSet<String>) {
     when (type) {
         is SortType -> into += type.name
-        is ObjClassType -> type.fields.forEach { collectSortConstants(it.type, into) }
+        is ObjClassType -> TlaFieldProjection.get().fieldsFor(type).forEach { collectSortConstants(it.type, into) }
         is ListType -> collectSortConstants(type.elementType, into)
         is SetType -> collectSortConstants(type.elementType, into)
         is MapType -> {
@@ -2041,7 +2070,7 @@ internal fun collectDomainModelNames(type: Type, into: MutableSet<String>) {
         is IntType, is RealType -> into += "Int"
         is StringType -> into += "String"
         is SortType -> into += type.name
-        is ObjClassType -> type.fields.forEach { collectDomainModelNames(it.type, into) }
+        is ObjClassType -> TlaFieldProjection.get().fieldsFor(type).forEach { collectDomainModelNames(it.type, into) }
         is ListType -> {
             into += "MaxListLen"
             collectDomainModelNames(type.elementType, into)
@@ -2064,21 +2093,92 @@ internal fun exprContainsIoHavoc(expr: ExprNode): Boolean =
         else -> expr.children.filterIsInstance<ExprNode>().any { exprContainsIoHavoc(it) }
     }
 
-private fun collectActionArgDomainModels(
+/**
+ * Sort CONSTANTs from leaf state, used action args, and also-args after unused-field projection.
+ */
+private fun collectProjectedSortConstants(
     leaves: List<SpecLeaf>,
     pclasses: Map<String, ProcClassNode>,
+    leafSpecs: Map<String, LeafSpecNode>,
+    offers: List<TlaActionOffer>,
     into: MutableSet<String>,
 ) {
     leaves.forEach { leaf ->
         val pc = pclasses[leaf.name] ?: return@forEach
-        (pc.localDecls().flatMap { it.constructors() } + pc.localDecls().flatMap { it.transitions() })
-            .forEach { action ->
-                action.action.args.forEach { arg ->
-                    collectDomainModelNames(arg.type, into)
+        pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
+            collectSortConstants(safeType(vn), into)
+        }
+        leafSpecs[leaf.name]?.leafSpecParamType()?.let { te ->
+            typeDomainConstant(te)?.let { name ->
+                if (name !in setOf("Int", "Nat", "Boolean", "Real")) into += name
+            }
+        }
+    }
+    offers.forEach { offer ->
+        offer.decl.action.args.filter { offerRefsArg(offer, it.name) }.forEach { arg ->
+            collectSortConstants(arg.type, into)
+        }
+        val pc = pclasses[offer.leaf.name] ?: return@forEach
+        val also = if (offer.isConstructor) {
+            pc.localDecls().filterIsInstance<ConstructorNode>()
+                .firstOrNull { it.constructorName() == offer.decl.action.name }
+                ?.alsoArgs()
+        } else {
+            pc.localDecls().filterIsInstance<TransitionNode>()
+                .firstOrNull { it.transitionName() == offer.decl.action.name }
+                ?.alsoArgs()
+        }
+        also?.children?.filterIsInstance<ArgNode>()?.forEach { arg ->
+            try {
+                collectSortConstants(arg.type, into)
+            } catch (_: RuntimeException) {
+                typeDomainConstant(arg.argTypeExpr())?.let { name ->
+                    if (name !in setOf("Int", "Nat", "Boolean", "Real")) into += name
                 }
             }
+        }
     }
 }
+
+private fun collectActionArgDomainModels(
+    offers: List<TlaActionOffer>,
+    pclasses: Map<String, ProcClassNode>,
+    into: MutableSet<String>,
+) {
+    offers.forEach { offer ->
+        offer.decl.action.args.filter { offerRefsArg(offer, it.name) }.forEach { arg ->
+            collectDomainModelNames(arg.type, into)
+        }
+        val pc = pclasses[offer.leaf.name] ?: return@forEach
+        val also = if (offer.isConstructor) {
+            pc.localDecls().filterIsInstance<ConstructorNode>()
+                .firstOrNull { it.constructorName() == offer.decl.action.name }
+                ?.alsoArgs()
+        } else {
+            pc.localDecls().filterIsInstance<TransitionNode>()
+                .firstOrNull { it.transitionName() == offer.decl.action.name }
+                ?.alsoArgs()
+        }
+        also?.children?.filterIsInstance<ArgNode>()?.forEach { arg ->
+            try {
+                collectDomainModelNames(arg.type, into)
+            } catch (_: RuntimeException) {
+            }
+        }
+    }
+}
+
+internal fun offerRefsArg(offer: TlaActionOffer, argName: String): Boolean =
+    offer.decl.guards.any { exprReferencesSymbol(it, argName) } ||
+        offer.decl.transits.any { update ->
+            when (update) {
+                is TransitUpdate.Assign -> exprReferencesSymbol(update.expr, argName)
+                is TransitUpdate.IndexPut ->
+                    exprReferencesSymbol(update.index, argName) || exprReferencesSymbol(update.value, argName)
+                is TransitUpdate.Let -> exprReferencesSymbol(update.init, argName)
+            }
+        } ||
+        (offer.decl.returnExpr?.let { exprReferencesSymbol(it, argName) } == true)
 
 private fun collectIoHavocDomainModels(
     leaves: List<SpecLeaf>,
@@ -2948,15 +3048,24 @@ internal fun emitObjClassLiteralToTla(
     render: (ExprNode, String) -> String,
     linePrefix: String,
 ): String {
-    if (!isMultiLineObjLiteral(expr) || expr.fieldEntries.isEmpty()) {
-        val fields = expr.fieldEntries.joinToString(", ") { (name, e) ->
+    val objName = try {
+        expr.structType.name
+    } catch (_: RuntimeException) {
+        expr.className
+    }
+    val fieldEntries = TlaFieldProjection.get().filterLiteralEntries(objName, expr.fieldEntries)
+    if (fieldEntries.isEmpty()) {
+        return "[dummy |-> 0]"
+    }
+    if (!isMultiLineObjLiteral(expr) || fieldEntries.isEmpty()) {
+        val fields = fieldEntries.joinToString(", ") { (name, e) ->
             "$name |-> ${render(e, linePrefix)}"
         }
         return "[$fields]"
     }
     val fieldIndent = bodyColumnSpaces(linePrefix)
     val closeIndent = openColumnSpaces(linePrefix)
-    val fields = expr.fieldEntries.joinToString(",\n$fieldIndent") { (name, e) ->
+    val fields = fieldEntries.joinToString(",\n$fieldIndent") { (name, e) ->
         val valuePrefix = fieldIndent + "$name |-> "
         "$name |-> ${render(e, valuePrefix)}"
     }

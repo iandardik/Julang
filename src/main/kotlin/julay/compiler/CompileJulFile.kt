@@ -10,6 +10,7 @@ import julay.compiler.ast.ValueProcExprNode
 import julay.compiler.pass.compositionLeavesOfSpec
 import julay.compiler.pass.compileSpecToTla
 import julay.compiler.pass.asSyntheticProcClass
+import julay.compiler.pass.TlaOptConfig
 import julay.compiler.pass.expandLeavesToPclasses
 import julay.compiler.pass.peerCompositionErrors
 import julay.compiler.pass.procFunCompositionErrors
@@ -26,6 +27,7 @@ fun compileJulFile(
     compileNames: List<String> = emptyList(),
     compileTlaNames: List<String> = emptyList(),
     syncResolveConfig: SyncResolveConfig = SyncResolveConfig.ALL_ON,
+    tlaOptConfig: TlaOptConfig = TlaOptConfig.ALL_ON,
     verbose: Boolean = false,
 ) {
     val checked = prepareCheckedCompilation(
@@ -70,8 +72,12 @@ fun compileJulFile(
         print(syncPathStats.formatSummary(syncResolveConfig))
     }
 
-    val compositionSpecs = ast.declNodes().filterIsInstance<SpecNode>().associateBy { it.name() }
-    val leafSpecs = ast.declNodes().filterIsInstance<LeafSpecNode>().associateBy { it.name() }
+    val compositionSpecs = unit.modules
+        .flatMap { it.root.declNodes().filterIsInstance<SpecNode>() }
+        .associateBy { it.name() }
+    val leafSpecs = unit.modules
+        .flatMap { it.root.declNodes().filterIsInstance<LeafSpecNode>() }
+        .associateBy { it.name() }
     val pclasses = unit.modules
         .flatMap { it.root.declNodes() }
         .mapNotNull { decl ->
@@ -82,9 +88,14 @@ fun compileJulFile(
             }
         }
         .toMap()
-    val procAliases = ast.declNodes().filterIsInstance<ProcNode>().associateBy { it.name() }
-    val apiAliases = ast.declNodes().filterIsInstance<ApiNode>().associateBy { it.name() }
-    val procFuns = ast.declNodes().filterIsInstance<ProcFunNode>()
+    val procAliases = unit.modules
+        .flatMap { it.root.declNodes().filterIsInstance<ProcNode>() }
+        .associateBy { it.name() }
+    val apiAliases = unit.modules
+        .flatMap { it.root.declNodes().filterIsInstance<ApiNode>() }
+        .associateBy { it.name() }
+    val procFuns = unit.modules
+        .flatMap { it.root.declNodes().filterIsInstance<ProcFunNode>() }
         .associate { it.name() to it.asSyntheticProcClass() }
 
     for (specDecl in specTargets) {
@@ -113,7 +124,7 @@ fun compileJulFile(
             System.err.println("Found errors while compiling \"${specDecl.name}\"; exiting.")
             return
         }
-        compileSpecToTla(specNode, ast, unit)
+        compileSpecToTla(specNode, ast, unit, tlaOptConfig = tlaOptConfig)
     }
 
     for (proc in tlaProcTargets) {
@@ -121,7 +132,7 @@ fun compileJulFile(
             return
         }
         // Synthetic plain-system spec: equivalent to <true> P <true> (no assume, no guarantee).
-        compileSpecToTla(syntheticProcSpec(proc.name), ast, unit)
+        compileSpecToTla(syntheticProcSpec(proc.name), ast, unit, tlaOptConfig = tlaOptConfig)
     }
 }
 

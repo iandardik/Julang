@@ -11,7 +11,7 @@ proc Painter {
     }
 
     transition paint() {
-        guard: p.x >= 0
+        guard: p.x >= 0 & p.y >= 0
         transit:
             p := Point {
                 x := 1,
