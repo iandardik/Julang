@@ -200,7 +200,7 @@ class SpecTlaTlcSmokeTest {
                 "expected Worker_constructed' flip in spawnWorker;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("\\E i \\in Int : \\E id \\in Int : spawnWorker(i, id)"),
+                tlaText.contains("\\E i, id \\in Int : spawnWorker(i, id)"),
                 "expected Next to quantify index then args;\n$tlaText",
             )
             assertFalse(
@@ -613,7 +613,8 @@ class SpecTlaTlcSmokeTest {
             tlaOptConfig = TlaOptConfig.fromDisableTlaOptFlag("literal-domains"),
         ).first
         assertTrue(
-            offText.contains("\\E mode \\in String"),
+            offText.contains("\\E mode, note \\in String") ||
+                offText.contains("\\E mode \\in String"),
             "disabling literal-domains should restore String for mode;\n$offText",
         )
     }
@@ -718,6 +719,25 @@ class SpecTlaTlcSmokeTest {
             !tlaText.contains("n_RaftProtocol") &&
                 !Regex("""requestVote\([^)]*n_Raft""").containsMatchIn(tlaText),
             "with (n) should share one binder for RaftProtocol and Net, not n_RaftProtocol;\n${tlaText.take(4000)}",
+        )
+        assertTrue(
+            tlaText.contains("\\E n, m \\in NodeSet : requestVote(n, m)") &&
+                !tlaText.contains("\\E n \\in NodeSet : \\E m \\in NodeSet"),
+            "consecutive \\E over NodeSet should combine;\n${tlaText.substringAfter("Next ==").take(2000)}",
+        )
+        assertTrue(
+            !Regex("""LET nextLogIndex ==[^\n]* IN\s+LET prevLogIndex""").containsMatchIn(tlaText) &&
+                Regex("""LET nextLogIndex ==.*prevLogIndex ==.*prevLogTerm ==""", RegexOption.DOT_MATCHES_ALL)
+                    .containsMatchIn(tlaText),
+            "chained expression lets should be one LET;\n${tlaText.substringAfter("appendEntries").take(1500)}",
+        )
+        assertTrue(
+            !Regex("""LET index ==[^\n]* IN\s+LET alreadyDone""").containsMatchIn(tlaText) &&
+                tlaText.contains("LET index ==") &&
+                tlaText.contains("alreadyDone ==") &&
+                !tlaText.contains("/\\ IN") &&
+                !Regex("""/\\\\\s+alreadyDone ==""").containsMatchIn(tlaText),
+            "back-to-back transit lets should be one LET;\n${tlaText.substringAfter("handleAppendEntriesRequest").take(2000)}",
         )
         val (offVars, offWarn) = compileSpecTla(
             source,
@@ -1269,7 +1289,7 @@ class SpecTlaTlcSmokeTest {
                 "expected parameterized EndSession operators;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("\\E a \\in Int : \\E b \\in Int : meet(a, b)"),
+                tlaText.contains("\\E a, b \\in Int : meet(a, b)"),
                 "expected Next to quantify meet over a and b;\n$tlaText",
             )
             tla.copyTo(File(work, "SessionPairParam.tla"), overwrite = true)

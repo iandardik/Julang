@@ -601,9 +601,7 @@ internal data class TlaAction(
     fun nextDisjunct(): String {
         if (params.isEmpty()) return name
         val call = "$name(${params.joinToString(", ") { it.first }})"
-        return params.asReversed().fold(call) { acc, (arg, domain) ->
-            "\\E $arg \\in $domain : $acc"
-        }
+        return wrapTlaExists(params, call)
     }
 }
 
@@ -1114,9 +1112,7 @@ private fun negateLocalGuards(
     }.forEach { arg ->
         existsParams += arg.name to (argLiteralDomain(listOf(offer), arg.name, arg.type) ?: typeToTlaDomain(arg.type))
     }
-    val exists = existsParams.asReversed().fold(inner) { acc, (n, d) ->
-        "\\E $n \\in $d : $acc"
-    }
+    val exists = wrapTlaExists(existsParams, inner)
     return "~($exists)"
 }
 
@@ -2956,8 +2952,8 @@ internal data class TransitLetEmit(
 )
 
 /**
- * Build a single action conjunct: nested `LET` (and optional IO `\\E`) around [bodyConjuncts].
- * Each body conjunct should already start with `/\\ `.
+ * Build a single action conjunct: `LET` (and optional IO `\\E`) around [bodyConjuncts].
+ * Consecutive non-IO lets share one `LET`. Each body conjunct should already start with `/\\ `.
  */
 internal fun wrapTransitLetBlock(
     bindings: List<TransitLetEmit>,
@@ -2969,9 +2965,31 @@ internal fun wrapTransitLetBlock(
     } else {
         bodyConjuncts.joinToString("\n")
     }
-    for (i in bindings.indices.reversed()) {
+    data class Seg(val io: TransitLetEmit?, val lets: List<TransitLetEmit>)
+    val segs = mutableListOf<Seg>()
+    var i = 0
+    while (i < bindings.size) {
         val b = bindings[i]
-        val depth = i
+        if (b.ioDomain != null) {
+            i++
+            val extra = mutableListOf<TransitLetEmit>()
+            while (i < bindings.size && bindings[i].ioDomain == null) {
+                extra += bindings[i]
+                i++
+            }
+            segs += Seg(b, extra)
+        } else {
+            val plain = mutableListOf<TransitLetEmit>()
+            while (i < bindings.size && bindings[i].ioDomain == null) {
+                plain += bindings[i]
+                i++
+            }
+            segs += Seg(null, plain)
+        }
+    }
+    for (si in segs.indices.reversed()) {
+        val seg = segs[si]
+        val depth = si
         // Action defs join parts with "\n  ", so the first line of this block gets a 2-space
         // module indent; continuation lines must already be indented past that `/\`.
         // Preserve relative indents inside multi-line RHS (nested IF); flattening them to the
@@ -2979,31 +2997,70 @@ internal fun wrapTransitLetBlock(
         val bodyPad = " ".repeat(4 + depth * 2)
         val letPad = " ".repeat(4 + (depth - 1).coerceAtLeast(0) * 2)
         val indentedBody = padPreservingRelative(text, bodyPad)
-        text = when {
-            b.ioDomain != null -> {
-                val ioName = "__io_${b.tlaName}"
-                if (depth == 0) {
-                    "/\\ \\E $ioName \\in ${b.ioDomain}:\n" +
-                        "    LET ${b.tlaName} == $ioName IN\n$indentedBody"
-                } else {
-                    "${letPad}\\E $ioName \\in ${b.ioDomain}:\n" +
-                        "${letPad}  LET ${b.tlaName} == $ioName IN\n$indentedBody"
-                }
+        val io = seg.io
+        val defs = if (io != null) {
+            listOf(TransitLetEmit(io.tlaName, "__io_${io.tlaName}")) + seg.lets
+        } else {
+            seg.lets
+        }
+        val letPrefix = when {
+            io != null && depth == 0 -> "    "
+            io != null -> "${letPad}  "
+            depth == 0 -> "/\\ "
+            else -> letPad
+        }
+        val letBlock = formatTransitLet(
+            defs,
+            indentedBody,
+            firstLinePrefix = letPrefix,
+            compensateModule = io == null && depth == 0,
+            initPad = bodyPad,
+        )
+        text = if (io != null) {
+            val ioName = "__io_${io.tlaName}"
+            if (depth == 0) {
+                "/\\ \\E $ioName \\in ${io.ioDomain}:\n$letBlock"
+            } else {
+                "${letPad}\\E $ioName \\in ${io.ioDomain}:\n$letBlock"
             }
-            b.initTla.contains('\n') -> {
-                val initPad = " ".repeat(4 + depth * 2)
-                val initIndented = padPreservingRelative(b.initTla, initPad)
-                if (depth == 0) {
-                    "/\\ LET ${b.tlaName} ==\n$initIndented\n    IN\n$indentedBody"
-                } else {
-                    "${letPad}LET ${b.tlaName} ==\n$initIndented\n${bodyPad}IN\n$indentedBody"
-                }
-            }
-            depth == 0 -> "/\\ LET ${b.tlaName} == ${b.initTla} IN\n$indentedBody"
-            else -> "${letPad}LET ${b.tlaName} == ${b.initTla} IN\n$indentedBody"
+        } else {
+            letBlock
         }
     }
     return text
+}
+
+/**
+ * `LET` defs plus `IN` body for [wrapTransitLetBlock]. Consecutive non-IO lets share one `LET`.
+ * [firstLinePrefix] is prepended to `LET` only (`/\ ` or indent under `\\E`).
+ * Continuation binding / `IN` lines use the same width in spaces so `/\` is not repeated.
+ * [compensateModule] adds 2 spaces on continuation lines so they line up after the action's
+ * `"\n  "` indent on the first line only.
+ */
+private fun formatTransitLet(
+    defs: List<TransitLetEmit>,
+    indentedBody: String,
+    firstLinePrefix: String,
+    compensateModule: Boolean,
+    initPad: String,
+): String {
+    val extra = if (compensateModule) "  " else ""
+    val prefixSpaces = " ".repeat(firstLinePrefix.length)
+    val nameContPad = extra + prefixSpaces + "    "
+    val inPad = extra + prefixSpaces
+    val defText = defs.mapIndexed { idx, b ->
+        val one = if (b.initTla.contains('\n')) {
+            "${b.tlaName} ==\n${padPreservingRelative(b.initTla, initPad)}"
+        } else {
+            "${b.tlaName} == ${b.initTla}"
+        }
+        if (idx == 0) one else "$nameContPad$one"
+    }.joinToString("\n")
+    return if (defs.size == 1 && !defs[0].initTla.contains('\n')) {
+        "${firstLinePrefix}LET $defText IN\n$indentedBody"
+    } else {
+        "${firstLinePrefix}LET $defText\n${inPad}IN\n$indentedBody"
+    }
 }
 
 /** Indent [block] by [pad], keeping relative indentation between lines. */
@@ -3154,44 +3211,88 @@ internal fun wrapTlaLet(bindings: List<Pair<String, String>>, body: String): Str
 }
 
 /**
+ * Consecutive `\E` binders over the same domain become `\E n, m \in D : …`.
+ * [params] is outermost-first.
+ */
+internal fun wrapTlaExists(params: List<Pair<String, String>>, body: String): String {
+    if (params.isEmpty()) return body
+    val groups = mutableListOf<Pair<MutableList<String>, String>>()
+    for ((name, domain) in params) {
+        val last = groups.lastOrNull()
+        if (last != null && last.second == domain) {
+            last.first += name
+        } else {
+            groups += mutableListOf(name) to domain
+        }
+    }
+    return groups.asReversed().fold(body) { acc, (names, domain) ->
+        "\\E ${names.joinToString(", ")} \\in $domain : $acc"
+    }
+}
+
+/**
  * Julay `let` → TLA `LET name == init IN body`. Multi-line source uses line breaks;
  * [body] / [init] should already be rendered (with let-name overrides applied to [body]).
+ * Consecutive chained lets are one `LET` with multiple bindings.
  */
 internal fun emitLetToTla(
-    name: String,
-    init: String,
+    bindings: List<Pair<String, String>>,
     body: String,
     linePrefix: String,
     multiLine: Boolean,
     open: String = "",
     close: String = "",
 ): String {
-    if (!multiLine) {
-        return "${open}LET $name == $init IN $body$close"
+    require(bindings.isNotEmpty()) { "emitLetToTla requires bindings" }
+    if (bindings.size == 1) {
+        val (name, init) = bindings.first()
+        if (!multiLine) {
+            return "${open}LET $name == $init IN $body$close"
+        }
+        val bodyIndent = exprBodyIndent(linePrefix + open)
+        val kwIndent = exprKeywordIndent(linePrefix + open)
+        return if (init.contains('\n')) {
+            buildString {
+                append(open)
+                append("LET $name ==\n")
+                append(bodyIndent)
+                append(init)
+                append("\n")
+                append(kwIndent)
+                append("IN\n")
+                append(bodyIndent)
+                append(body)
+                append(close)
+            }
+        } else {
+            buildString {
+                append(open)
+                append("LET $name == $init IN\n")
+                append(bodyIndent)
+                append(body)
+                append(close)
+            }
+        }
     }
-    val bodyIndent = exprBodyIndent(linePrefix + open)
     val kwIndent = exprKeywordIndent(linePrefix + open)
-    return if (init.contains('\n')) {
-        buildString {
-            append(open)
-            append("LET $name ==\n")
-            append(bodyIndent)
-            append(init)
-            append("\n")
-            append(kwIndent)
-            append("IN\n")
-            append(bodyIndent)
-            append(body)
-            append(close)
+    val bodyIndent = exprBodyIndent(linePrefix + open)
+    val nameIndent = kwIndent + "    "
+    return buildString {
+        append(open)
+        append("LET ")
+        bindings.forEachIndexed { i, (n, e) ->
+            if (i > 0) {
+                append("\n")
+                append(nameIndent)
+            }
+            append("$n == $e")
         }
-    } else {
-        buildString {
-            append(open)
-            append("LET $name == $init IN\n")
-            append(bodyIndent)
-            append(body)
-            append(close)
-        }
+        append("\n")
+        append(kwIndent)
+        append("IN\n")
+        append(bodyIndent)
+        append(body)
+        append(close)
     }
 }
 
@@ -3510,26 +3611,46 @@ internal fun exprToTla(
             }
         }
         is LetExprNode -> {
-            val rawName = expr.letName()
-            // Discard `let _ := e in body` → emit only body (init unused in TLA).
-            if (rawName.isDiscardBinding()) {
-                return rec(expr.bodyExpr(), linePrefix, parentPrec)
-            }
             val needParen = PREC_IMPLIES < parentPrec
             val open = if (needParen) "(" else ""
             val close = if (needParen) ")" else ""
-            val name = rawName
-            val multi = isMultiLineExpr(expr)
-            val initPrefix = if (multi && isMultiLineExpr(expr.letInitExpr())) {
-                exprBodyIndent(linePrefix + open)
-            } else {
-                "$linePrefix${open}LET $name == "
+            val chain = mutableListOf<Pair<String, ExprNode>>()
+            var cur: ExprNode = expr
+            var anyMulti = false
+            while (cur is LetExprNode) {
+                val rawName = cur.letName()
+                if (isMultiLineExpr(cur)) anyMulti = true
+                if (!rawName.isDiscardBinding()) {
+                    chain += rawName to cur.letInitExpr()
+                    if (isMultiLineExpr(cur.letInitExpr())) anyMulti = true
+                }
+                cur = cur.bodyExpr()
             }
-            val init = rec(expr.letInitExpr(), initPrefix, PREC_BOTTOM)
-            val bodyPrefix = if (multi) exprBodyIndent(linePrefix + open) else "$linePrefix${open}LET $name == $init IN "
-            // Bind the let name so it is not rewritten as a leaf state var / arg index.
-            val body = recWithOverrides(expr.bodyExpr(), mapOf(name to name), bodyPrefix, PREC_BOTTOM)
-            emitLetToTla(name, init, body, linePrefix, multi, open, close)
+            if (isMultiLineExpr(cur)) anyMulti = true
+            if (chain.isEmpty()) {
+                return rec(cur, linePrefix, parentPrec)
+            }
+            val extra = mutableMapOf<String, String>()
+            val rendered = mutableListOf<Pair<String, String>>()
+            val kwIndent = exprKeywordIndent(linePrefix + open)
+            val nameIndent = kwIndent + "    "
+            chain.forEachIndexed { i, (name, initExpr) ->
+                val initPrefix = when {
+                    anyMulti && isMultiLineExpr(initExpr) -> exprBodyIndent(linePrefix + open)
+                    i == 0 -> "$linePrefix${open}LET $name == "
+                    else -> "$nameIndent$name == "
+                }
+                val init = recWithOverrides(initExpr, extra.toMap(), initPrefix, PREC_BOTTOM)
+                rendered += name to init
+                extra[name] = name
+            }
+            val multi = anyMulti || rendered.size > 1
+            val bodyPrefix = if (multi) exprBodyIndent(linePrefix + open) else {
+                val defs = rendered.joinToString(" ") { (n, e) -> "$n == $e" }
+                "$linePrefix${open}LET $defs IN "
+            }
+            val body = recWithOverrides(cur, extra.toMap(), bodyPrefix, PREC_BOTTOM)
+            emitLetToTla(rendered, body, linePrefix, multi, open, close)
         }
         is FieldAccessExprNode -> {
             val base = expr.baseSymbol

@@ -208,10 +208,10 @@ See also [Collections](collections.md).
 - Top-level `&` guard conjuncts become separate `/\\` lines (matching multi-line Julay guards). Nested multi-line `&` / `|` are formatted recursively as `/\\` and `\\/` branches (single-line boolean ops stay compact).
 - Multi-line Julay `Obj { ... }` literals become TLA records with one field per line; field lines are indented 2 spaces past the first non-`/\`/`\/` symbol on the opening line (single-line obj inits stay compact).
 - Multi-line Julay `if` / expression `let` / `when` / list / set literals use that same open-column indent for bodies, `ELSE`/`IN`/`[]`/`OTHER`, and closing brackets (not the full hanging left-hand text such as `EXCEPT` or `\cup`).
-- Transit-level `let` bindings become nested TLA `LET` around later assign conjuncts (not AST-inlined). Discard `let _ := …` is omitted.
+- Transit-level `let` bindings become TLA `LET` around later assign conjuncts (not AST-inlined); consecutive lets share one `LET`. Discard `let _ := …` is omitted. Chained expression `let`s are also one `LET`.
 - Julay `when` becomes TLA `CASE` with `[]` arms and `OTHER` for the trailing else.
 - Invariants preserve multi-line structure (nested `\A` / `\E`, boolean trees). Parentheses written in the `.jul` source are kept; other parentheses are omitted when operator precedence makes them unnecessary.
-- `initially` constructors (`initially` / `*_initially`) are emitted first after `Init`, both as operator definitions and as the leading disjuncts of `Next`.
+- `initially` constructors (`initially` / `*_initially`) are emitted first after `Init`, both as operator definitions and as the leading disjuncts of `Next`. Consecutive `\E` binders in `Next` over the same domain are written `\E n, m \in NodeSet`.
 - Julay `fun`s referenced from Init/action guards or transit RHS (and their transitive callees) are emitted as TLA+ operators immediately above `Init`, grouped under `\* Julay lib funs` (stdlib funlib / helpers) or `\* user defined funs`. Operator parameters that collide with `VARIABLES` / `CONSTANT`s / other module operators are renamed (`p_…`).
 - `splice(xs, a, b)` becomes a call to a module-level `splice` operator (defined above `Init` under `\* Julay lib funs` when any call is used); splice params/binders are clash-renamed like fun params.
 - `startsWith` becomes a module-level helper (same Julay-lib section) when used.
