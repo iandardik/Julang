@@ -378,16 +378,16 @@ class SpecTlaTlcSmokeTest {
             assertTrue(cfg.exists(), "expected ObjFieldAccess.cfg")
             val tlaText = tla.readText()
             assertTrue(
-                tlaText.contains("peerArg.id"),
-                "expected action-arg record field as peerArg.id;\n$tlaText",
+                tlaText.contains("peerArg") && !tlaText.contains("peerArg.id"),
+                "unwrap-singletons: Peer arg should emit as Int without .id;\n$tlaText",
             )
             assertTrue(
                 !tlaText.contains("peerArg_id"),
                 "action-arg field must not use underscore peerArg_id;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("peer[i].id"),
-                "expected parameterized state-var field as peer[i].id;\n$tlaText",
+                tlaText.contains("peer[i]") && !tlaText.contains("peer[i].id"),
+                "unwrap-singletons: parameterized Peer state should emit without .id;\n$tlaText",
             )
             assertTrue(
                 !tlaText.contains("peer_id"),
@@ -398,8 +398,8 @@ class SpecTlaTlcSmokeTest {
                 "unread Peer.url should be omitted from TLA;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("[id: Int]") || tlaText.contains("[id |->"),
-                "Peer domain/default should keep only id;\n$tlaText",
+                !tlaText.contains("[id: Int]") && !tlaText.contains("[id |->"),
+                "unwrapped Peer should be Int, not a one-field record;\n$tlaText",
             )
             tla.copyTo(File(work, "ObjFieldAccess.tla"), overwrite = true)
             cfg.copyTo(File(work, "ObjFieldAccess.cfg"), overwrite = true)
@@ -454,10 +454,22 @@ class SpecTlaTlcSmokeTest {
     fun unusedFieldsKeptWhenRead() {
         val source = File("regression/input/spec/obj-field-keep-url.jul")
         val (tlaText, warnings) = compileSpecTla(source, "ObjFieldKeepUrl")
-        assertTrue(tlaText.contains("url"), "read url field must stay;\n$tlaText")
         assertTrue(
             warnings.none { it.contains("unused-fields") },
             "no unused-fields warning when url is read;\n$warnings",
+        )
+        assertTrue(
+            tlaText.contains("peerArg") && !tlaText.contains("peerArg.id"),
+            "url-only Peer unwraps to String; id must stay omitted;\n$tlaText",
+        )
+        val (unwrappedOff, _) = compileSpecTla(
+            source,
+            "ObjFieldKeepUrl",
+            tlaOptConfig = TlaOptConfig.fromDisableTlaOptFlag("unwrap-singletons"),
+        )
+        assertTrue(
+            unwrappedOff.contains("url"),
+            "read url field must stay when unwrap is off;\n$unwrappedOff",
         )
         File("ObjFieldKeepUrl.tla").delete()
         File("ObjFieldKeepUrl.cfg").delete()
@@ -483,6 +495,124 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun determinedArgsSubstitutesPayloadLet() {
+        val source = File("regression/input/spec/tla-determined-args.jul")
+        val (tlaText, _) = compileSpecTla(source, "DeterminedArgs")
+        assertTrue(
+            !tlaText.contains("\\E payload \\in"),
+            "determined-args should omit payload exists;\n$tlaText",
+        )
+        assertTrue(
+            tlaText.contains("LET payload ==") &&
+                (tlaText.contains("[x |-> n") || tlaText.contains("[x |-> Box_n")),
+            "expected LET payload == record;\n$tlaText",
+        )
+        val (offText, _) = compileSpecTla(
+            source,
+            "DeterminedArgs",
+            tlaOptConfig = TlaOptConfig.fromDisableTlaOptFlag("determined-args"),
+        )
+        assertTrue(
+            offText.contains("\\E payload \\in"),
+            "disabling determined-args should restore payload exists;\n$offText",
+        )
+    }
+
+    @Test
+    fun fromCollectionBindsListIndex() {
+        val source = File("regression/input/spec/tla-from-collection.jul")
+        val (tlaText, _) = compileSpecTla(source, "FromCollection")
+        assertTrue(
+            !tlaText.contains("\\E target \\in [id: Int]"),
+            "from-collection should not quantify target over [id: Int];\n$tlaText",
+        )
+        assertTrue(
+            tlaText.contains("target_idx") && tlaText.contains("LET target =="),
+            "expected index binder and LET target;\n$tlaText",
+        )
+        val (offText, _) = compileSpecTla(
+            source,
+            "FromCollection",
+            tlaOptConfig = TlaOptConfig.fromDisableTlaOptFlag("from-collection"),
+        )
+        assertTrue(
+            offText.contains("\\E target \\in") && !offText.contains("target_idx"),
+            "disabling from-collection should restore type-domain exists for target;\n$offText",
+        )
+    }
+
+    @Test
+    fun fromCollectionBindsStructInSet() {
+        val source = File("regression/input/spec/tla-from-collection-struct.jul")
+        val (tlaText, _) = compileSpecTla(source, "FromCollectionStruct")
+        assertTrue(
+            tlaText.contains("\\E __s0 \\in") && tlaText.contains("LET x =="),
+            "expected struct-in-set tmp binder and LET x;\n$tlaText",
+        )
+        assertTrue(
+            !Regex("""\\E x \\in Int""").containsMatchIn(tlaText),
+            "x should be bound from the set element, not Int;\n$tlaText",
+        )
+        val (offText, _) = compileSpecTla(
+            source,
+            "FromCollectionStruct",
+            tlaOptConfig = TlaOptConfig.fromDisableTlaOptFlag("from-collection"),
+        )
+        assertTrue(
+            Regex("""\\E x \\in Int""").containsMatchIn(offText) && !offText.contains("__s0"),
+            "disabling from-collection should restore \\E x \\in Int;\n$offText",
+        )
+    }
+
+    @Test
+    fun literalDomainsShrinkArgNotGlobalString() {
+        val source = File("regression/input/spec/tla-literal-domains.jul")
+        val (tlaText, _) = compileSpecTla(source, "LiteralDomains")
+        assertTrue(
+            tlaText.contains("\\E mode \\in {\"a\", \"b\"}") ||
+                tlaText.contains("\\E mode \\in {\"b\", \"a\"}"),
+            "mode should use a finite literal set;\n$tlaText",
+        )
+        assertTrue(
+            tlaText.contains("String"),
+            "open payload String site should keep the global String model;\n$tlaText",
+        )
+        val (offText, _) = compileSpecTla(
+            source,
+            "LiteralDomains",
+            tlaOptConfig = TlaOptConfig.fromDisableTlaOptFlag("literal-domains"),
+        )
+        assertTrue(
+            offText.contains("\\E mode \\in String"),
+            "disabling literal-domains should restore String for mode;\n$offText",
+        )
+    }
+
+    @Test
+    fun unwrapSingletonsEmitsFieldType() {
+        val source = File("regression/input/spec/obj-field-access.jul")
+        val (tlaText, _) = compileSpecTla(source, "ObjFieldAccess")
+        assertTrue(
+            !tlaText.contains("[id: Int]") && !tlaText.contains("peerArg.id") && !tlaText.contains("peer[i].id"),
+            "unwrap-singletons should drop .id and [id: Int];\n$tlaText",
+        )
+        val (offText, _) = compileSpecTla(
+            source,
+            "ObjFieldAccess",
+            tlaOptConfig = TlaOptConfig.fromDisableTlaOptFlag("unwrap-singletons"),
+        )
+        assertTrue(
+            (offText.contains("[id: Int]") || offText.contains("[id |->")) &&
+                (offText.contains("peerArg.id") || offText.contains("peer[i].id")),
+            "disabling unwrap-singletons should keep [id: Int] / .id;\n$offText",
+        )
+        assertTrue(
+            !offText.contains("url"),
+            "unused-fields should still omit url when only unwrap is disabled;\n$offText",
+        )
+    }
+
+    @Test
     fun raftNodeSpecOmitsUrlAndWarns() {
         val source = File("input/raft/sys.jul")
         assertTrue(source.exists(), "missing ${source.path}")
@@ -493,6 +623,19 @@ class SpecTlaTlcSmokeTest {
         )
         val hit = warnings.firstOrNull { it.contains("unused-fields") && it.contains("\"url\"") }
         assertTrue(hit != null, "expected unused-fields warning for Node.url;\n$warnings")
+        assertTrue(
+            !tlaText.contains("\\E payload \\in [term:"),
+            "determined-args should drop payload type-domain exists;\n${tlaText.take(4000)}",
+        )
+        assertTrue(
+            !tlaText.contains("\\E target \\in [id: Int]"),
+            "target should not be quantified over [id: Int];\n${tlaText.take(4000)}",
+        )
+        assertTrue(
+            !Regex("""RaftProtocol_state\s*=\s*\[.*\|->\s*""\]""").containsMatchIn(tlaText) &&
+                (tlaText.contains("\"Follower\"") || tlaText.contains("\"Candidate\"") || tlaText.contains("\"Leader\"")),
+            "state should use the closed role-string set, not the empty-string default;\n${tlaText.take(4000)}",
+        )
         File("RaftNodeSpec.tla").delete()
         File("RaftNodeSpec.cfg").delete()
     }
@@ -1394,7 +1537,8 @@ class SpecTlaTlcSmokeTest {
                 "expected splice operator for slices (SubSeq inside splice) and substituted map binders;\n$tlaText",
             )
             assertTrue(
-                (tlaText.contains("[target.id]") || tlaText.contains("cluster[i][target.id]")) &&
+                (tlaText.contains("[target_idx]") || tlaText.contains("[target.id]") ||
+                    tlaText.contains("cluster[i][target]")) &&
                     !tlaText.contains("((target.id) + 1)") &&
                     !tlaText.contains("[(target.id) + 1]") &&
                     !tlaText.contains("[((target.id) + 1)]"),
@@ -1592,6 +1736,7 @@ class SpecTlaTlcSmokeTest {
         source: File,
         specName: String,
         compileNames: List<String> = emptyList(),
+        tlaOptConfig: TlaOptConfig = TlaOptConfig.ALL_ON,
     ): Pair<String, List<String>> {
         val checked = prepareCheckedCompilation(
             source.toPath(),
@@ -1601,7 +1746,7 @@ class SpecTlaTlcSmokeTest {
             .flatMap { it.root.declNodes().filterIsInstance<SpecNode>() }
             .firstOrNull { it.specNodeName() == specName }
             ?: fail("spec $specName not found in ${source.path}")
-        val result = tlaCodegenPass(spec, checked.ast, checked.unit)
+        val result = tlaCodegenPass(spec, checked.ast, checked.unit, tlaOptConfig)
         return result.tlaText to result.warnings.map { it.toString() }
     }
 }

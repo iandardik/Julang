@@ -19,6 +19,22 @@ data class TlaCodegenResult(
     val warnings: List<OneLocCompileWarning> = emptyList(),
 )
 
+internal object TlaEmitOpts {
+    private val current = ThreadLocal.withInitial { TlaOptConfig.ALL_ON }
+    fun get(): TlaOptConfig = current.get()
+    fun set(config: TlaOptConfig) {
+        current.set(config)
+    }
+}
+
+internal object TlaSymbolTypes {
+    private val current = ThreadLocal.withInitial { emptyMap<String, Type>() }
+    fun get(): Map<String, Type> = current.get()
+    fun set(types: Map<String, Type>) {
+        current.set(types)
+    }
+}
+
 fun compileSpecToTla(
     spec: SpecNode,
     ast: RootNode,
@@ -149,17 +165,35 @@ fun tlaCodegenPass(
     val usedFunlibOps = orderFunsForTlaEmit(funlibFuns.toSet())
     val usedUserFunOps = orderFunsForTlaEmit(userFuns.toSet())
     val usedFunOps = usedFunlibOps + usedUserFunOps
-    val relevantFields = if (tlaOptConfig.unusedFields) {
-        analyzeTlaRelevantFields(
-            pclassesForTla, offers, usedFunOps, invClosure,
-        )
-    } else {
-        TlaRelevantFields.IDENTITY
+    val relevantFields = when {
+        tlaOptConfig.unusedFields ->
+            analyzeTlaRelevantFields(
+                pclassesForTla, offers, usedFunOps, invClosure,
+            ).withUnwrap(tlaOptConfig.unwrapSingletons)
+        tlaOptConfig.unwrapSingletons -> TlaRelevantFields.UNWRAP_ONLY
+        else -> TlaRelevantFields.IDENTITY
     }
     val unusedFieldWarnings =
         if (tlaOptConfig.unusedFields) relevantFields.comparisonWarnings() else emptyList()
+    val literalDomains = if (tlaOptConfig.literalDomains) {
+        analyzeTlaLiteralDomains(leaves, pclassesForTla, offers, usedFunOps, invClosure)
+    } else {
+        TlaLiteralDomains.NONE
+    }
 
     TlaFieldProjection.set(relevantFields)
+    TlaLiteralDomainProjection.set(literalDomains)
+    TlaEmitOpts.set(tlaOptConfig)
+    val symbolTypes = mutableMapOf<String, Type>()
+    pclassesForTla.values.forEach { pc ->
+        pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
+            try {
+                symbolTypes[vn.name] = vn.type
+            } catch (_: RuntimeException) {
+            }
+        }
+    }
+    TlaSymbolTypes.set(symbolTypes)
     try {
         return emitProjectedTla(
             moduleName = moduleName,
@@ -183,6 +217,9 @@ fun tlaCodegenPass(
         )
     } finally {
         TlaFieldProjection.set(TlaRelevantFields.IDENTITY)
+        TlaLiteralDomainProjection.set(TlaLiteralDomains.NONE)
+        TlaEmitOpts.set(TlaOptConfig.ALL_ON)
+        TlaSymbolTypes.set(emptyMap())
     }
 }
 
@@ -272,7 +309,7 @@ private fun emitProjectedTla(
             pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
                 val v = stateTlaName(leaf.tlaName, vn.name, stateVarNames)
                 variables += v
-                initParts += "/\\ $v = [$binder \\in $domain |-> ${defaultTlaValue(safeType(vn))}]"
+                initParts += "/\\ $v = [$binder \\in $domain |-> ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}]"
             }
         } else {
             variables += constructed
@@ -288,7 +325,7 @@ private fun emitProjectedTla(
             pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
                 val v = stateTlaName(leaf.tlaName, vn.name, stateVarNames)
                 variables += v
-                initParts += "/\\ $v = ${defaultTlaValue(safeType(vn))}"
+                initParts += "/\\ $v = ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
             }
         }
     }
@@ -971,24 +1008,78 @@ private fun negateLocalGuards(
 ): String {
     val guards = offer.decl.guards
     if (guards.isEmpty()) return "FALSE"
-    val argNames = offer.decl.action.args.map { it.name }.toSet()
+    val plan = analyzeTlaArgBind(listOf(offer), TlaEmitOpts.get())
+    offer.decl.action.args.forEach { TlaSymbolTypes.set(TlaSymbolTypes.get() + (it.name to it.type)) }
+    val bindNames = linkedSetOf<String>().apply {
+        addAll(plan.skipArgs)
+        addAll(plan.extraBinderNames())
+        plan.setBinds.forEach { add(it.arg) }
+        plan.determined.forEach { add(it.first) }
+        plan.listBinds.forEach { add(it.arg) }
+        plan.structBinds.forEach { b -> b.argPaths.forEach { add(it.first) } }
+    }
+    val argNames = offer.decl.action.args.map { it.name }.toSet() + bindNames
     val leafCtx = mapOf(offer.leaf.name to offer.leaf, offer.leaf.tlaName to offer.leaf)
     val bare = stateVarsByLeaf[offer.leaf.tlaName].orEmpty()
-    val guardStrs = guards.map {
-        exprToTla(it, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames)
-    }
-    val conj = if (guardStrs.size == 1) guardStrs[0] else guardStrs.joinToString(" /\\ ")
-    val usedArgs = offer.decl.action.args.filter { arg ->
-        guards.any { exprReferencesSymbol(it, arg.name) }
-    }
-    return if (usedArgs.isEmpty()) {
-        "~($conj)"
-    } else {
-        val exists = usedArgs.asReversed().fold(conj) { acc, arg ->
-            "\\E ${arg.name} \\in ${typeToTlaDomain(arg.type)} : $acc"
+    fun emit(expr: ExprNode, linePrefix: String = ""): String =
+        exprToTla(expr, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames, linePrefix = linePrefix)
+    val guardStrs = guards.flatMap { flattenTopLevelAnd(it) }
+        .filter { !plan.skipped(it) }
+        .map { emit(it) }
+    val keepStrs = plan.structBinds.flatMap { b ->
+        val elemType = try {
+            (b.set.getType() as? SetType)?.elementType
+        } catch (_: RuntimeException) {
+            null
         }
-        "~($exists)"
+        b.keep.map { (path, expr) ->
+            "${emitUnwrappedFieldPath(b.tmp, elemType, path)} = ${emit(expr)}"
+        }
     }
+    val allGuards = guardStrs + keepStrs
+    val conj = when {
+        allGuards.isEmpty() -> "TRUE"
+        allGuards.size == 1 -> allGuards[0]
+        else -> allGuards.joinToString(" /\\ ")
+    }
+    val letBindings = mutableListOf<Pair<String, String>>()
+    plan.listBinds.forEach { b ->
+        letBindings += b.arg to "${emit(b.list)}[${b.index}]"
+    }
+    plan.structBinds.forEach { b ->
+        val elemType = try {
+            (b.set.getType() as? SetType)?.elementType
+        } catch (_: RuntimeException) {
+            null
+        }
+        b.argPaths.forEach { (arg, path) ->
+            letBindings += arg to emitUnwrappedFieldPath(b.tmp, elemType, path)
+        }
+    }
+    plan.determined.forEach { (arg, expr) ->
+        letBindings += arg to emit(expr)
+    }
+    val inner = wrapTlaLet(letBindings, conj)
+    val existsParams = mutableListOf<Pair<String, String>>()
+    plan.listBinds.forEach { b ->
+        existsParams += b.index to "1..Len(${emit(b.list)})"
+    }
+    plan.setBinds.forEach { b ->
+        existsParams += b.arg to emit(b.set)
+    }
+    plan.structBinds.forEach { b ->
+        existsParams += b.tmp to emit(b.set)
+    }
+    val omit = plan.omitArgTypeDomains()
+    offer.decl.action.args.filter { arg ->
+        arg.name !in omit && guards.any { exprReferencesSymbol(it, arg.name) }
+    }.forEach { arg ->
+        existsParams += arg.name to (argLiteralDomain(listOf(offer), arg.name, arg.type) ?: typeToTlaDomain(arg.type))
+    }
+    val exists = existsParams.asReversed().fold(inner) { acc, (n, d) ->
+        "\\E $n \\in $d : $acc"
+    }
+    return "~($exists)"
 }
 
 private fun deadOperatorDef(
@@ -1369,6 +1460,27 @@ private fun emitConjoined(
     val argParams = mutableListOf<Pair<String, String>>()
     val auxParams = mutableListOf<Pair<String, String>>()
     val auxNamesByLeaf = mutableMapOf<String, Set<String>>()
+    val bindPlan = analyzeTlaArgBind(offers, TlaEmitOpts.get())
+    val symbolTypes = mutableMapOf<String, Type>()
+    offers.forEach { offer ->
+        offer.decl.action.args.forEach { symbolTypes[it.name] = it.type }
+        pclasses[offer.leaf.name]?.localDecls()?.filterIsInstance<VarNode>()?.forEach { vn ->
+            try {
+                symbolTypes[vn.name] = vn.type
+            } catch (_: RuntimeException) {
+            }
+        }
+    }
+    TlaSymbolTypes.set(TlaSymbolTypes.get() + symbolTypes)
+
+    val bindNames = linkedSetOf<String>().apply {
+        addAll(bindPlan.skipArgs)
+        addAll(bindPlan.extraBinderNames())
+        bindPlan.setBinds.forEach { add(it.arg) }
+        bindPlan.determined.forEach { add(it.first) }
+        bindPlan.listBinds.forEach { add(it.arg) }
+        bindPlan.structBinds.forEach { b -> b.argPaths.forEach { add(it.first) } }
+    }
 
     offers.forEach { offer ->
         val aux = collectLeafSpecAuxParams(
@@ -1386,19 +1498,9 @@ private fun emitConjoined(
     val usedArgNames = mutableSetOf<String>()
     usedArgNames += auxParams.map { it.first }
     offers.forEach { offer ->
-        fun refsArg(argName: String): Boolean {
-            return offer.decl.guards.any { exprReferencesSymbol(it, argName) } ||
-                offer.decl.transits.any { update ->
-                    when (update) {
-                        is TransitUpdate.Assign -> exprReferencesSymbol(update.expr, argName)
-                        is TransitUpdate.IndexPut ->
-                            exprReferencesSymbol(update.index, argName) || exprReferencesSymbol(update.value, argName)
-                        is TransitUpdate.Let -> exprReferencesSymbol(update.init, argName)
-                    }
-                }
-        }
-        offer.decl.action.args.filter { refsArg(it.name) }.forEach { usedArgNames += it.name }
+        offer.decl.action.args.filter { offerRefsArg(offer, it.name) }.forEach { usedArgNames += it.name }
     }
+    usedArgNames += bindNames
 
     // Instance binders for parameterized leaves: paramName indexes into the type domain.
     val selfBinders = linkedMapOf<String, String>() // leafName -> binder
@@ -1444,6 +1546,39 @@ private fun emitConjoined(
 
     fun selfOf(leaf: SpecLeaf): String? = selfBinders[leaf.tlaName]
 
+    fun pickOfferFor(expr: ExprNode): TlaActionOffer {
+        for (offer in offers) {
+            val bare = stateVarsByLeaf[offer.leaf.tlaName].orEmpty()
+            if (bare.any { exprReferencesSymbol(expr, it) }) return offer
+            if (offer.decl.action.args.any { exprReferencesSymbol(expr, it.name) }) return offer
+        }
+        return offers.first()
+    }
+
+    fun emitBound(expr: ExprNode, linePrefix: String = ""): String {
+        val offer = pickOfferFor(expr)
+        val self = selfOf(offer.leaf)
+        val auxNames = auxNamesByLeaf[offer.leaf.tlaName].orEmpty()
+        val names = offer.decl.action.args.map { it.name }.toSet() + auxNames + bindNames
+        val leafCtx = mapOf(offer.leaf.name to offer.leaf, offer.leaf.tlaName to offer.leaf)
+        return exprToTla(
+            expr, leafCtx, names, self,
+            bareStateVars = stateVarsByLeaf[offer.leaf.tlaName].orEmpty(),
+            stateVarNames = stateVarNames,
+            linePrefix = linePrefix,
+        )
+    }
+
+    bindPlan.listBinds.forEach { b ->
+        argParams += b.index to "1..Len(${emitBound(b.list)})"
+    }
+    bindPlan.setBinds.forEach { b ->
+        argParams += b.arg to emitBound(b.set)
+    }
+    bindPlan.structBinds.forEach { b ->
+        argParams += b.tmp to emitBound(b.set)
+    }
+
     val deferCtorSpawn = sessionPair != null && offers.any { it.isConstructor }
     val deferredSpawnParts = mutableListOf<String>()
     val deferredSpawnChanged = mutableSetOf<String>()
@@ -1451,7 +1586,7 @@ private fun emitConjoined(
     fun emitTransitUpdates(offer: TlaActionOffer, targetParts: MutableList<String>, targetChanged: MutableSet<String>) {
         val self = selfOf(offer.leaf)
         val auxNames = auxNamesByLeaf[offer.leaf.tlaName].orEmpty()
-        val baseArgNames = offer.decl.action.args.map { it.name }.toSet() + auxNames
+        val baseArgNames = offer.decl.action.args.map { it.name }.toSet() + auxNames + bindNames
         val leafCtx = mapOf(offer.leaf.name to offer.leaf, offer.leaf.tlaName to offer.leaf)
         val bare = stateVarsByLeaf[offer.leaf.tlaName].orEmpty()
         val taken = mutableSetOf<String>()
@@ -1627,28 +1762,20 @@ private fun emitConjoined(
         }
 
         val auxNames = auxNamesByLeaf[offer.leaf.tlaName].orEmpty()
-        val argNames = offer.decl.action.args.map { it.name }.toSet() + auxNames
+        val argNames = offer.decl.action.args.map { it.name }.toSet() + auxNames + bindNames
         val leafCtx = mapOf(offer.leaf.name to offer.leaf, offer.leaf.tlaName to offer.leaf)
 
         // Only include args that appear in guards/transits (skip unused initially args).
-        fun refsArg(argName: String): Boolean {
-            return offer.decl.guards.any { exprReferencesSymbol(it, argName) } ||
-                offer.decl.transits.any { update ->
-                    when (update) {
-                        is TransitUpdate.Assign -> exprReferencesSymbol(update.expr, argName)
-                        is TransitUpdate.IndexPut ->
-                            exprReferencesSymbol(update.index, argName) || exprReferencesSymbol(update.value, argName)
-                        is TransitUpdate.Let -> exprReferencesSymbol(update.init, argName)
-                    }
-                }
-        }
-        offer.decl.action.args.filter { refsArg(it.name) }.forEach { arg ->
-            argParams += arg.name to typeToTlaDomain(arg.type)
+        offer.decl.action.args.filter { offerRefsArg(offer, it.name) }.forEach { arg ->
+            if (arg.name in bindPlan.omitArgTypeDomains()) return@forEach
+            val lit = argLiteralDomain(offers, arg.name, arg.type)
+            argParams += arg.name to (lit ?: typeToTlaDomain(arg.type))
         }
 
         offer.decl.guards.forEach { g ->
             // Flatten top-level `&` so each Julay conjunct is its own `/\\` line.
             flattenTopLevelAnd(g).forEach { conjunct ->
+                if (bindPlan.skipped(conjunct)) return@forEach
                 parts += "/\\ ${exprToTla(
                     conjunct, leafCtx, argNames, self,
                     bareStateVars = stateVarsByLeaf[offer.leaf.tlaName].orEmpty(),
@@ -1668,6 +1795,18 @@ private fun emitConjoined(
                 parts += "/\\ ${killedAssignTrueExpr(offer.leaf, self, stateVarNames)}"
                 changed += killedVar
             }
+        }
+    }
+
+    bindPlan.structBinds.forEach { b ->
+        val elemType = try {
+            (b.set.getType() as? SetType)?.elementType
+        } catch (_: RuntimeException) {
+            null
+        }
+        b.keep.forEach { (path, expr) ->
+            val lhs = emitUnwrappedFieldPath(b.tmp, elemType, path)
+            parts += "/\\ $lhs = ${emitBound(expr)}"
         }
     }
 
@@ -1751,7 +1890,25 @@ private fun emitConjoined(
         parts += "/\\ UNCHANGED <<${unchanged.joinToString(", ")}>>"
     }
 
-    val body = parts.joinToString("\n  ")
+    val innerBody = parts.joinToString("\n  ")
+    val letBindings = mutableListOf<Pair<String, String>>()
+    bindPlan.listBinds.forEach { b ->
+        letBindings += b.arg to "${emitBound(b.list)}[${b.index}]"
+    }
+    bindPlan.structBinds.forEach { b ->
+        val elemType = try {
+            (b.set.getType() as? SetType)?.elementType
+        } catch (_: RuntimeException) {
+            null
+        }
+        b.argPaths.forEach { (arg, path) ->
+            letBindings += arg to emitUnwrappedFieldPath(b.tmp, elemType, path)
+        }
+    }
+    bindPlan.determined.forEach { (arg, expr) ->
+        letBindings += arg to emitBound(expr, "      $arg == ")
+    }
+    val body = wrapTlaLet(letBindings, innerBody)
     val indexParams = selfBinders.map { (leafName, binder) ->
         val leaf = offers.firstOrNull { it.leaf.tlaName == leafName }?.leaf
             ?: pairsNeedingBinders.firstNotNullOfOrNull { p ->
@@ -1849,7 +2006,24 @@ internal fun stateTlaName(
 
 internal fun tlaVar(leaf: String, varName: String): String = "${leaf}_$varName"
 
-internal fun defaultTlaValue(type: Type): String = when (type) {
+internal fun defaultTlaValue(
+    type: Type,
+    leafClass: String? = null,
+    varName: String? = null,
+    fieldOfObj: String? = null,
+    fieldName: String? = null,
+): String {
+    if (type is StringType || type is IntType) {
+        val lits = when {
+            leafClass != null && varName != null ->
+                TlaLiteralDomainProjection.get().varSet(leafClass, varName)
+            fieldOfObj != null && fieldName != null ->
+                TlaLiteralDomainProjection.get().objFieldSet(fieldOfObj, fieldName)
+            else -> null
+        }
+        if (lits != null && lits.isNotEmpty()) return lits.sorted().first()
+    }
+    return when (type) {
     is BoolType -> "FALSE"
     is IntType -> "0"
     is RealType -> "0"
@@ -1859,17 +2033,23 @@ internal fun defaultTlaValue(type: Type): String = when (type) {
     is SetType -> "{}"
     is MapType -> "[x \\in {} |-> 0]"
     is ObjClassType -> {
-        val fields = TlaFieldProjection.get().fieldsFor(type)
-        if (fields.isEmpty()) {
-            "[dummy |-> 0]"
+        val single = TlaFieldProjection.get().singletonField(type)
+        if (single != null) {
+            defaultTlaValue(single.type, fieldOfObj = type.name, fieldName = single.name)
         } else {
-            val rendered = fields.joinToString(", ") { f ->
-                "${f.name} |-> ${defaultTlaValue(f.type)}"
+            val fields = TlaFieldProjection.get().fieldsFor(type)
+            if (fields.isEmpty()) {
+                "[dummy |-> 0]"
+            } else {
+                val rendered = fields.joinToString(", ") { f ->
+                    "${f.name} |-> ${defaultTlaValue(f.type, fieldOfObj = type.name, fieldName = f.name)}"
+                }
+                "[$rendered]"
             }
-            "[$rendered]"
         }
     }
     else -> "0"
+    }
 }
 
 /** Julay leaf class names used as `Leaf.var` in an invariant formula. */
@@ -2026,7 +2206,22 @@ private fun collectIntLiteralsFromExpr(expr: ExprNode, into: MutableSet<Int>) {
     }
 }
 
-internal fun typeToTlaDomain(type: Type): String = when (type) {
+internal fun typeToTlaDomain(
+    type: Type,
+    fieldOfObj: String? = null,
+    fieldName: String? = null,
+): String {
+    if (type is StringType || type is IntType) {
+        val lits = if (fieldOfObj != null && fieldName != null) {
+            TlaLiteralDomainProjection.get().objFieldSet(fieldOfObj, fieldName)
+        } else {
+            null
+        }
+        if (lits != null && lits.isNotEmpty()) {
+            return TlaLiteralDomainProjection.get().render(lits)
+        }
+    }
+    return when (type) {
     is BoolType -> "BOOLEAN"
     is IntType -> "Int"
     is RealType -> "Int"
@@ -2036,17 +2231,23 @@ internal fun typeToTlaDomain(type: Type): String = when (type) {
     is ListType -> "BoundedSeq(${typeToTlaDomain(type.elementType)}, MaxListLen)"
     is SetType -> "SUBSET ${typeToTlaDomain(type.elementType)}"
     is ObjClassType -> {
-        val fields = TlaFieldProjection.get().fieldsFor(type)
-        if (fields.isEmpty()) {
-            "[dummy: {0}]"
+        val single = TlaFieldProjection.get().singletonField(type)
+        if (single != null) {
+            typeToTlaDomain(single.type, type.name, single.name)
         } else {
-            val rendered = fields.joinToString(", ") { f ->
-                "${f.name}: ${typeToTlaDomain(f.type)}"
+            val fields = TlaFieldProjection.get().fieldsFor(type)
+            if (fields.isEmpty()) {
+                "[dummy: {0}]"
+            } else {
+                val rendered = fields.joinToString(", ") { f ->
+                    "${f.name}: ${typeToTlaDomain(f.type, type.name, f.name)}"
+                }
+                "[$rendered]"
             }
-            "[$rendered]"
         }
     }
     else -> "Int"
+    }
 }
 
 /** Collect sort CONSTANT names nested in [type]. */
@@ -2114,10 +2315,15 @@ private fun collectProjectedSortConstants(
             }
         }
     }
-    offers.forEach { offer ->
-        offer.decl.action.args.filter { offerRefsArg(offer, it.name) }.forEach { arg ->
-            collectSortConstants(arg.type, into)
+    offers.groupBy { it.decl.action.name }.forEach { (_, group) ->
+        val omit = analyzeTlaArgBind(group, TlaEmitOpts.get()).omitArgTypeDomains()
+        group.forEach { offer ->
+            offer.decl.action.args.filter { offerRefsArg(offer, it.name) && it.name !in omit }.forEach { arg ->
+                collectSortConstants(arg.type, into)
+            }
         }
+    }
+    offers.forEach { offer ->
         val pc = pclasses[offer.leaf.name] ?: return@forEach
         val also = if (offer.isConstructor) {
             pc.localDecls().filterIsInstance<ConstructorNode>()
@@ -2145,10 +2351,17 @@ private fun collectActionArgDomainModels(
     pclasses: Map<String, ProcClassNode>,
     into: MutableSet<String>,
 ) {
-    offers.forEach { offer ->
-        offer.decl.action.args.filter { offerRefsArg(offer, it.name) }.forEach { arg ->
-            collectDomainModelNames(arg.type, into)
+    offers.groupBy { it.decl.action.name }.forEach { (_, group) ->
+        val omit = analyzeTlaArgBind(group, TlaEmitOpts.get()).omitArgTypeDomains()
+        group.forEach { offer ->
+            offer.decl.action.args.filter { offerRefsArg(offer, it.name) && it.name !in omit }.forEach { arg ->
+                if (argLiteralDomain(group, arg.name, arg.type) == null) {
+                    collectDomainModelNames(arg.type, into)
+                }
+            }
         }
+    }
+    offers.forEach { offer ->
         val pc = pclasses[offer.leaf.name] ?: return@forEach
         val also = if (offer.isConstructor) {
             pc.localDecls().filterIsInstance<ConstructorNode>()
@@ -2807,6 +3020,27 @@ internal fun emitMultiLineIf(
     }
 }
 
+internal fun emitUnwrappedFieldPath(base: String, type: Type?, path: List<String>): String {
+    val dropped = if (type != null) TlaFieldProjection.get().dropUnwrappedPath(type, path) else path
+    return if (dropped.isEmpty()) base else dropped.fold(base) { acc, f -> "$acc.$f" }
+}
+
+private fun typeOfBaseExpr(expr: ExprNode): Type? = try {
+    expr.getType()
+} catch (_: RuntimeException) {
+    (expr as? SymbolValueExprNode)?.let { TlaSymbolTypes.get()[it.symbol] }
+}
+
+internal fun wrapTlaLet(bindings: List<Pair<String, String>>, body: String): String {
+    if (bindings.isEmpty()) return body
+    val defs = bindings.joinToString("\n      ") { (n, e) -> "$n == $e" }
+    return if (body.contains('\n')) {
+        "LET $defs\n  IN\n  $body"
+    } else {
+        "LET $defs IN $body"
+    }
+}
+
 /**
  * Julay `let` → TLA `LET name == init IN body`. Multi-line source uses line breaks;
  * [body] / [init] should already be rendered (with let-name overrides applied to [body]).
@@ -3057,6 +3291,16 @@ internal fun emitObjClassLiteralToTla(
     if (fieldEntries.isEmpty()) {
         return "[dummy |-> 0]"
     }
+    val objType = try {
+        expr.structType
+    } catch (_: RuntimeException) {
+        null
+    }
+    if (fieldEntries.size == 1 && objType is ObjClassType &&
+        TlaFieldProjection.get().singletonField(objType) != null
+    ) {
+        return render(fieldEntries.single().second, linePrefix)
+    }
     if (!isMultiLineObjLiteral(expr) || fieldEntries.isEmpty()) {
         val fields = fieldEntries.joinToString(", ") { (name, e) ->
             "$name |-> ${render(e, linePrefix)}"
@@ -3195,8 +3439,7 @@ internal fun exprToTla(
             // Lambda / HOF binder substitution (e.g. map(e -> e.value)).
             if (base in symbolOverrides) {
                 val baseRendered = symbolOverrides.getValue(base)
-                return if (expr.fieldPath.isEmpty()) baseRendered
-                else expr.fieldPath.fold(baseRendered) { acc, field -> "$acc.$field" }
+                return emitUnwrappedFieldPath(baseRendered, TlaSymbolTypes.get()[base], expr.fieldPath)
             }
             val isObjectField = base in argNames || base in bareStateVars
             val leafVarName = expr.fieldPath.singleOrNull()?.let { stateVarNames[base to it] }
@@ -3214,8 +3457,7 @@ internal fun exprToTla(
                     }
                     else -> base
                 }
-                if (expr.fieldPath.isEmpty()) baseRendered
-                else expr.fieldPath.fold(baseRendered) { acc, field -> "$acc.$field" }
+                emitUnwrappedFieldPath(baseRendered, TlaSymbolTypes.get()[base], expr.fieldPath)
             }
         }
         is MemberAccessExprNode -> {
@@ -3225,7 +3467,11 @@ internal fun exprToTla(
             }
             when {
                 base is SymbolValueExprNode && base.symbol in symbolOverrides ->
-                    "${symbolOverrides.getValue(base.symbol)}.${expr.fieldName}"
+                    emitUnwrappedFieldPath(
+                        symbolOverrides.getValue(base.symbol),
+                        TlaSymbolTypes.get()[base.symbol],
+                        listOf(expr.fieldName),
+                    )
                 base is IndexExprNode && base.base is SymbolValueExprNode -> {
                     val leafName = (base.base as SymbolValueExprNode).symbol
                     val v = stateTlaName(leafName, expr.fieldName, stateVarNames)
@@ -3235,7 +3481,7 @@ internal fun exprToTla(
                     stateTlaName(base.symbol, expr.fieldName, stateVarNames)
                 else -> {
                     val rendered = rec(base)
-                    "$rendered.${expr.fieldName}"
+                    emitUnwrappedFieldPath(rendered, typeOfBaseExpr(base), listOf(expr.fieldName))
                 }
             }
         }
@@ -3244,9 +3490,7 @@ internal fun exprToTla(
                 return tlaLengthOf(rec(expr.baseExpr), expr.baseExpr)
             }
             val base = rec(expr.baseExpr)
-            val path = expr.fieldPath
-            if (path.isEmpty()) base
-            else path.fold(base) { acc, field -> "$acc.$field" }
+            emitUnwrappedFieldPath(base, typeOfBaseExpr(expr.baseExpr), expr.fieldPath)
         }
         is FunCallExprNode -> {
             when (expr.callName()) {

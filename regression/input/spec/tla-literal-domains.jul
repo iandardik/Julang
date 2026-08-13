@@ -1,0 +1,21 @@
+proc Modes {
+    var payload : String
+    var step : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            payload := "seed"
+            step := 0
+    }
+
+    transition go(mode : String, note : String) {
+        guard: mode = "a" | mode = "b"
+        transit:
+            payload := note
+            step := step + 1
+    }
+}
+
+spec LiteralDomains := <true> Modes <true>
+
+compile LiteralDomains

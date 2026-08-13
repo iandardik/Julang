@@ -1,0 +1,26 @@
+import julay.funlib.setOf
+
+obj Msg {
+    dest : Int
+    value : Int
+}
+
+proc Net {
+    var msgs : Set<Msg>
+    var got : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            msgs := setOf()
+            got := 0
+    }
+
+    transition recv(x : Int) {
+        guard: Msg { dest := 0, value := x } in msgs
+        transit: got := x
+    }
+}
+
+spec FromCollectionStruct := <true> Net <true>
+
+compile FromCollectionStruct

@@ -1,0 +1,24 @@
+obj Rec {
+    x : Int
+    y : Int
+}
+
+proc Box {
+    var n : Int
+    var box : Rec
+
+    constructor initially(args : List<String>) {
+        transit:
+            n := 0
+            box := Rec { x := 0, y := 0 }
+    }
+
+    transition send(payload : Rec) {
+        guard: payload = Rec { x := n, y := 1 }
+        transit: box := payload
+    }
+}
+
+spec DeterminedArgs := <true> Box <true>
+
+compile DeterminedArgs

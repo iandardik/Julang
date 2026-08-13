@@ -148,7 +148,15 @@ See [`input/inc_server/main.jul`](../../input/inc_server/main.jul) and [`regress
 
 ## TLA+ translation notes
 
-Unread `obj` fields in the composed spec are **projected out** of TLA records and TLC domains (`unused-fields`, on by default). JAR codegen keeps the full type. Disable with `--disable-tla-opt=unused-fields`; see [Compiler optimizations](compiler-optimizations.md#tla-emission-optimizations).
+TLA+ emit may rewrite the composed spec (JAR codegen is unchanged). Named ids, all default-on; see [Compiler optimizations](compiler-optimizations.md#tla-emission-optimizations):
+
+- `unused-fields` — project unread `obj` fields out of TLA records and TLC domains
+- `determined-args` — substitute args fixed by `arg = expr` / `<=>` with `LET` instead of `\E`
+- `from-collection` — quantify remaining args from a state set/list (or a struct literal `in` a set)
+- `literal-domains` — per-site finite `{…}` for String/Int that only use a closed literal set
+- `unwrap-singletons` — emit a one-field obj as that field’s type
+
+Disable with `--disable-tla-opt` / `--disable-tla-opt=ID,...`.
 
 ### Lists and sequences
 

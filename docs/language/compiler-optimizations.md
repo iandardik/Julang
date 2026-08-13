@@ -45,17 +45,21 @@ See also [Composition and actions](composition-and-actions.md) and [Tooling](../
 
 ## TLA+ emission optimizations
 
-When compiling a `spec` (or `--compile-tla`), Julay may **project unread `obj` fields** out of generated TLA+ records and TLC argument domains. That shrinks `\E` binders (e.g. dropping `Node.url` when the spec only reads `.id`). Executable JAR codegen is unchanged.
+When compiling a `spec` (or `--compile-tla`), Julay may rewrite generated `.tla` / `.cfg` so TLC `\E` quantification is smaller. **JAR codegen is unchanged.** Default: all named TLA+ optimizations are **on**. Disable with `--disable-tla-opt` / `--disable-tla-opt=ID,...` (`=` is required when passing ids).
 
-This is a **projection**: values that differed only in omitted fields become equal, so `=` / `in` / `~=` on those records can diverge from the Julay program. If a field is omitted from a type that still appears in whole-record comparison or set containment, `julayc` warns and points at `--disable-tla-opt=unused-fields`.
-
-Default: all named TLA+ optimizations are **on**.
+Some of these are **equivalent rewrites** of the same transition relation. Others are **projections**: they exclude values the Julay type would otherwise allow, so `=` / `in` / `~=` can diverge from the program.
 
 ### Named TLA+ optimizations
 
-| ID | Role |
-|----|------|
-| `unused-fields` | Omit obj fields that the TLA-relevant fragment never projects (field access / struct patterns / comparison-operand literals) |
+| ID | Role | Kind |
+|----|------|------|
+| `unused-fields` | Omit obj fields that the TLA-relevant fragment never projects (field access / struct patterns / comparison-operand literals) | Projection |
+| `determined-args` | Drop `\E` for action args fixed by `arg = expr` or `arg <=> expr`; substitute with `LET`. Not the same as JAR `directed-eval` | Equivalent rewrite |
+| `from-collection` | Quantify remaining args from a state collection: `a in S` on a set, `S[a.f] = a` on a list (index binder `i \in 1..Len(S)`), or a struct literal `in` a set | Equivalent rewrite |
+| `literal-domains` | Per-site finite `{…}` for String/Int that only use a closed literal set. Does **not** shrink the global `String` CONSTANT (so e.g. `Entry.value` stays open) | Projection (when it excludes values the type would otherwise allow) |
+| `unwrap-singletons` | After unused-fields, an obj with one remaining field emits as that field’s type (Raft `Node` → `Int`) | Equivalent rewrite |
+
+If a field is omitted from a type that still appears in whole-record comparison or set containment, `julayc` warns and points at `--disable-tla-opt=unused-fields`. Values that differed only in omitted fields become equal.
 
 ### `--disable-tla-opt`
 
@@ -67,6 +71,9 @@ java -jar build/libs/julayc.jar --disable-tla-opt --compile RaftNodeSpec path/to
 
 # Disable only unused-field projection (use '=' so the source path is not consumed)
 java -jar build/libs/julayc.jar --disable-tla-opt=unused-fields path/to/file.jul
+
+# Disable a mix
+java -jar build/libs/julayc.jar --disable-tla-opt=determined-args,from-collection path/to/file.jul
 ```
 
 Unknown TLA+ optimization ids are a usage error. `--disable-opt` and `--disable-tla-opt` may be passed together; they do not interact.

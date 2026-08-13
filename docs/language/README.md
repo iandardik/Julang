@@ -48,7 +48,7 @@ How-to: [Getting started](../getting-started.md). Specs: [Specifications](specif
 
 1. [Processes](processes.md) — state, `initially`, constructors vs transitions
 2. [Composition and actions](composition-and-actions.md) — `||`, **apis**, modifiers, synchronization
-3. [Compiler optimizations](compiler-optimizations.md) — sync fast paths (`eq-unify`, …), `--disable-opt`, and TLA+ `--disable-tla-opt`
+3. [Compiler optimizations](compiler-optimizations.md) — sync fast paths (`eq-unify`, …), `--disable-opt`, and TLA+ `--disable-tla-opt` (`unused-fields`, `determined-args`, `from-collection`, `literal-domains`, `unwrap-singletons`)
 4. [Types and expressions](types-and-expressions.md)
 5. [Collections](collections.md) — `List` / `Map` / `Set`, methods, lambdas
 6. [Procfuns](procfun.md) — process-backed blocking calls

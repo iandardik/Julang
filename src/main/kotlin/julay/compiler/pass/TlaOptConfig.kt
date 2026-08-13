@@ -8,13 +8,29 @@ package julay.compiler.pass
  */
 data class TlaOptConfig(
     val unusedFields: Boolean = true,
+    val determinedArgs: Boolean = true,
+    val fromCollection: Boolean = true,
+    val literalDomains: Boolean = true,
+    val unwrapSingletons: Boolean = true,
 ) {
     companion object {
         val ALL_ON = TlaOptConfig()
-        val ALL_OFF = TlaOptConfig(unusedFields = false)
+        val ALL_OFF = TlaOptConfig(
+            unusedFields = false,
+            determinedArgs = false,
+            fromCollection = false,
+            literalDomains = false,
+            unwrapSingletons = false,
+        )
 
         /** Stable CLI / docs IDs. */
-        val OPT_IDS: Set<String> = setOf("unused-fields")
+        val OPT_IDS: Set<String> = setOf(
+            "unused-fields",
+            "determined-args",
+            "from-collection",
+            "literal-domains",
+            "unwrap-singletons",
+        )
 
         /**
          * @param raw `null` if `--disable-tla-opt` was not passed; `"ALL"` for a bare flag;
@@ -36,6 +52,10 @@ data class TlaOptConfig(
             val disabled = names.toSet()
             return TlaOptConfig(
                 unusedFields = "unused-fields" !in disabled,
+                determinedArgs = "determined-args" !in disabled,
+                fromCollection = "from-collection" !in disabled,
+                literalDomains = "literal-domains" !in disabled,
+                unwrapSingletons = "unwrap-singletons" !in disabled,
             )
         }
     }

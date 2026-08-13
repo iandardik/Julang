@@ -21,6 +21,20 @@ class DisableTlaOptFlagTest {
     fun namedListDisablesSubset() {
         val cfg = TlaOptConfig.fromDisableTlaOptFlag("unused-fields")
         assertEquals(false, cfg.unusedFields)
+        assertEquals(true, cfg.determinedArgs)
+        assertEquals(true, cfg.fromCollection)
+        assertEquals(true, cfg.literalDomains)
+        assertEquals(true, cfg.unwrapSingletons)
+    }
+
+    @Test
+    fun commaSeparatedDisablesSeveral() {
+        val cfg = TlaOptConfig.fromDisableTlaOptFlag("determined-args,from-collection")
+        assertEquals(true, cfg.unusedFields)
+        assertEquals(false, cfg.determinedArgs)
+        assertEquals(false, cfg.fromCollection)
+        assertEquals(true, cfg.literalDomains)
+        assertEquals(true, cfg.unwrapSingletons)
     }
 
     @Test

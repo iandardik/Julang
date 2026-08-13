@@ -80,7 +80,8 @@ class Julayc : CliktCommand(name = "julayc") {
         "--disable-tla-opt",
         metavar = "OPT,...",
         help = "Disable TLA+ emission optimizations. Use bare --disable-tla-opt to disable all " +
-            "(unused-fields), or --disable-tla-opt=ID,ID for a subset. " +
+            "(unused-fields, determined-args, from-collection, literal-domains, unwrap-singletons), " +
+            "or --disable-tla-opt=ID,ID for a subset. " +
             "The '=' form is required when passing ids so the input path is not consumed. " +
             "See docs/language/compiler-optimizations.md",
     ).optionalValue("ALL", acceptsUnattachedValue = false)

@@ -18,6 +18,7 @@ import julay.program.type.*
  */
 class TlaRelevantFields internal constructor(
     val projecting: Boolean,
+    val unwrapSingletons: Boolean,
     private val relevantByObj: Map<String, Set<String>>,
     private val declaredFieldsByObj: Map<String, List<String>>,
     private val comparisonLocByObj: Map<String, ProgramLoc>,
@@ -26,6 +27,21 @@ class TlaRelevantFields internal constructor(
         if (!projecting) return type.fields
         val keep = relevantByObj[type.name] ?: return type.fields
         return type.fields.filter { it.name in keep }
+    }
+
+    fun singletonField(type: ObjClassType): Variable? {
+        if (!unwrapSingletons) return null
+        return fieldsFor(type).singleOrNull()
+    }
+
+    fun dropUnwrappedPath(type: Type, path: List<String>): List<String> {
+        if (!unwrapSingletons || path.isEmpty()) return path
+        if (type !is ObjClassType) return path
+        val head = path.first()
+        val fieldType = type.fields.firstOrNull { it.name == head }?.type
+        val rest = if (fieldType != null) dropUnwrappedPath(fieldType, path.drop(1)) else path.drop(1)
+        val single = singletonField(type)
+        return if (single != null && head == single.name) rest else listOf(head) + rest
     }
 
     fun filterLiteralEntries(
@@ -58,9 +74,26 @@ class TlaRelevantFields internal constructor(
         return out
     }
 
+    fun withUnwrap(on: Boolean): TlaRelevantFields = TlaRelevantFields(
+        projecting = projecting,
+        unwrapSingletons = on,
+        relevantByObj = relevantByObj,
+        declaredFieldsByObj = declaredFieldsByObj,
+        comparisonLocByObj = comparisonLocByObj,
+    )
+
     companion object {
         val IDENTITY = TlaRelevantFields(
             projecting = false,
+            unwrapSingletons = false,
+            relevantByObj = emptyMap(),
+            declaredFieldsByObj = emptyMap(),
+            comparisonLocByObj = emptyMap(),
+        )
+
+        val UNWRAP_ONLY = TlaRelevantFields(
+            projecting = false,
+            unwrapSingletons = true,
             relevantByObj = emptyMap(),
             declaredFieldsByObj = emptyMap(),
             comparisonLocByObj = emptyMap(),
@@ -111,6 +144,7 @@ private class RelevantFieldCollector(
 
     fun build(): TlaRelevantFields = TlaRelevantFields(
         projecting = true,
+        unwrapSingletons = false,
         relevantByObj = relevant.mapValues { it.value.toSet() },
         declaredFieldsByObj = declared.toMap(),
         comparisonLocByObj = comparisonLoc.toMap(),

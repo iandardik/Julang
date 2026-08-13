@@ -1,0 +1,30 @@
+import julay.funlib.length
+import julay.funlib.listOf
+
+obj Node {
+    id : Int
+    url : String
+}
+
+proc Core {
+    var cluster : List<Node>
+    var seen : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            cluster := listOf()
+            seen := 0
+    }
+
+    transition ping(target : Node) {
+        guard:
+            & target.id >= 1
+            & target.id <= length(cluster)
+            & cluster[target.id] = target
+        transit: seen := target.id
+    }
+}
+
+spec FromCollection := <true> Core <true>
+
+compile FromCollection
