@@ -741,7 +741,7 @@ class SpecTlaTlcSmokeTest {
                 tlaText.contains("TypeOKInt == Int \\cup Nat \\cup {") &&
                 tlaText.contains("-1") &&
                 Regex("""\\* cfg Int[^\n]+\nTypeOKInt ==""").containsMatchIn(tlaText),
-            "TypeOKInt should union Int, Nat, and extras including -1;\n${tlaText.substringAfter("TLA+ helpers").take(2500)}",
+            "TypeOKInt should union Int, Nat, and extras including -1;\n${tlaText.substringAfter("automatically generated invariants").take(2500)}",
         )
         assertTrue(
             !Regex("""LET nextLogIndex ==[^\n]* IN\s+LET prevLogIndex""").containsMatchIn(tlaText) &&
@@ -852,11 +852,10 @@ class SpecTlaTlcSmokeTest {
                     "Spec == Init /\\ [][Next]_vars\n\n\n\\* Invariants\n\n" +
                         "\\* automatically generated invariants\n\n",
                 ) &&
-                    tlaText.contains("\\* TLA+ helpers") &&
-                    Regex("""\\* cfg Int[^\n]+\nTypeOKInt == Int \\cup Nat \\cup \{""").containsMatchIn(tlaText) &&
+                    tlaText.contains("\\* automatically generated invariants\n\n\\* cfg Int") &&
                     tlaText.contains("TypeOKInt == Int \\cup Nat \\cup {") &&
-                    Regex("""\\* automatically generated invariants\n\nTypeOK ==""").containsMatchIn(tlaText),
-                "TypeOKInt under TLA+ helpers; TypeOK under automatically generated invariants;\n$tlaText",
+                    Regex("""TypeOKInt ==[^\n]+\n\nTypeOK ==""").containsMatchIn(tlaText),
+                "TypeOKInt should sit immediately above TypeOK under automatically generated invariants;\n$tlaText",
             )
             assertTrue(
                 tlaText.contains("currentTerm \\in [NodeSet -> TypeOKInt]"),
@@ -1726,6 +1725,14 @@ class SpecTlaTlcSmokeTest {
                     tlaText.contains("MaxListLen"),
                 "expected BoundedSeq under TLA+ helpers / MaxListLen;\n$tlaText",
             )
+            assertTrue(
+                tlaText.contains("Range(") &&
+                    tlaText.contains("SetToSeq(") &&
+                    tlaText.contains("RECURSIVE SetToSeq") &&
+                    tlaText.contains("allDistinct(") &&
+                    tlaText.contains("Cardinality(Range("),
+                "expected Range / SetToSeq / allDistinct conversion helpers;\n$tlaText",
+            )
             val nextBody = tlaText.substringAfter("Next ==").substringBefore("Spec ==")
             assertTrue(
                 !Regex("""(?<!Bounded)(?<!Sub)Seq\(""").containsMatchIn(nextBody),
@@ -1970,6 +1977,11 @@ class SpecTlaTlcSmokeTest {
                 "expected ~= flipped to =;\n$tlaText",
             )
             assertTrue(
+                startDef.contains("allDistinct(cluster)") &&
+                    !startDef.contains("~~allDistinct"),
+                "expected ~ flipped off allDistinct, not double negation;\n$tlaText",
+            )
+            assertTrue(
                 startDef.contains("~(port <= 0)") || startDef.contains("~(port <= 0)"),
                 "expected wrapped non-flipped error cond;\n$tlaText",
             )
@@ -2062,7 +2074,8 @@ class SpecTlaTlcSmokeTest {
         } else {
             ""
         }
-        return helperSec.contains("Range(") && !libSec.contains("Range(")
+        return helperSec.contains("Range(") &&
+            !Regex("""Range\(\w+\) == """).containsMatchIn(libSec)
     }
 
     /**

@@ -1,3 +1,5 @@
+import julay.funlib.allDistinct
+
 sort Idx := {"a"}
 
 proc P {
@@ -13,6 +15,7 @@ proc P {
             (me ~in cluster) -> "not in cluster"
             (k ~= 1) -> "k must be 1"
             (port <= 0) -> "bad port"
+            ~allDistinct(cluster) -> "dups"
     }
 
     internal transition tick() {

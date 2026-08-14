@@ -1425,7 +1425,49 @@ private fun MethodCallExprNode.typePassMethodCall(
         CollectionMethodKind.Filter -> typePassFilter(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv, collType)
         CollectionMethodKind.Map -> typePassMapMethod(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv, collType)
         CollectionMethodKind.Fold -> typePassFold(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv, collType)
+        CollectionMethodKind.ToSet -> typePassToSet(collType)
+        CollectionMethodKind.ToList -> typePassToList(collType)
     }
+}
+
+private fun MethodCallExprNode.typePassToSet(collType: Type): List<CompileError> {
+    val listTy = collType as? ListType
+        ?: return listOf(
+            OneLocCompileError(
+                programLocation(),
+                "Expected receiver of \"toSet\" to have a List type but got $collType",
+            ),
+        )
+    if (args.isNotEmpty()) {
+        return listOf(
+            OneLocCompileError(
+                programLocation(),
+                "Expected method \"toSet\" to take 0 argument(s) but got ${args.size}",
+            ),
+        )
+    }
+    setInferredType(TypePassType.Inferred(setType(listTy.elementType)))
+    return emptyList()
+}
+
+private fun MethodCallExprNode.typePassToList(collType: Type): List<CompileError> {
+    val setTy = collType as? SetType
+        ?: return listOf(
+            OneLocCompileError(
+                programLocation(),
+                "Expected receiver of \"toList\" to have a Set type but got $collType",
+            ),
+        )
+    if (args.isNotEmpty()) {
+        return listOf(
+            OneLocCompileError(
+                programLocation(),
+                "Expected method \"toList\" to take 0 argument(s) but got ${args.size}",
+            ),
+        )
+    }
+    setInferredType(TypePassType.Inferred(listType(setTy.elementType)))
+    return emptyList()
 }
 
 private fun MethodCallExprNode.typePassFilter(

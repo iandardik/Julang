@@ -1,0 +1,5 @@
+source: regression/input/type-errors/toset-extra-args.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected method \"toSet\" to take 0 argument(s)"
+  - "Found type errors; exiting."

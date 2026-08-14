@@ -349,6 +349,30 @@ object FunBuiltinRegistry {
         },
     )
 
+    /**
+     * Whether every element of a list is unique. Short-circuits on the first duplicate.
+     * Z3 path is handled in FunCallExprNode (embed Kotlin when the list is concrete state).
+     */
+    private val allDistinctBuiltin = FunBuiltin(
+        name = "allDistinct",
+        arity = 1,
+        returnType = boolType,
+        checkArgs = { argTypes ->
+            when {
+                argTypes.size != 1 -> "Expected function \"allDistinct\" to take 1 argument(s) but got ${argTypes.size}"
+                argTypes[0] !is ListType ->
+                    "Expected argument of \"allDistinct\" to have a List type but got ${argTypes[0]}"
+                else -> null
+            }
+        },
+        kotlinCodegen = { args ->
+            "run { val __xs = ${args[0]}; val __s = HashSet<Any?>(__xs.size); __xs.all { __s.add(it) } }"
+        },
+        z3Codegen = { _ ->
+            throw RuntimeException("Function \"allDistinct\" Z3 codegen is handled by FunCallExprNode")
+        },
+    )
+
     private val builtins = mapOf(
         lengthBuiltin.name to lengthBuiltin,
         parseIntBuiltin.name to parseIntBuiltin,
@@ -369,6 +393,7 @@ object FunBuiltinRegistry {
         setOfBuiltin.name to setOfBuiltin,
         mapOfBuiltin.name to mapOfBuiltin,
         spliceBuiltin.name to spliceBuiltin,
+        allDistinctBuiltin.name to allDistinctBuiltin,
     )
 
     val namedFunArgEffects: Set<String> =

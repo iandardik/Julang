@@ -1,0 +1,11 @@
+import julay.funlib.setOf
+proc BadToSet {
+    var s : Set<Int>
+
+    constructor initially(args : List<String>) {
+        transit:
+            s := setOf(1).toSet()
+    }
+}
+
+compile BadToSet

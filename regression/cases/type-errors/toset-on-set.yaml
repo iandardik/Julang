@@ -1,0 +1,5 @@
+source: regression/input/type-errors/toset-on-set.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected receiver of \"toSet\" to have a List type"
+  - "Found type errors; exiting."

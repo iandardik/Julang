@@ -10,6 +10,7 @@ import node.lib.entryTermAt
 import node.rpc_in.RpcIn
 import node.rpc_out.RpcOut
 import node.vote_requester.VoteRequester
+import julay.funlib.allDistinct
 import julay.funlib.listOf
 import julay.funlib.setOf
 import julay.funlib.splice
@@ -51,6 +52,7 @@ export proc RaftProtocol {
             matchIndex := cluster.map(n -> 0)
         error:
             (me ~in cluster) -> "Invalid config: node not in cluster"
+            ~allDistinct(cluster) -> "Invalid config: duplicate node IDs"
     }
 
     /*

@@ -543,6 +543,14 @@ class FunCallExprNode(
             if (builtin.returnType == null) {
                 throw RuntimeException("Function \"${builtin.name}\" cannot be used in guards")
             }
+            if (builtin.name == "allDistinct") {
+                if (exprReferencesAnyArg(this, argSymbols)) {
+                    throw RuntimeException(
+                        "Function \"allDistinct\" cannot be used in guards when it depends on action arguments at $loc",
+                    )
+                }
+                return embedKotlinValueAsZ3(toTransitString(symbolTypes, argSymbols), boolType, forceString, loc)
+            }
             val argStrs = args.map { it.toZ3GuardString(symbolTypes, argSymbols, forceString) }
             if (builtin.name == "length" && args.isNotEmpty()) {
                 return when (val argType = args[0].getType()) {
@@ -2271,6 +2279,10 @@ class MethodCallExprNode(
             return "(hostProc.invokeProcFun(\"${pf.procFunName()}\", $argsList) as $retTy)"
         }
         val base = baseExpr.toTransitString(symbolTypes, argSymbols)
+        when (methodName) {
+            "toSet" -> return "$base.toSet()"
+            "toList" -> return "$base.toList()"
+        }
         val body = hofBody ?: throw RuntimeException("HOF body not resolved for \"$methodName\" at $loc")
         val paramNames = hofParamNames ?: throw RuntimeException("HOF params not resolved for \"$methodName\" at $loc")
         val paramTypes = hofParamTypes ?: throw RuntimeException("HOF param types not resolved for \"$methodName\" at $loc")

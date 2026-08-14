@@ -95,7 +95,7 @@ fun add(x : Int, y : Int) : Int {
 
 Recursive user functions are rejected. Prefer `julay.funlib.*` for common helpers.
 
-Collection methods (`.filter`, `.map`, `.fold`), properties (`.keys`, `.length`), and inline lambdas: [Collections](collections.md).
+Collection methods (`.filter`, `.map`, `.fold`, `.toSet`, `.toList`), properties (`.keys`, `.length`), and inline lambdas: [Collections](collections.md).
 
 ## See also
 

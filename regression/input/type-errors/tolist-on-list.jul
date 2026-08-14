@@ -1,0 +1,11 @@
+import julay.funlib.listOf
+proc BadToList {
+    var xs : List<Int>
+
+    constructor initially(args : List<String>) {
+        transit:
+            xs := listOf(1).toList()
+    }
+}
+
+compile BadToList

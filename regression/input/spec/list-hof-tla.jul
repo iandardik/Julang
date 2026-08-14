@@ -1,3 +1,4 @@
+import julay.funlib.allDistinct
 import julay.funlib.length
 import julay.funlib.splice
 
@@ -14,9 +15,10 @@ proc Counter {
 
     constructor initially(args : List<String>, peers : List<Peer>) {
         transit:
+            let ps : Set<Peer> := peers.toSet()
             cluster := peers
             nextIndex := peers.map(p -> 1)
-            n := 0
+            n := ps.toList().length
     }
 
     transition bump(target : Peer) {
@@ -24,6 +26,8 @@ proc Counter {
             & target.id >= 1
             & target.id <= length(cluster)
             & cluster[target.id] = target
+            & allDistinct(cluster)
+            & cluster.toSet().length = length(cluster)
         transit:
             n := n + 1
             nextIndex[target.id] := nextIndex[target.id] + 1

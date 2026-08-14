@@ -200,7 +200,7 @@ Open `Int` / `String` sites that still need a TLC universe (leaf index, remainin
 
 - Julay lists are **1-based**, matching TLA `Sequences`. Reads and `EXCEPT` updates on list-typed state use the Julay index as-is.
 - List **action-argument / havoc domains** use a finite `BoundedSeq(S, MaxListLen)` (not bare `Seq(S)`, which TLC cannot enumerate). `MaxListLen` is a module `CONSTANT` (default `3` in the `.cfg`); raise it for longer lists.
-- Emitted helpers sit under `\* TLA+ helpers`: `BoundedSeq(S, N) == UNION { [1..k -> S] : k \in 0..N }` when list domains appear, and `Range(f) == { f[__i] : __i \in DOMAIN f }` when list `in` / `~in` is used.
+- Emitted helpers sit under `\* TLA+ helpers`: `BoundedSeq(S, N) == UNION { [1..k -> S] : k \in 0..N }` when list domains appear, `Range(f) == { f[__i] : __i \in DOMAIN f }` when list `in` / `~in`, `.toSet()`, or `allDistinct` is used, and `SetToSeq` when `.toList()` is used.
 
 ### Collections emitted today
 
@@ -218,6 +218,9 @@ Open `Int` / `String` sites that still need a TLC universe (leaf index, remainin
 | list/set `.map` (lambda) | function/set comprehension |
 | list `.filter` | `SelectSeq` |
 | set `.filter` | set comprehension |
+| `xs.toSet()` | `Range(xs)` |
+| `s.toList()` | `SetToSeq(s)` (helper; order unspecified) |
+| `allDistinct(xs)` | `allDistinct(xs)` helper: `Len(xs) = Cardinality(Range(xs))` |
 | `startsWith(s, p)` | `startsWith` helper above `Init` (`SubSeq` prefix check) |
 | `when` | TLA `CASE` … `[]` … `OTHER` |
 
@@ -243,7 +246,7 @@ See also [Collections](collections.md).
 ### Action layout
 
 - Multi-leaf (and solo) actions group each participant under `\* <Proc> <transition type> logic` (e.g. `transition`, `constructor`, `session transition`, `provider transition`), with that leaf’s enablement gates, guards, and transits together — similar to Init’s `\* State variables for <Proc>` sections.
-- When an action has `error:` arms, TLA+ emits `\* <Proc> <transition type> assumption` **before** the logic section. Each arm’s condition is negated and becomes a `/\\` conjunct (a guard): top-level `~in` / `~=` flip to `\in` / `=`; otherwise a `~` wraps the condition. List `in` / `~in` emit as `\in Range(xs)` / `\notin Range(xs)` (sequences are functions; `Range` is a generated helper). Error messages are runtime-only (JAR still throws `JulayException`).
+- When an action has `error:` arms, TLA+ emits `\* <Proc> <transition type> assumption` **before** the logic section. Each arm’s condition is negated and becomes a `/\\` conjunct (a guard): top-level `~in` / `~=` / `~` flip to `\in` / `=` / the inner formula; otherwise a `~` wraps the condition. List `in` / `~in` emit as `\in Range(xs)` / `\notin Range(xs)` (sequences are functions; `Range` is a generated helper). Error messages are runtime-only (JAR still throws `JulayException`).
 - Top-level `&` guard conjuncts become separate `/\\` lines (matching multi-line Julay guards). Nested multi-line `&` / `|` are formatted recursively as `/\\` and `\\/` branches (single-line boolean ops stay compact).
 - Multi-line Julay `Obj { ... }` literals become TLA records with one field per line; field lines are indented 2 spaces past the first non-`/\`/`\/` symbol on the opening line (single-line obj inits stay compact).
 - Multi-line Julay `if` / expression `let` / `when` / list / set literals use that same open-column indent for bodies, `ELSE`/`IN`/`[]`/`OTHER`, and closing brackets (not the full hanging left-hand text such as `EXCEPT` or `\cup`).
@@ -251,10 +254,10 @@ See also [Collections](collections.md).
 - Julay `when` becomes TLA `CASE` with `[]` arms and `OTHER` for the trailing else.
 - Invariants preserve multi-line structure (boolean trees). Consecutive `\A` / `\E` binders over the same domain are condensed like Next (`\A n1, n2 \in NodeSet`). Parentheses written in the `.jul` source are kept; other parentheses are omitted when operator precedence makes them unnecessary.
 - `initially` constructors (`initially` / `*_initially`) are emitted first after `Init`, both as operator definitions and as the leading disjuncts of `Next`. Consecutive `\E` binders in `Next` over the same domain are written `\E n, m \in NodeSet`.
-- Two blank lines separate funs/helpers from `\* system definition`, then a blank line before `Init`. After `Spec == Init /\ [][Next]_vars`, two blank lines precede `\* Invariants`. A blank line precedes the closing `====`. Automatically generated operators (`TypeOK`, and `SessionIntegrity` when present) sit under `\* automatically generated invariants`; named and inline guarantees sit under `\* user-specified invariants`. `TypeOK` is listed first in the `.cfg`. `TypeOKInt == Int \cup Nat \cup {lo..hi}` is emitted under `\* TLA+ helpers` (before Init). It unions cfg `Int` (a finite non-negative `\E` bound that cannot include negatives), `Nat` (so `x := x + 1` counters stay in-type when `Nat` is not overridden), and every integer from the lowest negative literal through `max(highest literal, MaxListLen+1)`. List vars use `Seq(S)` rather than `BoundedSeq` so membership stays pointwise.
-- `TypeOKInt`, `BoundedSeq`, and `Range` are emitted under `\* TLA+ helpers` (above `\* Julay lib funs`). Julay `fun`s referenced from Init/action guards or transit RHS (and their transitive callees) are emitted as TLA+ operators immediately above `Init`, grouped under `\* Julay lib funs` (stdlib funlib) or `\* user defined funs`. Operator parameters that collide with `VARIABLES` / `CONSTANT`s / other module operators are renamed (`p_…`).
+- Two blank lines separate funs/helpers from `\* system definition`, then a blank line before `Init`. After `Spec == Init /\ [][Next]_vars`, two blank lines precede `\* Invariants`. A blank line precedes the closing `====`. Automatically generated operators (`TypeOKInt`, `TypeOK`, and `SessionIntegrity` when present) sit under `\* automatically generated invariants`; named and inline guarantees sit under `\* user-specified invariants`. `TypeOK` is listed first in the `.cfg`. `TypeOKInt == Int \cup Nat \cup {lo..hi}` sits immediately above `TypeOK`. It unions cfg `Int` (a finite non-negative `\E` bound that cannot include negatives), `Nat` (so `x := x + 1` counters stay in-type when `Nat` is not overridden), and every integer from the lowest negative literal through `max(highest literal, MaxListLen+1)`. List vars use `Seq(S)` rather than `BoundedSeq` so membership stays pointwise.
+- `BoundedSeq`, `Range`, and `SetToSeq` are emitted under `\* TLA+ helpers` (above `\* Julay lib funs`) when used. Julay `fun`s referenced from Init/action guards or transit RHS (and their transitive callees) are emitted as TLA+ operators immediately above `Init`, grouped under `\* Julay lib funs` (stdlib funlib) or `\* user defined funs`. Operator parameters that collide with `VARIABLES` / `CONSTANT`s / other module operators are renamed (`p_…`).
 - `splice(xs, a, b)` becomes a call to a module-level `splice` operator (defined above `Init` under `\* Julay lib funs` when any call is used); splice params/binders are clash-renamed like fun params.
-- `startsWith` becomes a module-level helper (same Julay-lib section) when used.
+- `startsWith` and `allDistinct` become module-level helpers (same Julay-lib section) when used.
 
 ## Compiling specs
 

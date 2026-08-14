@@ -300,8 +300,26 @@ private fun emitProjectedTla(
             invClosure.any { exprContainsStartsWith(it.invariantFormula()) }
     val needsRangeOperator =
         offersUseListMembership(offers) ||
-            usedFunOps.any { exprContainsListMembership(it.funBody()) } ||
-            invClosure.any { exprContainsListMembership(it.invariantFormula()) }
+            offersUseToSet(offers) ||
+            offersUseAllDistinct(offers) ||
+            usedFunOps.any {
+                exprContainsListMembership(it.funBody()) ||
+                    exprContainsToSet(it.funBody()) ||
+                    exprContainsAllDistinct(it.funBody())
+            } ||
+            invClosure.any {
+                exprContainsListMembership(it.invariantFormula()) ||
+                    exprContainsToSet(it.invariantFormula()) ||
+                    exprContainsAllDistinct(it.invariantFormula())
+            }
+    val needsSetToSeqOperator =
+        offersUseToList(offers) ||
+            usedFunOps.any { exprContainsToList(it.funBody()) } ||
+            invClosure.any { exprContainsToList(it.invariantFormula()) }
+    val needsAllDistinctOperator =
+        offersUseAllDistinct(offers) ||
+            usedFunOps.any { exprContainsAllDistinct(it.funBody()) } ||
+            invClosure.any { exprContainsAllDistinct(it.invariantFormula()) }
     val unsupportedBuiltinWarnings =
         collectUnsupportedBuiltinWarnings(offers, usedFunOps, invClosure)
     val sessionPairs = detectTwoSidedSessionPairs(offers)
@@ -448,7 +466,7 @@ private fun emitProjectedTla(
         constants + variables + usedFunOps.map { it.name() } +
             actions.map { it.name } +
             setOf(
-                "vars", "BoundedSeq", "Range", "splice", "startsWith",
+                "vars", "BoundedSeq", "Range", "SetToSeq", "splice", "startsWith", "allDistinct",
                 "Init", "Next", "Spec", "TypeOK", "TypeOKInt", "GF", "dummy",
             )
         ).toSet()
@@ -456,10 +474,14 @@ private fun emitProjectedTla(
     val startsWithOperatorDef =
         if (needsStartsWithOperator) emitStartsWithOperatorDef(funReservedNames) else null
     val rangeOperatorDef = if (needsRangeOperator) emitRangeOperatorDef(funReservedNames) else null
+    val setToSeqOperatorDef = if (needsSetToSeqOperator) emitSetToSeqOperatorDef(funReservedNames) else null
+    val allDistinctOperatorDef =
+        if (needsAllDistinctOperator) emitAllDistinctOperatorDef(funReservedNames) else null
     val funlibOperatorDefs = usedFunlibOps.map { emitFunOperatorDef(it, funReservedNames) }
     val userFunOperatorDefs = usedUserFunOps.map { emitFunOperatorDef(it, funReservedNames) }
     val hasJulayLibFuns =
-        needsSpliceOperator || needsStartsWithOperator || funlibOperatorDefs.isNotEmpty()
+        needsSpliceOperator || needsStartsWithOperator || needsAllDistinctOperator ||
+            funlibOperatorDefs.isNotEmpty()
     val needsBoundedSeq = "MaxListLen" in constants || "MaxListLen" in cfgOverrides
 
     val invDefs = if (invClosure.isNotEmpty()) {
@@ -510,16 +532,21 @@ private fun emitProjectedTla(
         append(varsLine)
         appendLine("vars == $varsTuple")
         appendLine()
-        appendLine("\\* TLA+ helpers")
-        appendLine(typeOkIntDef)
-        appendLine()
-        if (needsBoundedSeq) {
-            appendLine("BoundedSeq(S, N) == UNION { [1..k -> S] : k \\in 0..N }")
-            appendLine()
-        }
-        if (needsRangeOperator) {
-            appendLine(rangeOperatorDef!!)
-            appendLine()
+        val hasTlaHelpers = needsBoundedSeq || needsRangeOperator || needsSetToSeqOperator
+        if (hasTlaHelpers) {
+            appendLine("\\* TLA+ helpers")
+            if (needsBoundedSeq) {
+                appendLine("BoundedSeq(S, N) == UNION { [1..k -> S] : k \\in 0..N }")
+                appendLine()
+            }
+            if (needsRangeOperator) {
+                appendLine(rangeOperatorDef!!)
+                appendLine()
+            }
+            if (needsSetToSeqOperator) {
+                appendLine(setToSeqOperatorDef!!)
+                appendLine()
+            }
         }
         if (hasJulayLibFuns) {
             appendLine("\\* Julay lib funs")
@@ -529,6 +556,10 @@ private fun emitProjectedTla(
             }
             if (needsStartsWithOperator) {
                 appendLine(startsWithOperatorDef!!)
+                appendLine()
+            }
+            if (needsAllDistinctOperator) {
+                appendLine(allDistinctOperatorDef!!)
                 appendLine()
             }
             funlibOperatorDefs.forEach { def ->
@@ -577,6 +608,8 @@ private fun emitProjectedTla(
         appendLine("\\* Invariants")
         appendLine()
         appendLine("\\* automatically generated invariants")
+        appendLine()
+        appendLine(typeOkIntDef)
         appendLine()
         appendLine(typeOkDef)
         if (sessionIntegrityDef != null) {
@@ -3118,6 +3151,80 @@ internal fun emitRangeOperatorDef(reservedNames: Set<String>): String {
     return "Range($f) == { $f[$i] : $i \\in DOMAIN $f }"
 }
 
+/** Julay `s.toList()`: arbitrary enumeration of a finite set (order unspecified). */
+internal fun emitSetToSeqOperatorDef(reservedNames: Set<String>): String {
+    val taken = reservedNames.toMutableSet()
+    val s = allocTlaName("S", taken)
+    val e = allocTlaName("e", taken)
+    val x = allocTlaName("x", taken)
+    return "RECURSIVE SetToSeq(_)\n" +
+        "SetToSeq($s) ==\n" +
+        "  IF $s = {} THEN <<>>\n" +
+        "  ELSE LET $e == CHOOSE $x \\in $s : TRUE\n" +
+        "       IN <<$e>> \\o SetToSeq($s \\ {$e})"
+}
+
+/** Julay `allDistinct(xs)`: every list element is unique. */
+internal fun emitAllDistinctOperatorDef(reservedNames: Set<String>): String {
+    val taken = reservedNames.toMutableSet()
+    val xs = allocTlaName("xs", taken)
+    return "allDistinct($xs) == Len($xs) = Cardinality(Range($xs))"
+}
+
+internal fun exprContainsToSet(expr: ExprNode): Boolean =
+    when (expr) {
+        is MethodCallExprNode ->
+            expr.methodName == "toSet" ||
+                exprContainsToSet(expr.baseExpr) ||
+                expr.args.any { exprContainsToSet(it) } ||
+                (expr.hofBodyOrNull()?.let { exprContainsToSet(it) } == true)
+        is ParenExprNode -> exprContainsToSet(expr.innerExpr())
+        else -> expr.children.filterIsInstance<ExprNode>().any { exprContainsToSet(it) }
+    }
+
+internal fun offersUseToSet(offers: List<TlaActionOffer>): Boolean =
+    offersUseExpr(offers, ::exprContainsToSet)
+
+internal fun exprContainsToList(expr: ExprNode): Boolean =
+    when (expr) {
+        is MethodCallExprNode ->
+            expr.methodName == "toList" ||
+                exprContainsToList(expr.baseExpr) ||
+                expr.args.any { exprContainsToList(it) } ||
+                (expr.hofBodyOrNull()?.let { exprContainsToList(it) } == true)
+        is ParenExprNode -> exprContainsToList(expr.innerExpr())
+        else -> expr.children.filterIsInstance<ExprNode>().any { exprContainsToList(it) }
+    }
+
+internal fun offersUseToList(offers: List<TlaActionOffer>): Boolean =
+    offersUseExpr(offers, ::exprContainsToList)
+
+internal fun exprContainsAllDistinct(expr: ExprNode): Boolean =
+    when (expr) {
+        is FunCallExprNode ->
+            (expr.resolvedBuiltinOrNull()?.name == "allDistinct" || expr.callName() == "allDistinct") ||
+                expr.callArgs().any { exprContainsAllDistinct(it) }
+        is ParenExprNode -> exprContainsAllDistinct(expr.innerExpr())
+        else -> expr.children.filterIsInstance<ExprNode>().any { exprContainsAllDistinct(it) }
+    }
+
+internal fun offersUseAllDistinct(offers: List<TlaActionOffer>): Boolean =
+    offersUseExpr(offers, ::exprContainsAllDistinct)
+
+private fun offersUseExpr(offers: List<TlaActionOffer>, pred: (ExprNode) -> Boolean): Boolean =
+    offers.any { offer ->
+        offer.decl.guards.any(pred) ||
+            offer.decl.errors.any { pred(it.condExpr()) } ||
+            offer.decl.transits.any { update ->
+                when (update) {
+                    is TransitUpdate.Assign -> pred(update.expr)
+                    is TransitUpdate.IndexPut -> pred(update.index) || pred(update.value)
+                    is TransitUpdate.Let -> pred(update.init)
+                }
+            } ||
+            (offer.decl.returnExpr?.let(pred) == true)
+    }
+
 /** Collect unsupported funlib builtins used in TLA-emitted exprs (for compile warnings). */
 internal fun collectUnsupportedBuiltinWarnings(
     offers: List<TlaActionOffer>,
@@ -3466,7 +3573,7 @@ internal fun collectGlobalConstArgBinds(
     return out
 }
 
-/** Negate an `error:` condition for a TLA assumption: flip top-level `~in` / `~=` (`#`), else wrap with `~`. */
+/** Negate an `error:` condition for a TLA assumption: flip top-level `~in` / `~=` (`#`) / `~`, else wrap with `~`. */
 internal fun negateErrorCondition(expr: ExprNode): ExprNode {
     val inner = unwrapParens(expr)
     return when {
@@ -3474,6 +3581,8 @@ internal fun negateErrorCondition(expr: ExprNode): ExprNode {
             BinaryOpExprNode("in", inner.lhsOperand(), inner.rhsOperand(), inner.programLocation())
         inner is BinaryOpExprNode && (inner.op() == "#" || inner.op() == "~=") ->
             BinaryOpExprNode("=", inner.lhsOperand(), inner.rhsOperand(), inner.programLocation())
+        inner is UnaryOpExprNode && inner.op() == "~" ->
+            inner.operand()
         else -> UnaryOpExprNode("~", expr, expr.programLocation())
     }
 }
@@ -4152,6 +4261,10 @@ internal fun exprToTla(
                     if (args.size != 3) return "TRUE"
                     "splice(${rec(args[0])}, ${rec(args[1])}, ${rec(args[2])})"
                 }
+                "allDistinct" -> {
+                    val arg = expr.callArgs().singleOrNull() ?: return "TRUE"
+                    "allDistinct(${rec(arg)})"
+                }
                 "map" -> {
                     // map(xs, f) — prefer method form; support freestanding.
                     val args = expr.callArgs()
@@ -4221,6 +4334,8 @@ internal fun exprToTla(
                         else -> "TRUE"
                     }
                 }
+                "toSet" -> "Range(${rec(expr.baseExpr)})"
+                "toList" -> "SetToSeq(${rec(expr.baseExpr)})"
                 else -> "TRUE"
             }
         }

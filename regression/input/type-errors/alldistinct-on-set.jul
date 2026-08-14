@@ -1,0 +1,14 @@
+import julay.funlib.allDistinct
+import julay.funlib.setOf
+proc BadAllDistinct {
+    var s : Set<Int>
+    var ok : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            s := setOf(1)
+            ok := allDistinct(s)
+    }
+}
+
+compile BadAllDistinct

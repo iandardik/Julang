@@ -4,7 +4,7 @@ Built-in `List`, `Map`, and `Set` values. Collection values are updated by reass
 
 Julay does **not** have first-class function values: lambdas exist only as arguments to higher-order collection calls, and bodies are inlined at compile time.
 
-Collection constructors and `splice` are funlib: import each name you use (`julay.funlib.listOf`, `setOf`, `mapOf`, `splice`).
+Collection constructors, `splice`, and `allDistinct` are funlib: import each name you use (`julay.funlib.listOf`, `setOf`, `mapOf`, `splice`, `allDistinct`).
 
 ## Quick comparison
 
@@ -20,6 +20,7 @@ Collection constructors and `splice` are funlib: import each name you use (`jula
 | `.length` | yes | yes | yes |
 | `.keys` | — | → `Set<K>` | — |
 | `.filter` / `.map` / `.fold` | yes | — (use `.keys`) | yes |
+| `.toSet()` / `.toList()` | `.toSet()` → `Set<T>` | — | `.toList()` → `List<T>` |
 
 ## `List<T>`
 
@@ -118,6 +119,21 @@ xs[1] := 99
 
 `xs.length` (intrinsic) or `length(xs)` from `julay.funlib.length`.
 
+### Conversion and uniqueness
+
+`xs.toSet()` is an **intrinsic** method (no import): `List<T>` → `Set<T>`, duplicates dropped.
+
+`allDistinct(xs)` (import `julay.funlib.allDistinct`) is `true` iff every element is unique, including the empty list. It short-circuits on the first duplicate and does not allocate a `Set`. Prefer it over `xs.length = xs.toSet().length`.
+
+```jul
+import julay.funlib.allDistinct
+import julay.funlib.listOf
+
+xs := listOf(1, 2, 2)
+s := xs.toSet()              // setOf(1, 2)
+ok := allDistinct(listOf(1, 2, 3))
+```
+
 ## `Map<K, V>`
 
 ### Literals
@@ -206,6 +222,8 @@ No indexing, splicing, or index assignment. Update only by whole reassignment.
 
 `s.length` / `length(s)`. Sets support `.filter` / `.map` / `.fold` (see below). **Set `.fold` iteration order is unspecified** — prefer `List` when order matters.
 
+`s.toList()` is an **intrinsic** method (no import): `Set<T>` → `List<T>`. **Order is unspecified** (same as set `.fold`). Use it for length, membership, or round-trip `s.toList().toSet() = s`; do not index the result if you need a portable order.
+
 ## Empty constructors and typing
 
 | Form | Needs |
@@ -263,12 +281,16 @@ Lambdas may close over outer variables (state, locals, action args in transit). 
 | `.filter(p)` | `List` / `Set` | unary pred → `Boolean` | same collection kind |
 | `.map(f)` | `List` / `Set` | unary → `U` | `List<U>` / `Set<U>` |
 | `.fold(init, f)` | `List` / `Set` | init + `(Acc, Elem) -> Acc` | type of `init` |
+| `.toSet()` | `List` | none | `Set<T>` (duplicates dropped) |
+| `.toList()` | `Set` | none | `List<T>` (order unspecified) |
 
 ```jul
 ys := xs.filter(i -> i >= 3)
 ts := s.map(x -> x + 1)
 n := xs.fold(0, (acc, x) -> acc + x)
 agree := mp.keys.filter(k -> mp[k] >= commitIndex)
+uniq := xs.toSet()
+ordered := s.toList()
 ```
 
 The function argument may also be a **named** unary `fun`:
@@ -284,14 +306,14 @@ Freestanding `map(xs, f)` from `julay.funlib.map` accepts a named fun or a lambd
 
 Higher-order calls that only depend on concrete process state are encoded by evaluating the Kotlin form and embedding the result in Z3 (so patterns like `mp.keys.filter(...).length` work in guards). Calls that depend on **symbolic action arguments** are rejected in guards.
 
-For **TLA+ / TLC**, list and set `.map` / `.filter` / `.length` are emitted (Julay list indexes already match TLA `Sequences`); `.fold` and map HOFs are not — see [Specifications — TLA+ translation limits](specifications.md#tla-translation-limits).
+For **TLA+ / TLC**, list and set `.map` / `.filter` / `.length` / `.toSet` / `.toList` are emitted (Julay list indexes already match TLA `Sequences`); `.fold` and map HOFs are not — see [Specifications — TLA+ translation limits](specifications.md#tla-translation-limits). `.toList` order is unspecified in TLC (`SetToSeq` via `CHOOSE`). `allDistinct(xs)` emits `Len(xs) = Cardinality(Range(xs))`.
 
 Runtime list/map indexing throws on out-of-bounds or missing keys. Symbolic map reads in guards may soft-default missing keys — do not rely on that for executable behavior; check `k in mp` first.
 
 ## See also
 
 - [Types and expressions](types-and-expressions.md)
-- [Standard library](standard-library.md) — funlib `listOf` / `setOf` / `mapOf` / `splice` / `length` / `map`
+- [Standard library](standard-library.md) — funlib `listOf` / `setOf` / `mapOf` / `splice` / `length` / `map` / `allDistinct`
 - [Reference](reference.md)
 - [List server example](../examples/list-server.md)
 - Regression coverage: [`regression/input/list/`](../../regression/input/list/), [`map/`](../../regression/input/map/), [`set/`](../../regression/input/set/), [`expr/`](../../regression/input/expr/)

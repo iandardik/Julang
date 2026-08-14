@@ -1,0 +1,5 @@
+source: regression/input/type-errors/alldistinct-on-set.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected argument of \"allDistinct\" to have a List type"
+  - "Found type errors; exiting."

@@ -1,0 +1,5 @@
+source: regression/input/type-errors/tolist-on-list.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Expected receiver of \"toList\" to have a Set type"
+  - "Found type errors; exiting."

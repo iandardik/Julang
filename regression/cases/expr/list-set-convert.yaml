@@ -1,0 +1,6 @@
+source: regression/input/expr/list-set-convert.jul
+programs:
+  - name: ConvertTest
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/expr-list-set-convert.stdout

@@ -1,0 +1,88 @@
+import julay.funlib.exitProgram
+import julay.funlib.println
+import julay.funlib.listOf
+import julay.funlib.setOf
+import julay.funlib.allDistinct
+
+proc ConvertTest {
+    var step : String
+    var xs : List<Int>
+    var s : Set<Int>
+    var ys : List<Int>
+    var emptyXs : List<Int>
+    var emptyS : Set<Int>
+    var round : Set<Int>
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            step := "convert"
+            xs := listOf(1, 2, 2)
+            s := setOf()
+            ys := listOf()
+            emptyXs := listOf()
+            emptyS := setOf()
+            round := setOf()
+            n := 0
+    }
+
+    internal transition doConvert() {
+        guard:
+            & step = "convert"
+            & xs.toSet().length = 2
+            & ~allDistinct(xs)
+            & allDistinct(emptyXs)
+        transit:
+            s := xs.toSet()
+            ys := setOf(1, 2).toList()
+            emptyS := emptyXs.toSet()
+            emptyXs := emptyS.toList()
+            round := setOf(3, 4).toList().toSet()
+            n := if (allDistinct(listOf(1, 2, 3))) 1 else 0
+            step := "printSetLen"
+    }
+
+    internal transition printlnSetLen(msg : String) {
+        guard:
+            & step = "printSetLen"
+            & s.length = 2
+            & emptyS.length = 0
+            & round = setOf(3, 4)
+            & msg = s.length + ""
+        transit:
+            step := "printListLen"
+        after:
+            println(msg)
+    }
+
+    internal transition printlnListLen(msg : String) {
+        guard:
+            & step = "printListLen"
+            & ys.length = 2
+            & emptyXs.length = 0
+            & msg = ys.length + ""
+        transit:
+            step := "printOk"
+        after:
+            println(msg)
+    }
+
+    internal transition printlnOk(msg : String) {
+        guard:
+            & step = "printOk"
+            & n = 1
+            & msg = n + ""
+        transit:
+            step := "done"
+        after:
+            println(msg)
+    }
+
+    internal transition exitSystem() {
+        guard: step = "done"
+        after:
+            exitProgram(0)
+    }
+}
+
+compile ConvertTest

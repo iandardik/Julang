@@ -107,7 +107,7 @@ x ==
 
 ### TLA+ translation (`error:`)
 
-`error:` arms still throw at runtime. TLA+ encodes the **negation** of each condition as an assumption conjunct **before** `\* … logic`, so the action is enabled only on the non-error path. Top-level `~in` / `~=` flip to `\in` / `=`; other conditions are wrapped with `~`. List membership uses a generated `Range` helper (`me \in Range(cluster)`). Constructors still cannot have `guard:`; `error:` is how constructor arguments are constrained in the spec.
+`error:` arms still throw at runtime. TLA+ encodes the **negation** of each condition as an assumption conjunct **before** `\* … logic`, so the action is enabled only on the non-error path. Top-level `~in` / `~=` / `~` flip to `\in` / `=` / the inner formula; other conditions are wrapped with `~`. List membership uses a generated `Range` helper (`me \in Range(cluster)`). Constructors still cannot have `guard:`; `error:` is how constructor arguments are constrained in the spec.
 
 ## See also
 
