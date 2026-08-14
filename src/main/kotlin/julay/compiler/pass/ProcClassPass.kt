@@ -6,6 +6,7 @@ import julay.compiler.decl.*
 
 fun ASTNode.procClassPass(procs: Set<String>): List<ProcClassDecl> = when (this) {
     is ProcClassNode -> procClassPassNode(procs)
+    is LeafSpecNode -> asProcClass().procClassPass(procs)
     else -> children.flatMap { it.procClassPass(procs) }
 }
 

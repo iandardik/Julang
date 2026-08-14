@@ -63,6 +63,117 @@ class AlphabetJsonTest {
     }
 
     @Test
+    fun specAliasAndLeafSpecTopLevelGraphShowsSyncEdges() {
+        // Mirrors input/raft/specs/protocol.jul: ClusterSpec := Protocol[n], Sys := ClusterSpec[n] || Net[n].
+        // Net is a leaf spec; omitting it from procClassPass left Sys with nodes but no edges.
+        val dir = Files.createTempDirectory("julay-leaf-spec-sync-graph")
+        val file = dir.resolve("main.jul")
+        file.writeText(
+            """
+            sort Node := { "n1", "n2" }
+
+            proc Protocol {
+                constructor initially(args : List<String>) { transit: }
+                transition requestVote() { transit: }
+                provider transition handleVote() { transit: }
+            }
+
+            spec Net[n : Node] {
+                constructor initially(args : List<String>) {}
+                transition requestVote() { transit: }
+                client transition handleVote() { transit: }
+            }
+
+            spec ClusterSpec := Protocol[n : Node]
+            spec Sys := with (n : Node) {
+                ClusterSpec[n] || Net[n]
+            }
+            compile Sys
+            """.trimIndent(),
+        )
+        val checked = prepareCheckedCompilation(file)
+        assertNotNull(checked)
+        val scope = resolveAnalyzeScope(
+            scopeNames = listOf("Sys"),
+            procDecls = checked.procDecls,
+            allPClassNames = checked.unit.allPClassNames,
+            allProcAliasNames = checked.unit.allProcNames,
+            librariesInUse = checked.librariesInUse,
+        )
+        assertNotNull(scope)
+        val json = buildAlphabetJsonDocument(
+            checked.ast as RootNode,
+            scope,
+            checked.librariesInUse,
+            checked.procDecls,
+        )
+        val graphIdx = json.indexOf("\"compositionGraph\"")
+        val externalIdx = json.indexOf("\"external\"")
+        assertTrue(graphIdx >= 0 && externalIdx > graphIdx, json)
+        val graphBlock = json.substring(graphIdx, externalIdx)
+        assertTrue(
+            graphBlock.contains("\"nodes\": [\"ClusterSpec\", \"Net\"]") ||
+                graphBlock.contains("\"nodes\": [\"Net\", \"ClusterSpec\"]"),
+            "Sys diagram should show ClusterSpec and Net:\n$graphBlock",
+        )
+        assertTrue(
+            graphBlock.contains("\"a\": \"ClusterSpec\"") || graphBlock.contains("\"b\": \"ClusterSpec\""),
+            graphBlock,
+        )
+        assertTrue(
+            graphBlock.contains("\"a\": \"Net\"") || graphBlock.contains("\"b\": \"Net\""),
+            graphBlock,
+        )
+        assertTrue(
+            graphBlock.contains("\"requestVote\""),
+            "ordinary sync requestVote must label the ClusterSpec—Net edge:\n$graphBlock",
+        )
+        assertTrue(
+            graphBlock.contains("\"handleVote\""),
+            "provider/client handleVote must label the ClusterSpec—Net edge:\n$graphBlock",
+        )
+
+        val hiddenIdx = json.indexOf("\"compositionHidden\"")
+        assertTrue(hiddenIdx >= 0, json)
+        val hiddenBlock = json.substring(hiddenIdx)
+        assertTrue(hiddenBlock.contains("\"name\": \"requestVote\""), hiddenBlock)
+        assertTrue(hiddenBlock.contains("\"name\": \"handleVote\""), hiddenBlock)
+    }
+
+    @Test
+    fun leafSpecScopeListsItsActions() {
+        val dir = Files.createTempDirectory("julay-leaf-spec-alphabet")
+        val file = dir.resolve("main.jul")
+        file.writeText(
+            """
+            sort Node := { "n1" }
+            spec Net[n : Node] {
+                constructor initially(args : List<String>) {}
+                transition requestVote() { transit: }
+            }
+            compile Net
+            """.trimIndent(),
+        )
+        val checked = prepareCheckedCompilation(file)
+        assertNotNull(checked)
+        val scope = resolveAnalyzeScope(
+            scopeNames = listOf("Net"),
+            procDecls = checked.procDecls,
+            allPClassNames = checked.unit.allPClassNames,
+            allProcAliasNames = checked.unit.allProcNames,
+            librariesInUse = checked.librariesInUse,
+        )
+        assertNotNull(scope)
+        val json = buildAlphabetJsonDocument(
+            checked.ast as RootNode,
+            scope,
+            checked.librariesInUse,
+            checked.procDecls,
+        )
+        assertTrue(json.contains("\"name\": \"requestVote\""), "leaf spec actions must appear:\n$json")
+    }
+
+    @Test
     fun nestedAssembliesGraphOnlyShowsTopLevelSync() {
         val dir = Files.createTempDirectory("julay-sync-graph")
         val file = dir.resolve("main.jul")
