@@ -122,7 +122,7 @@ system_atom
     ;
 
 global_decl
-    : GLOBAL ID (COMMA ID)*
+    : CONST? GLOBAL ID (COMMA ID)*
     ;
 
 system_primary

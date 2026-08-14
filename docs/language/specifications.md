@@ -97,7 +97,8 @@ Three roles:
 | Role | Syntax | Meaning |
 |------|--------|---------|
 | **Create index** | `Name[v : Type]` | Lift `Name`’s state to functions of a new index |
-| **Global vars** | `Name[v : T] { global x, y }` | Leave listed state vars **unindexed** (one TLA VARIABLE for all `v`) |
+| **Global vars** | `Name[v : T] { global x, y }` | Leave listed **var**s unindexed (one mutable TLA VARIABLE for all `v`) |
+| **Const-global vars** | `Name[v : T] { const global x }` | Leave listed **const**s unindexed and immutable in TLA+ |
 | **Shared binder** | `with (v : Type) { system }` | Scope where `v` may be applied; one `\E v` for the group |
 | **Apply index** | `Name[v]` | Use binder `v` from an enclosing `with` (no type). Does not create an index |
 
@@ -107,7 +108,7 @@ Hard rule: inside `with`, **create-index `Name[n : T]` is illegal** — create o
 spec PeerIndexed := Peer[n : NodeSet]          // create (lift state)
 
 spec ClusterSpec := RaftProtocol[n : NodeSet] {
-  global cluster
+  const global cluster
 }
 
 spec Sys := with (n : NodeSet) {
@@ -115,9 +116,34 @@ spec Sys := with (n : NodeSet) {
 }
 ```
 
-**`global` is model state only.** TLA+ emits listed variables as scalars (not functions of the index): Init / TypeOK / reads / writes omit `[n]`, and `Peer[i].cluster` in an invariant becomes the unindexed `RaftProtocol_cluster`. JAR codegen is unchanged — each runtime instance still has its own copy; this is not shared memory.
+**`global` / `const global` are model state only.** TLA+ emits listed variables as scalars (not functions of the index): TypeOK / reads omit `[n]`, and `Peer[i].cluster` in an invariant becomes the unindexed `RaftProtocol_cluster`. JAR codegen is unchanged — each runtime instance still has its own copy; this is not shared memory.
 
-`global` takes a comma-separated list (`global cluster, extra`). Unknown names, duplicates, and synthetic bookkeeping vars (`constructed` / `killed` / `terminated`) are compile errors. On shorthand `(A || B)[n : T] { global cluster }`, each name applies to every child that declares it.
+Do **not** infer immutability from a proc `const` plus `{ global x }`. The create-index block must say `const global x` explicitly. Mixed decls are allowed:
+
+```jul
+Peer[n : Node] {
+    const global cluster
+    global extra
+}
+```
+
+`const global a, b` marks every name on that line const-global. Only `const` before `global` is legal (`global const x` is not).
+
+**Mismatch is a compile error** (reported at the `global` / `const global` line):
+
+- `{ global cluster }` when the proc has `const cluster`: `"cluster" may change without declaring it "const global cluster", …`
+- `{ const global cluster }` when the proc has `var cluster`: it is a `var`, so drop `const` or declare `const cluster` on the proc.
+
+Unknown names, duplicates, and synthetic bookkeeping vars (`constructed` / `killed` / `terminated`) are also compile errors. On shorthand `(A || B)[n : T] { global cluster }`, each name applies to every child that declares it.
+
+**TLA+ for `const global` (not plain `global`):**
+
+- **Init** uses `/\ cluster \in <enumerable TLC domain>` (e.g. `BoundedSeq(Int, MaxListLen)` for `List<Node>`) instead of `= default`. TypeOK still uses `Seq(...)` so membership stays pointwise.
+- Constructors never prime the variable (`UNCHANGED` includes it).
+- A write whose RHS is an action-arg symbol is elided: that arg is dropped from the action/`\E`, and remaining references use the TLA state name (`cluster` → `RaftProtocol_cluster`). So `startRaftCore(n, me, cluster)` becomes `startRaftCore(n, me)` and `me \in Range(cluster)` becomes `me \in Range(RaftProtocol_cluster)`.
+- Any other write is an unprimed equality check: `/\ RaftProtocol_cluster = <rhs> \* global const check` (IO havoc: `v \in domain`).
+
+Plain `global extra` (a `var`) is unchanged: Init default, primed writes, scalar (unindexed).
 
 **Shorthand** `(A || B)[n : T]` means the same as create-temps + `with` + applies:
 
@@ -225,8 +251,8 @@ See also [Collections](collections.md).
 - Julay `when` becomes TLA `CASE` with `[]` arms and `OTHER` for the trailing else.
 - Invariants preserve multi-line structure (boolean trees). Consecutive `\A` / `\E` binders over the same domain are condensed like Next (`\A n1, n2 \in NodeSet`). Parentheses written in the `.jul` source are kept; other parentheses are omitted when operator precedence makes them unnecessary.
 - `initially` constructors (`initially` / `*_initially`) are emitted first after `Init`, both as operator definitions and as the leading disjuncts of `Next`. Consecutive `\E` binders in `Next` over the same domain are written `\E n, m \in NodeSet`.
-- Two blank lines separate funs/helpers from `\* system definition`, then a blank line before `Init`. After `Spec == Init /\ [][Next]_vars`, two blank lines precede `\* Invariants`. A blank line precedes the closing `====`. Automatically generated operators (`TypeOKInt`, `TypeOK`, and `SessionIntegrity` when present) sit under `\* automatically generated invariants`; named and inline guarantees sit under `\* user-specified invariants`. `TypeOK` is listed first in the `.cfg`. `TypeOKInt == Int \cup Nat \cup {lo..hi}` unions cfg `Int` (a finite non-negative `\E` bound that cannot include negatives), `Nat` (so `x := x + 1` counters stay in-type when `Nat` is not overridden), and every integer from the lowest negative literal through `max(highest literal, MaxListLen+1)`. List vars use `Seq(S)` rather than `BoundedSeq` so membership stays pointwise.
-- `BoundedSeq` and `Range` are emitted under `\* TLA+ helpers` (above `\* Julay lib funs`). Julay `fun`s referenced from Init/action guards or transit RHS (and their transitive callees) are emitted as TLA+ operators immediately above `Init`, grouped under `\* Julay lib funs` (stdlib funlib) or `\* user defined funs`. Operator parameters that collide with `VARIABLES` / `CONSTANT`s / other module operators are renamed (`p_…`).
+- Two blank lines separate funs/helpers from `\* system definition`, then a blank line before `Init`. After `Spec == Init /\ [][Next]_vars`, two blank lines precede `\* Invariants`. A blank line precedes the closing `====`. Automatically generated operators (`TypeOK`, and `SessionIntegrity` when present) sit under `\* automatically generated invariants`; named and inline guarantees sit under `\* user-specified invariants`. `TypeOK` is listed first in the `.cfg`. `TypeOKInt == Int \cup Nat \cup {lo..hi}` is emitted under `\* TLA+ helpers` (before Init). It unions cfg `Int` (a finite non-negative `\E` bound that cannot include negatives), `Nat` (so `x := x + 1` counters stay in-type when `Nat` is not overridden), and every integer from the lowest negative literal through `max(highest literal, MaxListLen+1)`. List vars use `Seq(S)` rather than `BoundedSeq` so membership stays pointwise.
+- `TypeOKInt`, `BoundedSeq`, and `Range` are emitted under `\* TLA+ helpers` (above `\* Julay lib funs`). Julay `fun`s referenced from Init/action guards or transit RHS (and their transitive callees) are emitted as TLA+ operators immediately above `Init`, grouped under `\* Julay lib funs` (stdlib funlib) or `\* user defined funs`. Operator parameters that collide with `VARIABLES` / `CONSTANT`s / other module operators are renamed (`p_…`).
 - `splice(xs, a, b)` becomes a call to a module-level `splice` operator (defined above `Init` under `\* Julay lib funs` when any call is used); splice params/binders are clash-renamed like fun params.
 - `startsWith` becomes a module-level helper (same Julay-lib section) when used.
 

@@ -741,7 +741,7 @@ class SpecTlaTlcSmokeTest {
                 tlaText.contains("TypeOKInt == Int \\cup Nat \\cup {") &&
                 tlaText.contains("-1") &&
                 Regex("""\\* cfg Int[^\n]+\nTypeOKInt ==""").containsMatchIn(tlaText),
-            "TypeOKInt should union Int, Nat, and extras including -1;\n${tlaText.substringAfter("automatically generated").take(2500)}",
+            "TypeOKInt should union Int, Nat, and extras including -1;\n${tlaText.substringAfter("TLA+ helpers").take(2500)}",
         )
         assertTrue(
             !Regex("""LET nextLogIndex ==[^\n]* IN\s+LET prevLogIndex""").containsMatchIn(tlaText) &&
@@ -852,10 +852,11 @@ class SpecTlaTlcSmokeTest {
                     "Spec == Init /\\ [][Next]_vars\n\n\n\\* Invariants\n\n" +
                         "\\* automatically generated invariants\n\n",
                 ) &&
+                    tlaText.contains("\\* TLA+ helpers") &&
                     Regex("""\\* cfg Int[^\n]+\nTypeOKInt == Int \\cup Nat \\cup \{""").containsMatchIn(tlaText) &&
                     tlaText.contains("TypeOKInt == Int \\cup Nat \\cup {") &&
-                    Regex("""TypeOKInt ==[^\n]+\n\nTypeOK ==""").containsMatchIn(tlaText),
-                "Invariants section layout after Spec, with TypeOKInt then TypeOK;\n$tlaText",
+                    Regex("""\\* automatically generated invariants\n\nTypeOK ==""").containsMatchIn(tlaText),
+                "TypeOKInt under TLA+ helpers; TypeOK under automatically generated invariants;\n$tlaText",
             )
             assertTrue(
                 tlaText.contains("currentTerm \\in [NodeSet -> TypeOKInt]"),
@@ -1826,12 +1827,13 @@ class SpecTlaTlcSmokeTest {
             assertTrue(cfg.exists(), "expected Indexed.cfg")
             val tlaText = tla.readText()
             assertTrue(
-                tlaText.contains("/\\ Peer_cluster = <<>>"),
-                "expected scalar Init for global cluster;\n$tlaText",
+                tlaText.contains("/\\ Peer_cluster \\in BoundedSeq("),
+                "expected const-global Init as \\\\in BoundedSeq (enumerable);\n$tlaText",
             )
             assertTrue(
-                !tlaText.contains("Peer_cluster = [n \\in"),
-                "global cluster must not be a function of n;\n$tlaText",
+                !tlaText.contains("Peer_cluster = [n \\in") &&
+                    !tlaText.contains("/\\ Peer_cluster = <<>>"),
+                "global cluster must not be a function of n or default Init;\n$tlaText",
             )
             assertTrue(
                 tlaText.contains("/\\ extra = 0"),
@@ -1842,9 +1844,14 @@ class SpecTlaTlcSmokeTest {
                 "expected indexed Init for per-instance state;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("Peer_cluster' = cluster") &&
-                    !tlaText.contains("Peer_cluster' = [Peer_cluster EXCEPT ![n]"),
-                "expected scalar cluster assign;\n$tlaText",
+                !tlaText.contains("Peer_cluster' =") &&
+                    !tlaText.contains("Peer_cluster'"),
+                "const-global cluster must not be primed;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("start(n, me) ==") &&
+                    !tlaText.contains("start(n, me, cluster)"),
+                "expected cluster arg elided from start;\n$tlaText",
             )
             assertTrue(
                 tlaText.contains("extra' = extra + 1") ||
@@ -1870,16 +1877,20 @@ class SpecTlaTlcSmokeTest {
             )
             assertTrue(
                 tlaText.contains("\\* Peer constructor assumption") &&
-                    tlaText.contains("me \\in Range(cluster)") &&
+                    tlaText.contains("me \\in Range(Peer_cluster)") &&
                     rangeHelperUnderTlaHelpers(tlaText),
-                "expected flipped ~in error assumption as Range membership;\n$tlaText",
+                "expected flipped ~in error assumption as Range membership on state var;\n$tlaText",
             )
-            val startDef = tlaText.substringAfter("start(n, me, cluster) ==").substringBefore("\n\n")
+            val startDef = tlaText.substringAfter("start(n, me) ==").substringBefore("\n\n")
             assertTrue(
                 startDef.contains("constructor assumption") &&
                     startDef.indexOf("constructor assumption") <
                     startDef.indexOf("constructor logic"),
                 "assumption section must precede constructor logic;\n$tlaText",
+            )
+            assertTrue(
+                startDef.contains("UNCHANGED") && startDef.contains("Peer_cluster"),
+                "const-global cluster must stay in UNCHANGED;\n$startDef",
             )
             tla.copyTo(File(work, "Indexed.tla"), overwrite = true)
             cfg.copyTo(File(work, "Indexed.cfg"), overwrite = true)
@@ -1890,6 +1901,42 @@ class SpecTlaTlcSmokeTest {
             work.deleteRecursively()
             File("Indexed.tla").delete()
             File("Indexed.cfg").delete()
+        }
+    }
+
+    @Test
+    fun constGlobalAssignEmitsEqualityCheck() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-const-global-check").toFile()
+        try {
+            val source = File("regression/input/spec/const-global-check.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("ConstCheck.tla")
+            val cfg = File("ConstCheck.cfg")
+            assertTrue(tla.exists(), "expected ConstCheck.tla")
+            val tlaText = tla.readText()
+            assertTrue(
+                tlaText.contains("/\\ cluster \\in BoundedSeq(") ||
+                    tlaText.contains("/\\ Peer_cluster \\in BoundedSeq("),
+                "expected const-global Init as \\\\in BoundedSeq (enumerable);\n$tlaText",
+            )
+            assertTrue(
+                (tlaText.contains("/\\ cluster = <<\"a\">> \\* global const check") ||
+                    tlaText.contains("/\\ Peer_cluster = <<\"a\">> \\* global const check")) &&
+                    !tlaText.contains("cluster'") &&
+                    !tlaText.contains("Peer_cluster'"),
+                "expected unprimed equality check for non-arg RHS;\n$tlaText",
+            )
+            tla.copyTo(File(work, "ConstCheck.tla"), overwrite = true)
+            cfg.copyTo(File(work, "ConstCheck.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "ConstCheck")
+        } finally {
+            work.deleteRecursively()
+            File("ConstCheck.tla").delete()
+            File("ConstCheck.cfg").delete()
         }
     }
 

@@ -48,11 +48,12 @@ spec Name := <Assume> System <Guarantee>
 spec Name := System |= Guarantee
 spec Name := System
 spec Name := with (v : T) { System }       // shared apply-binder scope
-spec Name := System[v : T] { global x, y } // create-index; x, y unindexed in TLA+ (model-only)
+spec Name := System[v : T] { const global x } // create-index; x unindexed & immutable in TLA+
+spec Name := System[v : T] { global y }       // create-index; y unindexed (mutable) in TLA+
 compile Name1, Name2, ...
 ```
 
-System atoms: `Name[v : T]` **creates** an index (lifts state); `{ global x, y }` on create-index leaves those vars scalar in TLA+ (does not affect JAR). Inside `with`, only `Name[v]` **applies** a shared binder. Shorthand `(A || B)[n : T]` desugars to create-temps + `with` + applies — see [Specifications](specifications.md#indexes-create-with-and-apply).
+System atoms: `Name[v : T]` **creates** an index (lifts state); `{ const global x }` / `{ global y }` on create-index leave those vars scalar in TLA+ (`const global` also freezes them; does not affect JAR). Inside `with`, only `Name[v]` **applies** a shared binder. Shorthand `(A || B)[n : T]` desugars to create-temps + `with` + applies — see [Specifications](specifications.md#indexes-create-with-and-apply).
 
 Leaf-spec actions: `transition name(args) also (aux : T) { … }` (leaf specs only). Bodies may read peer state `P.var` / `P[idx].var` (compile checks composition + indexing).
 

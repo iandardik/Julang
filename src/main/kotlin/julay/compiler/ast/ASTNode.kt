@@ -262,26 +262,40 @@ class AgSpecExprNode(
     }
 }
 
+/** Create-index `{ global x }` / `{ const global x }` names with source location. */
+data class GlobalDeclNames(
+    val names: List<String>,
+    val isConst: Boolean,
+    val loc: ProgramLoc,
+)
+
 class ParamProcExprNode(
     private val body: ASTNode,
     private val paramName: String,
     /** Null when this is an apply-index `Name[n]` (type comes from enclosing `with`). */
     private val paramType: TypeExpr?,
     private val loc: ProgramLoc,
-    /** Create-index `global x, y` names; empty for apply-index. */
-    private val globalVars: List<String> = emptyList(),
+    /** Create-index `global` / `const global` decls; empty for apply-index. */
+    private val globalDecls: List<GlobalDeclNames> = emptyList(),
 ) : ASTNode(listOf(body)) {
     override fun programLocation() = loc
     internal fun paramBody() = body
     internal fun paramName() = paramName
     internal fun paramType(): TypeExpr? = paramType
     internal fun isApplyIndex(): Boolean = paramType == null
-    internal fun globalVarNames(): List<String> = globalVars
+    internal fun globalDecls(): List<GlobalDeclNames> = globalDecls
+    internal fun globalVarNames(): List<String> = globalDecls.flatMap { it.names }
+    internal fun globalConstVarNames(): List<String> =
+        globalDecls.filter { it.isConst }.flatMap { it.names }
     override fun toString(): String {
         val index = if (paramType == null) "$body[$paramName]" else "$body[$paramName : $paramType]"
-        if (globalVars.isEmpty()) return index
-        val names = globalVars.joinToString(", ")
-        return "$index {\n  global $names\n}"
+        if (globalDecls.isEmpty()) return index
+        val lines = globalDecls.joinToString("\n") { decl ->
+            val names = decl.names.joinToString(", ")
+            val kw = if (decl.isConst) "const global" else "global"
+            "  $kw $names"
+        }
+        return "$index {\n$lines\n}"
     }
 }
 

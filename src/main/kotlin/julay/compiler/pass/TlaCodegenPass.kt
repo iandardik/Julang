@@ -255,6 +255,7 @@ private fun emitProjectedTla(
     collectActionArgDomainModels(emittedOffers, pclassesForTla, cfgOverrides)
     collectIoHavocDomainModels(emittedOffers, cfgOverrides)
     collectTypeOkDomainModels(leaves, pclassesForTla, cfgOverrides)
+    collectConstGlobalInitDomainModels(leaves, pclassesForTla, cfgOverrides)
     havocSites.forEach { site ->
         if (site.assignVars.isNotEmpty() &&
             site.assignVars.none { TlaVarProjection.get().isRelevant(site.hostName, it) }
@@ -350,6 +351,10 @@ private fun emitProjectedTla(
                 if (leaf.indexesState(vn.name)) {
                     initParts += "/\\ $v = [$binder \\in $domain |-> ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}]"
                     typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange), domain)
+                } else if (vn.name in leaf.globalConstVars) {
+                    // TypeOK uses Seq/TypeOKInt (not enumerable). Init must be a finite TLC set.
+                    initParts += "/\\ $v \\in ${typeToTlaDomain(safeType(vn))}"
+                    typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange), null)
                 } else {
                     initParts += "/\\ $v = ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
                     typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange), null)
@@ -505,16 +510,16 @@ private fun emitProjectedTla(
         append(varsLine)
         appendLine("vars == $varsTuple")
         appendLine()
-        if (needsBoundedSeq || needsRangeOperator) {
-            appendLine("\\* TLA+ helpers")
-            if (needsBoundedSeq) {
-                appendLine("BoundedSeq(S, N) == UNION { [1..k -> S] : k \\in 0..N }")
-                appendLine()
-            }
-            if (needsRangeOperator) {
-                appendLine(rangeOperatorDef!!)
-                appendLine()
-            }
+        appendLine("\\* TLA+ helpers")
+        appendLine(typeOkIntDef)
+        appendLine()
+        if (needsBoundedSeq) {
+            appendLine("BoundedSeq(S, N) == UNION { [1..k -> S] : k \\in 0..N }")
+            appendLine()
+        }
+        if (needsRangeOperator) {
+            appendLine(rangeOperatorDef!!)
+            appendLine()
         }
         if (hasJulayLibFuns) {
             appendLine("\\* Julay lib funs")
@@ -572,8 +577,6 @@ private fun emitProjectedTla(
         appendLine("\\* Invariants")
         appendLine()
         appendLine("\\* automatically generated invariants")
-        appendLine()
-        appendLine(typeOkIntDef)
         appendLine()
         appendLine(typeOkDef)
         if (sessionIntegrityDef != null) {
@@ -1033,6 +1036,26 @@ private fun collectTypeOkDomainModels(
         val pc = pclasses[leaf.name] ?: return@forEach
         pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
             if (TlaVarProjection.get().isRelevant(leaf.name, vn.name)) walk(safeType(vn))
+        }
+    }
+}
+
+/** Finite TLC models for const-global Init (`BoundedSeq` / cfg Int), not TypeOK's `Seq`. */
+private fun collectConstGlobalInitDomainModels(
+    leaves: List<SpecLeaf>,
+    pclasses: Map<String, ProcClassNode>,
+    cfgOverrides: MutableSet<String>,
+) {
+    leaves.forEach { leaf ->
+        if (leaf.globalConstVars.isEmpty()) return@forEach
+        val pc = pclasses[leaf.name] ?: return@forEach
+        pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
+            if (vn.name !in leaf.globalConstVars) return@forEach
+            if (!TlaVarProjection.get().isRelevant(leaf.name, vn.name)) return@forEach
+            try {
+                collectDomainModelNames(safeType(vn), cfgOverrides)
+            } catch (_: RuntimeException) {
+            }
         }
     }
 }
@@ -1716,6 +1739,8 @@ private fun emitConjoined(
     }
     usedArgNames += bindNames
 
+    val constGlobalArgBinds = collectGlobalConstArgBinds(offers, stateVarNames)
+
     // Instance binders for parameterized leaves: paramName indexes into the type domain.
     val selfBinders = linkedMapOf<String, String>() // leafName -> binder
     val sharedWithBinders = linkedMapOf<String, String>() // withScopeId -> binder
@@ -1788,6 +1813,7 @@ private fun emitConjoined(
             expr, leafCtx, names, self,
             bareStateVars = stateVarsByLeaf[offer.leaf.tlaName].orEmpty(),
             stateVarNames = stateVarNames,
+            symbolOverrides = constGlobalArgBinds,
             linePrefix = linePrefix,
         )
     }
@@ -1831,7 +1857,7 @@ private fun emitConjoined(
                 expr, leafCtx, effectiveArgNames(), self,
                 bareStateVars = bare,
                 stateVarNames = stateVarNames,
-                symbolOverrides = letOverrides.toMap(),
+                symbolOverrides = constGlobalArgBinds + letOverrides.toMap(),
                 linePrefix = linePrefix,
             )
 
@@ -1862,17 +1888,30 @@ private fun emitConjoined(
                     }
                     val root = update.key.substringBefore('.')
                     val v = stateTlaName(offer.leaf.tlaName, root, stateVarNames)
-                    targetChanged += v
+                    val constGlobal = root in offer.leaf.globalConstVars
+                    if (!constGlobal) {
+                        targetChanged += v
+                    }
                     val expr = update.expr
+                    val argNames = offer.decl.action.args.map { it.name }.toSet()
+                    if (constGlobal && isActionArgSymbol(expr, argNames)) {
+                        return@forEach
+                    }
                     if (exprContainsIoHavoc(expr)) {
                         val domain = typeToTlaDomain(expr.getType())
                         addAssignPart(
-                            if (indexes(root)) {
+                            if (constGlobal) {
+                                "/\\ $v \\in $domain \\* global const check"
+                            } else if (indexes(root)) {
                                 "/\\ \\E __io \\in $domain: $v' = [$v EXCEPT ![$self] = __io]"
                             } else {
                                 "/\\ $v' \\in $domain"
                             },
                         )
+                    } else if (constGlobal) {
+                        val assignPrefix = "/\\ $v = "
+                        val rhs = emitExpr(expr, assignPrefix)
+                        addAssignPart("/\\ $v = $rhs \\* global const check")
                     } else {
                         val assignPrefix = if (indexes(root)) {
                             "/\\ $v' = [$v EXCEPT ![$self] = "
@@ -1894,17 +1933,30 @@ private fun emitConjoined(
                         return@forEach
                     }
                     val v = stateTlaName(offer.leaf.tlaName, update.collectionVar, stateVarNames)
-                    targetChanged += v
+                    val constGlobal = update.collectionVar in offer.leaf.globalConstVars
+                    if (!constGlobal) {
+                        targetChanged += v
+                    }
+                    val argNames = offer.decl.action.args.map { it.name }.toSet()
+                    if (constGlobal && isActionArgSymbol(update.value, argNames)) {
+                        return@forEach
+                    }
                     val k = emitExpr(update.index, "")
                     if (exprContainsIoHavoc(update.value)) {
                         val domain = typeToTlaDomain(update.value.getType())
                         addAssignPart(
-                            if (indexes(update.collectionVar)) {
+                            if (constGlobal) {
+                                "/\\ \\E __io \\in $domain: $v = [$v EXCEPT ![$k] = __io] \\* global const check"
+                            } else if (indexes(update.collectionVar)) {
                                 "/\\ \\E __io \\in $domain: $v' = [$v EXCEPT ![$self] = [@ EXCEPT ![$k] = __io]]"
                             } else {
                                 "/\\ \\E __io \\in $domain: $v' = [$v EXCEPT ![$k] = __io]"
                             },
                         )
+                    } else if (constGlobal) {
+                        val putPrefix = "/\\ $v = [$v EXCEPT ![$k] = "
+                        val vv = emitExpr(update.value, putPrefix)
+                        addAssignPart("/\\ $v = [$v EXCEPT ![$k] = $vv] \\* global const check")
                     } else {
                         val putPrefix = if (indexes(update.collectionVar)) {
                             "/\\ $v' = [$v EXCEPT ![$self] = [@ EXCEPT ![$k] = "
@@ -1984,6 +2036,7 @@ private fun emitConjoined(
                     assumed, leafCtx, argNames, self,
                     bareStateVars = bare,
                     stateVarNames = stateVarNames,
+                    symbolOverrides = constGlobalArgBinds,
                     linePrefix = "/\\ ",
                 )}"
             }
@@ -2012,6 +2065,7 @@ private fun emitConjoined(
         // Only include args that appear in guards/transits (skip unused initially args).
         offer.decl.action.args.filter { offerRefsArg(offer, it.name) }.forEach { arg ->
             if (arg.name in bindPlan.omitArgTypeDomains()) return@forEach
+            if (arg.name in constGlobalArgBinds) return@forEach
             val lit = argLiteralDomain(offers, arg.name, arg.type)
             argParams += arg.name to (lit ?: typeToTlaDomain(arg.type))
         }
@@ -2024,6 +2078,7 @@ private fun emitConjoined(
                     conjunct, leafCtx, argNames, self,
                     bareStateVars = stateVarsByLeaf[offer.leaf.tlaName].orEmpty(),
                     stateVarNames = stateVarNames,
+                    symbolOverrides = constGlobalArgBinds,
                     linePrefix = "/\\ ",
                 )}"
             }
@@ -2150,6 +2205,7 @@ private fun emitConjoined(
         }
     }
     bindPlan.determined.forEach { (arg, expr) ->
+        if (arg in constGlobalArgBinds) return@forEach
         letBindings += arg to emitBound(expr, "      $arg == ")
     }
     val body = wrapTlaLet(letBindings, innerBody)
@@ -3379,6 +3435,35 @@ internal fun unwrapParens(expr: ExprNode): ExprNode {
     var e = expr
     while (e is ParenExprNode) e = e.innerExpr()
     return e
+}
+
+internal fun isActionArgSymbol(expr: ExprNode, argNames: Set<String>): Boolean {
+    val inner = unwrapParens(expr)
+    return inner is SymbolValueExprNode && inner.symbol in argNames
+}
+
+/**
+ * Const-global assigns `x := arg` determine [arg] as the TLA state variable, so the action
+ * drops that `\E` parameter and rewrites remaining references to the state name.
+ */
+internal fun collectGlobalConstArgBinds(
+    offers: List<TlaActionOffer>,
+    stateVarNames: Map<Pair<String, String>, String>,
+): Map<String, String> {
+    val out = linkedMapOf<String, String>()
+    offers.forEach { offer ->
+        val argNames = offer.decl.action.args.map { it.name }.toSet()
+        offer.decl.transits.forEach { update ->
+            if (update !is TransitUpdate.Assign) return@forEach
+            val root = update.transitRootVar()
+            if (root !in offer.leaf.globalConstVars) return@forEach
+            val rhs = unwrapParens(update.expr)
+            if (rhs is SymbolValueExprNode && rhs.symbol in argNames) {
+                out[rhs.symbol] = stateTlaName(offer.leaf.tlaName, root, stateVarNames)
+            }
+        }
+    }
+    return out
 }
 
 /** Negate an `error:` condition for a TLA assumption: flip top-level `~in` / `~=` (`#`), else wrap with `~`. */

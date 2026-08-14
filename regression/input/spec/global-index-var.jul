@@ -27,7 +27,8 @@ invariant All := forall i : Node,
     Peer[i].extra >= 0 & (Peer[i].state = "busy" | Peer[i].state = "idle") & Peer[i].cluster = Peer[i].cluster
 
 spec Indexed := Peer[n : Node] {
-  global cluster, extra
+  const global cluster
+  global extra
 } |= All
 
 compile Indexed

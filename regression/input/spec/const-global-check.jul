@@ -1,0 +1,22 @@
+import julay.funlib.listOf
+
+sort Node := {"n1"}
+
+proc Peer {
+    const cluster : List<String>
+    var state : String
+
+    constructor start(me : String) {
+        transit:
+            cluster := listOf("a")
+            state := "idle"
+        error:
+            (me ~in cluster) -> "not in cluster"
+    }
+}
+
+spec ConstCheck := Peer[n : Node] {
+  const global cluster
+}
+
+compile ConstCheck

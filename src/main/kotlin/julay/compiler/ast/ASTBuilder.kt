@@ -322,10 +322,14 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             ctx.COLON() != null -> {
                 val paramName = ctx.ID().text
                 val paramType = parseTypeExpr(ctx.typeExpr())
-                val globalVars = ctx.global_decl().flatMap { decl ->
-                    decl.ID().map { it.text }
+                val globalDecls = ctx.global_decl().map { decl ->
+                    GlobalDeclNames(
+                        names = decl.ID().map { it.text },
+                        isConst = decl.CONST() != null,
+                        loc = sourceLocation(decl),
+                    )
                 }
-                ParamProcExprNode(primary, paramName, paramType, sourceLocation(ctx), globalVars)
+                ParamProcExprNode(primary, paramName, paramType, sourceLocation(ctx), globalDecls)
             }
             ctx.LBRACK() != null -> {
                 val paramName = ctx.ID().text

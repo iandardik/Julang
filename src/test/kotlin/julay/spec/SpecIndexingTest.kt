@@ -184,6 +184,71 @@ class SpecIndexingTest {
         )
     }
 
+    @Test
+    fun plainGlobalOnConstIsError() {
+        val result = typeCheck(
+            """
+            sort N := {"a"}
+            proc Worker {
+                const cluster : List<String>
+                constructor initially(args : List<String>) { transit: cluster := args }
+            }
+            spec Bad := Worker[i : N] {
+              global cluster
+            }
+            """.trimIndent(),
+        )
+        assertTrue(
+            result.errors.any {
+                it.toString().contains(
+                    "\"cluster\" may change without declaring it \"const global cluster\", so either make it \"const global cluster\" or change the state var to be \"var cluster\" instead of \"const cluster\"",
+                )
+            },
+            result.toString(),
+        )
+    }
+
+    @Test
+    fun constGlobalOnVarIsError() {
+        val result = typeCheck(
+            """
+            sort N := {"a"}
+            proc Worker {
+                var cluster : List<String>
+                constructor initially(args : List<String>) { transit: cluster := args }
+            }
+            spec Bad := Worker[i : N] {
+              const global cluster
+            }
+            """.trimIndent(),
+        )
+        assertTrue(
+            result.errors.any {
+                it.toString().contains("\"cluster\" is a var") &&
+                    it.toString().contains("drop \"const\"") &&
+                    it.toString().contains("const cluster")
+            },
+            result.toString(),
+        )
+    }
+
+    @Test
+    fun constGlobalOnConstIsOk() {
+        val result = typeCheck(
+            """
+            sort N := {"a"}
+            proc Worker {
+                const cluster : List<String>
+                constructor initially(args : List<String>) { transit: cluster := args }
+            }
+            spec Ok := Worker[i : N] {
+              const global cluster
+            }
+            """.trimIndent(),
+        )
+        assertTrue(result.errors.isEmpty(), result.toString())
+    }
+
     private fun typeCheck(source: String, allowUnindexedSpec: Boolean = false): TypePassResult {
         val dir = Files.createTempDirectory("julay-spec-indexing")
         val file = dir.resolve("main.jul")

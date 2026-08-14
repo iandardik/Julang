@@ -24,10 +24,15 @@ data class SpecLeaf(
      */
     val withScopeId: String? = null,
     /**
-     * Create-index `global` state vars: emitted as scalar TLA VARIABLES (not functions of the index).
-     * Model-only; does not affect JAR codegen.
+     * Create-index `global` / `const global` state vars: emitted as scalar TLA VARIABLES
+     * (not functions of the index). Model-only; does not affect JAR codegen.
      */
     val globalVars: Set<String> = emptySet(),
+    /**
+     * Subset of [globalVars] listed as `const global`: Init is unconstrained (`\\in` TypeOK),
+     * constructors never prime the variable.
+     */
+    val globalConstVars: Set<String> = emptySet(),
 ) {
     val isParameterized: Boolean get() = paramName != null && paramType != null
     /** True when this leaf is create-indexed and [varName] is not a `global` model var. */
@@ -88,8 +93,16 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
             is ParamProcExprNode -> {
                 val paramName = n.paramName()
                 val globals = n.globalVarNames().toSet()
+                val constGlobals = n.globalConstVarNames().toSet()
                 fun withGlobals(child: SpecLeaf): SpecLeaf =
-                    if (globals.isEmpty()) child else child.copy(globalVars = child.globalVars + globals)
+                    if (globals.isEmpty()) {
+                        child
+                    } else {
+                        child.copy(
+                            globalVars = child.globalVars + globals,
+                            globalConstVars = child.globalConstVars + constGlobals,
+                        )
+                    }
                 when {
                     n.isApplyIndex() -> {
                         // Apply: share binder / with-scope only. Do not lift unindexed state.
@@ -208,6 +221,7 @@ fun expandLeavesToPclasses(
         var c = child.copy(
             withScopeId = outer.withScopeId ?: child.withScopeId,
             globalVars = child.globalVars + outer.globalVars,
+            globalConstVars = child.globalConstVars + outer.globalConstVars,
         )
         when {
             outer.isParameterized && !c.isParameterized ->
@@ -238,7 +252,10 @@ fun expandLeavesToPclasses(
         if (leaf.globalVars.isEmpty()) return leaf
         val declared = declaredStateNames(leaf.name)
         if (declared.isEmpty()) return leaf
-        return leaf.copy(globalVars = leaf.globalVars.intersect(declared))
+        return leaf.copy(
+            globalVars = leaf.globalVars.intersect(declared),
+            globalConstVars = leaf.globalConstVars.intersect(declared),
+        )
     }
 
     fun expand(leaf: SpecLeaf) {

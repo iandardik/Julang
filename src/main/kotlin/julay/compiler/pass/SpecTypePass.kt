@@ -230,14 +230,20 @@ private fun typePassSpec(
 
 private val SYNTHETIC_GLOBAL_NAMES = setOf("constructed", "killed", "terminated")
 
+private fun declaredStateVars(
+    leafName: String,
+    pclassNodes: Map<String, ProcClassNode>,
+    leafSpecNodes: Map<String, LeafSpecNode>,
+): Map<String, VarNode> {
+    val pc = pclassNodes[leafName] ?: leafSpecNodes[leafName]?.asProcClass() ?: return emptyMap()
+    return pc.localDecls().filterIsInstance<VarNode>().associateBy { it.name }
+}
+
 private fun declaredStateNames(
     leafName: String,
     pclassNodes: Map<String, ProcClassNode>,
     leafSpecNodes: Map<String, LeafSpecNode>,
-): Set<String> {
-    val pc = pclassNodes[leafName] ?: leafSpecNodes[leafName]?.asProcClass() ?: return emptySet()
-    return pc.localDecls().filterIsInstance<VarNode>().map { it.name }.toSet()
-}
+): Set<String> = declaredStateVars(leafName, pclassNodes, leafSpecNodes).keys
 
 private fun globalDeclErrors(
     node: ASTNode,
@@ -285,6 +291,26 @@ private fun globalDeclErrors(
                             n.programLocation(),
                             "global \"$name\" is not a state variable of any indexed leaf in this spec",
                         )
+                    }
+                }
+                n.globalDecls().forEach { decl ->
+                    decl.names.distinct().forEach { name ->
+                        if (name in SYNTHETIC_GLOBAL_NAMES || name !in declared) return@forEach
+                        val vars = expanded.mapNotNull { leaf ->
+                            declaredStateVars(leaf.name, pclassNodes, leafSpecNodes)[name]
+                        }
+                        if (!decl.isConst && vars.any { it.isConst }) {
+                            errors += OneLocCompileError(
+                                decl.loc,
+                                "\"$name\" may change without declaring it \"const global $name\", so either make it \"const global $name\" or change the state var to be \"var $name\" instead of \"const $name\"",
+                            )
+                        }
+                        if (decl.isConst && vars.any { !it.isConst }) {
+                            errors += OneLocCompileError(
+                                decl.loc,
+                                "\"$name\" is a var, so either drop \"const\" (use \"global $name\") or declare \"const $name\" on the proc instead of \"var $name\"",
+                            )
+                        }
                     }
                 }
             }
