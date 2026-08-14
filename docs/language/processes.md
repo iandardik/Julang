@@ -60,7 +60,7 @@ A **transition** body may include:
 | `guard:` | Boolean condition; must hold (with peers’ constraints) to take the step |
 | `before:` | Calls before state updates (IO allowed; no assignments)—see [Before/after and IO](effects.md) |
 | `transit:` | State updates and optional statement `let`s (may include IO in expressions)—see [Before/after and IO](effects.md) |
-| `error:` | Alternate updates when the step is taken in an error path (when used) |
+| `error:` | Pre-state checks: at runtime, if a condition holds, throw `JulayException` with the message (no transit / `after:`). In TLA+, each condition is negated and emitted as an enabling assumption (guard). |
 | `after:` | Calls after state updates (IO allowed; no assignments)—see [Before/after and IO](effects.md) |
 
 **Constructors cannot have `guard:`.** A constructor body may only use `before:`, `transit:`, `error:`, and `after:`. Spawning is gated by peers’ transition guards (and session rebind rules), not by a guard on the constructor itself.

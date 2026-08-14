@@ -116,9 +116,13 @@ with_expr
     ;
 
 system_atom
-    : system_primary LBRACK ID COLON typeExpr RBRACK
+    : system_primary LBRACK ID COLON typeExpr RBRACK (LCURLY global_decl* RCURLY)?
     | system_primary LBRACK ID RBRACK
     | system_primary
+    ;
+
+global_decl
+    : GLOBAL ID (COMMA ID)*
     ;
 
 system_primary

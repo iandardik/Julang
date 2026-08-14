@@ -293,6 +293,18 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
+	@Override public void enterGlobal_decl(JulayParser.Global_declContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitGlobal_decl(JulayParser.Global_declContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
 	@Override public void enterSystem_primary(JulayParser.System_primaryContext ctx) { }
 	/**
 	 * {@inheritDoc}

@@ -12,6 +12,7 @@ const KEYWORDS = new Set([
   "import", "export", "obj", "sort", "proc", "api", "calls", "procfun", "compile", "spec", "invariant",
   "var", "const", "constructor", "transition", "internal", "provider", "client",
   "session", "guard", "transit", "error", "before", "after", "return", "fun",
+  "also", "with", "this", "global",
   "true", "false",
 ]);
 

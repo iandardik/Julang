@@ -105,7 +105,9 @@ x ==
 
 `readFile(path)` is treated the same way (file contents are unknown, so any `String`). Nested IO inside a larger RHS (e.g. `trim(readln())`) also havocs the assign target at its type.
 
-See also [Specifications](specifications.md).
+### TLA+ translation (`error:`)
+
+`error:` arms still throw at runtime. TLA+ encodes the **negation** of each condition as an assumption conjunct **before** `\* … logic`, so the action is enabled only on the non-error path. Top-level `~in` / `~=` flip to `\in` / `=`; other conditions are wrapped with `~`. List membership uses a generated `Range` helper (`me \in Range(cluster)`). Constructors still cannot have `guard:`; `error:` is how constructor arguments are constrained in the spec.
 
 ## See also
 

@@ -121,6 +121,69 @@ class SpecIndexingTest {
         assertTrue(result.warnings.isEmpty(), result.toString())
     }
 
+    @Test
+    fun unknownGlobalVarIsError() {
+        val result = typeCheck(
+            """
+            sort N := {"a"}
+            proc Worker {
+                var id : Int
+                constructor initially(args : List<String>) { transit: id := 0 }
+                constructor spawnWorker(id : Int) { transit: id := id }
+            }
+            spec Bad := Worker[i : N] {
+              global nope
+            }
+            """.trimIndent(),
+        )
+        assertTrue(
+            result.errors.any { it.toString().contains("global \"nope\"") },
+            result.toString(),
+        )
+    }
+
+    @Test
+    fun duplicateGlobalVarIsError() {
+        val result = typeCheck(
+            """
+            sort N := {"a"}
+            proc Worker {
+                var id : Int
+                constructor initially(args : List<String>) { transit: id := 0 }
+                constructor spawnWorker(id : Int) { transit: id := id }
+            }
+            spec Bad := Worker[i : N] {
+              global id, id
+            }
+            """.trimIndent(),
+        )
+        assertTrue(
+            result.errors.any { it.toString().contains("duplicate global variable \"id\"") },
+            result.toString(),
+        )
+    }
+
+    @Test
+    fun globalConstructedIsError() {
+        val result = typeCheck(
+            """
+            sort N := {"a"}
+            proc Worker {
+                var id : Int
+                constructor initially(args : List<String>) { transit: id := 0 }
+                constructor spawnWorker(id : Int) { transit: id := id }
+            }
+            spec Bad := Worker[i : N] {
+              global constructed
+            }
+            """.trimIndent(),
+        )
+        assertTrue(
+            result.errors.any { it.toString().contains("synthetic variable \"constructed\"") },
+            result.toString(),
+        )
+    }
+
     private fun typeCheck(source: String, allowUnindexedSpec: Boolean = false): TypePassResult {
         val dir = Files.createTempDirectory("julay-spec-indexing")
         val file = dir.resolve("main.jul")

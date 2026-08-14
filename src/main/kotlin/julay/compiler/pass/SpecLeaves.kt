@@ -23,8 +23,15 @@ data class SpecLeaf(
      * same [withScopeId] use one TLA binder (no per-leaf clash rename).
      */
     val withScopeId: String? = null,
+    /**
+     * Create-index `global` state vars: emitted as scalar TLA VARIABLES (not functions of the index).
+     * Model-only; does not affect JAR codegen.
+     */
+    val globalVars: Set<String> = emptySet(),
 ) {
     val isParameterized: Boolean get() = paramName != null && paramType != null
+    /** True when this leaf is create-indexed and [varName] is not a `global` model var. */
+    fun indexesState(varName: String): Boolean = isParameterized && varName !in globalVars
     fun identityKey(): String {
         val base = if (paramName != null) "$name[$paramName:${paramType}]" else name
         return if (occurrenceId.isNotEmpty()) "$base#$occurrenceId" else base
@@ -80,18 +87,23 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
             }
             is ParamProcExprNode -> {
                 val paramName = n.paramName()
+                val globals = n.globalVarNames().toSet()
+                fun withGlobals(child: SpecLeaf): SpecLeaf =
+                    if (globals.isEmpty()) child else child.copy(globalVars = child.globalVars + globals)
                 when {
                     n.isApplyIndex() -> {
                         // Apply: share binder / with-scope only. Do not lift unindexed state.
                         // Create-indexed children keep lifting; binder renamed to the with-name.
                         flattenSpecLeaves(n.paramBody(), intro).forEach { child ->
                             out += if (child.isParameterized) {
-                                child.copy(paramName = paramName, withScopeId = withScopeId)
+                                withGlobals(child.copy(paramName = paramName, withScopeId = withScopeId))
                             } else {
-                                child.copy(
-                                    paramName = paramName,
-                                    paramType = null,
-                                    withScopeId = withScopeId,
+                                withGlobals(
+                                    child.copy(
+                                        paramName = paramName,
+                                        paramType = null,
+                                        withScopeId = withScopeId,
+                                    ),
                                 )
                             }
                         }
@@ -102,13 +114,15 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
                         val pType = n.paramType()!!
                         flattenSpecLeaves(n.paramBody(), intro).forEach { child ->
                             out += if (!child.isParameterized) {
-                                child.copy(
-                                    paramName = paramName,
-                                    paramType = pType,
-                                    withScopeId = scopeId,
+                                withGlobals(
+                                    child.copy(
+                                        paramName = paramName,
+                                        paramType = pType,
+                                        withScopeId = scopeId,
+                                    ),
                                 )
                             } else {
-                                child
+                                withGlobals(child)
                             }
                         }
                     }
@@ -116,9 +130,9 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
                         val pType = n.paramType()!!
                         flattenSpecLeaves(n.paramBody(), intro).forEach { child ->
                             out += if (!child.isParameterized) {
-                                child.copy(paramName = paramName, paramType = pType)
+                                withGlobals(child.copy(paramName = paramName, paramType = pType))
                             } else {
-                                child
+                                withGlobals(child)
                             }
                         }
                     }
@@ -191,7 +205,10 @@ fun expandLeavesToPclasses(
     val visiting = mutableSetOf<String>()
 
     fun pushDown(outer: SpecLeaf, child: SpecLeaf): SpecLeaf {
-        var c = child.copy(withScopeId = outer.withScopeId ?: child.withScopeId)
+        var c = child.copy(
+            withScopeId = outer.withScopeId ?: child.withScopeId,
+            globalVars = child.globalVars + outer.globalVars,
+        )
         when {
             outer.isParameterized && !c.isParameterized ->
                 c = c.copy(paramName = outer.paramName, paramType = outer.paramType)
@@ -212,9 +229,21 @@ fun expandLeavesToPclasses(
         }
     }
 
+    fun declaredStateNames(leafName: String): Set<String> {
+        val pc = pclasses[leafName] ?: leafSpecs[leafName]?.asProcClass() ?: return emptySet()
+        return pc.localDecls().filterIsInstance<VarNode>().map { it.name }.toSet()
+    }
+
+    fun filterGlobals(leaf: SpecLeaf): SpecLeaf {
+        if (leaf.globalVars.isEmpty()) return leaf
+        val declared = declaredStateNames(leaf.name)
+        if (declared.isEmpty()) return leaf
+        return leaf.copy(globalVars = leaf.globalVars.intersect(declared))
+    }
+
     fun expand(leaf: SpecLeaf) {
         when {
-            leaf.name in leafSpecs || leaf.name in pclasses -> out += leaf
+            leaf.name in leafSpecs || leaf.name in pclasses -> out += filterGlobals(leaf)
             leaf.name in apiAliases -> {
                 val api = apiAliases.getValue(leaf.name)
                 flattenSpecLeaves(api.apiProcExpr(), leaf.name).forEach { child ->
@@ -240,7 +269,7 @@ fun expandLeavesToPclasses(
                     visiting.remove(leaf.name)
                 }
             }
-            else -> out += leaf
+            else -> out += filterGlobals(leaf)
         }
     }
     leaves.forEach { expand(it) }

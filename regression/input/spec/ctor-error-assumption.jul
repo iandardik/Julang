@@ -1,0 +1,26 @@
+sort Idx := {"a"}
+
+proc P {
+    var x : Int
+
+    constructor initially(args : List<String>) {
+        transit: x := 0
+    }
+
+    constructor start(me : String, cluster : List<String>, port : Int, k : Int) {
+        transit: x := 1
+        error:
+            (me ~in cluster) -> "not in cluster"
+            (k ~= 1) -> "k must be 1"
+            (port <= 0) -> "bad port"
+    }
+
+    internal transition tick() {
+        guard: x < 5
+        transit: x := x + 1
+    }
+}
+
+spec CtorErr := P[n : Idx]
+
+compile CtorErr

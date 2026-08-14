@@ -1720,8 +1720,10 @@ class SpecTlaTlcSmokeTest {
                 "expected inclusive SubSeq splice helper;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("BoundedSeq(") && tlaText.contains("MaxListLen"),
-                "expected BoundedSeq / MaxListLen;\n$tlaText",
+                tlaText.contains("\\* TLA+ helpers") &&
+                    tlaText.contains("BoundedSeq(") &&
+                    tlaText.contains("MaxListLen"),
+                "expected BoundedSeq under TLA+ helpers / MaxListLen;\n$tlaText",
             )
             val nextBody = tlaText.substringAfter("Next ==").substringBefore("Spec ==")
             assertTrue(
@@ -1810,10 +1812,210 @@ class SpecTlaTlcSmokeTest {
         }
     }
 
+    @Test
+    fun globalIndexVarsStayScalarInTla() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-global").toFile()
+        try {
+            val source = File("regression/input/spec/global-index-var.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("Indexed.tla")
+            val cfg = File("Indexed.cfg")
+            assertTrue(tla.exists(), "expected Indexed.tla")
+            assertTrue(cfg.exists(), "expected Indexed.cfg")
+            val tlaText = tla.readText()
+            assertTrue(
+                tlaText.contains("/\\ Peer_cluster = <<>>"),
+                "expected scalar Init for global cluster;\n$tlaText",
+            )
+            assertTrue(
+                !tlaText.contains("Peer_cluster = [n \\in"),
+                "global cluster must not be a function of n;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("/\\ extra = 0"),
+                "expected scalar Init for global extra;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("state = [n \\in Node |->"),
+                "expected indexed Init for per-instance state;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("Peer_cluster' = cluster") &&
+                    !tlaText.contains("Peer_cluster' = [Peer_cluster EXCEPT ![n]"),
+                "expected scalar cluster assign;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("extra' = extra + 1") ||
+                    tlaText.contains("extra' = 0"),
+                "expected scalar extra write;\n$tlaText",
+            )
+            assertTrue(
+                !tlaText.contains("extra' = [extra EXCEPT ![n]"),
+                "global extra must not use EXCEPT ![n];\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("state' = [state EXCEPT ![n]"),
+                "expected EXCEPT ![n] for per-instance state;\n$tlaText",
+            )
+            assertTrue(
+                (tlaText.contains("Len(Peer_cluster)") || tlaText.contains("Len(cluster)")) &&
+                    !tlaText.contains("Peer_cluster[i]"),
+                "expected unindexed Peer[i].cluster in invariant;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("state[i]"),
+                "expected indexed Peer[i].state in invariant;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("\\* Peer constructor assumption") &&
+                    tlaText.contains("me \\in Range(cluster)") &&
+                    rangeHelperUnderTlaHelpers(tlaText),
+                "expected flipped ~in error assumption as Range membership;\n$tlaText",
+            )
+            val startDef = tlaText.substringAfter("start(n, me, cluster) ==").substringBefore("\n\n")
+            assertTrue(
+                startDef.contains("constructor assumption") &&
+                    startDef.indexOf("constructor assumption") <
+                    startDef.indexOf("constructor logic"),
+                "assumption section must precede constructor logic;\n$tlaText",
+            )
+            tla.copyTo(File(work, "Indexed.tla"), overwrite = true)
+            cfg.copyTo(File(work, "Indexed.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "Indexed")
+        } finally {
+            work.deleteRecursively()
+            File("Indexed.tla").delete()
+            File("Indexed.cfg").delete()
+        }
+    }
+
+    @Test
+    fun ctorErrorAssumptionsFlipNotinAndNeq() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-ctor-err").toFile()
+        try {
+            val source = File("regression/input/spec/ctor-error-assumption.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("CtorErr.tla")
+            val cfg = File("CtorErr.cfg")
+            assertTrue(tla.exists(), "expected CtorErr.tla")
+            val tlaText = tla.readText()
+            val startDef = tlaText.substringAfter("start(n,").substringBefore("\n\n")
+            assertTrue(
+                startDef.contains("\\* P constructor assumption"),
+                "expected constructor assumption comment;\n$tlaText",
+            )
+            assertTrue(
+                startDef.contains("me \\in Range(cluster)"),
+                "expected ~in flipped to \\\\in Range;\n$tlaText",
+            )
+            assertTrue(
+                rangeHelperUnderTlaHelpers(tlaText),
+                "expected Range helper under TLA+ helpers;\n$tlaText",
+            )
+            assertTrue(
+                startDef.contains("k = 1"),
+                "expected ~= flipped to =;\n$tlaText",
+            )
+            assertTrue(
+                startDef.contains("~(port <= 0)") || startDef.contains("~(port <= 0)"),
+                "expected wrapped non-flipped error cond;\n$tlaText",
+            )
+            assertTrue(
+                startDef.indexOf("constructor assumption") < startDef.indexOf("constructor logic"),
+                "assumption must precede logic;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.endsWith("\n\n====\n"),
+                "expected blank line before closing ====;\n$tlaText",
+            )
+            assertTrue(
+                startDef.contains("~P_constructed[n]") || startDef.contains("~P_constructed[n]"),
+                "expected constructor logic constructed gate;\n$tlaText",
+            )
+            tla.copyTo(File(work, "CtorErr.tla"), overwrite = true)
+            cfg.copyTo(File(work, "CtorErr.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "CtorErr")
+        } finally {
+            work.deleteRecursively()
+            File("CtorErr.tla").delete()
+            File("CtorErr.cfg").delete()
+        }
+    }
+
+    @Test
+    fun transitionErrorBecomesAssumption() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-trans-err").toFile()
+        try {
+            val source = File("regression/input/spec/transition-error-assumption.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("TransErr.tla")
+            val cfg = File("TransErr.cfg")
+            assertTrue(tla.exists(), "expected TransErr.tla")
+            val tlaText = tla.readText()
+            val tickDef = tlaText.substringAfter("tick ==").substringBefore("\n\n")
+            assertTrue(
+                tickDef.contains("\\* P internal transition assumption"),
+                "expected transition assumption comment;\n$tlaText",
+            )
+            assertTrue(
+                tickDef.contains("~(x = 0)"),
+                "expected negated error condition;\n$tlaText",
+            )
+            assertTrue(
+                tickDef.indexOf("transition assumption") < tickDef.indexOf("transition logic"),
+                "assumption must precede logic;\n$tlaText",
+            )
+            assertTrue(
+                tickDef.contains("x < 5"),
+                "expected original guard still present;\n$tlaText",
+            )
+            tla.copyTo(File(work, "TransErr.tla"), overwrite = true)
+            cfg.copyTo(File(work, "TransErr.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "TransErr")
+        } finally {
+            work.deleteRecursively()
+            File("TransErr.tla").delete()
+            File("TransErr.cfg").delete()
+        }
+    }
+
     private fun assumeTlcPresent() {
         if (!TLC_JAR.isFile) {
             fail("TLC jar not found at ${TLC_JAR.path}")
         }
+    }
+
+    /** `Range` belongs with `BoundedSeq` under `\* TLA+ helpers`, not `\* Julay lib funs`. */
+    private fun rangeHelperUnderTlaHelpers(tlaText: String): Boolean {
+        if (!tlaText.contains("\\* TLA+ helpers")) return false
+        if (!Regex("""Range\(\w+\) == \{ \w+\[\w+\] : \w+ \\in DOMAIN \w+ \}""").containsMatchIn(tlaText)) {
+            return false
+        }
+        val afterHelpers = tlaText.substringAfter("\\* TLA+ helpers")
+        val helperSec = afterHelpers
+            .substringBefore("\\* Julay lib funs")
+            .substringBefore("\\* user defined funs")
+            .substringBefore("\\* system definition")
+        val libSec = if (tlaText.contains("\\* Julay lib funs")) {
+            tlaText.substringAfter("\\* Julay lib funs")
+                .substringBefore("\\* user defined funs")
+                .substringBefore("\\* system definition")
+        } else {
+            ""
+        }
+        return helperSec.contains("Range(") && !libSec.contains("Range(")
     }
 
     /**

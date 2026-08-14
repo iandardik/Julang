@@ -178,6 +178,7 @@ private fun typePassSpec(
             checkLeaves(systemLeaves, "system")
             checkIndexing(assumeLeaves)
             checkIndexing(systemLeaves)
+            errors += globalDeclErrors(value, pclassNodes, leafSpecNodes, procAliases, specAliases, apiAliases)
 
             val guarantee = value.guaranteeExpr()
             if (guarantee != null) {
@@ -221,9 +222,77 @@ private fun typePassSpec(
             val systemLeaves = annotateDeclParams(flattenSpecLeaves(value))
             checkLeaves(systemLeaves, "system")
             checkIndexing(systemLeaves)
+            errors += globalDeclErrors(value, pclassNodes, leafSpecNodes, procAliases, specAliases, apiAliases)
         }
     }
     return SpecTypePassResult(errors, warnings)
+}
+
+private val SYNTHETIC_GLOBAL_NAMES = setOf("constructed", "killed", "terminated")
+
+private fun declaredStateNames(
+    leafName: String,
+    pclassNodes: Map<String, ProcClassNode>,
+    leafSpecNodes: Map<String, LeafSpecNode>,
+): Set<String> {
+    val pc = pclassNodes[leafName] ?: leafSpecNodes[leafName]?.asProcClass() ?: return emptySet()
+    return pc.localDecls().filterIsInstance<VarNode>().map { it.name }.toSet()
+}
+
+private fun globalDeclErrors(
+    node: ASTNode,
+    pclassNodes: Map<String, ProcClassNode>,
+    leafSpecNodes: Map<String, LeafSpecNode>,
+    procAliases: Map<String, ProcNode>,
+    specAliases: Map<String, SpecNode>,
+    apiAliases: Map<String, ApiNode>,
+): List<CompileError> {
+    val errors = mutableListOf<CompileError>()
+    fun walk(n: ASTNode) {
+        if (n is ParamProcExprNode && !n.isApplyIndex() && n.globalVarNames().isNotEmpty()) {
+            val names = n.globalVarNames()
+            val seen = mutableSetOf<String>()
+            names.forEach { name ->
+                if (!seen.add(name)) {
+                    errors += OneLocCompileError(
+                        n.programLocation(),
+                        "duplicate global variable \"$name\"",
+                    )
+                }
+                if (name in SYNTHETIC_GLOBAL_NAMES) {
+                    errors += OneLocCompileError(
+                        n.programLocation(),
+                        "cannot mark synthetic variable \"$name\" as global",
+                    )
+                }
+            }
+            val unique = names.distinct().filter { it !in SYNTHETIC_GLOBAL_NAMES }
+            if (unique.isNotEmpty()) {
+                val expanded = expandLeavesToPclasses(
+                    flattenSpecLeaves(n),
+                    pclassNodes,
+                    procAliases,
+                    specAliases,
+                    apiAliases,
+                    leafSpecNodes,
+                )
+                val declared = expanded.flatMap { leaf ->
+                    declaredStateNames(leaf.name, pclassNodes, leafSpecNodes)
+                }.toSet()
+                unique.forEach { name ->
+                    if (name !in declared) {
+                        errors += OneLocCompileError(
+                            n.programLocation(),
+                            "global \"$name\" is not a state variable of any indexed leaf in this spec",
+                        )
+                    }
+                }
+            }
+        }
+        n.children.forEach { walk(it) }
+    }
+    walk(node)
+    return errors
 }
 
 private fun typePassInvariantNamed(

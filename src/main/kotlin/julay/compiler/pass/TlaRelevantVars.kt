@@ -85,6 +85,9 @@ internal fun analyzeTlaRelevantVars(
             group.forEach { offer ->
                 val bound = boundNamesOf(offer)
                 offer.decl.guards.forEach { collectStateReads(it, offer.leaf.name, varsByLeaf, bound, relevant) }
+                offer.decl.errors.forEach { arm ->
+                    collectStateReads(arm.condExpr(), offer.leaf.name, varsByLeaf, bound, relevant)
+                }
                 offer.decl.returnExpr?.let { collectStateReads(it, offer.leaf.name, varsByLeaf, bound, relevant) }
             }
         }

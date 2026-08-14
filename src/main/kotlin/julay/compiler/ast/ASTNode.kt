@@ -268,14 +268,21 @@ class ParamProcExprNode(
     /** Null when this is an apply-index `Name[n]` (type comes from enclosing `with`). */
     private val paramType: TypeExpr?,
     private val loc: ProgramLoc,
+    /** Create-index `global x, y` names; empty for apply-index. */
+    private val globalVars: List<String> = emptyList(),
 ) : ASTNode(listOf(body)) {
     override fun programLocation() = loc
     internal fun paramBody() = body
     internal fun paramName() = paramName
     internal fun paramType(): TypeExpr? = paramType
     internal fun isApplyIndex(): Boolean = paramType == null
-    override fun toString(): String =
-        if (paramType == null) "$body[$paramName]" else "$body[$paramName : $paramType]"
+    internal fun globalVarNames(): List<String> = globalVars
+    override fun toString(): String {
+        val index = if (paramType == null) "$body[$paramName]" else "$body[$paramName : $paramType]"
+        if (globalVars.isEmpty()) return index
+        val names = globalVars.joinToString(", ")
+        return "$index {\n  global $names\n}"
+    }
 }
 
 /** `with (n : T) { system }` — introduces binder [n] for apply-index forms inside. */

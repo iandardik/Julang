@@ -179,6 +179,13 @@ public class JulayParserBaseVisitor<T> extends AbstractParseTreeVisitor<T> imple
 	 * <p>The default implementation returns the result of calling
 	 * {@link #visitChildren} on {@code ctx}.</p>
 	 */
+	@Override public T visitGlobal_decl(JulayParser.Global_declContext ctx) { return visitChildren(ctx); }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation returns the result of calling
+	 * {@link #visitChildren} on {@code ctx}.</p>
+	 */
 	@Override public T visitSystem_primary(JulayParser.System_primaryContext ctx) { return visitChildren(ctx); }
 	/**
 	 * {@inheritDoc}

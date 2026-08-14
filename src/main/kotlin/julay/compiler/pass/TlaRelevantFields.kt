@@ -169,6 +169,7 @@ private class RelevantFieldCollector(
             }
         }
         offer.decl.guards.forEach { walkExpr(it, env, inComparison = false) }
+        offer.decl.errors.forEach { arm -> walkExpr(arm.condExpr(), env, inComparison = false) }
         offer.decl.transits.forEach { update ->
             when (update) {
                 is TransitUpdate.Assign -> walkExpr(update.expr, env, inComparison = false)

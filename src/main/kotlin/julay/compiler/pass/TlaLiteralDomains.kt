@@ -70,6 +70,9 @@ internal fun analyzeTlaLiteralDomains(
 
     offers.forEach { offer ->
         offer.decl.guards.forEach { walkLits(it, offer.leaf.name, ::varSite, ::fieldSite, inWrite = false) }
+        offer.decl.errors.forEach { arm ->
+            walkLits(arm.condExpr(), offer.leaf.name, ::varSite, ::fieldSite, inWrite = false)
+        }
         offer.decl.transits.forEach { update ->
             when (update) {
                 is TransitUpdate.Assign -> {

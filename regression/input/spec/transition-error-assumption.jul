@@ -1,0 +1,18 @@
+proc P {
+    var x : Int
+
+    constructor initially(args : List<String>) {
+        transit: x := 0
+    }
+
+    internal transition tick() {
+        guard: x < 5
+        error:
+            x = 0 -> "tick boom"
+        transit: x := x + 1
+    }
+}
+
+spec TransErr := P
+
+compile TransErr

@@ -75,6 +75,7 @@ RETURN : 'return' ;
 ALSO : 'also' ;
 WITH : 'with' ;
 THIS : 'this' ;
+GLOBAL : 'global' ;
 
 REAL : [-]?[0-9]+ '.' [0-9]+ ;
 INT : [-]?[0-9]+ ;

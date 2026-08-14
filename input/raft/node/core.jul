@@ -49,6 +49,8 @@ export proc RaftProtocol {
             knownLeaderId := -1
             nextIndex := cluster.map(n -> 1)
             matchIndex := cluster.map(n -> 0)
+        error:
+            (me ~in cluster) -> "Invalid config: node not in cluster"
     }
 
     /*

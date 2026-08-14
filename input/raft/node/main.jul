@@ -61,18 +61,18 @@ procfun parseCfg(cfg : String, myIdx : Int) : CfgPair {
 }
 
 proc RaftNodeMain {
-    const self : Node
-    const theCluster : List<Node>
-    const listenPort : Int
+    const me : Node
+    const cluster : List<Node>
+    const port : Int
     var step : String := "startRpcIn"
 
     constructor initially(args : List<String>) {
         transit:
             let id : Int := parseInt(args[2])
             let cfg : CfgPair := parseCfg(args[1], id)
-            self := cfg.me
-            theCluster := cfg.cluster
-            listenPort := portFromUrl(cfg.me.url)
+            me := cfg.me
+            cluster := cfg.cluster
+            port := portFromUrl(cfg.me.url)
         error:
             (length(args) ~= 2) -> "usage: RaftNode.jar <config_file> <node_id>"
     }
@@ -80,7 +80,7 @@ proc RaftNodeMain {
     transition startRpcIn(port : Int) {
         guard:
             & step = "startRpcIn"
-            & port = listenPort
+            & port = this.port
         transit:
             step := "startRpcOut"
     }
@@ -95,8 +95,8 @@ proc RaftNodeMain {
     transition startRaftCore(me : Node, cluster : List<Node>) {
         guard:
             & step = "startCore"
-            & me = self
-            & cluster = theCluster
+            & me = this.me
+            & cluster = this.cluster
         transit:
             step := "startVoteRequester"
     }

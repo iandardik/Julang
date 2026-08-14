@@ -8,7 +8,7 @@ Compact cheat sheet. For explanations, use the other chapters.
 `var` `const` `constructor` `transition`  
 `internal` `provider` `client` `session`  
 `guard` `before` `transit` `error` `after` `return`  
-`also` `with` `this`  
+`also` `with` `this` `global`  
 `forall` `exists` `if` `else` `let` `when` `in` `to`  
 `true` `false` `listOf` `setOf` `mapOf`
 
@@ -48,10 +48,11 @@ spec Name := <Assume> System <Guarantee>
 spec Name := System |= Guarantee
 spec Name := System
 spec Name := with (v : T) { System }       // shared apply-binder scope
+spec Name := System[v : T] { global x, y } // create-index; x, y unindexed in TLA+ (model-only)
 compile Name1, Name2, ...
 ```
 
-System atoms: `Name[v : T]` **creates** an index (lifts state); inside `with`, only `Name[v]` **applies** a shared binder. Shorthand `(A || B)[n : T]` desugars to create-temps + `with` + applies — see [Specifications](specifications.md#indexes-create-with-and-apply).
+System atoms: `Name[v : T]` **creates** an index (lifts state); `{ global x, y }` on create-index leaves those vars scalar in TLA+ (does not affect JAR). Inside `with`, only `Name[v]` **applies** a shared binder. Shorthand `(A || B)[n : T]` desugars to create-temps + `with` + applies — see [Specifications](specifications.md#indexes-create-with-and-apply).
 
 Leaf-spec actions: `transition name(args) also (aux : T) { … }` (leaf specs only). Bodies may read peer state `P.var` / `P[idx].var` (compile checks composition + indexing).
 
