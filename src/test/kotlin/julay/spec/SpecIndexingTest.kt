@@ -249,6 +249,136 @@ class SpecIndexingTest {
         assertTrue(result.errors.isEmpty(), result.toString())
     }
 
+    @Test
+    fun initConstGlobalLengthEqualsSortLengthIsOk() {
+        val result = typeCheck(
+            """
+            sort N := {"a", "b"}
+            proc Worker {
+                const cluster : List<String>
+                constructor initially(args : List<String>) { transit: cluster := args }
+            }
+            spec Ok := Worker[i : N] {
+              const global cluster
+              init: cluster.length = N.length
+            }
+            """.trimIndent(),
+        )
+        assertTrue(result.errors.isEmpty(), result.toString())
+    }
+
+    @Test
+    fun initLengthFunOnSortIsOk() {
+        val result = typeCheck(
+            """
+            sort N := {"a", "b"}
+            proc Worker {
+                const cluster : List<String>
+                constructor initially(args : List<String>) { transit: cluster := args }
+            }
+            spec Ok := Worker[i : N] {
+              const global cluster
+              init: length(cluster) = length(N)
+            }
+            """.trimIndent(),
+        )
+        assertTrue(result.errors.isEmpty(), result.toString())
+    }
+
+    @Test
+    fun initNonBooleanIsError() {
+        val result = typeCheck(
+            """
+            sort N := {"a"}
+            proc Worker {
+                const cluster : List<String>
+                constructor initially(args : List<String>) { transit: cluster := args }
+            }
+            spec Bad := Worker[i : N] {
+              const global cluster
+              init: cluster.length
+            }
+            """.trimIndent(),
+        )
+        assertTrue(
+            result.errors.any { it.toString().contains("must be Boolean") },
+            result.toString(),
+        )
+    }
+
+    @Test
+    fun initMutableVarIsError() {
+        val result = typeCheck(
+            """
+            sort N := {"a"}
+            proc Worker {
+                const cluster : List<String>
+                var extra : Int
+                constructor initially(args : List<String>) {
+                    transit:
+                        cluster := args
+                        extra := 0
+                }
+            }
+            spec Bad := Worker[i : N] {
+              const global cluster
+              global extra
+              init: extra = 0
+            }
+            """.trimIndent(),
+        )
+        assertTrue(
+            result.errors.any {
+                it.toString().contains("const-global") || it.toString().contains("unbound symbol \"extra\"")
+            },
+            result.toString(),
+        )
+    }
+
+    @Test
+    fun initSortLargerThanMaxListLenIsError() {
+        val result = typeCheck(
+            """
+            sort N := {"a", "b", "c", "d"}
+            proc Worker {
+                const cluster : List<String>
+                constructor initially(args : List<String>) { transit: cluster := args }
+            }
+            spec Bad := Worker[i : N] {
+              const global cluster
+              init: cluster.length = N.length
+            }
+            """.trimIndent(),
+        )
+        assertTrue(
+            result.errors.any {
+                it.toString().contains("MaxListLen") && it.toString().contains("4")
+            },
+            result.toString(),
+        )
+    }
+
+    @Test
+    fun initIndexedConstGlobalIsError() {
+        val result = typeCheck(
+            """
+            sort N := {"a"}
+            proc Worker {
+                const cluster : List<String>
+                constructor initially(args : List<String>) { transit: cluster := args }
+            }
+            spec Bad := Worker[i : N] {
+              const global cluster
+              init: Worker[i].cluster.length = N.length
+            }
+            """.trimIndent(),
+        )
+        assertTrue(
+            result.errors.any { it.toString().contains("indexed access") },
+            result.toString(),
+        )
+    }
+
     private fun typeCheck(source: String, allowUnindexedSpec: Boolean = false): TypePassResult {
         val dir = Files.createTempDirectory("julay-spec-indexing")
         val file = dir.resolve("main.jul")

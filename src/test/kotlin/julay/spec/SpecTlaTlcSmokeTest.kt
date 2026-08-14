@@ -723,6 +723,11 @@ class SpecTlaTlcSmokeTest {
             "with (n) should share one binder for RaftProtocol and Net, not n_RaftProtocol;\n${tlaText.take(4000)}",
         )
         assertTrue(
+            Regex("""Len\([^)]*cluster[^)]*\)\s*=\s*Cardinality\(NodeSet\)""").containsMatchIn(tlaText) ||
+                tlaText.contains("Len(RaftProtocol_cluster) = Cardinality(NodeSet)"),
+            "Init should constrain cluster length to |NodeSet|;\n${tlaText.substringAfter("Init ==").take(2500)}",
+        )
+        assertTrue(
             tlaText.contains("\\E n, m \\in NodeSet : requestVote(n, m)") &&
                 !tlaText.contains("\\E n \\in NodeSet : \\E m \\in NodeSet"),
             "consecutive \\E over NodeSet should combine;\n${tlaText.substringAfter("Next ==").take(2000)}",
@@ -1898,6 +1903,52 @@ class SpecTlaTlcSmokeTest {
             assertTrue(
                 startDef.contains("UNCHANGED") && startDef.contains("Peer_cluster"),
                 "const-global cluster must stay in UNCHANGED;\n$startDef",
+            )
+            tla.copyTo(File(work, "Indexed.tla"), overwrite = true)
+            cfg.copyTo(File(work, "Indexed.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "Indexed")
+        } finally {
+            work.deleteRecursively()
+            File("Indexed.tla").delete()
+            File("Indexed.cfg").delete()
+        }
+    }
+
+    @Test
+    fun initClauseConjoinsLenEqualsCardinality() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-init-clause").toFile()
+        try {
+            val source = File("regression/input/spec/init-const-global.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("Indexed.tla")
+            val cfg = File("Indexed.cfg")
+            assertTrue(tla.exists(), "expected Indexed.tla")
+            val tlaText = tla.readText()
+            assertTrue(
+                tlaText.contains("/\\ Peer_cluster \\in BoundedSeq(") ||
+                    tlaText.contains("/\\ cluster \\in BoundedSeq("),
+                "expected const-global Init as BoundedSeq;\n$tlaText",
+            )
+            val initBlock = tlaText.substringAfter("Init ==").substringBefore("\n\n")
+            val constraint = listOf(
+                "Len(Peer_cluster) = Cardinality(Node)",
+                "Len(cluster) = Cardinality(Node)",
+            ).firstOrNull { it in initBlock }
+            assertTrue(
+                constraint != null,
+                "expected init: cluster.length = Node.length in Init;\n$initBlock",
+            )
+            val trimmed = initBlock.trimEnd()
+            val commentIdx = trimmed.lastIndexOf("\\* init constraints")
+            val constraintIdx = trimmed.lastIndexOf(constraint!!)
+            assertTrue(
+                commentIdx >= 0 && commentIdx < constraintIdx &&
+                    (trimmed.endsWith(constraint) || trimmed.endsWith("/\\ $constraint")),
+                "init constraints comment and conjuncts should be last in Init;\n$initBlock",
             )
             tla.copyTo(File(work, "Indexed.tla"), overwrite = true)
             cfg.copyTo(File(work, "Indexed.cfg"), overwrite = true)

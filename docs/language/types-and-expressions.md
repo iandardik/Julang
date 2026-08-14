@@ -36,6 +36,8 @@ sort Node := {"n1", "n2", "n3"}
 
 Declares a finite homogeneous domain for **spec index, quantifier, and leaf-spec parameter binders**, and for **leaf-spec state** (and `obj` fields used from specs). Ordinary **proc** state and action args still cannot be sorts directly. Allowed element types: `String`, non-negative `Int`, and `Boolean`. Compiling a spec that uses the sort emits `CONSTANT Node` in TLA+ and assigns the exact set in the `.cfg`. Mark with `export` and import by name like other decls (`import path.Node`).
 
+In **spec/TLA expressions** (invariants, `init:`), `Node.length` and `length(Node)` are the domain size (`Cardinality(Node)` in TLA+). They are not legal in ordinary proc bodies.
+
 **JAR refusal:** if a JAR compile target’s leaf procs mention a sort-bearing type (a sort, or an `obj`/collection that nests one), compile and `julayc check` report an error. Specs are unaffected.
 ## Expressions
 

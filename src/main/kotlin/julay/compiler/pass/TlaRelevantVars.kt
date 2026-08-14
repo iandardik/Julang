@@ -41,6 +41,7 @@ internal fun analyzeTlaRelevantVars(
     invClosure: List<InvariantNode>,
     procFunLeafNames: Set<String> = emptySet(),
     callSites: List<ProcFunCallSite> = emptyList(),
+    initExprs: List<Pair<String, ExprNode>> = emptyList(),
 ): TlaRelevantVars {
     val varsByLeaf = pclasses.mapValues { (_, pc) ->
         pc.localDecls().filterIsInstance<VarNode>().map { it.name }.toSet()
@@ -92,6 +93,9 @@ internal fun analyzeTlaRelevantVars(
             }
         }
         invClosure.forEach { collectStateReads(it.invariantFormula(), null, varsByLeaf, emptySet(), relevant) }
+        initExprs.forEach { (leafName, expr) ->
+            collectStateReads(expr, leafName, varsByLeaf, emptySet(), relevant)
+        }
         usedFuns.forEach { fn ->
             val bound = fn.funArgs().actionArgs().map { it.name }.toSet()
             collectStateReads(fn.funBody(), null, varsByLeaf, bound, relevant)

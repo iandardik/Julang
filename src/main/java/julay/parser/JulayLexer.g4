@@ -76,6 +76,7 @@ ALSO : 'also' ;
 WITH : 'with' ;
 THIS : 'this' ;
 GLOBAL : 'global' ;
+INIT : 'init' ;
 
 REAL : [-]?[0-9]+ '.' [0-9]+ ;
 INT : [-]?[0-9]+ ;

@@ -7,6 +7,7 @@ invariant OneLeaderPerTerm := forall n1 : NodeSet, forall n2 : NodeSet,
 
 spec ClusterSpec := RaftProtocol[n : NodeSet] {
     const global cluster
+    init: cluster.length = NodeSet.length
 }
 spec Sys := with (n : NodeSet) {
     ClusterSpec[n] || Net[n]

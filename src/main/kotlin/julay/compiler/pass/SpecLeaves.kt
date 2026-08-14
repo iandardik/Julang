@@ -33,6 +33,10 @@ data class SpecLeaf(
      * constructors never prime the variable.
      */
     val globalConstVars: Set<String> = emptySet(),
+    /**
+     * Create-index `init:` Boolean exprs: extra Init conjuncts (const-global constraints).
+     */
+    val initExprs: List<ExprNode> = emptyList(),
 ) {
     val isParameterized: Boolean get() = paramName != null && paramType != null
     /** True when this leaf is create-indexed and [varName] is not a `global` model var. */
@@ -94,13 +98,15 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
                 val paramName = n.paramName()
                 val globals = n.globalVarNames().toSet()
                 val constGlobals = n.globalConstVarNames().toSet()
+                val inits = n.initExprs()
                 fun withGlobals(child: SpecLeaf): SpecLeaf =
-                    if (globals.isEmpty()) {
+                    if (globals.isEmpty() && inits.isEmpty()) {
                         child
                     } else {
                         child.copy(
                             globalVars = child.globalVars + globals,
                             globalConstVars = child.globalConstVars + constGlobals,
+                            initExprs = child.initExprs + inits,
                         )
                     }
                 when {
@@ -222,6 +228,7 @@ fun expandLeavesToPclasses(
             withScopeId = outer.withScopeId ?: child.withScopeId,
             globalVars = child.globalVars + outer.globalVars,
             globalConstVars = child.globalConstVars + outer.globalConstVars,
+            initExprs = child.initExprs + outer.initExprs,
         )
         when {
             outer.isParameterized && !c.isParameterized ->

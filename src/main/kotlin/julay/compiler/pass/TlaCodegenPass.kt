@@ -143,6 +143,13 @@ fun tlaCodegenPass(
         emptyList()
     }
     invClosure.forEach { collectTypeConstants(it.invariantFormula(), constants) }
+    val sortNames = ast.cachedObjClassRegistry()?.sorts?.keys.orEmpty()
+    leaves.forEach { leaf ->
+        leaf.initExprs.forEach { expr ->
+            collectTypeConstants(expr, constants)
+            collectSortLengthConstants(expr, sortNames, constants)
+        }
+    }
 
     val cfgOverrides = linkedSetOf<String>()
 
@@ -172,6 +179,7 @@ fun tlaCodegenPass(
             invClosure,
             procFunLeafNames = leaves.filter { it.isProcFun }.map { it.name }.toSet(),
             callSites = callSites,
+            initExprs = leaves.flatMap { leaf -> leaf.initExprs.map { leaf.name to it } },
         )
     } else {
         TlaRelevantVars.IDENTITY
@@ -187,6 +195,9 @@ fun tlaCodegenPass(
     TlaLiteralDomainProjection.set(literalDomains)
     TlaEmitOpts.set(tlaOptConfig)
     val symbolTypes = mutableMapOf<String, Type>()
+    ast.cachedObjClassRegistry()?.sorts?.forEach { (name, sort) ->
+        symbolTypes[name] = sort
+    }
     pclassesForTla.values.forEach { pc ->
         pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
             try {
@@ -247,6 +258,9 @@ private fun emitProjectedTla(
     val emittedOffers = collectEmittedOfferLists(offers).filter { offerGroupHasEmittedUpdate(it) }.flatten()
     invClosure.forEach { collectBuiltinDomainUses(it.invariantFormula(), cfgOverrides) }
     leaves.forEach { leaf ->
+        leaf.initExprs.forEach { collectBuiltinDomainUses(it, cfgOverrides) }
+    }
+    leaves.forEach { leaf ->
         leaf.paramType?.let { typeDomainConstant(it) }?.let { name ->
             if (name in setOf("Int", "Nat", "Real")) cfgOverrides += name
         }
@@ -281,6 +295,9 @@ private fun emitProjectedTla(
     val stringModelValues = linkedSetOf<String>()
     emittedOffers.forEach { collectCfgLiteralsFromOffer(it, intModelValues, stringModelValues) }
     invClosure.forEach { collectCfgLiteralsFromExpr(it.invariantFormula(), intModelValues, stringModelValues) }
+    leaves.forEach { leaf ->
+        leaf.initExprs.forEach { collectCfgLiteralsFromExpr(it, intModelValues, stringModelValues) }
+    }
     usedFunOps.forEach { collectCfgLiteralsFromExpr(it.funBody(), intModelValues, stringModelValues) }
     val coerceIntToString =
         emittedOffers.any { offerContainsIntToStringCoerce(it) } ||
@@ -505,6 +522,7 @@ private fun emitProjectedTla(
         initParts += "/\\ dummy = 0"
         typeOkParts += typeOkConjunct("dummy", typeOkIntRange, null)
     }
+    emitInitConstraintParts(leaves, stateVarNames, constants, initParts)
 
     val typeOkDef = buildString {
         appendLine("TypeOK ==")
@@ -987,7 +1005,7 @@ private fun leafParamDomain(leaf: SpecLeaf): String? =
         null
     }
 
-private const val DEFAULT_MAX_LIST_LEN = 3
+internal const val DEFAULT_MAX_LIST_LEN = 3
 
 /** Contiguous extras: lowest negative literal .. max(highest literal, MaxListLen+1). */
 internal fun typeOkIntExtras(intLiterals: Set<Int>, maxListLen: Int = DEFAULT_MAX_LIST_LEN): List<Int> {
@@ -2337,6 +2355,68 @@ internal fun stateTlaName(
     names: Map<Pair<String, String>, String>,
 ): String = names[leaf to varName] ?: tlaVar(leaf, varName)
 
+private fun emitInitConstraintParts(
+    leaves: List<SpecLeaf>,
+    stateVarNames: Map<Pair<String, String>, String>,
+    constants: Set<String>,
+    initParts: MutableList<String>,
+) {
+    val withInits = leaves.filter { it.initExprs.isNotEmpty() }
+    if (withInits.isEmpty()) return
+    initParts += "\\* init constraints"
+    withInits.forEach { leaf ->
+        val leafCtx = mapOf(leaf.name to leaf, leaf.tlaName to leaf)
+        leaf.initExprs.forEach { expr ->
+            val body = exprToTla(
+                expr,
+                leafCtx = leafCtx,
+                argNames = emptySet(),
+                self = null,
+                bareStateVars = leaf.globalConstVars,
+                reservedNames = constants,
+                stateVarNames = stateVarNames,
+                linePrefix = "",
+                parentPrec = PREC_BOTTOM,
+                globalByLeaf = globalVarsByLeaf(leaves),
+            )
+            body.lineSequence().forEach { raw ->
+                val t = raw.trim()
+                if (t.isEmpty()) return@forEach
+                initParts += if (t.startsWith("/\\") || t.startsWith("\\/")) t else "/\\ $t"
+            }
+        }
+    }
+}
+
+internal fun collectSortLengthConstants(
+    expr: ExprNode,
+    sortNames: Set<String>,
+    into: MutableSet<String>,
+) {
+    fun walk(e: ExprNode) {
+        when (e) {
+            is FieldAccessExprNode -> {
+                if (e.fieldPath.lastOrNull() == "length" && e.baseSymbol in sortNames) {
+                    into += e.baseSymbol
+                }
+            }
+            is FunCallExprNode -> {
+                if (e.callName() == "length") {
+                    val arg = e.callArgs().singleOrNull()
+                    if (arg is SymbolValueExprNode && arg.symbol in sortNames) {
+                        into += arg.symbol
+                    }
+                }
+                e.callArgs().forEach { walk(it) }
+                return
+            }
+            else -> {}
+        }
+        e.children.filterIsInstance<ExprNode>().forEach { walk(it) }
+    }
+    walk(expr)
+}
+
 internal fun globalVarsByLeaf(leaves: List<SpecLeaf>): Map<String, Set<String>> {
     val out = mutableMapOf<String, Set<String>>()
     leaves.forEach { leaf ->
@@ -3008,6 +3088,13 @@ private fun tlaLengthOf(baseRendered: String, baseExpr: ExprNode): String =
         is ListType -> "Len($baseRendered)"
         is SetType -> "Cardinality($baseRendered)"
         is MapType -> "Cardinality($baseRendered)" // maps emit as functions; prefer keys cardinality if needed
+        is SortType -> "Cardinality($baseRendered)"
+        else -> "Len($baseRendered)"
+    }
+
+private fun tlaLengthOfType(baseRendered: String, type: Type?): String =
+    when (type) {
+        is SetType, is MapType, is SortType -> "Cardinality($baseRendered)"
         else -> "Len($baseRendered)"
     }
 
@@ -4191,9 +4278,15 @@ internal fun exprToTla(
                     }
                     else -> base
                 }
-                // Bare `xs.length` via FieldAccess: lists are the common case (Len).
-                // Prefer MemberAccess / FieldAccessOnExpr when the base expr carries a Set type.
-                return "Len($baseRendered)"
+                return tlaLengthOfType(baseRendered, TlaSymbolTypes.get()[base])
+            }
+            if (expr.fieldPath.size == 2 && expr.fieldPath[1] == "length") {
+                val varName = expr.fieldPath[0]
+                val leafVar = stateVarNames[base to varName]
+                    ?: leafCtx[base]?.let { stateTlaName(it.tlaName, varName, stateVarNames) }
+                if (leafVar != null) {
+                    return tlaLengthOfType(leafVar, TlaSymbolTypes.get()[varName])
+                }
             }
             // Lambda / HOF binder substitution (e.g. map(e -> e.value)).
             if (base in symbolOverrides) {

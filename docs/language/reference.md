@@ -8,7 +8,7 @@ Compact cheat sheet. For explanations, use the other chapters.
 `var` `const` `constructor` `transition`  
 `internal` `provider` `client` `session`  
 `guard` `before` `transit` `error` `after` `return`  
-`also` `with` `this` `global`  
+`also` `with` `this` `global` `init`  
 `forall` `exists` `if` `else` `let` `when` `in` `to`  
 `true` `false` `listOf` `setOf` `mapOf`
 
@@ -49,6 +49,7 @@ spec Name := System |= Guarantee
 spec Name := System
 spec Name := with (v : T) { System }       // shared apply-binder scope
 spec Name := System[v : T] { const global x } // create-index; x unindexed & immutable in TLA+
+spec Name := System[v : T] { const global x; init: expr } // extra Init conjuncts (const-global)
 spec Name := System[v : T] { global y }       // create-index; y unindexed (mutable) in TLA+
 compile Name1, Name2, ...
 ```

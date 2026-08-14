@@ -1151,6 +1151,13 @@ private fun FieldAccessExprNode.typePassFieldAccess(
     funBuiltinEnv: Map<String, FunBuiltin>,
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
+    if (typePassAllowSortDomains && fieldPath == listOf("length") && baseSymbol !in symbolEnv &&
+        registry.sorts.containsKey(baseSymbol)
+    ) {
+        resolveFieldAccess(intType, "length")
+        inferExprType(symbolEnv)
+        return emptyList()
+    }
     if (typePassAllowSortDomains && fieldPath.size == 1) {
         val pc = typePassPeerClasses[baseSymbol]
         if (pc != null && baseSymbol !in symbolEnv) {
@@ -1880,6 +1887,16 @@ private fun FunCallExprNode.typePassFunCall(
     funBuiltinEnv: Map<String, FunBuiltin>,
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
+    if (typePassAllowSortDomains && callName() == "length" && callArgs().size == 1) {
+        val arg = callArgs().single()
+        if (arg is SymbolValueExprNode && arg.symbol !in symbolEnv &&
+            registry.sorts.containsKey(arg.symbol)
+        ) {
+            arg.setInferredType(TypePassType.Inferred(registry.sorts.getValue(arg.symbol)))
+            setInferredType(TypePassType.Inferred(intType))
+            return emptyList()
+        }
+    }
     funBuiltinEnv[callName()]?.let { builtin ->
         if (builtin.namedFunArg) {
             return typePassNamedFunMap(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv, builtin)

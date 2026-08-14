@@ -277,7 +277,9 @@ class ParamProcExprNode(
     private val loc: ProgramLoc,
     /** Create-index `global` / `const global` decls; empty for apply-index. */
     private val globalDecls: List<GlobalDeclNames> = emptyList(),
-) : ASTNode(listOf(body)) {
+    /** Create-index `init:` Boolean exprs; empty for apply-index. */
+    private val initExprs: List<ExprNode> = emptyList(),
+) : ASTNode(listOf(body) + initExprs) {
     override fun programLocation() = loc
     internal fun paramBody() = body
     internal fun paramName() = paramName
@@ -287,15 +289,18 @@ class ParamProcExprNode(
     internal fun globalVarNames(): List<String> = globalDecls.flatMap { it.names }
     internal fun globalConstVarNames(): List<String> =
         globalDecls.filter { it.isConst }.flatMap { it.names }
+    internal fun initExprs(): List<ExprNode> = initExprs
     override fun toString(): String {
         val index = if (paramType == null) "$body[$paramName]" else "$body[$paramName : $paramType]"
-        if (globalDecls.isEmpty()) return index
-        val lines = globalDecls.joinToString("\n") { decl ->
+        if (globalDecls.isEmpty() && initExprs.isEmpty()) return index
+        val lines = globalDecls.map { decl ->
             val names = decl.names.joinToString(", ")
             val kw = if (decl.isConst) "const global" else "global"
             "  $kw $names"
+        } + initExprs.map { expr ->
+            "  init: $expr"
         }
-        return "$index {\n$lines\n}"
+        return "$index {\n${lines.joinToString("\n")}\n}"
     }
 }
 

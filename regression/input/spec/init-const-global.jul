@@ -1,0 +1,19 @@
+sort Node := {"n1", "n2"}
+
+proc Peer {
+    const cluster : List<String>
+    var state : String
+
+    constructor start(me : String, cluster : List<String>) {
+        transit:
+            cluster := cluster
+            state := "idle"
+    }
+}
+
+spec Indexed := Peer[n : Node] {
+  const global cluster
+  init: cluster.length = Node.length
+}
+
+compile Indexed

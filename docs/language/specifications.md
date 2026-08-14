@@ -99,6 +99,7 @@ Three roles:
 | **Create index** | `Name[v : Type]` | Lift `Name`’s state to functions of a new index |
 | **Global vars** | `Name[v : T] { global x, y }` | Leave listed **var**s unindexed (one mutable TLA VARIABLE for all `v`) |
 | **Const-global vars** | `Name[v : T] { const global x }` | Leave listed **const**s unindexed and immutable in TLA+ |
+| **Init constraints** | `Name[v : T] { const global x; init: expr }` | Extra Init conjuncts over const-globals / sort `.length` |
 | **Shared binder** | `with (v : Type) { system }` | Scope where `v` may be applied; one `\E v` for the group |
 | **Apply index** | `Name[v]` | Use binder `v` from an enclosing `with` (no type). Does not create an index |
 
@@ -109,6 +110,7 @@ spec PeerIndexed := Peer[n : NodeSet]          // create (lift state)
 
 spec ClusterSpec := RaftProtocol[n : NodeSet] {
   const global cluster
+  init: cluster.length = NodeSet.length
 }
 
 spec Sys := with (n : NodeSet) {
@@ -144,6 +146,17 @@ Unknown names, duplicates, and synthetic bookkeeping vars (`constructed` / `kill
 - Any other write is an unprimed equality check: `/\ RaftProtocol_cluster = <rhs> \* global const check` (IO havoc: `v \in domain`).
 
 Plain `global extra` (a `var`) is unchanged: Init default, primed writes, scalar (unindexed).
+
+**`init:` on create-index** (same `{ }` block) adds extra Init conjuncts. Use this for facts about `const global` state that never change, so Init is enough (not a checked invariant):
+
+```jul
+spec ClusterSpec := RaftProtocol[n : NodeSet] {
+    const global cluster
+    init: cluster.length = NodeSet.length
+}
+```
+
+Several `init:` lines, or `init: A & B`, all become Init `/\`. Bare names are the listed const-globals (`cluster`); `RaftProtocol.cluster` also works. Indexed `RaftProtocol[n].cluster` is an error (const-globals are scalars). Sort `.length` / `length(Sort)` is spec/TLA-only (`Cardinality` in TLA+). If `|Sort| > MaxListLen` (default 3), compile errors — Init would be empty.
 
 **Shorthand** `(A || B)[n : T]` means the same as create-temps + `with` + applies:
 

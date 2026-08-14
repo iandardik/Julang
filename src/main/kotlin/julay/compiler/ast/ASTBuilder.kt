@@ -322,14 +322,29 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             ctx.COLON() != null -> {
                 val paramName = ctx.ID().text
                 val paramType = parseTypeExpr(ctx.typeExpr())
-                val globalDecls = ctx.global_decl().map { decl ->
-                    GlobalDeclNames(
-                        names = decl.ID().map { it.text },
-                        isConst = decl.CONST() != null,
-                        loc = sourceLocation(decl),
-                    )
+                val globalDecls = mutableListOf<GlobalDeclNames>()
+                val initExprs = mutableListOf<ExprNode>()
+                ctx.create_index_item().forEach { item ->
+                    val decl = item.global_decl()
+                    if (decl != null) {
+                        globalDecls += GlobalDeclNames(
+                            names = decl.ID().map { it.text },
+                            isConst = decl.CONST() != null,
+                            loc = sourceLocation(decl),
+                        )
+                    } else {
+                        val init = item.init_clause()
+                            ?: return@forEach
+                        val expr = visit(init.expr())
+                        if (expr !is ExprNode) {
+                            throw RuntimeException("Expected init: clause to be an expression")
+                        }
+                        initExprs += expr
+                    }
                 }
-                ParamProcExprNode(primary, paramName, paramType, sourceLocation(ctx), globalDecls)
+                ParamProcExprNode(
+                    primary, paramName, paramType, sourceLocation(ctx), globalDecls, initExprs,
+                )
             }
             ctx.LBRACK() != null -> {
                 val paramName = ctx.ID().text
