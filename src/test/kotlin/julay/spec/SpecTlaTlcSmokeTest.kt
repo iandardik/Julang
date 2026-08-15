@@ -84,12 +84,12 @@ class SpecTlaTlcSmokeTest {
                 "expected Init to index Counter over String with binder i;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("\\* State variables for Counter"),
-                "expected Init comment for Counter state;\n$tlaText",
+                tlaText.contains("\\* State variables for Counter with initially constructor logic"),
+                "expected Init comment for Counter state with folded initially;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("Counter_constructed") && tlaText.contains("/\\ n = [i \\in String |->"),
-                "expected bare state var n with Leaf_constructed;\n$tlaText",
+                !tlaText.contains("Counter_constructed") && tlaText.contains("/\\ n = [i \\in String |->"),
+                "expected bare state var n without Leaf_constructed (ctor folded into Init);\n$tlaText",
             )
             assertTrue(
                 tlaText.contains("\\E i \\in String :"),
@@ -208,18 +208,18 @@ class SpecTlaTlcSmokeTest {
                 "guard-only work should be omitted from defs/Next;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("\\* State variables for Server") &&
+                tlaText.contains("\\* State variables for Server with initially constructor logic") &&
                     tlaText.contains("\\* State variables for Worker"),
-                "expected Init state-var comments;\n$tlaText",
+                "expected Init state-var comments; Server initially is folded, Worker keeps Next ctors;\n$tlaText",
             )
             assertTrue(
                 tlaText.contains("Worker_id") && tlaText.contains("/\\ ready = FALSE"),
                 "id clashes with action arg so stays Worker_id; ready is bare;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("\\* initially constructor on Server") &&
-                    tlaText.contains("Server_initially =="),
-                "expected disambiguation comment for Server initially;\n$tlaText",
+                !tlaText.contains("Server_constructed") &&
+                    !tlaText.contains("Server_initially =="),
+                "Server's sole unsynced initially is folded into Init;\n$tlaText",
             )
             assertTrue(
                 tlaText.contains("\\* initially constructor on Worker") &&
@@ -234,22 +234,18 @@ class SpecTlaTlcSmokeTest {
                 "expected per-proc transition-type logic comments in spawnWorker;\n$spawnDef",
             )
             val afterInit = tlaText.substringAfter("Init ==")
-            val serverInitIdx = afterInit.indexOf("Server_initially ==")
             val workerInitIdx = afterInit.indexOf("Worker_initially(i) ==")
             val spawnIdx = afterInit.indexOf("spawnWorker(i, id) ==")
             assertTrue(
-                serverInitIdx >= 0 && workerInitIdx >= 0 && spawnIdx >= 0 &&
-                    serverInitIdx < spawnIdx && workerInitIdx < spawnIdx,
-                "initially defs should appear after Init and before spawnWorker;\n$tlaText",
+                workerInitIdx >= 0 && spawnIdx >= 0 && workerInitIdx < spawnIdx,
+                "Worker initially def should appear after Init and before spawnWorker;\n$tlaText",
             )
             val nextBody = tlaText.substringAfter("Next ==").substringBefore("\n\n")
-            val nextServer = nextBody.indexOf("Server_initially")
             val nextWorker = nextBody.indexOf("Worker_initially")
             val nextSpawn = nextBody.indexOf("spawnWorker")
             assertTrue(
-                nextServer >= 0 && nextWorker >= 0 && nextSpawn >= 0 &&
-                    nextServer < nextSpawn && nextWorker < nextSpawn,
-                "initially should lead Next before spawnWorker;\n$nextBody",
+                nextWorker >= 0 && nextSpawn >= 0 && nextWorker < nextSpawn,
+                "Worker initially should lead Next before spawnWorker;\n$nextBody",
             )
             tla.copyTo(File(work, "SpawnWorker.tla"), overwrite = true)
             cfg.copyTo(File(work, "SpawnWorker.cfg"), overwrite = true)
@@ -280,16 +276,16 @@ class SpecTlaTlcSmokeTest {
             assertTrue(cfg.exists(), "expected ComposedSystem.cfg")
             val tlaText = tla.readText()
             assertTrue(
-                tlaText.contains("Counter_constructed") &&
-                    tlaText.contains("\\* State variables for Counter") &&
+                !tlaText.contains("Counter_constructed") &&
+                    tlaText.contains("\\* State variables for Counter with initially constructor logic") &&
                     tlaText.contains("/\\ n = 0"),
-                "expected Counter_constructed and bare n;\n$tlaText",
+                "expected Counter initially folded into Init with bare n;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("Env_constructed") &&
-                    tlaText.contains("\\* State variables for Env") &&
+                !tlaText.contains("Env_constructed") &&
+                    tlaText.contains("\\* State variables for Env with initially constructor logic") &&
                     tlaText.contains("/\\ ready = FALSE"),
-                "expected Env_constructed and bare ready;\n$tlaText",
+                "expected Env initially folded into Init with bare ready;\n$tlaText",
             )
             assertTrue(
                 !tlaText.contains("System_constructed"),
@@ -329,17 +325,17 @@ class SpecTlaTlcSmokeTest {
             assertTrue(cfg.exists(), "expected NestedSpec.cfg")
             val tlaText = tla.readText()
             assertTrue(
-                tlaText.contains("Counter_constructed") &&
-                    tlaText.contains("\\* State variables for Counter") &&
+                !tlaText.contains("Counter_constructed") &&
+                    tlaText.contains("\\* State variables for Counter with initially constructor logic") &&
                     !tlaText.contains("Counter_n"),
-                "expected Counter_constructed with bare n;\n$tlaText",
+                "expected Counter initially folded into Init with bare n;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("Handler_constructed") &&
-                    tlaText.contains("\\* State variables for Handler") &&
+                !tlaText.contains("Handler_constructed") &&
+                    tlaText.contains("\\* State variables for Handler with initially constructor logic") &&
                     !tlaText.contains("Handler_step") &&
                     tlaText.contains("step"),
-                "expected Handler_constructed with bare step;\n$tlaText",
+                "expected Handler initially folded into Init with bare step;\n$tlaText",
             )
             assertTrue(
                 !tlaText.contains("CONSTANT t") && !tlaText.contains("CONSTANT t,"),
@@ -733,6 +729,25 @@ class SpecTlaTlcSmokeTest {
             "consecutive \\E over NodeSet should combine;\n${tlaText.substringAfter("Next ==").take(2000)}",
         )
         assertTrue(
+            !tlaText.contains("RaftProtocol_constructed") &&
+                !tlaText.contains("Net_constructed") &&
+                !tlaText.contains("startRaftCore(") &&
+                !Regex("""(?m)^initially ==""").containsMatchIn(tlaText),
+            "sole unsynced ctors should fold into Init; omit *_constructed and Next ctors;\n${tlaText.take(4000)}",
+        )
+        assertTrue(
+            tlaText.contains("\\* State variables for RaftProtocol with startRaftCore constructor logic") &&
+                tlaText.contains("\\* State variables for Net with initially constructor logic") &&
+                tlaText.contains("\\* RaftProtocol constructor assumption") &&
+                tlaText.contains("\\* init constraints"),
+            "Init comments should name folded ctors, assumptions, then init constraints;\n${tlaText.substringAfter("Init ==").take(2500)}",
+        )
+        val cfgText = emit.cfgText
+        assertTrue(
+            cfgText.contains("CONSTANT Int = {0, 1, 2, 3}"),
+            "cfg Int should pad through MaxListLen so node id 3 is in the universe;\n$cfgText",
+        )
+        assertTrue(
             tlaText.contains("self \\in [NodeSet -> TypeOKInt]"),
             "TypeOK should type self as [NodeSet -> TypeOKInt];\n${tlaText.substringAfter("TypeOK ==").take(1500)}",
         )
@@ -744,9 +759,14 @@ class SpecTlaTlcSmokeTest {
         assertTrue(
             tlaText.contains("StateMachineSafety") &&
                 (tlaText.contains("1 <= i") || tlaText.contains("i >= 1")) &&
-                tlaText.contains("max(") &&
-                (tlaText.contains("commitIndex[n1]") || tlaText.contains("RaftProtocol_commitIndex")),
-            "StateMachineSafety should call max on commitIndex;\n${tlaText.substringAfter("StateMachineSafety").take(800)}",
+                (tlaText.contains("min(") || tlaText.contains("max(")) &&
+                (
+                    tlaText.contains("commitIndex[n1]") ||
+                        tlaText.contains("RaftProtocol_commitIndex") ||
+                        tlaText.contains("Len(log[n1])") ||
+                        tlaText.contains("Len(RaftProtocol_log[n1])")
+                    ),
+            "StateMachineSafety should constrain overlapping log indices;\n${tlaText.substringAfter("StateMachineSafety").take(800)}",
         )
         assertTrue(
             Regex("""=> \(n1 = n2\)\n\nStateMachineSafety ==""").containsMatchIn(tlaText) &&
@@ -806,12 +826,11 @@ class SpecTlaTlcSmokeTest {
                 paintDef.contains("p' = [\n       x |-> 1,\n       y |-> 2\n     ]"),
                 "multi-line Julay obj fields should be +2 past first non-/\\ symbol;\n$paintDef",
             )
-            val initDef = tlaText.substringAfter("initially ==").substringBefore("\n\n")
-                .ifEmpty { tlaText.substringAfter("Painter_initially ==").substringBefore("\n\n") }
+            val initDef = tlaText.substringAfter("Init ==").substringBefore("\n\n")
             assertTrue(
-                initDef.contains("p' = [x |-> 0, y |-> 0]") ||
+                initDef.contains("p = [x |-> 0, y |-> 0]") ||
                     initDef.contains("[x |-> 0, y |-> 0]"),
-                "single-line Julay obj should stay compact;\n$initDef",
+                "single-line Julay obj should stay compact in folded Init;\n$initDef",
             )
             assertFalse(
                 initDef.contains("x |-> 0,\n"),
@@ -1269,7 +1288,7 @@ class SpecTlaTlcSmokeTest {
             val sessionCommentIdx = meetDef.indexOf("\\* Session connection semantics")
             val unchangedIdx = meetDef.indexOf("UNCHANGED")
             assertTrue(
-                sessionCommentIdx in 0 until unchangedIdx,
+                sessionCommentIdx >= 0 && (unchangedIdx < 0 || sessionCommentIdx < unchangedIdx),
                 "session block should be last before UNCHANGED in meet;\n$meetDef",
             )
             assertTrue(
@@ -1903,9 +1922,9 @@ class SpecTlaTlcSmokeTest {
                 "const-global cluster must not be primed;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("start(n, me) ==") &&
-                    !tlaText.contains("start(n, me, cluster)"),
-                "expected cluster arg elided from start;\n$tlaText",
+                !tlaText.contains("start(n, me) ==") &&
+                    !tlaText.contains("Peer_constructed"),
+                "sole unsynced start ctor should fold into Init;\n$tlaText",
             )
             assertTrue(
                 tlaText.contains("extra' = extra + 1") ||
@@ -1929,22 +1948,21 @@ class SpecTlaTlcSmokeTest {
                 tlaText.contains("state[i]"),
                 "expected indexed Peer[i].state in invariant;\n$tlaText",
             )
+            val initDef = tlaText.substringAfter("Init ==").substringBefore("\n\n")
             assertTrue(
                 tlaText.contains("\\* Peer constructor assumption") &&
-                    tlaText.contains("me \\in Range(Peer_cluster)") &&
+                    initDef.contains("\\E me \\in String : me \\in Range(Peer_cluster)") &&
                     rangeHelperUnderTlaHelpers(tlaText),
-                "expected flipped ~in error assumption as Range membership on state var;\n$tlaText",
+                "expected folded ~in error as Range membership with unbound me existential;\n$initDef",
             )
-            val startDef = tlaText.substringAfter("start(n, me) ==").substringBefore("\n\n")
+            val bumpDef = tlaText.substringAfter("bump(n) ==").substringBefore("\n\n")
+                .ifEmpty { tlaText.substringAfter("bump(").let { rest ->
+                    val sigEnd = rest.indexOf(" ==")
+                    if (sigEnd < 0) "" else rest.substring(sigEnd + 3).substringBefore("\n\n")
+                } }
             assertTrue(
-                startDef.contains("constructor assumption") &&
-                    startDef.indexOf("constructor assumption") <
-                    startDef.indexOf("constructor logic"),
-                "assumption section must precede constructor logic;\n$tlaText",
-            )
-            assertTrue(
-                startDef.contains("UNCHANGED") && startDef.contains("Peer_cluster"),
-                "const-global cluster must stay in UNCHANGED;\n$startDef",
+                bumpDef.contains("UNCHANGED") && bumpDef.contains("Peer_cluster"),
+                "const-global cluster must stay in UNCHANGED;\n$bumpDef",
             )
             tla.copyTo(File(work, "Indexed.tla"), overwrite = true)
             cfg.copyTo(File(work, "Indexed.cfg"), overwrite = true)

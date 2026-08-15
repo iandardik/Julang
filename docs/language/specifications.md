@@ -207,7 +207,7 @@ TLA+ emit may rewrite the composed spec (JAR codegen is unchanged). Named ids, a
 
 Disable with `--disable-tla-opt` / `--disable-tla-opt=ID,...`.
 
-Open `Int` / `String` sites that still need a TLC universe (leaf index, remaining `\E`, havoc) get a `.cfg` assignment from literals in the emitted spec — not a fixed `{0..5}` or a 9-string set. If nothing enumerates `Int`/`String`, that CONSTANT is omitted. Always-on; not a named opt. `MaxListLen` default remains `3`.
+Open `Int` / `String` sites that still need a TLC universe (leaf index, remaining `\E`, havoc) get a `.cfg` assignment from literals in the emitted spec — not a fixed `{0..5}` or a 9-string set. Cfg `Int` is the contiguous range `{0, …, max(highest non-negative literal, MaxListLen)}` (default `MaxListLen` is `3`). If nothing enumerates `Int`/`String`, that CONSTANT is omitted. Always-on; not a named opt.
 
 ### Lists and sequences
 
@@ -266,7 +266,7 @@ See also [Collections](collections.md).
 - Transit-level `let` bindings become TLA `LET` around later assign conjuncts (not AST-inlined); consecutive lets share one `LET`. Discard `let _ := …` is omitted. Chained expression `let`s are also one `LET`.
 - Julay `when` becomes TLA `CASE` with `[]` arms and `OTHER` for the trailing else.
 - Invariants preserve multi-line structure (boolean trees). Consecutive `\A` / `\E` binders over the same domain are condensed like Next (`\A n1, n2 \in NodeSet`). Parentheses written in the `.jul` source are kept; other parentheses are omitted when operator precedence makes them unnecessary. A blank line separates consecutive user-specified invariant operators. List indices are 1-based: `i <= xs.length => xs[i]` is true for `i = 0` on an empty list (`0 <= 0`), and TLC then evaluates `<<>>[0]`. Guard with `i >= 1` as well.
-- `initially` constructors (`initially` / `*_initially`) are emitted first after `Init`, both as operator definitions and as the leading disjuncts of `Next`. Consecutive `\E` binders in `Next` over the same domain are written `\E n, m \in NodeSet`.
+- A leaf’s **only** constructor, when it has no sync partner (not a client/provider pair, not hybrid ctor+default, not a procfun `*_call` / havoc site), is folded into `Init`: constructor transits become Init assignments, `error:` arms become Init constraints under `\* <Proc> constructor assumption` immediately after that leaf’s state variables, and the constructor is omitted from `Next`. `initially` constructors that are **not** folded (`initially` / `*_initially`) are emitted first after `Init`, both as operator definitions and as the leading disjuncts of `Next`. Consecutive `\E` binders in `Next` over the same domain are written `\E n, m \in NodeSet`.
 - Two blank lines separate funs/helpers from `\* system definition`, then a blank line before `Init`. After `Spec == Init /\ [][Next]_vars`, two blank lines precede `\* Invariants`. A blank line precedes the closing `====`. Automatically generated operators (`TypeOKInt`, `TypeOK`, and `SessionIntegrity` when present) sit under `\* automatically generated invariants`; named and inline guarantees sit under `\* user-specified invariants`. `TypeOK` is listed first in the `.cfg`. `TypeOKInt == Int \cup Nat \cup {lo..hi}` sits immediately above `TypeOK`. It unions cfg `Int` (a finite non-negative `\E` bound that cannot include negatives), `Nat` (so `x := x + 1` counters stay in-type when `Nat` is not overridden), and every integer from the lowest negative literal through `max(highest literal, MaxListLen+1)`. List vars use `Seq(S)` rather than `BoundedSeq` so membership stays pointwise.
 - `BoundedSeq`, `Range`, and `SetToSeq` are emitted under `\* TLA+ helpers` (above `\* Julay lib funs`) when used. Julay `fun`s referenced from Init/action guards, transit RHS, **or invariants** (and their transitive callees) are emitted as TLA+ operators immediately above `Init`, grouped under `\* Julay lib funs` (stdlib funlib) or `\* user defined funs`. Operator parameters that collide with `VARIABLES` / `CONSTANT`s / other module operators are renamed (`p_…`).
 - `splice(xs, a, b)` becomes a call to a module-level `splice` operator (defined above `Init` under `\* Julay lib funs` when any call is used); splice params/binders are clash-renamed like fun params.
@@ -306,7 +306,7 @@ When a spec includes **two-sided** session actions (both peer classes appear as 
 
 **Per SpecLeaf (any spec):**
 
-- `*_constructed` — always emitted; constructors require `~constructed`, transitions require `constructed`
+- `*_constructed` — constructors require `~constructed`, transitions require `constructed`. Omitted when that leaf’s sole unsynced constructor is folded into `Init` (every reachable state is constructed).
 
 **Omitted when unused:**
 

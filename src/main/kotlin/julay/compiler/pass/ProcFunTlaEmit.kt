@@ -44,6 +44,7 @@ internal fun emitProcFunCallAndRet(
     stateVarsByLeaf: Map<String, Set<String>>,
     stateVarNames: Map<Pair<String, String>, String>,
     handshake: ProcFunHandshakeVars,
+    foldedCtorLeaves: Set<String> = emptySet(),
 ): List<TlaAction> {
     val child = site.occurrence
     val callFlag = handshake.callFlags.first { it.first.occurrenceId == child.occurrenceId }.second
@@ -79,10 +80,12 @@ internal fun emitProcFunCallAndRet(
     val callChanged = mutableSetOf<String>()
 
     val hostConstructed = stateTlaName(hostLeaf.tlaName, "constructed", stateVarNames)
-    if (site.isHostConstructor) {
-        callParts += "/\\ ~${idx(hostConstructed, hostBinder)}"
-    } else {
-        callParts += "/\\ ${idx(hostConstructed, hostBinder)}"
+    if (hostLeaf.tlaName !in foldedCtorLeaves) {
+        if (site.isHostConstructor) {
+            callParts += "/\\ ~${idx(hostConstructed, hostBinder)}"
+        } else {
+            callParts += "/\\ ${idx(hostConstructed, hostBinder)}"
+        }
     }
     callParts += "/\\ ~${idx(blocking, hostBinder)}"
 
@@ -285,6 +288,7 @@ internal fun emitProcFunHavocAction(
     stateVarsByLeaf: Map<String, Set<String>>,
     stateVarNames: Map<Pair<String, String>, String>,
     cfgOverrides: MutableSet<String>,
+    foldedCtorLeaves: Set<String> = emptySet(),
 ): TlaAction {
     val hostBare = stateVarsByLeaf[hostLeaf.tlaName].orEmpty()
     val reserved = mutableSetOf<String>()
@@ -303,10 +307,12 @@ internal fun emitProcFunHavocAction(
     val changed = mutableSetOf<String>()
 
     val hostConstructed = stateTlaName(hostLeaf.tlaName, "constructed", stateVarNames)
-    if (site.isHostConstructor) {
-        parts += "/\\ ~${idx(hostConstructed, hostBinder)}"
-    } else {
-        parts += "/\\ ${idx(hostConstructed, hostBinder)}"
+    if (hostLeaf.tlaName !in foldedCtorLeaves) {
+        if (site.isHostConstructor) {
+            parts += "/\\ ~${idx(hostConstructed, hostBinder)}"
+        } else {
+            parts += "/\\ ${idx(hostConstructed, hostBinder)}"
+        }
     }
     hostOffer.decl.guards.forEach { g ->
         flattenTopLevelAnd(g).forEach { conjunct ->

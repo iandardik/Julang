@@ -239,7 +239,7 @@ class LeafSpecTest {
             proc Counter {
                 var count : Int := 0
                 constructor initially(args : List<String>) { transit: count := 0 }
-                transition bump() { transit: count := count + 1 }
+                transition bump() { guard: count >= 0 transit: count := count + 1 }
             }
             spec C1 := Counter[x : Node]
             spec C2 := Counter[x : Node]

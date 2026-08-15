@@ -49,7 +49,7 @@ When compiling a `spec` (or `--compile-tla`), Julay may rewrite generated `.tla`
 
 Some of these are **equivalent rewrites** of the same transition relation. Others are **projections**: they exclude values the Julay type would otherwise allow, so `=` / `in` / `~=` can diverge from the program.
 
-TLC `.cfg` `Int` / `String` universes are sized from literals in the emitted spec (open `\E` / index / havoc sites). That projection is always on and is not a `--disable-tla-opt` id. `MaxListLen` stays `3`.
+TLC `.cfg` `Int` / `String` universes are sized from literals in the emitted spec (open `\E` / index / havoc sites). Cfg `Int` is `{0, …, max(highest non-negative literal, MaxListLen)}`. That projection is always on and is not a `--disable-tla-opt` id. `MaxListLen` stays `3`.
 
 ### Named TLA+ optimizations
 

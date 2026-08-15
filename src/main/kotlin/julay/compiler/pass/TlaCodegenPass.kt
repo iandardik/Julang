@@ -351,6 +351,8 @@ private fun emitProjectedTla(
         sessionPairForOffers(offerList, sessionPairs) != null && offerList.any { it.isConstructor }
     }
     val stateVarNames = buildStateVarNames(leaves, pclassesForTla, reservedTlaIds, killTargets)
+    val foldedCtors = foldableInitConstructors(offers, callSites, havocSites)
+    val foldedCtorLeaves = foldedCtors.keys
 
     // cfg Int/Nat may be finite \E bounds; TypeOK uses TypeOKInt (Int \cup Nat \cup extras).
     val typeOkIntRange = "TypeOKInt"
@@ -361,19 +363,27 @@ private fun emitProjectedTla(
     val typeOkParts = mutableListOf<String>()
     leaves.forEach { leaf ->
         val pc = pclassesForTla[leaf.name] ?: return@forEach
-        initParts += "\\* State variables for ${leaf.name}"
+        val foldCtor = foldedCtors[leaf.tlaName]
+        initParts += if (foldCtor != null) {
+            "\\* State variables for ${leaf.name} with ${foldCtor.decl.action.name} constructor logic"
+        } else {
+            "\\* State variables for ${leaf.name}"
+        }
         val constructed = stateTlaName(leaf.tlaName, "constructed", stateVarNames)
         val hasKilled = leaf.tlaName in killTargets
         val killed = if (hasKilled) stateTlaName(leaf.tlaName, "killed", stateVarNames) else null
         val terminated = if (leaf.isProcFun) stateTlaName(leaf.tlaName, "terminated", stateVarNames) else null
         val paramDomain = leafParamDomain(leaf)
+        val stateVarsByLeaf = pc.localDecls().filterIsInstance<VarNode>().map { it.name }.toSet()
         if (leaf.isParameterized) {
             val domain = paramDomain!!
-            val bareStateVars = pc.localDecls().filterIsInstance<VarNode>().map { it.name }.toSet()
+            val bareStateVars = stateVarsByLeaf
             val binder = indexBinderName(leaf, bareStateVars)
-            variables += constructed
-            initParts += "/\\ $constructed = [$binder \\in $domain |-> FALSE]"
-            typeOkParts += typeOkConjunct(constructed, "BOOLEAN", domain)
+            if (foldCtor == null) {
+                variables += constructed
+                initParts += "/\\ $constructed = [$binder \\in $domain |-> FALSE]"
+                typeOkParts += typeOkConjunct(constructed, "BOOLEAN", domain)
+            }
             if (killed != null) {
                 variables += killed
                 initParts += "/\\ $killed = [$binder \\in $domain |-> FALSE]"
@@ -388,7 +398,20 @@ private fun emitProjectedTla(
                 if (!TlaVarProjection.get().isRelevant(leaf.name, vn.name)) return@forEach
                 val v = stateTlaName(leaf.tlaName, vn.name, stateVarNames)
                 variables += v
-                if (leaf.indexesState(vn.name)) {
+                val folded = foldCtor?.let {
+                    foldedCtorVarInit(
+                        leaf, vn, it, binder, domain, stateVarNames, constants, cfgOverrides, stateVarsByLeaf,
+                        leaves,
+                    )
+                }
+                if (folded != null) {
+                    initParts += folded
+                    if (leaf.indexesState(vn.name)) {
+                        typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange), domain)
+                    } else {
+                        typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange), null)
+                    }
+                } else if (leaf.indexesState(vn.name)) {
                     initParts += "/\\ $v = [$binder \\in $domain |-> ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}]"
                     typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange), domain)
                 } else if (vn.name in leaf.globalConstVars) {
@@ -400,10 +423,18 @@ private fun emitProjectedTla(
                     typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange), null)
                 }
             }
+            if (foldCtor != null) {
+                emitFoldedCtorAssumptions(
+                    leaf, foldCtor, binder, domain, stateVarNames, constants, cfgOverrides,
+                    stateVarsByLeaf, leaves, initParts,
+                )
+            }
         } else {
-            variables += constructed
-            initParts += "/\\ $constructed = FALSE"
-            typeOkParts += typeOkConjunct(constructed, "BOOLEAN", null)
+            if (foldCtor == null) {
+                variables += constructed
+                initParts += "/\\ $constructed = FALSE"
+                typeOkParts += typeOkConjunct(constructed, "BOOLEAN", null)
+            }
             if (killed != null) {
                 variables += killed
                 initParts += "/\\ $killed = FALSE"
@@ -418,8 +449,24 @@ private fun emitProjectedTla(
                 if (!TlaVarProjection.get().isRelevant(leaf.name, vn.name)) return@forEach
                 val v = stateTlaName(leaf.tlaName, vn.name, stateVarNames)
                 variables += v
-                initParts += "/\\ $v = ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
+                val folded = foldCtor?.let {
+                    foldedCtorVarInit(
+                        leaf, vn, it, null, null, stateVarNames, constants, cfgOverrides, stateVarsByLeaf,
+                        leaves,
+                    )
+                }
+                if (folded != null) {
+                    initParts += folded
+                } else {
+                    initParts += "/\\ $v = ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
+                }
                 typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange), null)
+            }
+            if (foldCtor != null) {
+                emitFoldedCtorAssumptions(
+                    leaf, foldCtor, null, null, stateVarNames, constants, cfgOverrides,
+                    stateVarsByLeaf, leaves, initParts,
+                )
             }
         }
     }
@@ -478,7 +525,7 @@ private fun emitProjectedTla(
     val built = buildTlaActions(
         leaves, pclassesForTla, offers, sessionPairs, stateVarNames,
         killTargets, needsSessionException, callSites, handshake, procFunNodes,
-        havocSites, cfgOverrides, leafSpecNodes,
+        havocSites, cfgOverrides, leafSpecNodes, foldedCtorLeaves,
     )
     val helpers = built.helpers
     val actions = built.actions
@@ -680,7 +727,8 @@ private fun emitProjectedTla(
         appendLine("CHECK_DEADLOCK FALSE")
         fun modelFor(name: String): String = when {
             name in sortModels -> sortModels.getValue(name)
-            name == "Int" || name == "Nat" || name == "Real" -> cfgIntModel(intModelValues)
+            name == "Int" || name == "Nat" || name == "Real" ->
+                cfgIntModel(intModelValues, DEFAULT_MAX_LIST_LEN)
             name == "String" -> cfgStringModel(stringModelValues, intModelValues, coerceIntToString)
             else -> cfgConstantModel(name)
         }
@@ -879,6 +927,33 @@ internal fun collectEmittedOfferLists(offers: List<TlaActionOffer>): List<List<T
         }
     }
     return result
+}
+
+/**
+ * Sole unsynced constructors folded into Init: not a client/provider pair, not hybrid
+ * ctor+default, not a procfun `*_call` / havoc site, and the leaf has no other constructor.
+ */
+internal fun foldableInitConstructors(
+    offers: List<TlaActionOffer>,
+    callSites: List<ProcFunCallSite>,
+    havocSites: List<ProcFunCallSite>,
+): Map<String, TlaActionOffer> {
+    val splitKeys = (callSites + havocSites).map { it.hostName to it.hostActionName }.toSet()
+    val out = linkedMapOf<String, TlaActionOffer>()
+    offers.filter { it.isConstructor }.groupBy { it.leaf.tlaName }.forEach { (tlaName, ctors) ->
+        if (ctors.size != 1) return@forEach
+        val offer = ctors.single()
+        if ((offer.leaf.tlaName to offer.decl.action.name) in splitKeys) return@forEach
+        val group = offers.filter { it.decl.action.name == offer.decl.action.name }
+        val providers = group.filter { it.role == TSAction.SyncRole.Provider }
+        val clients = group.filter { it.role == TSAction.SyncRole.Client }
+        if (providers.size == 1 && clients.isNotEmpty()) return@forEach
+        val constructors = group.filter { it.isConstructor }
+        val defaults = group.filter { it.role == TSAction.SyncRole.Default && !it.isConstructor }
+        if (constructors.size == 1 && defaults.size == 1) return@forEach
+        out[tlaName] = offer
+    }
+    return out
 }
 
 /** True when the group still primes a var after unused-vars (constructor / return always emit). */
@@ -1382,15 +1457,18 @@ private fun deadOperatorDef(
     stateVarsByLeaf: Map<String, Set<String>>,
     stateVarNames: Map<Pair<String, String>, String>,
     killTargets: Set<String>,
+    foldedCtorLeaves: Set<String> = emptySet(),
 ): String {
-    val c = stateTlaName(leaf.tlaName, "constructed", stateVarNames)
     val self = if (leaf.isParameterized) {
         indexBinderName(leaf, stateVarsByLeaf[leaf.tlaName].orEmpty())
     } else {
         null
     }
     val naturalParts = mutableListOf<String>()
-    naturalParts += if (self != null) "/\\ $c[$self]" else "/\\ $c"
+    if (leaf.tlaName !in foldedCtorLeaves) {
+        val c = stateTlaName(leaf.tlaName, "constructed", stateVarNames)
+        naturalParts += if (self != null) "/\\ $c[$self]" else "/\\ $c"
+    }
     leafOffers.filter { !it.isConstructor }.forEach { offer ->
         naturalParts += "/\\ ${negateLocalGuards(offer, self, stateVarsByLeaf, stateVarNames)}"
     }
@@ -1487,8 +1565,9 @@ private fun buildTlaActions(
     havocSites: List<ProcFunCallSite> = emptyList(),
     cfgOverrides: MutableSet<String> = linkedSetOf(),
     leafSpecs: Map<String, LeafSpecNode> = emptyMap(),
+    foldedCtorLeaves: Set<String> = emptySet(),
 ): TlaBuildResult {
-    val allVars = allTlaVars(leaves, pclasses, stateVarNames, killTargets) +
+    val allVars = allTlaVars(leaves, pclasses, stateVarNames, killTargets, foldedCtorLeaves) +
         handshake.allNames() +
         sessionPairs.map { it.varName } +
         if (needsSessionException) listOf("sessionException") else emptyList()
@@ -1529,6 +1608,7 @@ private fun buildTlaActions(
             pclasses = pclasses,
             leafSpecs = leafSpecs,
             systemLeaves = leaves,
+            foldedCtorLeaves = foldedCtorLeaves,
         )?.let { result += it }
     }
 
@@ -1538,6 +1618,7 @@ private fun buildTlaActions(
             ?: error("missing procfun ${site.procFunName}")
         result += emitProcFunCallAndRet(
             site, hostLeaf, offer, pf, allVars, stateVarsByLeaf, stateVarNames, handshake,
+            foldedCtorLeaves,
         )
     }
 
@@ -1547,6 +1628,7 @@ private fun buildTlaActions(
             ?: error("missing procfun ${site.procFunName}")
         result += emitProcFunHavocAction(
             site, hostLeaf, offer, pf, allVars, stateVarsByLeaf, stateVarNames, cfgOverrides,
+            foldedCtorLeaves,
         )
     }
 
@@ -1592,6 +1674,7 @@ private fun buildTlaActions(
         // Solo constructors (any name, including initially) — valid leaf entry
         val disambiguateCtors = constructors.size > 1
         constructors.forEach { offer ->
+            if (offer.leaf.tlaName in foldedCtorLeaves) return@forEach
             if (emitSplitOrPlain(offer)) return@forEach
             val name: String
             val comment: String?
@@ -1683,7 +1766,7 @@ private fun buildTlaActions(
         .distinctBy { it.name }
     sessionLeaves.forEach { leaf ->
         val leafOffers = offers.filter { it.leaf.tlaName == leaf.tlaName }
-        helpers += deadOperatorDef(leaf, leafOffers, stateVarsByLeaf, stateVarNames, killTargets)
+        helpers += deadOperatorDef(leaf, leafOffers, stateVarsByLeaf, stateVarNames, killTargets, foldedCtorLeaves)
     }
 
     sessionPairs.forEach { pair ->
@@ -1705,10 +1788,14 @@ private fun allTlaVars(
     pclasses: Map<String, ProcClassNode>,
     stateVarNames: Map<Pair<String, String>, String>,
     killTargets: Set<String>,
+    foldedCtorLeaves: Set<String> = emptySet(),
 ): List<String> =
     leaves.flatMap { leaf ->
         val pc = pclasses[leaf.name] ?: return@flatMap emptyList()
-        val base = mutableListOf(stateTlaName(leaf.tlaName, "constructed", stateVarNames))
+        val base = mutableListOf<String>()
+        if (leaf.tlaName !in foldedCtorLeaves) {
+            base += stateTlaName(leaf.tlaName, "constructed", stateVarNames)
+        }
         if (leaf.tlaName in killTargets) {
             base += stateTlaName(leaf.tlaName, "killed", stateVarNames)
         }
@@ -1738,6 +1825,7 @@ private fun emitConjoined(
     pclasses: Map<String, ProcClassNode> = emptyMap(),
     leafSpecs: Map<String, LeafSpecNode> = emptyMap(),
     systemLeaves: List<SpecLeaf> = emptyList(),
+    foldedCtorLeaves: Set<String> = emptySet(),
 ): TlaAction? {
     // Peer reads use class names (Peer.self); map unique class → occurrence tlaName.
     val stateVarNames = stateVarNamesIn.toMutableMap()
@@ -2034,7 +2122,7 @@ private fun emitConjoined(
                 }
             }
         }
-        if (offer.isConstructor) {
+        if (offer.isConstructor && offer.leaf.tlaName !in foldedCtorLeaves) {
             val c = stateTlaName(offer.leaf.tlaName, "constructed", stateVarNames)
             targetChanged += c
             addAssignPart(
@@ -2080,7 +2168,6 @@ private fun emitConjoined(
 
     // Per-offer sections: assumptions (from error:), then comment + gates + guards + transits.
     offers.forEach { offer ->
-        val c = stateTlaName(offer.leaf.tlaName, "constructed", stateVarNames)
         val self = selfOf(offer.leaf)
         val auxNames = auxNamesByLeaf[offer.leaf.tlaName].orEmpty()
         val argNames = offer.decl.action.args.map { it.name }.toSet() + auxNames + bindNames
@@ -2102,10 +2189,13 @@ private fun emitConjoined(
         }
 
         parts += "\\* ${offer.leaf.name} ${tlaTransitionTypeLabel(offer)} logic"
-        if (offer.isConstructor) {
-            parts += if (self != null) "/\\ ~$c[$self]" else "/\\ ~$c"
-        } else {
-            parts += if (self != null) "/\\ $c[$self]" else "/\\ $c"
+        if (offer.leaf.tlaName !in foldedCtorLeaves) {
+            val c = stateTlaName(offer.leaf.tlaName, "constructed", stateVarNames)
+            if (offer.isConstructor) {
+                parts += if (self != null) "/\\ ~$c[$self]" else "/\\ ~$c"
+            } else {
+                parts += if (self != null) "/\\ $c[$self]" else "/\\ $c"
+            }
         }
         if (offer.leaf.tlaName in killTargets) {
             val killed = stateTlaName(offer.leaf.tlaName, "killed", stateVarNames)
@@ -2305,7 +2395,8 @@ internal fun indexBinderName(leaf: SpecLeaf, reserved: Set<String>, sharedBinder
 
 /**
  * Map (leafTlaName, julayVarName) → TLA identifier.
- * `constructed` is always `Leaf_constructed`; `killed` only for [killTargets] (by tlaName);
+ * `constructed` is `Leaf_constructed` unless that leaf's sole unsynced constructor was folded
+ * into Init (then the flag is omitted). `killed` only for [killTargets] (by tlaName);
  * other vars are bare unless duplicated or reserved.
  *
  * Future: Julay source may allow composite qualifiers such as `Y.X.n` where `proc Y := X || ...`;
@@ -2393,6 +2484,197 @@ private fun emitInitConstraintParts(
                 initParts += if (t.startsWith("/\\") || t.startsWith("\\/")) t else "/\\ $t"
             }
         }
+    }
+}
+
+/** Last `x := arg` assign in a constructor (const-global binds handled separately). */
+private fun ctorArgStateAssigns(offer: TlaActionOffer): Map<String, String> {
+    val argNames = offer.decl.action.args.map { it.name }.toSet()
+    val out = linkedMapOf<String, String>()
+    offer.decl.transits.forEach { update ->
+        if (update !is TransitUpdate.Assign) return@forEach
+        if (!isActionArgSymbol(update.expr, argNames)) return@forEach
+        val arg = (unwrapParens(update.expr) as SymbolValueExprNode).symbol
+        out[arg] = update.transitRootVar()
+    }
+    return out
+}
+
+private fun lastCtorAssign(offer: TlaActionOffer, varName: String): TransitUpdate.Assign? =
+    offer.decl.transits.filterIsInstance<TransitUpdate.Assign>().lastOrNull {
+        it.transitRootVar() == varName
+    }
+
+private fun ctorSymbolOverrides(
+    leaf: SpecLeaf,
+    offer: TlaActionOffer,
+    binder: String?,
+    stateVarNames: Map<Pair<String, String>, String>,
+    constants: Set<String>,
+    stateVarsByLeaf: Set<String>,
+    leaves: List<SpecLeaf>,
+): Map<String, String> {
+    val leafCtx = mapOf(leaf.name to leaf, leaf.tlaName to leaf)
+    val argNames = offer.decl.action.args.map { it.name }.toSet()
+    val constBinds = collectGlobalConstArgBinds(listOf(offer), stateVarNames)
+    val overrides = linkedMapOf<String, String>()
+    overrides.putAll(constBinds)
+    ctorArgStateAssigns(offer).forEach { (arg, varName) ->
+        if (arg in overrides) return@forEach
+        val v = stateTlaName(leaf.tlaName, varName, stateVarNames)
+        overrides[arg] = if (binder != null && leaf.indexesState(varName)) "$v[$binder]" else v
+    }
+    offer.decl.transits.forEach { update ->
+        if (update !is TransitUpdate.Let || update.name.isDiscardBinding()) return@forEach
+        val rhs = exprToTla(
+            update.init,
+            leafCtx = leafCtx,
+            argNames = argNames,
+            self = binder,
+            bareStateVars = stateVarsByLeaf,
+            reservedNames = constants,
+            stateVarNames = stateVarNames,
+            symbolOverrides = overrides,
+            linePrefix = "",
+            globalByLeaf = globalVarsByLeaf(leaves),
+        )
+        overrides[update.name] = rhs
+    }
+    return overrides
+}
+
+private fun foldedCtorVarInit(
+    leaf: SpecLeaf,
+    vn: VarNode,
+    offer: TlaActionOffer,
+    binder: String?,
+    domain: String?,
+    stateVarNames: Map<Pair<String, String>, String>,
+    constants: Set<String>,
+    cfgOverrides: MutableSet<String>,
+    stateVarsByLeaf: Set<String>,
+    leaves: List<SpecLeaf>,
+): String? {
+    val assign = lastCtorAssign(offer, vn.name) ?: return null
+    val v = stateTlaName(leaf.tlaName, vn.name, stateVarNames)
+    val argNames = offer.decl.action.args.map { it.name }.toSet()
+    val constGlobal = vn.name in leaf.globalConstVars
+    if (constGlobal) {
+        return null
+    }
+    if (exprContainsIoHavoc(assign.expr) || isActionArgSymbol(assign.expr, argNames)) {
+        collectDomainModelNames(safeType(vn), cfgOverrides)
+        val ty = typeToTlaDomain(safeType(vn))
+        return if (binder != null && leaf.indexesState(vn.name)) {
+            "/\\ $v \\in [$domain -> $ty]"
+        } else {
+            "/\\ $v \\in $ty"
+        }
+    }
+    val leafCtx = mapOf(leaf.name to leaf, leaf.tlaName to leaf)
+    val overrides = ctorSymbolOverrides(
+        leaf, offer, binder, stateVarNames, constants, stateVarsByLeaf, leaves,
+    )
+    val indexed = binder != null && leaf.indexesState(vn.name)
+    val assignPrefix = if (indexed) {
+        "/\\ $v = [$binder \\in $domain |-> "
+    } else {
+        "/\\ $v = "
+    }
+    val rhs = exprToTla(
+        assign.expr,
+        leafCtx = leafCtx,
+        argNames = argNames,
+        self = binder,
+        bareStateVars = stateVarsByLeaf,
+        reservedNames = constants,
+        stateVarNames = stateVarNames,
+        symbolOverrides = overrides,
+        linePrefix = assignPrefix,
+        globalByLeaf = globalVarsByLeaf(leaves),
+    )
+    return if (indexed) {
+        "/\\ $v = [$binder \\in $domain |-> $rhs]"
+    } else {
+        "/\\ $v = $rhs"
+    }
+}
+
+private fun emitFoldedCtorAssumptions(
+    leaf: SpecLeaf,
+    offer: TlaActionOffer,
+    binder: String?,
+    domain: String?,
+    stateVarNames: Map<Pair<String, String>, String>,
+    constants: Set<String>,
+    cfgOverrides: MutableSet<String>,
+    stateVarsByLeaf: Set<String>,
+    leaves: List<SpecLeaf>,
+    initParts: MutableList<String>,
+) {
+    val argNames = offer.decl.action.args.map { it.name }.toSet()
+    val constChecks = offer.decl.transits.filterIsInstance<TransitUpdate.Assign>().filter { update ->
+        update.transitRootVar() in leaf.globalConstVars &&
+            TlaVarProjection.get().isRelevant(leaf.name, update.transitRootVar()) &&
+            !isActionArgSymbol(update.expr, argNames)
+    }
+    if (offer.decl.errors.isEmpty() && constChecks.isEmpty()) return
+    initParts += "\\* ${leaf.name} constructor assumption"
+    val leafCtx = mapOf(leaf.name to leaf, leaf.tlaName to leaf)
+    val overrides = ctorSymbolOverrides(
+        leaf, offer, binder, stateVarNames, constants, stateVarsByLeaf, leaves,
+    )
+    constChecks.forEach { update ->
+        val v = stateTlaName(leaf.tlaName, update.transitRootVar(), stateVarNames)
+        val rhs = exprToTla(
+            update.expr,
+            leafCtx = leafCtx,
+            argNames = argNames,
+            self = binder,
+            bareStateVars = stateVarsByLeaf,
+            reservedNames = constants,
+            stateVarNames = stateVarNames,
+            symbolOverrides = overrides,
+            linePrefix = "/\\ $v = ",
+            globalByLeaf = globalVarsByLeaf(leaves),
+        )
+        initParts += "/\\ $v = $rhs \\* global const check"
+    }
+    val argAssigns = ctorArgStateAssigns(offer)
+    val argTypes = offer.decl.action.args.associate { it.name to it.type }
+    offer.decl.errors.forEach { arm ->
+        val assumed = negateErrorCondition(arm.condExpr())
+        val quantifiedIndexed = binder != null && domain != null && argAssigns.any { (arg, varName) ->
+            leaf.indexesState(varName) && exprReferencesSymbol(assumed, arg)
+        }
+        val existsArgs = argTypes.keys.filter { arg ->
+            arg !in overrides && exprReferencesSymbol(assumed, arg)
+        }
+        existsArgs.forEach { arg ->
+            argTypes[arg]?.let { collectDomainModelNames(it, cfgOverrides) }
+        }
+        val body = exprToTla(
+            assumed,
+            leafCtx = leafCtx,
+            argNames = existsArgs.toSet(),
+            self = binder,
+            bareStateVars = stateVarsByLeaf,
+            reservedNames = constants,
+            stateVarNames = stateVarNames,
+            symbolOverrides = overrides,
+            linePrefix = "/\\ ",
+            globalByLeaf = globalVarsByLeaf(leaves),
+        )
+        val existsWrap = existsArgs.reversed().fold(body) { inner, arg ->
+            val ty = argTypes[arg]?.let { typeToTlaDomain(it) } ?: "Int"
+            "\\E $arg \\in $ty : $inner"
+        }
+        val formula = if (quantifiedIndexed) {
+            "\\A $binder \\in $domain : $existsWrap"
+        } else {
+            existsWrap
+        }
+        initParts += "/\\ $formula"
     }
 }
 
@@ -2582,10 +2864,10 @@ internal fun cfgConstantModel(name: String): String = when (name) {
     else -> error("TLA+ cfg: no model for CONSTANT $name")
 }
 
-internal fun cfgIntModel(values: Set<Int>): String {
-    val nums = values.filter { it >= 0 }.toMutableSet()
-    nums += 0
-    return "{${nums.sorted().joinToString(", ")}}"
+internal fun cfgIntModel(values: Set<Int>, maxListLen: Int = DEFAULT_MAX_LIST_LEN): String {
+    val nums = values.filter { it >= 0 }
+    val hi = maxOf(nums.maxOrNull() ?: 0, maxListLen)
+    return "{${(0..hi).joinToString(", ")}}"
 }
 
 internal fun cfgStringModel(

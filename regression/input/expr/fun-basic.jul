@@ -17,7 +17,7 @@ proc S {
 
     transition increment(inc : Real) {
         guard:
-            ~print & double(id(inc)) > 0.0 & (1 + 1.5 = 2.5)
+            ~print & x = 0.0 & double(id(inc)) > 0.0 & (1 + 1.5 = 2.5)
         transit:
             x := 2.0
             print := true
