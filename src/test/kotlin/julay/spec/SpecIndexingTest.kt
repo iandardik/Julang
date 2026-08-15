@@ -396,6 +396,48 @@ class SpecIndexingTest {
         assertTrue(result.errors.isEmpty(), result.toString())
     }
 
+    @Test
+    fun invariantImportedMaxIsOk() {
+        val result = typeCheck(
+            """
+            import julay.funlib.max
+            sort N := {"a", "b"}
+            proc Worker {
+                var log : List<String>
+                var commitIndex : Int
+                constructor initially(args : List<String>) {
+                    transit:
+                        log := args
+                        commitIndex := 0
+                }
+            }
+            invariant SameLog := forall n1 : N, forall n2 : N, forall i : Int,
+                (1 <= i & i <= max(Worker[n1].commitIndex, Worker[n2].commitIndex)) => (Worker[n1].log[i] = Worker[n2].log[i])
+            spec Ok := Worker[n : N] |= SameLog
+            """.trimIndent(),
+        )
+        assertTrue(result.errors.isEmpty(), result.toString())
+    }
+
+    @Test
+    fun invariantMaxWithoutImportIsError() {
+        val result = typeCheck(
+            """
+            sort N := {"a"}
+            proc Worker {
+                var n : Int
+                constructor initially(args : List<String>) { transit: n := 0 }
+            }
+            invariant Bound := forall k : N, Worker[k].n <= max(Worker[k].n, Worker[k].n)
+            spec Bad := Worker[a : N] |= Bound
+            """.trimIndent(),
+        )
+        assertTrue(
+            result.errors.any { it.toString().contains("Unknown function \"max\"") },
+            result.toString(),
+        )
+    }
+
     private fun typeCheck(source: String, allowUnindexedSpec: Boolean = false): TypePassResult {
         val dir = Files.createTempDirectory("julay-spec-indexing")
         val file = dir.resolve("main.jul")

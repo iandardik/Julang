@@ -743,9 +743,10 @@ class SpecTlaTlcSmokeTest {
         )
         assertTrue(
             tlaText.contains("StateMachineSafety") &&
-                tlaText.contains("i >= 1") &&
-                (tlaText.contains("Len(log[n1])") || tlaText.contains("Len(RaftProtocol_log[n1])")),
-            "StateMachineSafety should guard i >= 1 and use list .length as Len;\n${tlaText.substringAfter("StateMachineSafety").take(800)}",
+                (tlaText.contains("1 <= i") || tlaText.contains("i >= 1")) &&
+                tlaText.contains("max(") &&
+                (tlaText.contains("commitIndex[n1]") || tlaText.contains("RaftProtocol_commitIndex")),
+            "StateMachineSafety should call max on commitIndex;\n${tlaText.substringAfter("StateMachineSafety").take(800)}",
         )
         assertTrue(
             Regex("""=> \(n1 = n2\)\n\nStateMachineSafety ==""").containsMatchIn(tlaText) &&

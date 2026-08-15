@@ -15,7 +15,19 @@ fun RootNode.specTypePass(
     allowUnindexedSpec: Boolean = false,
 ): SpecTypePassResult {
     val registry = cachedObjClassRegistry() ?: return SpecTypePassResult(emptyList())
-    val invariants = declNodes().filterIsInstance<InvariantNode>().associateBy { it.name() }
+    val invariants = unit.modules
+        .flatMap { it.root.declNodes().filterIsInstance<InvariantNode>() }
+        .associateBy { it.name() }
+    val funEnvByInv = mutableMapOf<String, Map<String, FunNode>>()
+    val funBuiltinEnvByInv = mutableMapOf<String, Map<String, FunBuiltin>>()
+    unit.modules.forEach { mod ->
+        val env = callableFuns(mod)
+        val builtins = callableFunBuiltins(mod)
+        mod.root.declNodes().filterIsInstance<InvariantNode>().forEach { inv ->
+            funEnvByInv[inv.name()] = env
+            funBuiltinEnvByInv[inv.name()] = builtins
+        }
+    }
     val leafSpecNodes = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<LeafSpecNode>() }
         .associateBy { it.name() }
@@ -34,21 +46,29 @@ fun RootNode.specTypePass(
 
     val errors = mutableListOf<CompileError>()
     val warnings = mutableListOf<CompileWarning>()
-    declNodes().filterIsInstance<SpecNode>().forEach { spec ->
-        val result = typePassSpec(
-            spec,
-            invariants,
-            pclassNodes,
-            leafSpecNodes,
-            procAliases,
-            specAliases,
-            apiAliases,
-            unit,
-            registry,
-            allowUnindexedSpec,
-        )
-        errors += result.errors
-        warnings += result.warnings
+    unit.modules.forEach { mod ->
+        val moduleFunEnv = callableFuns(mod)
+        val moduleFunBuiltinEnv = callableFunBuiltins(mod)
+        mod.root.declNodes().filterIsInstance<SpecNode>().forEach { spec ->
+            val result = typePassSpec(
+                spec,
+                invariants,
+                pclassNodes,
+                leafSpecNodes,
+                procAliases,
+                specAliases,
+                apiAliases,
+                unit,
+                registry,
+                allowUnindexedSpec,
+                funEnvByInv,
+                moduleFunEnv,
+                funBuiltinEnvByInv,
+                moduleFunBuiltinEnv,
+            )
+            errors += result.errors
+            warnings += result.warnings
+        }
     }
     return SpecTypePassResult(errors, warnings)
 }
@@ -77,6 +97,10 @@ private fun typePassSpec(
     unit: CompilationUnit,
     registry: ObjClassRegistry,
     allowUnindexedSpec: Boolean,
+    funEnvByInv: Map<String, Map<String, FunNode>>,
+    moduleFunEnv: Map<String, FunNode>,
+    funBuiltinEnvByInv: Map<String, Map<String, FunBuiltin>>,
+    moduleFunBuiltinEnv: Map<String, FunBuiltin>,
 ): SpecTypePassResult {
     val errors = mutableListOf<CompileError>()
     val warnings = mutableListOf<CompileWarning>()
@@ -181,6 +205,7 @@ private fun typePassSpec(
             errors += globalDeclErrors(value, pclassNodes, leafSpecNodes, procAliases, specAliases, apiAliases)
             errors += initClauseErrors(
                 value, pclassNodes, leafSpecNodes, procAliases, specAliases, apiAliases, registry,
+                moduleFunEnv, moduleFunBuiltinEnv,
             )
 
             val guarantee = value.guaranteeExpr()
@@ -204,6 +229,10 @@ private fun typePassSpec(
                             expandedSystem,
                             systemPclasses,
                             registry,
+                            funEnvByInv,
+                            moduleFunEnv,
+                            funBuiltinEnvByInv,
+                            moduleFunBuiltinEnv,
                         )
                     }
                     else -> {
@@ -215,6 +244,11 @@ private fun typePassSpec(
                             invariants,
                             checking = mutableSetOf(),
                             checked = mutableSetOf(),
+                            funEnvByInv,
+                            moduleFunEnv,
+                            funBuiltinEnvByInv,
+                            moduleFunBuiltinEnv,
+                            guarantee.programLocation(),
                         )
                     }
                 }
@@ -228,6 +262,7 @@ private fun typePassSpec(
             errors += globalDeclErrors(value, pclassNodes, leafSpecNodes, procAliases, specAliases, apiAliases)
             errors += initClauseErrors(
                 value, pclassNodes, leafSpecNodes, procAliases, specAliases, apiAliases, registry,
+                moduleFunEnv, moduleFunBuiltinEnv,
             )
         }
     }
@@ -333,6 +368,10 @@ private fun typePassInvariantNamed(
     systemLeaves: List<SpecLeaf>,
     pclasses: Map<String, ProcClassNode>,
     registry: ObjClassRegistry,
+    funEnvByInv: Map<String, Map<String, FunNode>>,
+    defaultFunEnv: Map<String, FunNode>,
+    funBuiltinEnvByInv: Map<String, Map<String, FunBuiltin>>,
+    defaultFunBuiltinEnv: Map<String, FunBuiltin>,
     checking: MutableSet<String> = mutableSetOf(),
     checked: MutableSet<String> = mutableSetOf(),
 ): List<CompileError> {
@@ -356,11 +395,17 @@ private fun typePassInvariantNamed(
         invariants,
         checking,
         checked,
+        funEnvByInv,
+        funEnvByInv[invName] ?: defaultFunEnv,
+        funBuiltinEnvByInv,
+        funBuiltinEnvByInv[invName] ?: defaultFunBuiltinEnv,
+        inv.programLocation(),
     )
     checking -= invName
     checked += invName
     return errors
 }
+
 
 private fun typePassInvariantFormula(
     formula: ExprNode,
@@ -370,309 +415,100 @@ private fun typePassInvariantFormula(
     invariants: Map<String, InvariantNode>,
     checking: MutableSet<String>,
     checked: MutableSet<String>,
+    funEnvByInv: Map<String, Map<String, FunNode>>,
+    funEnv: Map<String, FunNode>,
+    funBuiltinEnvByInv: Map<String, Map<String, FunBuiltin>>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    loc: julay.compiler.ProgramLoc,
 ): List<CompileError> {
-    val leafByName = systemLeaves.associateBy { it.name }
+    val refs = collectInvariantRefs(formula, invariants.keys)
     val errors = mutableListOf<CompileError>()
-
-    fun stateVarType(leafName: String, varName: String): Type? {
-        val pc = pclasses[leafName] ?: return null
-        val vn = pc.localDecls().filterIsInstance<VarNode>().firstOrNull { it.name == varName }
-            ?: return null
-        return try {
-            vn.type
+    val env = mutableMapOf<String, Type>()
+    refs.forEach { name ->
+        errors += typePassInvariantNamed(
+            name,
+            invariants,
+            systemLeaves,
+            pclasses,
+            registry,
+            funEnvByInv,
+            funEnv,
+            funBuiltinEnvByInv,
+            funBuiltinEnv,
+            checking,
+            checked,
+        )
+        env[name] = boolType
+    }
+    val (unindexed, indexed, paramTypes) = specPeerMaps(systemLeaves, pclasses, registry)
+    errors += typePassSpecFormula(
+        formula,
+        env,
+        registry,
+        funEnv,
+        funBuiltinEnv,
+        unindexed,
+        indexed,
+        paramTypes,
+    )
+    if (errors.isEmpty()) {
+        try {
+            if (formula.getType() !is BoolType) {
+                errors += OneLocCompileError(
+                    loc,
+                    "invariant formula must be Boolean but got ${formula.getType()}",
+                )
+            }
         } catch (_: RuntimeException) {
-            resolveType(registry, vn.typeExpr)
         }
     }
-
-    fun check(expr: ExprNode, env: Map<String, Type>) {
-        when (expr) {
-            is QuantifiedExprNode -> {
-                val t = resolveType(registry, expr.binderTypeExpr())
-                if (t == null) {
-                    errors += OneLocCompileError(
-                        expr.programLocation(),
-                        "unknown type \"${expr.binderTypeExpr()}\" in quantifier",
-                    )
-                    return
-                }
-                check(expr.quantifiedBody(), env + (expr.binderName() to t))
-                expr.setInferredType(TypePassType.Inferred(boolType))
-            }
-            is FieldAccessExprNode -> {
-                if (expr.fieldPath == listOf("length") && registry.sorts.containsKey(expr.baseSymbol)) {
-                    expr.resolveFieldAccess(intType, "length")
-                    return
-                }
-                val leaf = leafByName[expr.baseSymbol]
-                if (leaf == null) {
-                    errors += OneLocCompileError(
-                        expr.programLocation(),
-                        "invariant may only reference system components; unknown \"${expr.baseSymbol}\"",
-                    )
-                    return
-                }
-                if (expr.fieldPath.size != 1) {
-                    errors += OneLocCompileError(
-                        expr.programLocation(),
-                        "invariant state reference must be Leaf.var",
-                    )
-                    return
-                }
-                val varName = expr.fieldPath[0]
-                val vt = stateVarType(expr.baseSymbol, varName)
-                if (vt == null) {
-                    errors += OneLocCompileError(
-                        expr.programLocation(),
-                        "unknown state variable \"${expr.baseSymbol}.$varName\"",
-                    )
-                    return
-                }
-                if (leaf.isParameterized) {
-                    errors += OneLocCompileError(
-                        expr.programLocation(),
-                        "parameterized component \"${expr.baseSymbol}\" requires indexed access \"${expr.baseSymbol}[i].$varName\"",
-                    )
-                    return
-                }
-                expr.resolveFieldAccess(vt, varName)
-            }
-            is MemberAccessExprNode -> {
-                val indexed = expr.baseExpr
-                if (indexed is IndexExprNode && indexed.base is SymbolValueExprNode) {
-                    val leafName = (indexed.base as SymbolValueExprNode).symbol
-                    val leaf = leafByName[leafName]
-                    if (leaf == null) {
-                        errors += OneLocCompileError(
-                            expr.programLocation(),
-                            "invariant may only reference system components; unknown \"$leafName\"",
-                        )
-                        return
-                    }
-                    if (!leaf.isParameterized) {
-                        errors += OneLocCompileError(
-                            expr.programLocation(),
-                            "component \"$leafName\" is not parameterized; use \"$leafName.${expr.fieldName}\"",
-                        )
-                        return
-                    }
-                    val vt = stateVarType(leafName, expr.fieldName)
-                    if (vt == null) {
-                        errors += OneLocCompileError(
-                            expr.programLocation(),
-                            "unknown state variable \"$leafName.${expr.fieldName}\"",
-                        )
-                        return
-                    }
-                    check(indexed.index, env)
-                    try {
-                        val actualIdx = indexed.index.getType()
-                        val expected = resolveType(registry, leaf.paramType!!)
-                        if (expected != null && actualIdx != expected) {
-                            errors += OneLocCompileError(
-                                expr.programLocation(),
-                                "index type $actualIdx does not match parameter type $expected",
-                            )
-                        }
-                    } catch (_: RuntimeException) {
-                    }
-                    expr.setInferredType(TypePassType.Inferred(vt))
-                    return
-                }
-                // Nested: Leaf[i].log.length, Leaf[i].self.id, …
-                check(expr.baseExpr, env)
-                val baseType = try {
-                    expr.baseExpr.getType()
-                } catch (_: RuntimeException) {
-                    return
-                }
-                when (val coll = resolveCollectionProperty(baseType, expr.fieldName)) {
-                    is CollectionPropResult.Resolved -> {
-                        expr.setInferredType(TypePassType.Inferred(coll.type))
-                        return
-                    }
-                    is CollectionPropResult.Error -> {
-                        errors += OneLocCompileError(expr.programLocation(), coll.message)
-                        return
-                    }
-                    is CollectionPropResult.NotCollectionProp -> {}
-                }
-                when (val result = resolveFieldPath(baseType, listOf(expr.fieldName))) {
-                    is FieldPathResult.Resolved -> {
-                        expr.setInferredType(TypePassType.Inferred(result.type))
-                    }
-                    is FieldPathResult.Error -> {
-                        errors += OneLocCompileError(expr.programLocation(), result.message)
-                    }
-                }
-            }
-            is IndexExprNode -> {
-                val base = expr.base
-                // Bare Leaf[i] (missing .var)
-                if (base is SymbolValueExprNode && leafByName.containsKey(base.symbol)) {
-                    errors += OneLocCompileError(
-                        expr.programLocation(),
-                        "indexed component \"${base.symbol}\" requires a state variable: \"${base.symbol}[i].var\"",
-                    )
-                    return
-                }
-                // Leaf.var[j] on a parameterized leaf — instance access is Leaf[i].var
-                if (base is FieldAccessExprNode && base.fieldPath.size == 1) {
-                    val leaf = leafByName[base.baseSymbol]
-                    if (leaf != null && leaf.isParameterized) {
-                        val varName = base.fieldPath[0]
-                        errors += OneLocCompileError(
-                            expr.programLocation(),
-                            "parameterized component \"${base.baseSymbol}\" requires instance access \"${base.baseSymbol}[i].$varName\" " +
-                                "(list/map index: \"${base.baseSymbol}[i].$varName[j]\")",
-                        )
-                        return
-                    }
-                }
-                check(base, env)
-                try {
-                    when (val baseType = base.getType()) {
-                        is ListType -> {
-                            check(expr.index, env)
-                            try {
-                                if (expr.index.getType() !is IntType) {
-                                    errors += OneLocCompileError(
-                                        expr.index.programLocation(),
-                                        "Expected Int index but got ${expr.index.getType()}",
-                                    )
-                                }
-                            } catch (_: RuntimeException) {
-                            }
-                            expr.setInferredType(TypePassType.Inferred(baseType.elementType))
-                        }
-                        is MapType -> {
-                            check(expr.index, env)
-                            try {
-                                if (expr.index.getType() != baseType.keyType) {
-                                    errors += OneLocCompileError(
-                                        expr.index.programLocation(),
-                                        "Expected map key type ${baseType.keyType} but got ${expr.index.getType()}",
-                                    )
-                                }
-                            } catch (_: RuntimeException) {
-                            }
-                            expr.setInferredType(TypePassType.Inferred(baseType.valueType))
-                        }
-                        else -> {
-                            errors += OneLocCompileError(
-                                expr.programLocation(),
-                                "Expected list or map type for index base but got $baseType",
-                            )
-                        }
-                    }
-                } catch (_: RuntimeException) {
-                    // Base failed to type; error already recorded.
-                }
-            }
-            is SymbolValueExprNode -> {
-                val t = env[expr.symbol]
-                when {
-                    t != null -> expr.setInferredType(TypePassType.Inferred(t))
-                    invariants.containsKey(expr.symbol) -> {
-                        errors += typePassInvariantNamed(
-                            expr.symbol,
-                            invariants,
-                            systemLeaves,
-                            pclasses,
-                            registry,
-                            checking,
-                            checked,
-                        )
-                        expr.setInferredType(TypePassType.Inferred(boolType))
-                    }
-                    else -> {
-                        errors += OneLocCompileError(
-                            expr.programLocation(),
-                            "unbound symbol \"${expr.symbol}\" in invariant (use Leaf.var for state)",
-                        )
-                    }
-                }
-            }
-            is FunCallExprNode -> {
-                if (expr.callName() == "length" && expr.callArgs().size == 1) {
-                    val arg = expr.callArgs().single()
-                    if (arg is SymbolValueExprNode && registry.sorts.containsKey(arg.symbol)) {
-                        arg.setInferredType(TypePassType.Inferred(registry.sorts.getValue(arg.symbol)))
-                        expr.setInferredType(TypePassType.Inferred(intType))
-                        return
-                    }
-                }
-                expr.children.filterIsInstance<ExprNode>().forEach { check(it, env) }
-                if (errors.isEmpty() && expr.callName() == "length" && expr.callArgs().size == 1) {
-                    when (val t = try { expr.callArgs().single().getType() } catch (_: RuntimeException) { null }) {
-                        is ListType, is SetType, is MapType ->
-                            expr.setInferredType(TypePassType.Inferred(intType))
-                        else -> {
-                            if (t != null) {
-                                errors += OneLocCompileError(
-                                    expr.programLocation(),
-                                    "Expected argument of \"length\" to have a List, Set, Map, or sort type but got $t",
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-            is LiteralValueExprNode -> {
-                expr.setInferredType(TypePassType.Inferred(expr.inferType(env)))
-            }
-            is UnaryOpExprNode -> {
-                check(expr.operand(), env)
-                if (errors.isEmpty()) {
-                    try {
-                        expr.setInferredType(TypePassType.Inferred(expr.inferType(env)))
-                    } catch (e: RuntimeException) {
-                        errors += OneLocCompileError(expr.programLocation(), e.message ?: "type error")
-                    }
-                }
-            }
-            is ParenExprNode -> {
-                check(expr.innerExpr(), env)
-                if (errors.isEmpty()) {
-                    try {
-                        expr.setInferredType(TypePassType.Inferred(expr.inferType(env)))
-                    } catch (e: RuntimeException) {
-                        errors += OneLocCompileError(expr.programLocation(), e.message ?: "type error")
-                    }
-                }
-            }
-            is BinaryOpExprNode -> {
-                check(expr.lhsOperand(), env)
-                check(expr.rhsOperand(), env)
-                if (errors.isEmpty()) {
-                    try {
-                        expr.setInferredType(TypePassType.Inferred(expr.inferType(env)))
-                    } catch (e: RuntimeException) {
-                        errors += OneLocCompileError(expr.programLocation(), e.message ?: "type error")
-                    }
-                }
-            }
-            is IfElseExprNode -> {
-                check(expr.condExpr(), env)
-                check(expr.thenExpr(), env)
-                check(expr.elseExpr(), env)
-                if (errors.isEmpty()) {
-                    try {
-                        expr.setInferredType(TypePassType.Inferred(expr.inferType(env)))
-                    } catch (e: RuntimeException) {
-                        errors += OneLocCompileError(expr.programLocation(), e.message ?: "type error")
-                    }
-                }
-            }
-            else -> {
-                expr.children.filterIsInstance<ExprNode>().forEach { check(it, env) }
-            }
-        }
-    }
-
-    check(formula, emptyMap())
     return errors
 }
+
+private fun specPeerMaps(
+    systemLeaves: List<SpecLeaf>,
+    pclasses: Map<String, ProcClassNode>,
+    registry: ObjClassRegistry,
+): Triple<Map<String, ProcClassNode>, Map<String, ProcClassNode>, Map<String, Type>> {
+    val unindexed = linkedMapOf<String, ProcClassNode>()
+    val indexed = linkedMapOf<String, ProcClassNode>()
+    val paramTypes = linkedMapOf<String, Type>()
+    systemLeaves.forEach { leaf ->
+        val pc = pclasses[leaf.name] ?: return@forEach
+        if (leaf.isParameterized) {
+            indexed[leaf.name] = pc
+            leaf.paramType?.let { pt ->
+                when (val r = registry.resolveTypeExpr(pt)) {
+                    is TypeResolveResult.Found -> paramTypes[leaf.name] = r.type
+                    is TypeResolveResult.Error -> {}
+                }
+            }
+        } else {
+            unindexed[leaf.name] = pc
+        }
+    }
+    return Triple(unindexed, indexed, paramTypes)
+}
+
+private fun collectInvariantRefs(
+    expr: ExprNode,
+    invariantNames: Set<String>,
+    bound: Set<String> = emptySet(),
+): Set<String> = when (expr) {
+    is QuantifiedExprNode ->
+        collectInvariantRefs(expr.quantifiedBody(), invariantNames, bound + expr.binderName())
+    is LetExprNode ->
+        collectInvariantRefs(expr.letInitExpr(), invariantNames, bound) +
+            collectInvariantRefs(expr.bodyExpr(), invariantNames, bound + expr.letName())
+    is LambdaExprNode ->
+        collectInvariantRefs(expr.body, invariantNames, bound + expr.params)
+    is SymbolValueExprNode ->
+        if (expr.symbol in invariantNames && expr.symbol !in bound) setOf(expr.symbol) else emptySet()
+    else -> expr.children.filterIsInstance<ExprNode>().flatMap {
+        collectInvariantRefs(it, invariantNames, bound)
+    }.toSet()
+}
+
 
 /** Default TLC MaxListLen; `init:` length constraints larger than this make Init empty. */
 private const val INIT_MAX_LIST_LEN = 3
@@ -685,6 +521,8 @@ private fun initClauseErrors(
     specAliases: Map<String, SpecNode>,
     apiAliases: Map<String, ApiNode>,
     registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
 ): List<CompileError> {
     val errors = mutableListOf<CompileError>()
     fun walk(n: ASTNode) {
@@ -713,9 +551,20 @@ private fun initClauseErrors(
             val leafConst = expanded.associate { leaf ->
                 leaf.name to leaf.globalConstVars
             }
+            val unindexed = expanded.mapNotNull { leaf ->
+                val pc = pclassNodes[leaf.name] ?: leafSpecNodes[leaf.name]?.asProcClass()
+                pc?.let { leaf.name to it }
+            }.toMap()
             n.initExprs().forEach { expr ->
-                val initErrs = typePassInitFormula(
-                    expr, expanded, pclassNodes, leafSpecNodes, registry, constTypes, leafConst,
+                val initErrs = typePassSpecFormula(
+                    expr,
+                    constTypes,
+                    registry,
+                    funEnv,
+                    funBuiltinEnv,
+                    unindexed,
+                    indexedPeers = emptyMap(),
+                    initConstGlobals = leafConst,
                 )
                 errors += initErrs
                 if (initErrs.isEmpty()) {
@@ -778,283 +627,3 @@ private fun sortLengthMaxListLenErrors(
     return errors
 }
 
-private fun typePassInitFormula(
-    formula: ExprNode,
-    expanded: List<SpecLeaf>,
-    pclassNodes: Map<String, ProcClassNode>,
-    leafSpecNodes: Map<String, LeafSpecNode>,
-    registry: ObjClassRegistry,
-    constGlobalTypes: Map<String, Type>,
-    leafConstGlobals: Map<String, Set<String>>,
-): List<CompileError> {
-    val leafByName = expanded.associateBy { it.name }
-    val errors = mutableListOf<CompileError>()
-
-    fun stateVarType(leafName: String, varName: String): Type? {
-        val vn = declaredStateVars(leafName, pclassNodes, leafSpecNodes)[varName] ?: return null
-        return try {
-            vn.type
-        } catch (_: RuntimeException) {
-            resolveType(registry, vn.typeExpr)
-        }
-    }
-
-    fun collectionLengthType(baseType: Type, loc: julay.compiler.ProgramLoc): Type? {
-        return when (val r = resolveCollectionProperty(baseType, "length")) {
-            is CollectionPropResult.Resolved -> r.type
-            is CollectionPropResult.Error -> {
-                errors += OneLocCompileError(loc, r.message)
-                null
-            }
-            is CollectionPropResult.NotCollectionProp -> {
-                errors += OneLocCompileError(loc, "Cannot access property \"length\" on type $baseType")
-                null
-            }
-        }
-    }
-
-    fun requireConstGlobal(leafName: String, varName: String, loc: julay.compiler.ProgramLoc): Boolean {
-        val consts = leafConstGlobals[leafName].orEmpty()
-        if (varName in consts) return true
-        errors += OneLocCompileError(
-            loc,
-            "\"init:\" may only mention const-global state; \"$leafName.$varName\" is not const global",
-        )
-        return false
-    }
-
-    fun check(expr: ExprNode, env: Map<String, Type>) {
-        when (expr) {
-            is QuantifiedExprNode -> {
-                val t = resolveType(registry, expr.binderTypeExpr())
-                if (t == null) {
-                    errors += OneLocCompileError(
-                        expr.programLocation(),
-                        "unknown type \"${expr.binderTypeExpr()}\" in quantifier",
-                    )
-                    return
-                }
-                check(expr.quantifiedBody(), env + (expr.binderName() to t))
-                expr.setInferredType(TypePassType.Inferred(boolType))
-            }
-            is FieldAccessExprNode -> {
-                val path = expr.fieldPath
-                if (path == listOf("length") && registry.sorts.containsKey(expr.baseSymbol) &&
-                    expr.baseSymbol !in constGlobalTypes && expr.baseSymbol !in env
-                ) {
-                    expr.resolveFieldAccess(intType, "length")
-                    return
-                }
-                if (path.firstOrNull() == "length" || path.lastOrNull() == "length") {
-                    val constTy = constGlobalTypes[expr.baseSymbol]
-                    if (constTy != null && path == listOf("length")) {
-                        val lt = collectionLengthType(constTy, expr.programLocation()) ?: return
-                        expr.resolveFieldAccess(lt, "length")
-                        return
-                    }
-                }
-                val leaf = leafByName[expr.baseSymbol]
-                if (leaf != null) {
-                    if (path.isEmpty()) {
-                        errors += OneLocCompileError(expr.programLocation(), "\"init:\" state reference must be Leaf.var")
-                        return
-                    }
-                    val varName = path[0]
-                    if (!requireConstGlobal(leaf.name, varName, expr.programLocation())) return
-                    val vt = stateVarType(leaf.name, varName)
-                    if (vt == null) {
-                        errors += OneLocCompileError(
-                            expr.programLocation(),
-                            "unknown state variable \"${expr.baseSymbol}.$varName\"",
-                        )
-                        return
-                    }
-                    if (path.size == 1) {
-                        expr.resolveFieldAccess(vt, varName)
-                        return
-                    }
-                    if (path == listOf(varName, "length")) {
-                        val lt = collectionLengthType(vt, expr.programLocation()) ?: return
-                        expr.resolveFieldAccess(lt, path.joinToString("."))
-                        return
-                    }
-                    errors += OneLocCompileError(
-                        expr.programLocation(),
-                        "\"init:\" state reference must be Leaf.var or Leaf.var.length",
-                    )
-                    return
-                }
-                val constTy = constGlobalTypes[expr.baseSymbol]
-                if (constTy != null) {
-                    when (val coll = resolveCollectionPropertyPath(constTy, path)) {
-                        is CollectionPropResult.Resolved -> {
-                            expr.resolveFieldAccess(coll.type, path.joinToString("."))
-                            return
-                        }
-                        is CollectionPropResult.Error -> {
-                            errors += OneLocCompileError(expr.programLocation(), coll.message)
-                            return
-                        }
-                        is CollectionPropResult.NotCollectionProp -> {}
-                    }
-                }
-                errors += OneLocCompileError(
-                    expr.programLocation(),
-                    "unbound \"${expr.baseSymbol}.${path.joinToString(".")}\" in init: " +
-                        "(use a const-global name, Leaf.var, or Sort.length)",
-                )
-            }
-            is MemberAccessExprNode -> {
-                if (expr.fieldName == "length") {
-                    val base = expr.baseExpr
-                    if (base is SymbolValueExprNode && registry.sorts.containsKey(base.symbol) &&
-                        base.symbol !in constGlobalTypes && base.symbol !in env
-                    ) {
-                        base.setInferredType(TypePassType.Inferred(registry.sorts.getValue(base.symbol)))
-                        expr.setInferredType(TypePassType.Inferred(intType))
-                        return
-                    }
-                    check(base, env)
-                    if (errors.isNotEmpty()) return
-                    val baseType = try { base.getType() } catch (_: RuntimeException) { return }
-                    val lt = collectionLengthType(baseType, expr.programLocation()) ?: return
-                    expr.setInferredType(TypePassType.Inferred(lt))
-                    return
-                }
-                val indexed = expr.baseExpr
-                if (indexed is IndexExprNode && indexed.base is SymbolValueExprNode) {
-                    val leafName = (indexed.base as SymbolValueExprNode).symbol
-                    errors += OneLocCompileError(
-                        expr.programLocation(),
-                        "\"init:\" cannot use indexed access \"${leafName}[i].${expr.fieldName}\"; " +
-                            "const-globals are scalars (write ${leafName}.${expr.fieldName} or a bare name)",
-                    )
-                    return
-                }
-                errors += OneLocCompileError(
-                    expr.programLocation(),
-                    "\"init:\" member access must be expr.length or Leaf.var",
-                )
-            }
-            is FunCallExprNode -> {
-                if (expr.callName() == "length" && expr.callArgs().size == 1) {
-                    val arg = expr.callArgs().single()
-                    if (arg is SymbolValueExprNode && registry.sorts.containsKey(arg.symbol) &&
-                        arg.symbol !in constGlobalTypes && arg.symbol !in env
-                    ) {
-                        arg.setInferredType(TypePassType.Inferred(registry.sorts.getValue(arg.symbol)))
-                        expr.setInferredType(TypePassType.Inferred(intType))
-                        return
-                    }
-                    check(arg, env)
-                    if (errors.isNotEmpty()) return
-                    val t = try { arg.getType() } catch (_: RuntimeException) { return }
-                    if (t is SortType) {
-                        expr.setInferredType(TypePassType.Inferred(intType))
-                        return
-                    }
-                    val lt = collectionLengthType(t, expr.programLocation()) ?: return
-                    expr.setInferredType(TypePassType.Inferred(lt))
-                    return
-                }
-                errors += OneLocCompileError(
-                    expr.programLocation(),
-                    "unknown function \"${expr.callName()}\" in init:",
-                )
-            }
-            is IndexExprNode -> {
-                val base = expr.base
-                if (base is SymbolValueExprNode && leafByName.containsKey(base.symbol)) {
-                    errors += OneLocCompileError(
-                        expr.programLocation(),
-                        "\"init:\" cannot index component \"${base.symbol}\"; const-globals are unindexed",
-                    )
-                    return
-                }
-                check(base, env)
-                try {
-                    when (val baseType = base.getType()) {
-                        is ListType -> {
-                            check(expr.index, env)
-                            expr.setInferredType(TypePassType.Inferred(baseType.elementType))
-                        }
-                        is MapType -> {
-                            check(expr.index, env)
-                            expr.setInferredType(TypePassType.Inferred(baseType.valueType))
-                        }
-                        else -> {
-                            errors += OneLocCompileError(
-                                expr.programLocation(),
-                                "Expected list or map type for index base but got $baseType",
-                            )
-                        }
-                    }
-                } catch (_: RuntimeException) {
-                }
-            }
-            is SymbolValueExprNode -> {
-                val t = env[expr.symbol] ?: constGlobalTypes[expr.symbol]
-                if (t != null) {
-                    expr.setInferredType(TypePassType.Inferred(t))
-                } else {
-                    errors += OneLocCompileError(
-                        expr.programLocation(),
-                        "unbound symbol \"${expr.symbol}\" in init: (use a const-global name or Sort.length)",
-                    )
-                }
-            }
-            is LiteralValueExprNode -> {
-                expr.setInferredType(TypePassType.Inferred(expr.inferType(env)))
-            }
-            is UnaryOpExprNode -> {
-                check(expr.operand(), env)
-                if (errors.isEmpty()) {
-                    try {
-                        expr.setInferredType(TypePassType.Inferred(expr.inferType(env)))
-                    } catch (e: RuntimeException) {
-                        errors += OneLocCompileError(expr.programLocation(), e.message ?: "type error")
-                    }
-                }
-            }
-            is ParenExprNode -> {
-                check(expr.innerExpr(), env)
-                if (errors.isEmpty()) {
-                    try {
-                        expr.setInferredType(TypePassType.Inferred(expr.inferType(env)))
-                    } catch (e: RuntimeException) {
-                        errors += OneLocCompileError(expr.programLocation(), e.message ?: "type error")
-                    }
-                }
-            }
-            is BinaryOpExprNode -> {
-                check(expr.lhsOperand(), env)
-                check(expr.rhsOperand(), env)
-                if (errors.isEmpty()) {
-                    try {
-                        expr.setInferredType(TypePassType.Inferred(expr.inferType(env)))
-                    } catch (e: RuntimeException) {
-                        errors += OneLocCompileError(expr.programLocation(), e.message ?: "type error")
-                    }
-                }
-            }
-            is IfElseExprNode -> {
-                check(expr.condExpr(), env)
-                check(expr.thenExpr(), env)
-                check(expr.elseExpr(), env)
-                if (errors.isEmpty()) {
-                    try {
-                        expr.setInferredType(TypePassType.Inferred(expr.inferType(env)))
-                    } catch (e: RuntimeException) {
-                        errors += OneLocCompileError(expr.programLocation(), e.message ?: "type error")
-                    }
-                }
-            }
-            else -> {
-                expr.children.filterIsInstance<ExprNode>().forEach { check(it, env) }
-            }
-        }
-    }
-
-    check(formula, emptyMap())
-    return errors
-}

@@ -27,10 +27,124 @@ private var typePassAllowSortDomains: Boolean = false
 /** Proc/leaf-spec classes visible for peer state reads in leaf-spec bodies. */
 private var typePassPeerClasses: Map<String, ProcClassNode> = emptyMap()
 /**
+ * While typing invariant/`init:` formulas: unparameterized leaves (`Leaf.var` only).
+ * Empty outside [typePassSpecFormula].
+ */
+private var typePassUnindexedPeerClasses: Map<String, ProcClassNode> = emptyMap()
+/**
+ * While typing invariant/`init:` formulas: parameterized leaves (`Leaf[i].var` only).
+ * Empty outside [typePassSpecFormula].
+ */
+private var typePassIndexedPeerClasses: Map<String, ProcClassNode> = emptyMap()
+/** Expected index types for [typePassIndexedPeerClasses], when known. */
+private var typePassIndexedPeerParamTypes: Map<String, Type> = emptyMap()
+/**
+ * Non-null while typing `init:`: leaf name → const-global var names. Indexed peer
+ * access is rejected; FieldAccess may only name these vars.
+ */
+private var typePassInitConstGlobals: Map<String, Set<String>>? = null
+/** True while typing invariant/`init:` formulas (tighter peer indexing, no effects). */
+private var typePassSpecFormula: Boolean = false
+/** Reject IO/session/transition-only builtins and `.fold` (spec formulas). */
+private var typePassForbidEffects: Boolean = false
+/**
  * State var/const types for the enclosing proc/procfun/leaf-spec body.
  * Null outside those bodies (`this` illegal). Empty map means a leaf with no state.
  */
 private var typePassStateEnv: Map<String, Type>? = null
+
+/**
+ * Type an invariant or `init:` formula with the same [ASTNode.typePass] used for
+ * proc / leaf-spec bodies, plus spec-only flags (sort domains, peer maps, no `this`).
+ */
+internal fun typePassSpecFormula(
+    expr: ExprNode,
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    unindexedPeers: Map<String, ProcClassNode>,
+    indexedPeers: Map<String, ProcClassNode>,
+    indexedParamTypes: Map<String, Type> = emptyMap(),
+    initConstGlobals: Map<String, Set<String>>? = null,
+): List<CompileError> {
+    val prevAllow = typePassAllowSortDomains
+    val prevPeers = typePassPeerClasses
+    val prevUnindexed = typePassUnindexedPeerClasses
+    val prevIndexed = typePassIndexedPeerClasses
+    val prevParamTypes = typePassIndexedPeerParamTypes
+    val prevInit = typePassInitConstGlobals
+    val prevSpec = typePassSpecFormula
+    val prevForbid = typePassForbidEffects
+    val prevApi = typePassApiEnv
+    val prevCallToApi = typePassCallToApi
+    val prevInside = typePassInsideProcFun
+    val prevState = typePassStateEnv
+    typePassAllowSortDomains = true
+    typePassSpecFormula = true
+    typePassForbidEffects = true
+    typePassUnindexedPeerClasses = unindexedPeers
+    typePassIndexedPeerClasses = indexedPeers
+    typePassIndexedPeerParamTypes = indexedParamTypes
+    typePassInitConstGlobals = initConstGlobals
+    typePassPeerClasses = unindexedPeers + indexedPeers
+    typePassApiEnv = emptyMap()
+    typePassCallToApi = emptyMap()
+    typePassInsideProcFun = false
+    typePassStateEnv = null
+    val builtins = funBuiltinEnv.toMutableMap()
+    FunBuiltinRegistry.lookup("length")?.let { builtins.putIfAbsent("length", it) }
+    try {
+        return expr.typePass(symbolEnv, registry, funEnv, emptyMap(), builtins, emptyMap())
+    } finally {
+        typePassAllowSortDomains = prevAllow
+        typePassPeerClasses = prevPeers
+        typePassUnindexedPeerClasses = prevUnindexed
+        typePassIndexedPeerClasses = prevIndexed
+        typePassIndexedPeerParamTypes = prevParamTypes
+        typePassInitConstGlobals = prevInit
+        typePassSpecFormula = prevSpec
+        typePassForbidEffects = prevForbid
+        typePassApiEnv = prevApi
+        typePassCallToApi = prevCallToApi
+        typePassInsideProcFun = prevInside
+        typePassStateEnv = prevState
+    }
+}
+
+private fun unindexedPeerClass(name: String): ProcClassNode? =
+    if (typePassSpecFormula) typePassUnindexedPeerClasses[name] else typePassPeerClasses[name]
+
+private fun indexedPeerClass(name: String): ProcClassNode? =
+    if (typePassSpecFormula) typePassIndexedPeerClasses[name] else typePassPeerClasses[name]
+
+private fun isSpecPeerName(name: String): Boolean =
+    name in typePassUnindexedPeerClasses ||
+        name in typePassIndexedPeerClasses ||
+        name in typePassPeerClasses
+
+/** Walk `.length` / `.keys` / obj fields after a peer state var. */
+private fun resolveAccessPath(rootType: Type, path: List<String>): Pair<Type?, String?> {
+    if (path.isEmpty()) return rootType to null
+    var current = rootType
+    var i = 0
+    while (i < path.size) {
+        val remaining = path.subList(i, path.size)
+        when (val coll = resolveCollectionPropertyPath(current, remaining)) {
+            is CollectionPropResult.Resolved -> return coll.type to null
+            is CollectionPropResult.Error -> return null to coll.message
+            is CollectionPropResult.NotCollectionProp -> {}
+        }
+        when (val result = resolveFieldPath(current, listOf(path[i]))) {
+            is FieldPathResult.Error -> return null to result.message
+            is FieldPathResult.Resolved -> {
+                current = result.type
+                i++
+            }
+        }
+    }
+    return current to null
+}
 
 /** Prefer an obj-literal hint when `Name(...)` names a known obj type rather than a function. */
 internal fun unknownFunctionMessage(name: String, registry: ObjClassRegistry): String =
@@ -201,6 +315,7 @@ fun ASTNode.typePass(
     is IndexExprNode -> typePassIndex(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is FunCallExprNode -> typePassFunCall(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is SymbolValueExprNode -> typePassSymbol(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
+    is QuantifiedExprNode -> typePassQuantified(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     is ExprNode -> typePassExpr(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     else -> children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
 }
@@ -1158,30 +1273,72 @@ private fun FieldAccessExprNode.typePassFieldAccess(
         inferExprType(symbolEnv)
         return emptyList()
     }
-    if (typePassAllowSortDomains && fieldPath.size == 1) {
-        val pc = typePassPeerClasses[baseSymbol]
-        if (pc != null && baseSymbol !in symbolEnv) {
-            val vn = pc.localDecls().filterIsInstance<VarNode>().firstOrNull { it.name == fieldPath[0] }
+    if (typePassAllowSortDomains && fieldPath.isNotEmpty() && baseSymbol !in symbolEnv) {
+        val unindexed = unindexedPeerClass(baseSymbol)
+        val indexed = indexedPeerClass(baseSymbol)
+        val pc = when {
+            unindexed != null -> unindexed
+            indexed != null && typePassSpecFormula -> {
+                val varName = fieldPath[0]
+                return listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "parameterized component \"$baseSymbol\" requires indexed access \"$baseSymbol[i].$varName\"",
+                    ),
+                )
+            }
+            indexed != null -> indexed
+            else -> null
+        }
+        if (pc != null) {
+            val varName = fieldPath[0]
+            val vn = pc.localDecls().filterIsInstance<VarNode>().firstOrNull { it.name == varName }
             if (vn == null) {
                 return listOf(
                     OneLocCompileError(
                         programLocation(),
-                        "unknown state variable \"$baseSymbol.${fieldPath[0]}\"",
+                        "unknown state variable \"$baseSymbol.$varName\"",
                     ),
                 )
             }
-            val t = try {
+            val initConsts = typePassInitConstGlobals
+            if (initConsts != null && varName !in initConsts[baseSymbol].orEmpty()) {
+                return listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "\"init:\" may only mention const-global state; \"$baseSymbol.$varName\" is not const global",
+                    ),
+                )
+            }
+            val varType = try {
                 valueView(vn.type)
             } catch (_: RuntimeException) {
-                return listOf(OneLocCompileError(programLocation(), "unresolved type for \"$baseSymbol.${fieldPath[0]}\""))
+                return listOf(OneLocCompileError(programLocation(), "unresolved type for \"$baseSymbol.$varName\""))
             }
-            resolveFieldAccess(t, fieldPath[0])
+            val rest = fieldPath.drop(1)
+            val (leafType, pathErr) = resolveAccessPath(varType, rest)
+            if (pathErr != null) {
+                return listOf(OneLocCompileError(programLocation(), pathErr))
+            }
+            if (leafType == null) {
+                return listOf(OneLocCompileError(programLocation(), "unresolved type for \"$baseSymbol.${fieldPath.joinToString(".")}\""))
+            }
+            resolveFieldAccess(leafType, fieldPath.joinToString("."))
             inferExprType(symbolEnv)
             return emptyList()
         }
     }
     val baseType = symbolEnv[baseSymbol]
     if (baseType == null) {
+        if (typePassInitConstGlobals != null) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "unbound \"$baseSymbol.${fieldPath.joinToString(".")}\" in init: " +
+                        "(use a const-global name, Leaf.var, or Sort.length)",
+                ),
+            )
+        }
         return listOf(OneLocCompileError(programLocation(), "Unknown variable \"$baseSymbol\" in field access"))
     }
     when (val coll = resolveCollectionPropertyPath(baseType, fieldPath)) {
@@ -1264,8 +1421,25 @@ private fun peerStateRefType(
     when (baseExpr) {
         is IndexExprNode -> {
             val peerSym = (baseExpr.base as? SymbolValueExprNode)?.symbol ?: return null
-            val pc = typePassPeerClasses[peerSym] ?: return null
             if (peerSym in symbolEnv) return null
+            val pc = indexedPeerClass(peerSym)
+            if (pc == null) {
+                if (!typePassSpecFormula || !isSpecPeerName(peerSym)) return null
+                val loc = baseExpr.programLocation()
+                val fieldErr = if (typePassInitConstGlobals != null) {
+                    OneLocCompileError(
+                        loc,
+                        "\"init:\" cannot use indexed access \"$peerSym[i].$fieldName\"; " +
+                            "const-globals are scalars (write $peerSym.$fieldName or a bare name)",
+                    )
+                } else {
+                    OneLocCompileError(
+                        loc,
+                        "component \"$peerSym\" is not parameterized; use \"$peerSym.$fieldName\"",
+                    )
+                }
+                return PeerRefTypeResult(null, listOf(fieldErr))
+            }
             val idxErrors = baseExpr.index.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
             val vn = pc.localDecls().filterIsInstance<VarNode>().firstOrNull { it.name == fieldName }
                 ?: return PeerRefTypeResult(
@@ -1280,10 +1454,24 @@ private fun peerStateRefType(
                     listOf(OneLocCompileError(baseExpr.programLocation(), "unresolved type for \"$peerSym.$fieldName\"")),
                 )
             }
-            return PeerRefTypeResult(t, idxErrors)
+            val expected = typePassIndexedPeerParamTypes[peerSym]
+            val typeErrs = mutableListOf<CompileError>()
+            if (expected != null && idxErrors.isEmpty()) {
+                try {
+                    val actualIdx = baseExpr.index.getType()
+                    if (typingView(actualIdx) != typingView(expected)) {
+                        typeErrs += OneLocCompileError(
+                            baseExpr.programLocation(),
+                            "index type $actualIdx does not match parameter type $expected",
+                        )
+                    }
+                } catch (_: RuntimeException) {
+                }
+            }
+            return PeerRefTypeResult(t, idxErrors + typeErrs)
         }
         is SymbolValueExprNode -> {
-            val pc = typePassPeerClasses[baseExpr.symbol] ?: return null
+            val pc = unindexedPeerClass(baseExpr.symbol) ?: return null
             if (baseExpr.symbol in symbolEnv) return null
             val vn = pc.localDecls().filterIsInstance<VarNode>().firstOrNull { it.name == fieldName }
                 ?: return PeerRefTypeResult(
@@ -1419,6 +1607,14 @@ private fun MethodCallExprNode.typePassMethodCall(
                 "Unknown method \"$methodName\"",
             ),
         )
+    if (typePassForbidEffects && kind == CollectionMethodKind.Fold) {
+        return listOf(
+            OneLocCompileError(
+                programLocation(),
+                "Method \"fold\" cannot be used in a spec formula",
+            ),
+        )
+    }
     val baseErrors = baseExpr.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv)
     if (baseErrors.isNotEmpty()) {
         return baseErrors
@@ -1697,6 +1893,56 @@ private fun MethodCallExprNode.typePassUnaryHofArg(
     }
 }
 
+private fun QuantifiedExprNode.typePassQuantified(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
+): List<CompileError> {
+    val resolved = registry.resolveTypeExpr(binderTypeExpr(), typeParamEnv, programLocation())
+    val binderType = when (resolved) {
+        is TypeResolveResult.Error -> {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "unknown type \"${binderTypeExpr()}\" in quantifier",
+                ),
+            )
+        }
+        is TypeResolveResult.Found -> resolved.type
+    }
+    sortDomainBan(binderType, programLocation())?.let { return listOf(it) }
+    val bodyType = when (binderType) {
+        is SortType -> binderType.elementType
+        else -> binderType
+    }
+    val bodyErrors = quantifiedBody().typePass(
+        symbolEnv + (binderName() to bodyType),
+        registry,
+        funEnv,
+        typeParamEnv,
+        funBuiltinEnv,
+        procFunEnv,
+    )
+    if (bodyErrors.isNotEmpty()) return bodyErrors
+    try {
+        if (quantifiedBody().getType() !is BoolType) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "quantifier body must be Boolean but got ${quantifiedBody().getType()}",
+                ),
+            )
+        }
+    } catch (_: RuntimeException) {
+        return listOf(OneLocCompileError(programLocation(), "quantifier body must be Boolean"))
+    }
+    setInferredType(TypePassType.Inferred(boolType))
+    return emptyList()
+}
+
 private fun ExprNode.typePassExpr(symbolEnv: Map<String, Type>, registry: ObjClassRegistry, funEnv: Map<String, FunNode>, typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
     procFunEnv: Map<String, ProcFunNode> = emptyMap()): List<CompileError> {
@@ -1719,6 +1965,14 @@ private fun SymbolValueExprNode.typePassSymbol(
         )
     }
     if (symbol !in symbolEnv) {
+        if (typePassInitConstGlobals != null) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "unbound symbol \"$symbol\" in init: (use a const-global name or Sort.length)",
+                ),
+            )
+        }
         return listOf(OneLocCompileError(programLocation(), "Unknown variable \"$symbol\""))
     }
     inferExprType(symbolEnv)
@@ -1923,6 +2177,14 @@ private fun FunCallExprNode.typePassFunCall(
                     "Function \"${callName()}\" cannot be used in an expression because it returns no value",
                 ),
             )
+        if (typePassForbidEffects && (builtin.ioHavoc || builtin.transitionOnly || builtin.sessionPeerClassArg)) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Function \"${callName()}\" cannot be used in a spec formula",
+                ),
+            )
+        }
         if (builtin.sessionPeerClassArg) {
             return listOf(
                 OneLocCompileError(
@@ -2243,6 +2505,17 @@ private fun IndexExprNode.typePassIndex(
     funBuiltinEnv: Map<String, FunBuiltin>,
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
+    if (typePassSpecFormula) {
+        val baseSym = (base as? SymbolValueExprNode)?.symbol
+        if (baseSym != null && baseSym !in symbolEnv && isSpecPeerName(baseSym)) {
+            val msg = if (typePassInitConstGlobals != null) {
+                "\"init:\" cannot index component \"$baseSym\"; const-globals are unindexed"
+            } else {
+                "indexed component \"$baseSym\" requires a state variable: \"$baseSym[i].var\""
+            }
+            return listOf(OneLocCompileError(programLocation(), msg))
+        }
+    }
     val childErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
     if (childErrors.isNotEmpty()) {
         return childErrors

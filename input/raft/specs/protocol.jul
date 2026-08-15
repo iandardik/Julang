@@ -1,3 +1,4 @@
+import julay.funlib.min
 import specs.net.Net
 import node.core.RaftProtocol
 import node.protocol.NodeSet
@@ -7,7 +8,7 @@ invariant OneLeaderPerTerm := forall n1 : NodeSet, forall n2 : NodeSet,
 
 invariant StateMachineSafety :=
     forall n1 : NodeSet, forall n2 : NodeSet, forall i : Int,
-        (i >= 1 & i <= RaftProtocol[n1].commitIndex & i <= RaftProtocol[n2].commitIndex) => (RaftProtocol[n1].log[i] = RaftProtocol[n2].log[i])
+        (1 <= i & i <= min(RaftProtocol[n1].commitIndex,RaftProtocol[n2].commitIndex)) => (RaftProtocol[n1].log[i] = RaftProtocol[n2].log[i])
 
 invariant AllInvariants := OneLeaderPerTerm & StateMachineSafety
 

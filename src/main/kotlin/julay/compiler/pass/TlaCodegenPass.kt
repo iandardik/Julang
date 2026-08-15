@@ -1,6 +1,7 @@
 package julay.compiler.pass
 
 import julay.compiler.CompilationUnit
+import julay.compiler.FieldPathResult
 import julay.compiler.FunBuiltinRegistry
 import julay.compiler.OneLocCompileWarning
 import julay.compiler.SourceLoc
@@ -8,6 +9,7 @@ import julay.compiler.TypeExpr
 import julay.compiler.ast.*
 import julay.compiler.decl.*
 import julay.compiler.isDiscardBinding
+import julay.compiler.resolveFieldPath
 import julay.program.action.TSAction
 import julay.program.type.*
 import java.io.File
@@ -156,7 +158,10 @@ fun tlaCodegenPass(
     val offers = collectTlaActionOffers(leaves, pclassesForTla, procFunDecls)
         // Coupled: child construct is folded into parent *_call. Standalone: keep F_call.
         .filterNot { it.isConstructor && it.leaf.isProcFun && !standaloneProcFun }
-    val usedFunOpsAll = collectUserFunsUsedInOffers(offers)
+    val usedFunOpsAll = collectUserFunsUsedInOffers(
+        offers,
+        extraExprs = invClosure.map { it.invariantFormula() },
+    )
     val (funlibFuns, userFuns) = usedFunOpsAll.partition { isJulayFunlibFun(it) }
     val usedFunlibOps = orderFunsForTlaEmit(funlibFuns.toSet())
     val usedUserFunOps = orderFunsForTlaEmit(userFuns.toSet())
@@ -3101,6 +3106,32 @@ private fun tlaLengthOfType(baseRendered: String, type: Type?): String =
         else -> "Len($baseRendered)"
     }
 
+/** `.length` / `.keys` / remaining obj fields after a leaf state var. */
+private fun emitPeerPropPath(baseRendered: String, rootType: Type?, path: List<String>): String {
+    var acc = baseRendered
+    var ty = rootType
+    for (seg in path) {
+        when (seg) {
+            "length" -> {
+                acc = tlaLengthOfType(acc, ty)
+                ty = intType
+            }
+            "keys" -> {
+                acc = "DOMAIN $acc"
+                ty = (ty as? MapType)?.let { setType(it.keyType) }
+            }
+            else -> {
+                acc = emitUnwrappedFieldPath(acc, ty, listOf(seg))
+                ty = when (val r = ty?.let { resolveFieldPath(it, listOf(seg)) }) {
+                    is FieldPathResult.Resolved -> r.type
+                    else -> null
+                }
+            }
+        }
+    }
+    return acc
+}
+
 /**
  * @param leafCtx map of leaf name → SpecLeaf (for FieldAccess context; optional)
  * @param argNames action argument symbols (emitted bare)
@@ -3358,8 +3389,11 @@ internal fun collectUnsupportedBuiltinWarnings(
     return warnings
 }
 
-/** User funs called from Init/action guards and transit RHS (plus transitive callees). */
-internal fun collectUserFunsUsedInOffers(offers: List<TlaActionOffer>): LinkedHashSet<FunNode> {
+/** User funs called from Init/action guards, transit RHS, and extra exprs (invariants), plus transitive callees. */
+internal fun collectUserFunsUsedInOffers(
+    offers: List<TlaActionOffer>,
+    extraExprs: List<ExprNode> = emptyList(),
+): LinkedHashSet<FunNode> {
     val used = linkedSetOf<FunNode>()
     offers.forEach { offer ->
         offer.decl.guards.forEach { collectUserFunNodesFromExpr(it, used) }
@@ -3374,6 +3408,7 @@ internal fun collectUserFunsUsedInOffers(offers: List<TlaActionOffer>): LinkedHa
             }
         }
     }
+    extraExprs.forEach { collectUserFunNodesFromExpr(it, used) }
     val queue = ArrayDeque(used)
     val seen = used.map { it.name() }.toMutableSet()
     while (queue.isNotEmpty()) {
@@ -4143,6 +4178,10 @@ private fun emitInToTla(
     }
 }
 
+/** Do not weaken formulas to TRUE when a call has no TLA+ emitter. */
+private fun unresolvedTlaCall(kind: String, name: String): Nothing =
+    error("internal: no TLA+ emitter for $kind \"$name\" (should have been rejected by type checking)")
+
 internal fun exprToTla(
     expr: ExprNode,
     leafCtx: Map<String, SpecLeaf>,
@@ -4283,12 +4322,17 @@ internal fun exprToTla(
                 }
                 return tlaLengthOfType(baseRendered, TlaSymbolTypes.get()[base])
             }
-            if (expr.fieldPath.size == 2 && expr.fieldPath[1] == "length") {
+            if (expr.fieldPath.isNotEmpty()) {
                 val varName = expr.fieldPath[0]
                 val leafVar = stateVarNames[base to varName]
                     ?: leafCtx[base]?.let { stateTlaName(it.tlaName, varName, stateVarNames) }
-                if (leafVar != null) {
-                    return tlaLengthOfType(leafVar, TlaSymbolTypes.get()[varName])
+                if (leafVar != null && base !in argNames && base !in bareStateVars && base !in symbolOverrides) {
+                    val rest = expr.fieldPath.drop(1)
+                    return if (rest.isEmpty()) {
+                        leafVar
+                    } else {
+                        emitPeerPropPath(leafVar, TlaSymbolTypes.get()[varName], rest)
+                    }
                 }
             }
             // Lambda / HOF binder substitution (e.g. map(e -> e.value)).
@@ -4317,6 +4361,9 @@ internal fun exprToTla(
             val base = expr.baseExpr
             if (expr.fieldName == "length") {
                 return tlaLengthOf(rec(base), base)
+            }
+            if (expr.fieldName == "keys") {
+                return "DOMAIN ${rec(base)}"
             }
             when {
                 base is SymbolValueExprNode && base.symbol in symbolOverrides ->
@@ -4349,22 +4396,24 @@ internal fun exprToTla(
         is FunCallExprNode -> {
             when (expr.callName()) {
                 "length" -> {
-                    val arg = expr.callArgs().singleOrNull() ?: return "TRUE"
+                    val arg = expr.callArgs().singleOrNull()
+                        ?: unresolvedTlaCall("function", "length")
                     tlaLengthOf(rec(arg), arg)
                 }
                 "splice" -> {
                     val args = expr.callArgs()
-                    if (args.size != 3) return "TRUE"
+                    if (args.size != 3) unresolvedTlaCall("function", "splice")
                     "splice(${rec(args[0])}, ${rec(args[1])}, ${rec(args[2])})"
                 }
                 "allDistinct" -> {
-                    val arg = expr.callArgs().singleOrNull() ?: return "TRUE"
+                    val arg = expr.callArgs().singleOrNull()
+                        ?: unresolvedTlaCall("function", "allDistinct")
                     "allDistinct(${rec(arg)})"
                 }
                 "map" -> {
                     // map(xs, f) — prefer method form; support freestanding.
                     val args = expr.callArgs()
-                    if (args.size < 2) return "TRUE"
+                    if (args.size < 2) unresolvedTlaCall("function", "map")
                     val xs = args[0]
                     val f = args[1]
                     emitMapToTla(xs, f, ::rec, ::recWithOverrides)
@@ -4378,10 +4427,10 @@ internal fun exprToTla(
                         when (expr.resolvedBuiltinOrNull()?.name ?: expr.callName()) {
                             "startsWith" -> {
                                 val args = expr.callArgs()
-                                if (args.size != 2) return "TRUE"
+                                if (args.size != 2) unresolvedTlaCall("function", "startsWith")
                                 "startsWith(${rec(args[0], linePrefix, PREC_BOTTOM)}, ${rec(args[1], linePrefix, PREC_BOTTOM)})"
                             }
-                            else -> "TRUE"
+                            else -> unresolvedTlaCall("function", expr.callName())
                         }
                     }
                 }
@@ -4409,13 +4458,15 @@ internal fun exprToTla(
                             emitMapLambdaToTla(expr.baseExpr, hofParams[0], hofBody, ::rec, ::recWithOverrides)
                         f != null ->
                             emitMapToTla(expr.baseExpr, f, ::rec, ::recWithOverrides)
-                        else -> "TRUE"
+                        else -> unresolvedTlaCall("method", "map")
                     }
                 }
                 "filter" -> {
                     val hofBody = expr.hofBodyOrNull()
                     val hofParams = expr.hofParamNamesOrNull()
-                    if (hofBody == null || hofParams == null || hofParams.size != 1) return "TRUE"
+                    if (hofBody == null || hofParams == null || hofParams.size != 1) {
+                        unresolvedTlaCall("method", "filter")
+                    }
                     val p = hofParams[0]
                     val xs = rec(expr.baseExpr)
                     when (try { expr.baseExpr.getType() } catch (_: RuntimeException) { null }) {
@@ -4427,12 +4478,12 @@ internal fun exprToTla(
                             val pred = recWithOverrides(hofBody, mapOf(p to p))
                             "{ $p \\in $xs : $pred }"
                         }
-                        else -> "TRUE"
+                        else -> unresolvedTlaCall("method", "filter")
                     }
                 }
                 "toSet" -> "Range(${rec(expr.baseExpr)})"
                 "toList" -> "SetToSeq(${rec(expr.baseExpr)})"
-                else -> "TRUE"
+                else -> unresolvedTlaCall("method", expr.methodName)
             }
         }
         is ObjClassLiteralExprNode ->
