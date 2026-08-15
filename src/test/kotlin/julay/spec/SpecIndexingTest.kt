@@ -379,6 +379,23 @@ class SpecIndexingTest {
         )
     }
 
+    @Test
+    fun invariantIndexedListLengthAndIndexIsOk() {
+        val result = typeCheck(
+            """
+            sort N := {"a", "b"}
+            proc Worker {
+                var log : List<String>
+                constructor initially(args : List<String>) { transit: log := args }
+            }
+            invariant SameLog := forall n1 : N, forall n2 : N, forall i : Int,
+                (i >= 1 & i <= Worker[n1].log.length & i <= Worker[n2].log.length) => (Worker[n1].log[i] = Worker[n2].log[i])
+            spec Ok := Worker[n : N] |= SameLog
+            """.trimIndent(),
+        )
+        assertTrue(result.errors.isEmpty(), result.toString())
+    }
+
     private fun typeCheck(source: String, allowUnindexedSpec: Boolean = false): TypePassResult {
         val dir = Files.createTempDirectory("julay-spec-indexing")
         val file = dir.resolve("main.jul")

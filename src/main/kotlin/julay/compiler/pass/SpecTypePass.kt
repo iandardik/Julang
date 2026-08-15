@@ -439,50 +439,72 @@ private fun typePassInvariantFormula(
             }
             is MemberAccessExprNode -> {
                 val indexed = expr.baseExpr
-                if (indexed !is IndexExprNode || indexed.base !is SymbolValueExprNode) {
-                    errors += OneLocCompileError(
-                        expr.programLocation(),
-                        "invariant member access must be Leaf[i].var",
-                    )
-                    return
-                }
-                val leafName = (indexed.base as SymbolValueExprNode).symbol
-                val leaf = leafByName[leafName]
-                if (leaf == null) {
-                    errors += OneLocCompileError(
-                        expr.programLocation(),
-                        "invariant may only reference system components; unknown \"$leafName\"",
-                    )
-                    return
-                }
-                if (!leaf.isParameterized) {
-                    errors += OneLocCompileError(
-                        expr.programLocation(),
-                        "component \"$leafName\" is not parameterized; use \"$leafName.${expr.fieldName}\"",
-                    )
-                    return
-                }
-                val vt = stateVarType(leafName, expr.fieldName)
-                if (vt == null) {
-                    errors += OneLocCompileError(
-                        expr.programLocation(),
-                        "unknown state variable \"$leafName.${expr.fieldName}\"",
-                    )
-                    return
-                }
-                check(indexed.index, env)
-                try {
-                    val actualIdx = indexed.index.getType()
-                    val expected = resolveType(registry, leaf.paramType!!)
-                    if (expected != null && actualIdx != expected) {
+                if (indexed is IndexExprNode && indexed.base is SymbolValueExprNode) {
+                    val leafName = (indexed.base as SymbolValueExprNode).symbol
+                    val leaf = leafByName[leafName]
+                    if (leaf == null) {
                         errors += OneLocCompileError(
                             expr.programLocation(),
-                            "index type $actualIdx does not match parameter type $expected",
+                            "invariant may only reference system components; unknown \"$leafName\"",
                         )
+                        return
                     }
-                } catch (_: RuntimeException) {
+                    if (!leaf.isParameterized) {
+                        errors += OneLocCompileError(
+                            expr.programLocation(),
+                            "component \"$leafName\" is not parameterized; use \"$leafName.${expr.fieldName}\"",
+                        )
+                        return
+                    }
+                    val vt = stateVarType(leafName, expr.fieldName)
+                    if (vt == null) {
+                        errors += OneLocCompileError(
+                            expr.programLocation(),
+                            "unknown state variable \"$leafName.${expr.fieldName}\"",
+                        )
+                        return
+                    }
+                    check(indexed.index, env)
+                    try {
+                        val actualIdx = indexed.index.getType()
+                        val expected = resolveType(registry, leaf.paramType!!)
+                        if (expected != null && actualIdx != expected) {
+                            errors += OneLocCompileError(
+                                expr.programLocation(),
+                                "index type $actualIdx does not match parameter type $expected",
+                            )
+                        }
+                    } catch (_: RuntimeException) {
+                    }
+                    expr.setInferredType(TypePassType.Inferred(vt))
+                    return
                 }
-                expr.setInferredType(TypePassType.Inferred(vt))
+                // Nested: Leaf[i].log.length, Leaf[i].self.id, …
+                check(expr.baseExpr, env)
+                val baseType = try {
+                    expr.baseExpr.getType()
+                } catch (_: RuntimeException) {
+                    return
+                }
+                when (val coll = resolveCollectionProperty(baseType, expr.fieldName)) {
+                    is CollectionPropResult.Resolved -> {
+                        expr.setInferredType(TypePassType.Inferred(coll.type))
+                        return
+                    }
+                    is CollectionPropResult.Error -> {
+                        errors += OneLocCompileError(expr.programLocation(), coll.message)
+                        return
+                    }
+                    is CollectionPropResult.NotCollectionProp -> {}
+                }
+                when (val result = resolveFieldPath(baseType, listOf(expr.fieldName))) {
+                    is FieldPathResult.Resolved -> {
+                        expr.setInferredType(TypePassType.Inferred(result.type))
+                    }
+                    is FieldPathResult.Error -> {
+                        errors += OneLocCompileError(expr.programLocation(), result.message)
+                    }
+                }
             }
             is IndexExprNode -> {
                 val base = expr.base

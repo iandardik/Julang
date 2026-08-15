@@ -742,6 +742,17 @@ class SpecTlaTlcSmokeTest {
             "consecutive \\A over NodeSet should combine;\n${tlaText.substringAfter("OneLeaderPerTerm ==").take(500)}",
         )
         assertTrue(
+            tlaText.contains("StateMachineSafety") &&
+                tlaText.contains("i >= 1") &&
+                (tlaText.contains("Len(log[n1])") || tlaText.contains("Len(RaftProtocol_log[n1])")),
+            "StateMachineSafety should guard i >= 1 and use list .length as Len;\n${tlaText.substringAfter("StateMachineSafety").take(800)}",
+        )
+        assertTrue(
+            Regex("""=> \(n1 = n2\)\n\nStateMachineSafety ==""").containsMatchIn(tlaText) &&
+                Regex("""\n\nAllInvariants == OneLeaderPerTerm /\\ StateMachineSafety""").containsMatchIn(tlaText),
+            "user-specified invariants should be separated by a blank line;\n${tlaText.substringAfter("user-specified invariants").take(1200)}",
+        )
+        assertTrue(
             tlaText.contains("votedFor \\in [NodeSet -> TypeOKInt]") &&
                 tlaText.contains("TypeOKInt == Int \\cup Nat \\cup {") &&
                 tlaText.contains("-1") &&
@@ -896,6 +907,36 @@ class SpecTlaTlcSmokeTest {
         } finally {
             File("InvLayout.tla").delete()
             File("InvLayout.cfg").delete()
+        }
+    }
+
+    @Test
+    fun listIndexInvariantDoesNotApplyEmptySeqAtZero() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-list-index-inv").toFile()
+        try {
+            val source = File("regression/input/spec/list-index-inv.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("ListIndexInv.tla")
+            val cfg = File("ListIndexInv.cfg")
+            assertTrue(tla.exists(), "expected ListIndexInv.tla")
+            val tlaText = tla.readText()
+            assertTrue(
+                tlaText.contains("i >= 1") &&
+                    tlaText.contains("Len(log[n1])") &&
+                    tlaText.contains("log[n1][i]"),
+                "SameLog should guard 1-based indices before list apply;\n${tlaText.substringAfter("SameLog").take(600)}",
+            )
+            tla.copyTo(File(work, "ListIndexInv.tla"), overwrite = true)
+            cfg.copyTo(File(work, "ListIndexInv.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcCompletesWithoutEvalError(work, "ListIndexInv")
+        } finally {
+            work.deleteRecursively()
+            File("ListIndexInv.tla").delete()
+            File("ListIndexInv.cfg").delete()
         }
     }
 
@@ -2127,6 +2168,47 @@ class SpecTlaTlcSmokeTest {
         }
         return helperSec.contains("Range(") &&
             !Regex("""Range\(\w+\) == """).containsMatchIn(libSec)
+    }
+
+    /**
+     * Success = TLC finishes with no evaluation errors (empty-seq `<<>>[0]`, fingerprint, …).
+     * Use for small specs that should complete.
+     */
+    private fun assertTlcCompletesWithoutEvalError(workDir: File, module: String) {
+        val pb = ProcessBuilder(
+            "java", "-XX:+UseParallelGC",
+            "-cp", TLC_JAR.absolutePath,
+            "tlc2.TLC",
+            "-config", "$module.cfg",
+            "$module.tla",
+        ).directory(workDir).redirectErrorStream(true)
+        val proc = pb.start()
+        val output = StringBuilder()
+        val reader = Thread {
+            proc.inputStream.bufferedReader().useLines { lines ->
+                lines.forEach { line ->
+                    synchronized(output) { output.appendLine(line) }
+                }
+            }
+        }
+        reader.start()
+        val finished = proc.waitFor(TLC_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        if (!finished) {
+            proc.destroyForcibly()
+        }
+        reader.join(2000)
+        val text = synchronized(output) { output.toString() }
+        assertTrue(finished, "TLC timed out on $module.\n$text")
+        assertTrue(
+            !text.contains("out of domain", ignoreCase = true) &&
+                !text.contains("unable to fingerprint", ignoreCase = true),
+            "TLC evaluation error on $module.\n$text",
+        )
+        assertTrue(
+            proc.exitValue() == 0 &&
+                text.contains("Model checking completed. No error has been found."),
+            "expected TLC to complete without error on $module.\n$text",
+        )
     }
 
     /**

@@ -5,6 +5,12 @@ import node.protocol.NodeSet
 invariant OneLeaderPerTerm := forall n1 : NodeSet, forall n2 : NodeSet,
     (RaftProtocol[n1].state = "Leader" & RaftProtocol[n2].state = "Leader" & RaftProtocol[n1].currentTerm = RaftProtocol[n2].currentTerm) => (n1 = n2)
 
+invariant StateMachineSafety :=
+    forall n1 : NodeSet, forall n2 : NodeSet, forall i : Int,
+        (i >= 1 & i <= RaftProtocol[n1].commitIndex & i <= RaftProtocol[n2].commitIndex) => (RaftProtocol[n1].log[i] = RaftProtocol[n2].log[i])
+
+invariant AllInvariants := OneLeaderPerTerm & StateMachineSafety
+
 spec ClusterSpec := RaftProtocol[n : NodeSet] {
     const global cluster
     init: cluster.length = NodeSet.length
@@ -12,4 +18,4 @@ spec ClusterSpec := RaftProtocol[n : NodeSet] {
 spec Sys := with (n : NodeSet) {
     ClusterSpec[n] || Net[n]
 }
-export spec RaftNodeSpec := Sys |= OneLeaderPerTerm
+export spec RaftNodeSpec := Sys |= AllInvariants

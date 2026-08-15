@@ -638,7 +638,10 @@ private fun emitProjectedTla(
             appendLine()
             appendLine("\\* user-specified invariants")
             appendLine()
-            invDefs.forEach { appendLine(it) }
+            invDefs.forEachIndexed { idx, def ->
+                if (idx > 0) appendLine()
+                appendLine(def)
+            }
         }
         val terminatesDefs = leaves.filter { it.isProcFun }.map { leaf ->
             emitTerminatesProperty(leaf, stateVarNames, pclassesForTla)
