@@ -742,6 +742,34 @@ class SpecTlaTlcSmokeTest {
                 tlaText.contains("\\* init constraints"),
             "Init comments should name folded ctors, assumptions, then init constraints;\n${tlaText.substringAfter("Init ==").take(2500)}",
         )
+        val initBlock = tlaText.substringAfter("Init ==").substringBefore("\n\n")
+        assertTrue(
+            Regex("""\\A i \\in Int :""").containsMatchIn(initBlock) &&
+                (
+                    initBlock.contains("RaftProtocol_cluster[i] = i") ||
+                        initBlock.contains("cluster[i] = i")
+                    ),
+            "Init should pin identity cluster[i] = i;\n$initBlock",
+        )
+        val updateTermDef = tlaText.substringAfter("updateTerm(").substringBefore("\n\n")
+        assertTrue(
+            !tlaText.contains("updateTerm_RaftProtocol_Net") &&
+                Regex("""(?m)^updateTerm\(""").containsMatchIn(tlaText) &&
+                (
+                    updateTermDef.contains("voteRequestMsgs") &&
+                        updateTermDef.contains("voteResponseMsgs") &&
+                        updateTermDef.contains("appendEntriesRequestMsgs") &&
+                        updateTermDef.contains("appendEntriesResponseMsgs")
+                    ) &&
+                (updateTermDef.contains("Cardinality") || updateTermDef.contains("filter")),
+            "updateTerm should be one paired action whose guard mentions all four bags;\n$updateTermDef",
+        )
+        val handleRvDef = tlaText.substringAfter("handleRequestVoteRequest(").substringBefore("\n\n")
+        assertTrue(
+            handleRvDef.contains("voteRequestMsgs' =") &&
+                (handleRvDef.contains("voteRequestMsgs \\ {") || handleRvDef.contains("voteRequestMsgs\\ {")),
+            "handleRequestVoteRequest should subtract the matched request;\n$handleRvDef",
+        )
         val cfgText = emit.cfgText
         assertTrue(
             cfgText.contains("CONSTANT Int = {0, 1, 2, 3}"),

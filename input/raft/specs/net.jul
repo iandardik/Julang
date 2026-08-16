@@ -67,6 +67,16 @@ export spec Net[n : NodeSet] {
                 }
             } in voteRequestMsgs
         transit:
+            voteRequestMsgs := voteRequestMsgs - setOf(VoteRequestMsg {
+                src := m,
+                dest := n,
+                msg := VoteRequestData {
+                    term := inTerm,
+                    candidateId := candidateId,
+                    lastLogIndex := lastLogIndex,
+                    lastLogTerm := lastLogTerm
+                }
+            })
             voteResponseMsgs := voteResponseMsgs + setOf(VoteResponseMsg {
                 src := n,
                 dest := m,
@@ -85,6 +95,14 @@ export spec Net[n : NodeSet] {
                 term := term,
                 granted := granted
             } in voteResponseMsgs
+        transit:
+            voteResponseMsgs := voteResponseMsgs - setOf(VoteResponseMsg {
+                src := m,
+                dest := n,
+                id := peerId,
+                term := term,
+                granted := granted
+            })
     }
 
     transition appendEntries(target : Node, payload : AppendEntriesData) also (m : NodeSet) {
@@ -129,6 +147,22 @@ export spec Net[n : NodeSet] {
                 }
             } in appendEntriesRequestMsgs
         transit:
+            appendEntriesRequestMsgs := appendEntriesRequestMsgs - setOf(AppendEntriesRequestMsg {
+                src := m,
+                dest := n,
+                msg := AppendEntriesData {
+                    term := inTerm,
+                    leaderId := leaderId,
+                    prevLogIndex := prevLogIndex,
+                    prevLogTerm := prevLogTerm,
+                    entry := Entry {
+                        term := entryTerm,
+                        value := entryValue
+                    },
+                    entriesLen := entriesLen,
+                    leaderCommit := leaderCommit
+                }
+            })
             appendEntriesResponseMsgs := appendEntriesResponseMsgs + setOf(AppendEntriesResponseMsg {
                 src := n,
                 dest := m,
@@ -154,5 +188,22 @@ export spec Net[n : NodeSet] {
                 success := success,
                 matchIdx := matchIdx
             } in appendEntriesResponseMsgs
+        transit:
+            appendEntriesResponseMsgs := appendEntriesResponseMsgs - setOf(AppendEntriesResponseMsg {
+                src := m,
+                dest := n,
+                id := peerId,
+                term := inTerm,
+                success := success,
+                matchIdx := matchIdx
+            })
+    }
+
+    client transition updateTerm(inTerm : Int) {
+        guard:
+            | voteRequestMsgs.filter(m -> m.dest = n & m.msg.term = inTerm).length > 0
+            | voteResponseMsgs.filter(m -> m.dest = n & m.term = inTerm).length > 0
+            | appendEntriesRequestMsgs.filter(m -> m.dest = n & m.msg.term = inTerm).length > 0
+            | appendEntriesResponseMsgs.filter(m -> m.dest = n & m.term = inTerm).length > 0
     }
 }

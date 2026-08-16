@@ -4656,9 +4656,20 @@ internal fun exprToTla(
                     )
                 base is IndexExprNode && base.base is SymbolValueExprNode -> {
                     val leafName = (base.base as SymbolValueExprNode).symbol
-                    val v = stateTlaName(leafName, expr.fieldName, stateVarNames)
-                    val globals = globalByLeaf[leafName].orEmpty()
-                    if (expr.fieldName in globals) v else "$v[${rec(base.index)}]"
+                    val peer = leafCtx[leafName]
+                    val mapped = stateVarNames[leafName to expr.fieldName]
+                        ?: peer?.let { stateVarNames[it.tlaName to expr.fieldName] }
+                    if (mapped != null && leafName !in argNames && leafName !in bareStateVars) {
+                        val globals = globalByLeaf[leafName].orEmpty() +
+                            (peer?.let { globalByLeaf[it.tlaName].orEmpty() } ?: emptySet())
+                        if (expr.fieldName in globals) mapped else "$mapped[${rec(base.index)}]"
+                    } else {
+                        emitUnwrappedFieldPath(
+                            rec(base),
+                            typeOfBaseExpr(base),
+                            listOf(expr.fieldName),
+                        )
+                    }
                 }
                 base is SymbolValueExprNode && stateVarNames.containsKey(base.symbol to expr.fieldName) ->
                     stateTlaName(base.symbol, expr.fieldName, stateVarNames)
