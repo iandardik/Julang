@@ -2454,6 +2454,26 @@ internal fun stateTlaName(
     names: Map<Pair<String, String>, String>,
 ): String = names[leaf to varName] ?: tlaVar(leaf, varName)
 
+/** One Init conjunct. Do not prefix every pretty-printed line with `/\` — that splits `\A x \in S :` from its body. */
+private fun addInitConjunct(initParts: MutableList<String>, body: String) {
+    val lines = body.lineSequence().map { it.trimEnd() }.filter { it.isNotBlank() }.toList()
+    if (lines.isEmpty()) return
+    val first = lines.first().trimStart()
+    val head = if (first.startsWith("/\\") || first.startsWith("\\/")) first else "/\\ $first"
+    if (lines.size == 1) {
+        initParts += head
+        return
+    }
+    initParts += buildString {
+        append(head)
+        lines.drop(1).forEach { line ->
+            append('\n')
+            append("     ")
+            append(line.trimStart())
+        }
+    }
+}
+
 private fun emitInitConstraintParts(
     leaves: List<SpecLeaf>,
     stateVarNames: Map<Pair<String, String>, String>,
@@ -2478,11 +2498,7 @@ private fun emitInitConstraintParts(
                 parentPrec = PREC_BOTTOM,
                 globalByLeaf = globalVarsByLeaf(leaves),
             )
-            body.lineSequence().forEach { raw ->
-                val t = raw.trim()
-                if (t.isEmpty()) return@forEach
-                initParts += if (t.startsWith("/\\") || t.startsWith("\\/")) t else "/\\ $t"
-            }
+            addInitConjunct(initParts, body)
         }
     }
 }

@@ -751,6 +751,16 @@ class SpecTlaTlcSmokeTest {
                     ),
             "Init should pin identity cluster[i] = i;\n$initBlock",
         )
+        assertTrue(
+            Regex("""self\[n1\] = self\[n2\]""").containsMatchIn(initBlock) &&
+                (initBlock.contains("n1 = n2") || initBlock.contains("(n1 = n2)")),
+            "Init should require injective self;\n$initBlock",
+        )
+        assertTrue(
+            Regex("""\\A n1, n2 \\in NodeSet :""").containsMatchIn(initBlock) &&
+                !Regex("""\\A n1, n2 \\in NodeSet :\s*\n\s*/\\ """).containsMatchIn(initBlock),
+            "injective-self quantifier must be one Init conjunct (not /\\ per source line);\n$initBlock",
+        )
         val updateTermDef = tlaText.substringAfter("updateTerm(").substringBefore("\n\n")
         assertTrue(
             !tlaText.contains("updateTerm_RaftProtocol_Net") &&

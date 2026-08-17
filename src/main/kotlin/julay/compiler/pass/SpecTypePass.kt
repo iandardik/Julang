@@ -555,6 +555,21 @@ private fun initClauseErrors(
                 val pc = pclassNodes[leaf.name] ?: leafSpecNodes[leaf.name]?.asProcClass()
                 pc?.let { leaf.name to it }
             }.toMap()
+            val indexed = linkedMapOf<String, ProcClassNode>()
+            val paramTypes = linkedMapOf<String, Type>()
+            n.paramType()?.let { pt ->
+                val indexType = when (val r = registry.resolveTypeExpr(pt)) {
+                    is TypeResolveResult.Found -> r.type
+                    is TypeResolveResult.Error -> null
+                }
+                if (indexType != null) {
+                    expanded.forEach { leaf ->
+                        val pc = pclassNodes[leaf.name] ?: leafSpecNodes[leaf.name]?.asProcClass() ?: return@forEach
+                        indexed[leaf.name] = pc
+                        paramTypes[leaf.name] = indexType
+                    }
+                }
+            }
             n.initExprs().forEach { expr ->
                 val initErrs = typePassSpecFormula(
                     expr,
@@ -563,7 +578,8 @@ private fun initClauseErrors(
                     funEnv,
                     funBuiltinEnv,
                     unindexed,
-                    indexedPeers = emptyMap(),
+                    indexedPeers = indexed,
+                    indexedParamTypes = paramTypes,
                     initConstGlobals = leafConst,
                 )
                 errors += initErrs

@@ -39,8 +39,9 @@ private var typePassIndexedPeerClasses: Map<String, ProcClassNode> = emptyMap()
 /** Expected index types for [typePassIndexedPeerClasses], when known. */
 private var typePassIndexedPeerParamTypes: Map<String, Type> = emptyMap()
 /**
- * Non-null while typing `init:`: leaf name → const-global var names. Indexed peer
- * access is rejected; FieldAccess may only name these vars.
+ * Non-null while typing `init:`: leaf name → const-global var names. Indexed
+ * `Leaf[i].var` is rejected for those names (scalars) and for mutable vars;
+ * indexed `const` state is allowed.
  */
 private var typePassInitConstGlobals: Map<String, Set<String>>? = null
 /** True while typing invariant/`init:` formulas (tighter peer indexing, no effects). */
@@ -1446,6 +1447,33 @@ private fun peerStateRefType(
                     null,
                     listOf(OneLocCompileError(baseExpr.programLocation(), "unknown state variable \"$peerSym.$fieldName\"")),
                 )
+            val initConsts = typePassInitConstGlobals
+            if (initConsts != null) {
+                val loc = baseExpr.programLocation()
+                if (fieldName in initConsts[peerSym].orEmpty()) {
+                    return PeerRefTypeResult(
+                        null,
+                        listOf(
+                            OneLocCompileError(
+                                loc,
+                                "\"init:\" cannot use indexed access \"$peerSym[i].$fieldName\"; " +
+                                    "const-globals are scalars (write $peerSym.$fieldName or a bare name)",
+                            ),
+                        ),
+                    )
+                }
+                if (!vn.isConst) {
+                    return PeerRefTypeResult(
+                        null,
+                        listOf(
+                            OneLocCompileError(
+                                loc,
+                                "\"init:\" may only mention const state; \"$peerSym.$fieldName\" is a var",
+                            ),
+                        ),
+                    )
+                }
+            }
             val t = try {
                 valueView(vn.type)
             } catch (_: RuntimeException) {

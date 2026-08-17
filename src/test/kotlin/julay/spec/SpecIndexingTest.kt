@@ -380,6 +380,57 @@ class SpecIndexingTest {
     }
 
     @Test
+    fun initIndexedConstInjectiveIsOk() {
+        val result = typeCheck(
+            """
+            sort N := {"a", "b"}
+            proc Worker {
+                const me : String
+                const cluster : List<String>
+                constructor initially(args : List<String>) {
+                    transit:
+                        me := args[1]
+                        cluster := args
+                }
+            }
+            spec Ok := Worker[i : N] {
+              const global cluster
+              init: forall n1 : N, forall n2 : N, (Worker[n1].me = Worker[n2].me) => (n1 = n2)
+            }
+            """.trimIndent(),
+        )
+        assertTrue(result.errors.isEmpty(), result.toString())
+    }
+
+    @Test
+    fun initIndexedVarIsError() {
+        val result = typeCheck(
+            """
+            sort N := {"a"}
+            proc Worker {
+                const cluster : List<String>
+                var extra : Int
+                constructor initially(args : List<String>) {
+                    transit:
+                        cluster := args
+                        extra := 0
+                }
+            }
+            spec Bad := Worker[i : N] {
+              const global cluster
+              init: Worker[i].extra = 0
+            }
+            """.trimIndent(),
+        )
+        assertTrue(
+            result.errors.any {
+                it.toString().contains("const") || it.toString().contains("var")
+            },
+            result.toString(),
+        )
+    }
+
+    @Test
     fun invariantIndexedListLengthAndIndexIsOk() {
         val result = typeCheck(
             """

@@ -80,7 +80,7 @@ export spec Net[n : NodeSet] {
             voteResponseMsgs := voteResponseMsgs + setOf(VoteResponseMsg {
                 src := n,
                 dest := m,
-                id := candidateId,
+                id := RaftProtocol[n].self.id,
                 term := outTerm,
                 granted := voteGranted
             })
@@ -166,8 +166,8 @@ export spec Net[n : NodeSet] {
             appendEntriesResponseMsgs := appendEntriesResponseMsgs + setOf(AppendEntriesResponseMsg {
                 src := n,
                 dest := m,
-                id := leaderId,
-                term := inTerm,
+                id := RaftProtocol[n].self.id,
+                term := outTerm,
                 success := success,
                 matchIdx := matchIdx
             })

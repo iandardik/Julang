@@ -153,12 +153,14 @@ export proc RaftProtocol {
     internal transition advanceCommitIndex(newCommitIndex : Int) {
         guard:
             & state = "Leader"
-            & commitIndex < newCommitIndex
+            & newCommitIndex = commitIndex + 1
             & newCommitIndex <= length(log)
             & entryTermAt(log, newCommitIndex) = currentTerm
-            // matchIndex[self] stays 0 (leader never AEs itself), so count the leader explicitly.
-            // Filter compares against state (commitIndex), not the action arg — required for fast guards.
-            & let (numAgree : Int := 1 + matchIndex.filter(i -> i >= commitIndex).length) {
+            // matchIndex[self] stays 0 (leader never AEs itself), so count the leader
+            // with +1. Filter uses commitIndex (state), not newCommitIndex (action arg),
+            // so the HOF stays a fast guard; stepping by 1 makes i > commitIndex
+            // equivalent to i >= newCommitIndex. Zeros therefore do not count.
+            & let (numAgree : Int := 1 + matchIndex.filter(i -> i > commitIndex).length) {
                 numAgree * 2 > length(cluster)
             }
         transit:

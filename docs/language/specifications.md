@@ -156,7 +156,7 @@ spec ClusterSpec := RaftProtocol[n : NodeSet] {
 }
 ```
 
-Several `init:` lines, or `init: A & B`, all become Init `/\`. Bare names are the listed const-globals (`cluster`); `RaftProtocol.cluster` also works. Indexed `RaftProtocol[n].cluster` is an error (const-globals are scalars). Sort `.length` / `length(Sort)` is spec/TLA-only (`Cardinality` in TLA+). If `|Sort| > MaxListLen` (default 3), compile errors — Init would be empty.
+Several `init:` lines, or `init: A & B`, all become Init `/\`. Bare names are the listed const-globals (`cluster`); `RaftProtocol.cluster` also works. Indexed `RaftProtocol[n].cluster` is an error (const-globals are scalars). Indexed **`const`** state that is not const-global is allowed (`RaftProtocol[n1].self`), so Init can constrain per-index constants. Mutable `var`s are not. Sort `.length` / `length(Sort)` is spec/TLA-only (`Cardinality` in TLA+). If `|Sort| > MaxListLen` (default 3), compile errors — Init would be empty.
 
 **Shorthand** `(A || B)[n : T]` means the same as create-temps + `with` + applies:
 

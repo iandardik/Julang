@@ -16,6 +16,8 @@ spec ClusterSpec := RaftProtocol[n : NodeSet] {
     const global cluster
     init: cluster.length = NodeSet.length
     init: forall i : Int, (i >= 1 & i <= cluster.length) => cluster[i].id = i
+    init: forall n1 : NodeSet, forall n2 : NodeSet,
+        (RaftProtocol[n1].self = RaftProtocol[n2].self) => (n1 = n2)
 }
 spec Sys := with (n : NodeSet) {
     ClusterSpec[n] || Net[n]
