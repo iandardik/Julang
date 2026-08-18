@@ -1,0 +1,16 @@
+proc Counter {
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit: n := 0
+    }
+
+    transition bump() {
+        guard: n >= 0
+        transit: n := n + 1
+    }
+}
+
+spec StateConstraintInc := <true> Counter <true>
+
+compile StateConstraintInc

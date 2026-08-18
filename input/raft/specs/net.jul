@@ -201,9 +201,24 @@ export spec Net[n : NodeSet] {
 
     client transition updateTerm(inTerm : Int) {
         guard:
-            | voteRequestMsgs.filter(m -> m.dest = n & m.msg.term = inTerm).length > 0
-            | voteResponseMsgs.filter(m -> m.dest = n & m.term = inTerm).length > 0
-            | appendEntriesRequestMsgs.filter(m -> m.dest = n & m.msg.term = inTerm).length > 0
-            | appendEntriesResponseMsgs.filter(m -> m.dest = n & m.term = inTerm).length > 0
+            & inTerm > RaftProtocol[n].currentTerm
+            & (
+                | voteRequestMsgs.filter(m -> m.dest = n & m.msg.term = inTerm).length > 0
+                | voteResponseMsgs.filter(m -> m.dest = n & m.term = inTerm).length > 0
+                | appendEntriesRequestMsgs.filter(m -> m.dest = n & m.msg.term = inTerm).length > 0
+                | appendEntriesResponseMsgs.filter(m -> m.dest = n & m.term = inTerm).length > 0
+            )
+    }
+
+    client transition dropStaleResponse(respTerm : Int, drop : Boolean) {
+        guard:
+            & drop
+            & (
+                | voteResponseMsgs.filter(m -> m.dest = n & m.term = respTerm).length > 0
+                | appendEntriesResponseMsgs.filter(m -> m.dest = n & m.term = respTerm).length > 0
+            )
+        transit:
+            voteResponseMsgs := voteResponseMsgs.filter(m -> m.dest ~= n | m.term ~= respTerm)
+            appendEntriesResponseMsgs := appendEntriesResponseMsgs.filter(m -> m.dest ~= n | m.term ~= respTerm)
     }
 }

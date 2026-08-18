@@ -500,6 +500,31 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun inferredStateConstraintBindsIntVars() {
+        val source = File("regression/input/spec/tla-state-constraint.jul")
+        val emit = compileSpecEmit(source, "StateConstraintInc")
+        val tlaText = emit.tlaText
+        val cfgText = emit.cfgText
+        assertTrue(
+            cfgText.contains("CONSTRAINT StateConstraint") &&
+                !cfgText.contains("INVARIANT StateConstraint"),
+            "StateConstraint should be a TLC CONSTRAINT, not an INVARIANT;\n$cfgText",
+        )
+        val constraintDef = tlaText.substringAfter("StateConstraint ==").substringBefore("\n\n")
+        assertTrue(
+            constraintDef.contains("n \\in Int") &&
+                !constraintDef.contains("TypeOKInt"),
+            "Int state vars should inhabit cfg Int;\n$constraintDef",
+        )
+        assertTrue(
+            cfgText.contains("CONSTANT Int"),
+            "CONSTRAINT n \\in Int needs cfg Int;\n$cfgText",
+        )
+        File("StateConstraintInc.tla").delete()
+        File("StateConstraintInc.cfg").delete()
+    }
+
+    @Test
     fun determinedArgsSubstitutesPayloadLet() {
         val source = File("regression/input/spec/tla-determined-args.jul")
         val (tlaText, _) = compileSpecTla(source, "DeterminedArgs")
@@ -817,8 +842,12 @@ class SpecTlaTlcSmokeTest {
                         updateTermDef.contains("appendEntriesRequestMsgs") &&
                         updateTermDef.contains("appendEntriesResponseMsgs")
                     ) &&
-                (updateTermDef.contains("Cardinality") || updateTermDef.contains("filter")),
-            "updateTerm should be one paired action whose guard mentions all four bags;\n$updateTermDef",
+                (updateTermDef.contains("Cardinality") || updateTermDef.contains("filter")) &&
+                (
+                    updateTermDef.contains("inTerm > currentTerm") ||
+                        updateTermDef.contains("inTerm > RaftProtocol_currentTerm")
+                    ),
+            "updateTerm should be one paired action whose guard mentions all four bags and inTerm > currentTerm;\n$updateTermDef",
         )
         val handleRvDef = tlaText.substringAfter("handleRequestVoteRequest(").substringBefore("\n\n")
         assertTrue(
@@ -837,6 +866,25 @@ class SpecTlaTlcSmokeTest {
                 !Regex("""\\E n, m \\in NodeSet :[^\n]*handleAppendEntriesResponse""").containsMatchIn(nextBlock),
             "handle Next should not wrap bag exists with \\E n, m \\in NodeSet;\n$nextBlock",
         )
+        assertTrue(
+            nextBlock.contains("dropStaleResponse"),
+            "Next should include dropStaleResponse;\n$nextBlock",
+        )
+        val dropStaleDef = tlaText.substringAfter("dropStaleResponse(").substringBefore("\n\n")
+        assertTrue(
+            (
+                dropStaleDef.contains("voteResponseMsgs") &&
+                    dropStaleDef.contains("appendEntriesResponseMsgs")
+                ) &&
+                (
+                    dropStaleDef.contains("SelectSeq") ||
+                        dropStaleDef.contains("{") ||
+                        dropStaleDef.contains("filter")
+                    ) &&
+                dropStaleDef.contains("voteResponseMsgs'") &&
+                dropStaleDef.contains("appendEntriesResponseMsgs'"),
+            "dropStaleResponse should shrink stale vote/AE response bags;\n$dropStaleDef",
+        )
         val handleAeDef = tlaText.substringAfter("handleAppendEntriesResponse(").substringBefore("\n\n")
         val keepTermAt = listOf(".term =", ".dest =", ".src =")
             .map { handleAeDef.indexOf(it) }
@@ -851,6 +899,28 @@ class SpecTlaTlcSmokeTest {
         assertTrue(
             cfgText.contains("CONSTANT Int = {0, 1, 2, 3}"),
             "cfg Int should pad through MaxListLen so node id 3 is in the universe;\n$cfgText",
+        )
+        assertTrue(
+            cfgText.contains("CONSTRAINT StateConstraint") &&
+                !cfgText.contains("INVARIANT StateConstraint"),
+            "inferred StateConstraint should be a TLC CONSTRAINT;\n$cfgText",
+        )
+        val constraintDef = tlaText.substringAfter("StateConstraint ==").substringBefore("\n\n")
+        assertTrue(
+            (
+                constraintDef.contains("currentTerm[n] \\in Int") ||
+                    constraintDef.contains("RaftProtocol_currentTerm[n] \\in Int")
+                ) &&
+                (
+                    constraintDef.contains("commitIndex[n] \\in Int") ||
+                        constraintDef.contains("RaftProtocol_commitIndex[n] \\in Int")
+                    ) &&
+                constraintDef.contains("\\cup {-1}") &&
+                (
+                    Regex("""Len\([^)]*log\[n\]\)\s*<=\s*MaxListLen""").containsMatchIn(constraintDef) ||
+                        Regex("""Len\(RaftProtocol_log\[n\]\)\s*<=\s*MaxListLen""").containsMatchIn(constraintDef)
+                    ),
+            "CONSTRAINT should bind Int vars to cfg Int (plus -1) and list Len to MaxListLen;\n$constraintDef",
         )
         assertTrue(
             tlaText.contains("self \\in [NodeSet -> TypeOKInt]"),

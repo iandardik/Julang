@@ -51,6 +51,10 @@ Some of these are **equivalent rewrites** of the same transition relation. Other
 
 TLC `.cfg` `Int` / `String` universes are sized from literals in the emitted spec (open `\E` / index / havoc sites). Cfg `Int` is `{0, …, max(highest non-negative literal, MaxListLen)}`. That projection is always on and is not a `--disable-tla-opt` id. `MaxListLen` stays `3`.
 
+The compiler also infers a TLC `CONSTRAINT StateConstraint` (not an `INVARIANT`): each Julay-`Int` state variable must inhabit that cfg `Int`, union any negative literals already in the model (so `votedFor = -1` is allowed at Init), and each list state variable has `Len(x) <= MaxListLen`. Parameterized leaves use `\A n \in NodeSet : currentTerm[n] \in Int`. Successors that leave those bounds are discarded. Always-on; not a `--disable-tla-opt` id. Do not add a user `constraint` keyword.
+
+TypeOK still uses `TypeOKInt` (`Int ∪ Nat ∪ extras`) so membership stays pointwise; CONSTRAINT is what keeps reachable Int state inside cfg `Int`. That also makes `\A i \in Int` complete for properties whose bound is an Int state var (Raft `StateMachineSafety` vs `commitIndex`).
+
 ### Named TLA+ optimizations
 
 | ID | Role | Kind |

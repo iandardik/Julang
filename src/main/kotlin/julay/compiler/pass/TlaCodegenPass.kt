@@ -358,9 +358,11 @@ private fun emitProjectedTla(
     val typeOkIntRange = "TypeOKInt"
     val typeOkIntDef = emitTypeOkIntDef(intModelValues)
 
+    val intConstraintRange = constraintIntRange(intModelValues)
     val variables = mutableListOf<String>()
     val initParts = mutableListOf<String>()
     val typeOkParts = mutableListOf<String>()
+    val constraintParts = mutableListOf<String>()
     leaves.forEach { leaf ->
         val pc = pclassesForTla[leaf.name] ?: return@forEach
         val foldCtor = foldedCtors[leaf.tlaName]
@@ -422,6 +424,11 @@ private fun emitProjectedTla(
                     initParts += "/\\ $v = ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
                     typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange), null)
                 }
+                appendStateConstraint(
+                    constraintParts, v, safeType(vn),
+                    indexed = leaf.indexesState(vn.name),
+                    binder = binder, domain = domain, intRange = intConstraintRange,
+                )
             }
             if (foldCtor != null) {
                 emitFoldedCtorAssumptions(
@@ -461,6 +468,10 @@ private fun emitProjectedTla(
                     initParts += "/\\ $v = ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
                 }
                 typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange), null)
+                appendStateConstraint(
+                    constraintParts, v, safeType(vn),
+                    indexed = false, binder = null, domain = null, intRange = intConstraintRange,
+                )
             }
             if (foldCtor != null) {
                 emitFoldedCtorAssumptions(
@@ -469,6 +480,9 @@ private fun emitProjectedTla(
                 )
             }
         }
+    }
+    if (constraintParts.any { "\\in Int" in it }) {
+        cfgOverrides += "Int"
     }
     // Procfun spawn-await handshake vars
     if (handshake.allNames().isNotEmpty()) {
@@ -536,7 +550,7 @@ private fun emitProjectedTla(
             actions.map { it.name } +
             setOf(
                 "vars", "BoundedSeq", "Range", "SetToSeq", "splice", "startsWith", "allDistinct",
-                "Init", "Next", "Spec", "TypeOK", "TypeOKInt", "GF", "dummy",
+                "Init", "Next", "Spec", "TypeOK", "TypeOKInt", "StateConstraint", "GF", "dummy",
             )
         ).toSet()
     val spliceOperatorDef = if (needsSpliceOperator) emitSpliceOperatorDef(funReservedNames) else null
@@ -552,6 +566,10 @@ private fun emitProjectedTla(
         needsSpliceOperator || needsStartsWithOperator || needsAllDistinctOperator ||
             funlibOperatorDefs.isNotEmpty()
     val needsBoundedSeq = "MaxListLen" in constants || "MaxListLen" in cfgOverrides
+    if (constraintParts.any { "MaxListLen" in it }) {
+        constants += "MaxListLen"
+        cfgOverrides += "MaxListLen"
+    }
 
     val invDefs = if (invClosure.isNotEmpty()) {
         invClosure.flatMap { node ->
@@ -584,6 +602,14 @@ private fun emitProjectedTla(
             typeOkParts.forEach { appendLine("  $it") }
         }
     }.trimEnd()
+    val constraintDef = if (constraintParts.isEmpty()) {
+        null
+    } else {
+        buildString {
+            appendLine("StateConstraint ==")
+            constraintParts.forEach { appendLine("  $it") }
+        }.trimEnd()
+    }
 
     val actionDefs = actions.joinToString("\n\n") { action ->
         if (action.comment != null) "\\* ${action.comment}\n${action.def}" else action.def
@@ -682,6 +708,10 @@ private fun emitProjectedTla(
         appendLine(typeOkIntDef)
         appendLine()
         appendLine(typeOkDef)
+        if (constraintDef != null) {
+            appendLine()
+            appendLine(constraintDef)
+        }
         if (sessionIntegrityDef != null) {
             appendLine()
             appendLine(sessionIntegrityDef)
@@ -712,6 +742,9 @@ private fun emitProjectedTla(
     val cfg = buildString {
         appendLine("SPECIFICATION Spec")
         appendLine("INVARIANT TypeOK")
+        if (constraintDef != null) {
+            appendLine("CONSTRAINT StateConstraint")
+        }
         if (needsSessionException) {
             appendLine("INVARIANT SessionIntegrity")
         }
@@ -1145,6 +1178,46 @@ private fun typeOkVarRange(
 private fun typeOkConjunct(name: String, range: String, paramDomain: String?): String {
     val ty = if (paramDomain != null) "[$paramDomain -> $range]" else range
     return "/\\ $name \\in $ty"
+}
+
+/** cfg Int plus negative literals already in the model (`votedFor = -1`). Not TypeOKInt extras. */
+internal fun constraintIntRange(intLiterals: Set<Int>): String {
+    val negatives = intLiterals.filter { it < 0 }.sorted()
+    return if (negatives.isEmpty()) {
+        "Int"
+    } else {
+        "Int \\cup {${negatives.joinToString(", ")}}"
+    }
+}
+
+private fun appendStateConstraint(
+    parts: MutableList<String>,
+    varName: String,
+    type: Type,
+    indexed: Boolean,
+    binder: String?,
+    domain: String?,
+    intRange: String,
+) {
+    when (type) {
+        is IntType -> {
+            val body = if (indexed && binder != null && domain != null) {
+                "\\A $binder \\in $domain : $varName[$binder] \\in $intRange"
+            } else {
+                "$varName \\in $intRange"
+            }
+            parts += "/\\ $body"
+        }
+        is ListType -> {
+            val body = if (indexed && binder != null && domain != null) {
+                "\\A $binder \\in $domain : Len($varName[$binder]) <= MaxListLen"
+            } else {
+                "Len($varName) <= MaxListLen"
+            }
+            parts += "/\\ $body"
+        }
+        else -> {}
+    }
 }
 
 /** Domains TypeOK mentions that must be module CONSTANTs (`String`). */
