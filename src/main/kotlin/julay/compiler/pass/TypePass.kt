@@ -1975,8 +1975,15 @@ private fun ExprNode.typePassExpr(symbolEnv: Map<String, Type>, registry: ObjCla
     funBuiltinEnv: Map<String, FunBuiltin>,
     procFunEnv: Map<String, ProcFunNode> = emptyMap()): List<CompileError> {
     val childrenErrors = children.flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv) }
-    inferExprType(symbolEnv)
-    return childrenErrors
+    if (childrenErrors.isNotEmpty()) {
+        return childrenErrors
+    }
+    try {
+        inferExprType(symbolEnv)
+    } catch (e: RuntimeException) {
+        return listOf(OneLocCompileError(programLocation(), e.message ?: "Type error"))
+    }
+    return emptyList()
 }
 
 private fun SymbolValueExprNode.typePassSymbol(

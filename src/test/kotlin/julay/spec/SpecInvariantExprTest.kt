@@ -75,6 +75,7 @@ class SpecInvariantExprTest {
         Neg("non-boolean", "Worker.n", "Boolean", parameterized = false),
         Neg("bare-index", "forall k : N, Worker[k] = Worker[k]", "requires a state variable"),
         Neg("param-without-index", "Worker.n >= 0", "requires indexed access"),
+        Neg("paren-unknown-len", "forall k : N, (Worker[k].log.len >= 0)", "len"),
     )
 
     @Test
