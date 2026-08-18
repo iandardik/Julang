@@ -524,6 +524,28 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun determinedArgsWalksGuardLets() {
+        val source = File("regression/input/spec/tla-determined-args-let.jul")
+        val (tlaText, _) = compileSpecTla(source, "DeterminedArgsLet")
+        assertTrue(
+            !Regex("""\\E g \\in BOOLEAN""").containsMatchIn(tlaText),
+            "determined-args should omit g exists through let;\n$tlaText",
+        )
+        assertTrue(
+            !Regex("""\\E out \\in Int""").containsMatchIn(tlaText),
+            "determined-args should omit out type-domain exists;\n$tlaText",
+        )
+        assertTrue(
+            (tlaText.contains("g ==") && tlaText.contains("out ==")),
+            "expected LET g and LET out;\n$tlaText",
+        )
+        assertTrue(
+            !tlaText.contains("voteCondition") && !Regex("""LET g == c\b""").containsMatchIn(tlaText),
+            "determiner should inline the let-bound name c;\n$tlaText",
+        )
+    }
+
+    @Test
     fun fromCollectionBindsListIndex() {
         val source = File("regression/input/spec/tla-from-collection.jul")
         val (tlaText, _) = compileSpecTla(source, "FromCollection")
@@ -570,6 +592,29 @@ class SpecTlaTlcSmokeTest {
         assertTrue(
             Regex("""\\E x \\in Int""").containsMatchIn(offText) && !offText.contains("__s0"),
             "disabling from-collection should restore \\E x \\in Int;\n$offText",
+        )
+    }
+
+    @Test
+    fun fromCollectionBindsAlsoAndIndex() {
+        val source = File("regression/input/spec/tla-from-collection-also.jul")
+        val (tlaText, _) = compileSpecTla(source, "AlsoStructChecked")
+        val recvDef = tlaText.substringAfter("recv(").substringBefore("\n\n")
+        assertTrue(
+            (recvDef.contains("LET n ==") || recvDef.contains("n ==")) &&
+                (recvDef.contains("LET m ==") || recvDef.contains("m ==")),
+            "also-arg m and index n should be LET-bound from the struct;\n$recvDef",
+        )
+        assertTrue(
+            !Regex("""\\E n, m \\in NodeSet""").containsMatchIn(tlaText) &&
+                !Regex("""\\E n \\in NodeSet""").containsMatchIn(recvDef) &&
+                !Regex("""\\E m \\in NodeSet""").containsMatchIn(recvDef),
+            "n and m should not be type-domain exists on recv;\n$tlaText",
+        )
+        assertTrue(
+            Regex("""\\E \w+ \\in """).containsMatchIn(recvDef) ||
+                Regex("""\\E \w+ \\in """).containsMatchIn(tlaText.substringAfter("Next ==")),
+            "collection binder exists should remain;\n$tlaText",
         )
     }
 
@@ -724,7 +769,8 @@ class SpecTlaTlcSmokeTest {
             "Init should constrain cluster length to |NodeSet|;\n${tlaText.substringAfter("Init ==").take(2500)}",
         )
         assertTrue(
-            tlaText.contains("\\E n, m \\in NodeSet : requestVote(n, m)") &&
+            tlaText.contains("\\E n, m \\in NodeSet :") &&
+                Regex("""requestVote\(n, m""").containsMatchIn(tlaText) &&
                 !tlaText.contains("\\E n \\in NodeSet : \\E m \\in NodeSet"),
             "consecutive \\E over NodeSet should combine;\n${tlaText.substringAfter("Next ==").take(2000)}",
         )
@@ -779,6 +825,27 @@ class SpecTlaTlcSmokeTest {
             handleRvDef.contains("voteRequestMsgs' =") &&
                 (handleRvDef.contains("voteRequestMsgs \\ {") || handleRvDef.contains("voteRequestMsgs\\ {")),
             "handleRequestVoteRequest should subtract the matched request;\n$handleRvDef",
+        )
+        assertTrue(
+            !Regex("""\\E outTerm \\in Int""").containsMatchIn(tlaText) &&
+                !Regex("""\\E voteGranted \\in BOOLEAN""").containsMatchIn(tlaText),
+            "determined-args through let should drop outTerm and voteGranted exists;\n$handleRvDef",
+        )
+        val nextBlock = tlaText.substringAfter("Next ==").substringBefore("\n\n")
+        assertTrue(
+            !Regex("""\\E n, m \\in NodeSet :[^\n]*handleRequestVoteRequest""").containsMatchIn(nextBlock) &&
+                !Regex("""\\E n, m \\in NodeSet :[^\n]*handleAppendEntriesResponse""").containsMatchIn(nextBlock),
+            "handle Next should not wrap bag exists with \\E n, m \\in NodeSet;\n$nextBlock",
+        )
+        val handleAeDef = tlaText.substringAfter("handleAppendEntriesResponse(").substringBefore("\n\n")
+        val keepTermAt = listOf(".term =", ".dest =", ".src =")
+            .map { handleAeDef.indexOf(it) }
+            .filter { it >= 0 }
+            .minOrNull() ?: -1
+        val nextIndexAt = handleAeDef.indexOf("nextIndex'")
+        assertTrue(
+            keepTermAt >= 0 && nextIndexAt >= 0 && keepTermAt < nextIndexAt,
+            "struct keep equalities should precede primed nextIndex;\n$handleAeDef",
         )
         val cfgText = emit.cfgText
         assertTrue(

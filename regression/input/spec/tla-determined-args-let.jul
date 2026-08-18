@@ -1,0 +1,25 @@
+proc Box {
+    var n : Int
+    var flag : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            n := 0
+            flag := false
+    }
+
+    transition step(g : Boolean, out : Int) {
+        guard:
+            let (c : Boolean := n >= 0) {
+                g <=> c
+            }
+            & out = n
+        transit:
+            flag := g
+            n := out
+    }
+}
+
+spec DeterminedArgsLet := <true> Box <true>
+
+compile DeterminedArgsLet

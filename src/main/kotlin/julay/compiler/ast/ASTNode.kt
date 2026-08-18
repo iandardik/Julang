@@ -1640,6 +1640,7 @@ class ListLiteralExprNode(
     val elements: List<ExprNode>,
     private val loc: ProgramLoc,
     resolvedType: ListType? = null,
+    val typeArgs: List<TypeExpr> = emptyList(),
 ) : ExprNode(elements) {
     private var listType: ListType? = resolvedType
 
@@ -1675,7 +1676,8 @@ class ListLiteralExprNode(
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
         if (elements.isEmpty()) {
-            return "emptyList()"
+            val elem = listType?.elementType?.toKotlinTypeString()
+            return if (elem != null) "emptyList<$elem>()" else "emptyList()"
         }
         val elems = elements.joinToString(", ") { it.toTransitString(symbolTypes, argSymbols) }
         return "listOf($elems)"
@@ -1685,15 +1687,18 @@ class ListLiteralExprNode(
         return listType ?: throw RuntimeException("List literal type not resolved at $loc")
     }
 
-    override fun toString(): String =
-        if (elements.isEmpty()) "listOf()"
-        else elements.joinToString(", ", prefix = "listOf(", postfix = ")")
+    override fun toString(): String {
+        val ann = if (typeArgs.isEmpty()) "" else "<${typeArgs.joinToString(", ")}>"
+        return if (elements.isEmpty()) "listOf$ann()"
+        else elements.joinToString(", ", prefix = "listOf$ann(", postfix = ")")
+    }
 }
 
 class MapLiteralExprNode(
     val entries: List<Pair<ExprNode, ExprNode>>,
     private val loc: ProgramLoc,
     resolvedType: MapType? = null,
+    val typeArgs: List<TypeExpr> = emptyList(),
 ) : ExprNode(entries.flatMap { listOf(it.first, it.second) }) {
     private var mapType: MapType? = resolvedType
 
@@ -1736,7 +1741,9 @@ class MapLiteralExprNode(
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
         if (entries.isEmpty()) {
-            return "emptyMap()"
+            val kt = mapType?.keyType?.toKotlinTypeString()
+            val vt = mapType?.valueType?.toKotlinTypeString()
+            return if (kt != null && vt != null) "emptyMap<$kt, $vt>()" else "emptyMap()"
         }
         val pairs = entries.joinToString(", ") { (k, v) ->
             "${k.toTransitString(symbolTypes, argSymbols)} to ${v.toTransitString(symbolTypes, argSymbols)}"
@@ -1748,15 +1755,18 @@ class MapLiteralExprNode(
         return mapType ?: throw RuntimeException("Map literal type not resolved at $loc")
     }
 
-    override fun toString(): String =
-        if (entries.isEmpty()) "mapOf()"
-        else entries.joinToString(", ", prefix = "mapOf(", postfix = ")") { (k, v) -> "$k to $v" }
+    override fun toString(): String {
+        val ann = if (typeArgs.isEmpty()) "" else "<${typeArgs.joinToString(", ")}>"
+        return if (entries.isEmpty()) "mapOf$ann()"
+        else entries.joinToString(", ", prefix = "mapOf$ann(", postfix = ")") { (k, v) -> "$k to $v" }
+    }
 }
 
 class SetLiteralExprNode(
     val elements: List<ExprNode>,
     private val loc: ProgramLoc,
     resolvedType: SetType? = null,
+    val typeArgs: List<TypeExpr> = emptyList(),
 ) : ExprNode(elements) {
     private var setType: SetType? = resolvedType
 
@@ -1793,7 +1803,8 @@ class SetLiteralExprNode(
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
         if (elements.isEmpty()) {
-            return "emptySet()"
+            val elem = setType?.elementType?.toKotlinTypeString()
+            return if (elem != null) "emptySet<$elem>()" else "emptySet()"
         }
         val elems = elements.joinToString(", ") { it.toTransitString(symbolTypes, argSymbols) }
         return "setOf($elems)"
@@ -1803,9 +1814,11 @@ class SetLiteralExprNode(
         return setType ?: throw RuntimeException("Set literal type not resolved at $loc")
     }
 
-    override fun toString(): String =
-        if (elements.isEmpty()) "setOf()"
-        else elements.joinToString(", ", prefix = "setOf(", postfix = ")")
+    override fun toString(): String {
+        val ann = if (typeArgs.isEmpty()) "" else "<${typeArgs.joinToString(", ")}>"
+        return if (elements.isEmpty()) "setOf$ann()"
+        else elements.joinToString(", ", prefix = "setOf$ann(", postfix = ")")
+    }
 }
 
 class IndexExprNode(

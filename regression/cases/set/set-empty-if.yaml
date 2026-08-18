@@ -1,0 +1,5 @@
+source: regression/input/set/set-empty-if.jul
+programs:
+  - name: SetEmptyIfTest
+    run:
+      timeoutMs: 60000

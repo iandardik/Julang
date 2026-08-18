@@ -325,8 +325,7 @@ export proc RaftProtocol {
             votedFor := if (advance) -1 else votedFor
             knownLeaderId := if (advance) -1 else knownLeaderId
             votesGranted := if (advance) {
-                // TODO hack to get an empty set, since that doesn't compile for some reason
-                votesGranted - votesGranted
+                setOf()
             } else { votesGranted }
     }
 

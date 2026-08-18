@@ -24,9 +24,9 @@ Import as `julay.funlib.<name>`. Bare names are not available without an import.
 
 | Function | Role | Effects / IO? | OK in guards? |
 |----------|------|---------------|----------------|
-| `listOf` | List constructor (`listOf(a, b)` / typed `listOf()`) | No | Yes |
-| `setOf` | Set constructor (`setOf(a, b)` / typed `setOf()`) | No | Yes |
-| `mapOf` | Map constructor (`mapOf(k to v, …)` / typed `mapOf()`) | No | Yes |
+| `listOf` | List constructor (`listOf(a, b)` / typed `listOf()` / `listOf<T>()`) | No | Yes |
+| `setOf` | Set constructor (`setOf(a, b)` / typed `setOf()` / `setOf<T>()`) | No | Yes |
+| `mapOf` | Map constructor (`mapOf(k to v, …)` / typed `mapOf()` / `mapOf<K, V>()`) | No | Yes |
 | `splice` | List slice `splice(xs, start, end)` — 1-based inclusive; clamp `end` to `length`; `end=0` or `start` past end → empty (see [Collections](collections.md#splicing)) | No | Yes |
 | `allDistinct` | `true` iff every list element is unique (empty list is `true`; short-circuits on the first duplicate) | No | **No** (unless only concrete state; see [Collections](collections.md#guards)) |
 | `length` | Size of list, set, or map | No | Yes |

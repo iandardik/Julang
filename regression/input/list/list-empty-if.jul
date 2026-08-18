@@ -1,0 +1,33 @@
+import julay.funlib.length
+import julay.funlib.exitProgram
+import julay.funlib.listOf
+
+proc ListEmptyIfDemo {
+    var xs : List<Int>
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            xs := listOf(1)
+            done := false
+    }
+
+    internal transition clear() {
+        guard:
+            ~done
+        transit:
+            xs := if (length(xs) >= 1) listOf() else xs
+            done := length(xs) = 0
+    }
+
+    internal transition exitSystem() {
+        guard:
+            done
+        after:
+            exitProgram(0)
+    }
+}
+
+proc ListEmptyIfTest := ListEmptyIfDemo
+
+compile ListEmptyIfTest

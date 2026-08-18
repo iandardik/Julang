@@ -1,6 +1,7 @@
 package julay.compiler.pass
 
 import julay.compiler.ast.*
+import julay.compiler.isDiscardBinding
 import julay.program.type.ListType
 import julay.program.type.SetType
 import java.util.IdentityHashMap
@@ -20,7 +21,8 @@ internal data class TlaArgBindPlan(
     val setBinds: List<SetMemberBind>,
     val structBinds: List<StructInSetBind>,
 ) {
-    fun skipped(expr: ExprNode): Boolean = skipConjuncts.containsKey(expr)
+    fun skipped(expr: ExprNode): Boolean =
+        skipConjuncts.containsKey(expr) || skipConjuncts.containsKey(unwrapParen(expr))
 
     /** Args whose type-domain `\E` should not be collected (determined, list, struct, set-member). */
     fun omitArgTypeDomains(): Set<String> = skipArgs + setBinds.map { it.arg }.toSet()
@@ -58,9 +60,63 @@ internal data class StructInSetBind(
     val keep: List<Pair<List<String>, ExprNode>>,
 )
 
+/** Skip-by-identity guard conjuncts while emitting TLA (determined-args / from-collection). */
+internal object TlaSkipConjuncts {
+    private val current = ThreadLocal.withInitial { IdentityHashMap<ExprNode, Boolean>() }
+
+    fun skipped(expr: ExprNode): Boolean {
+        val skip = current.get()
+        return skip.containsKey(expr) || skip.containsKey(unwrapParen(expr))
+    }
+
+    fun install(skip: IdentityHashMap<ExprNode, Boolean>) {
+        current.set(skip)
+    }
+
+    fun clear() {
+        current.set(IdentityHashMap())
+    }
+
+    fun <T> with(skip: IdentityHashMap<ExprNode, Boolean>, block: () -> T): T {
+        val prev = current.get()
+        current.set(skip)
+        try {
+            return block()
+        } finally {
+            current.set(prev)
+        }
+    }
+}
+
+/** Index / `also` names that from-collection may bind from a struct-in-set guard. */
+internal fun collectTlaExtraArgNames(
+    offers: List<TlaActionOffer>,
+    pclasses: Map<String, ProcClassNode> = emptyMap(),
+    leafSpecs: Map<String, LeafSpecNode> = emptyMap(),
+): Set<String> {
+    val names = linkedSetOf<String>()
+    offers.forEach { offer ->
+        offer.leaf.paramName?.let { names += it }
+        collectLeafSpecAuxParams(
+            offer.leaf,
+            offer.decl.action.name,
+            offer.isConstructor,
+            pclasses,
+            leafSpecs,
+        ).forEach { names += it.name }
+    }
+    return names
+}
+
+internal data class GuardConjunct(
+    val expr: ExprNode,
+    val letEnv: Map<String, ExprNode>,
+)
+
 internal fun analyzeTlaArgBind(
     offers: List<TlaActionOffer>,
     config: TlaOptConfig,
+    extraArgNames: Set<String> = emptySet(),
 ): TlaArgBindPlan {
     if (!config.determinedArgs && !config.fromCollection) return TlaArgBindPlan.EMPTY
     val argNames = linkedSetOf<String>()
@@ -69,10 +125,11 @@ internal fun analyzeTlaArgBind(
             if (offerRefsArg(offer, arg.name)) argNames += arg.name
         }
     }
+    extraArgNames.forEach { argNames += it }
     if (argNames.isEmpty()) return TlaArgBindPlan.EMPTY
 
     val conjuncts = offers.flatMap { offer ->
-        offer.decl.guards.flatMap { flattenTopLevelAnd(it) }
+        offer.decl.guards.flatMap { collectGuardConjuncts(it) }
     }
     val bound = linkedMapOf<String, Bound>()
     val conflicted = mutableSetOf<String>()
@@ -84,9 +141,10 @@ internal fun analyzeTlaArgBind(
         var changed = false
         if (config.determinedArgs) {
             for (c in conjuncts) {
-                if (skip.containsKey(c)) continue
-                val det = matchDetermined(c, argNames, bound.keys, conflicted) ?: continue
-                val (arg, expr) = det
+                if (skip.containsKey(c.expr)) continue
+                val det = matchDetermined(c.expr, argNames, bound.keys, conflicted, extraArgNames) ?: continue
+                val (arg, raw) = det
+                val expr = substLetEnv(raw, c.letEnv)
                 val existing = bound[arg]
                 if (existing is Bound.Determined && !sameDeterminer(existing.expr, expr)) {
                     bound.remove(arg)
@@ -96,35 +154,35 @@ internal fun analyzeTlaArgBind(
                 if (arg in conflicted) continue
                 if (existing != null && existing !is Bound.Determined) continue
                 bound[arg] = Bound.Determined(expr)
-                skip[c] = true
+                skip[c.expr] = true
                 changed = true
             }
         }
         if (config.fromCollection) {
             val unbound = argNames.filter { it !in bound }.toSet()
             for (c in conjuncts) {
-                if (skip.containsKey(c)) continue
-                matchSetMember(c, unbound)?.let { (arg, setExpr) ->
-                    bound[arg] = Bound.SetMember(setExpr)
-                    skip[c] = true
+                if (skip.containsKey(c.expr)) continue
+                matchSetMember(c.expr, unbound)?.let { (arg, setExpr) ->
+                    bound[arg] = Bound.SetMember(substLetEnv(setExpr, c.letEnv))
+                    skip[c.expr] = true
                     changed = true
                     return@let
                 }
-                if (skip.containsKey(c)) continue
-                matchListIndex(c, unbound)?.let { (arg, field, listExpr) ->
-                    bound[arg] = Bound.ListIndex("${arg}_idx", listExpr)
-                    skip[c] = true
+                if (skip.containsKey(c.expr)) continue
+                matchListIndex(c.expr, unbound)?.let { (arg, field, listExpr) ->
+                    bound[arg] = Bound.ListIndex("${arg}_idx", substLetEnv(listExpr, c.letEnv))
+                    skip[c.expr] = true
                     dropImpliedBounds(conjuncts, skip, arg, field, listExpr)
                     changed = true
                     return@let
                 }
-                if (skip.containsKey(c)) continue
-                matchStructInSet(c, unbound, takenStructNames)?.let { struct ->
+                if (skip.containsKey(c.expr)) continue
+                matchStructInSet(c.expr, unbound, takenStructNames)?.let { struct ->
                     structBinds += struct
                     struct.argPaths.forEach { (arg, path) ->
                         bound[arg] = Bound.StructField(struct.tmp, path)
                     }
-                    skip[c] = true
+                    skip[c.expr] = true
                     changed = true
                 }
             }
@@ -170,25 +228,47 @@ private sealed class Bound {
 private fun unwrapParen(expr: ExprNode): ExprNode =
     if (expr is ParenExprNode) unwrapParen(expr.innerExpr()) else expr
 
+internal fun isDesugaredIff(expr: ExprNode): Boolean {
+    val e = unwrapParen(expr)
+    if (e !is BinaryOpExprNode || e.op() != "&") return false
+    val l = unwrapParen(e.lhsOperand()) as? BinaryOpExprNode ?: return false
+    val r = unwrapParen(e.rhsOperand()) as? BinaryOpExprNode ?: return false
+    if (l.op() != "=>" || r.op() != "=>") return false
+    return sameDeterminer(unwrapParen(l.lhsOperand()), unwrapParen(r.rhsOperand())) &&
+        sameDeterminer(unwrapParen(l.rhsOperand()), unwrapParen(r.lhsOperand()))
+}
+
 private fun matchDetermined(
     conjunct: ExprNode,
     argNames: Set<String>,
     alreadyBound: Set<String>,
     conflicted: Set<String>,
+    extraArgNames: Set<String>,
 ): Pair<String, ExprNode>? {
     val e = unwrapParen(conjunct)
-    if (e !is BinaryOpExprNode) return null
-    if (e.op() != "=" && e.op() != "<=>") return null
-    val lhs = unwrapParen(e.lhsOperand())
-    val rhs = unwrapParen(e.rhsOperand())
     fun oneSide(argSide: ExprNode, other: ExprNode): Pair<String, ExprNode>? {
         val a = (argSide as? SymbolValueExprNode)?.symbol ?: return null
         if (a !in argNames || a in conflicted) return null
         if (exprReferencesSymbol(other, a)) return null
-        val unbound = argNames.filter { it != a && it !in alreadyBound }
+        val unbound = argNames.filter { it != a && it !in alreadyBound && it !in extraArgNames }
         if (unbound.any { exprReferencesSymbol(other, it) }) return null
         return a to other
     }
+    if (e is BinaryOpExprNode && e.op() == "<=>") {
+        val lhs = unwrapParen(e.lhsOperand())
+        val rhs = unwrapParen(e.rhsOperand())
+        return oneSide(lhs, rhs) ?: oneSide(rhs, lhs)
+    }
+    if (isDesugaredIff(e) && e is BinaryOpExprNode) {
+        val l = unwrapParen(e.lhsOperand()) as BinaryOpExprNode
+        val argSide = unwrapParen(l.lhsOperand())
+        val other = unwrapParen(l.rhsOperand())
+        return oneSide(argSide, other) ?: oneSide(other, argSide)
+    }
+    if (e !is BinaryOpExprNode) return null
+    if (e.op() != "=") return null
+    val lhs = unwrapParen(e.lhsOperand())
+    val rhs = unwrapParen(e.rhsOperand())
     return oneSide(lhs, rhs) ?: oneSide(rhs, lhs)
 }
 
@@ -243,16 +323,16 @@ private fun indexFieldOf(index: ExprNode, arg: String): String? {
 }
 
 private fun dropImpliedBounds(
-    conjuncts: List<ExprNode>,
+    conjuncts: List<GuardConjunct>,
     skip: IdentityHashMap<ExprNode, Boolean>,
     arg: String,
     field: String,
     list: ExprNode,
 ) {
     for (c in conjuncts) {
-        if (skip.containsKey(c)) continue
-        if (isLowerBound(c, arg, field) || isLenBound(c, arg, field, list)) {
-            skip[c] = true
+        if (skip.containsKey(c.expr)) continue
+        if (isLowerBound(c.expr, arg, field) || isLenBound(c.expr, arg, field, list)) {
+            skip[c.expr] = true
         }
     }
 }
@@ -374,4 +454,31 @@ private fun typeOf(expr: ExprNode): julay.program.type.Type? = try {
     expr.getType()
 } catch (_: RuntimeException) {
     null
+}
+
+/** Walk into `let` / parens / top-level `&` so determined-args can see nested `arg = E`. */
+internal fun collectGuardConjuncts(
+    expr: ExprNode,
+    env: Map<String, ExprNode> = emptyMap(),
+): List<GuardConjunct> {
+    val e = unwrapParen(expr)
+    return when {
+        e is LetExprNode -> {
+            val name = e.letName()
+            val init = substLetEnv(e.letInitExpr(), env)
+            val newEnv = if (name.isDiscardBinding()) env else env + (name to init)
+            collectGuardConjuncts(e.bodyExpr(), newEnv)
+        }
+        e is BinaryOpExprNode && e.op() == "&" && !isDesugaredIff(e) ->
+            collectGuardConjuncts(e.lhsOperand(), env) + collectGuardConjuncts(e.rhsOperand(), env)
+        else -> listOf(GuardConjunct(e, env))
+    }
+}
+
+private fun substLetEnv(expr: ExprNode, env: Map<String, ExprNode>): ExprNode {
+    var out = expr
+    env.forEach { (name, replacement) ->
+        out = substituteExpr(out, name, replacement)
+    }
+    return out
 }

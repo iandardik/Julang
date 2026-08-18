@@ -1,0 +1,33 @@
+import julay.funlib.length
+import julay.funlib.exitProgram
+import julay.funlib.setOf
+
+proc SetEmptyIfDemo {
+    var s : Set<Int>
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            s := setOf(1)
+            done := false
+    }
+
+    internal transition clear() {
+        guard:
+            ~done
+        transit:
+            s := if (length(s) >= 1) setOf() else s
+            done := length(s) = 0
+    }
+
+    internal transition exitSystem() {
+        guard:
+            done
+        after:
+            exitProgram(0)
+    }
+}
+
+proc SetEmptyIfTest := SetEmptyIfDemo
+
+compile SetEmptyIfTest

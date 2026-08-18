@@ -10,7 +10,7 @@ Collection constructors, `splice`, and `allDistinct` are funlib: import each nam
 
 | | `List<T>` | `Map<K, V>` | `Set<T>` |
 |--|-----------|-------------|----------|
-| Constructor | `listOf(…)`, typed `listOf()` | `mapOf(k to v, …)`, typed `mapOf()` | `setOf(…)`, typed `setOf()` |
+| Constructor | `listOf(…)`, typed `listOf()` / `listOf<T>()` | `mapOf(k to v, …)`, typed `mapOf()` / `mapOf<K, V>()` | `setOf(…)`, typed `setOf()` / `setOf<T>()` |
 | `+` | concat | — | union |
 | `-` | — | — | difference |
 | `in` | element | **key** | element |
@@ -226,15 +226,24 @@ No indexing, splicing, or index assignment. Update only by whole reassignment.
 
 ## Empty constructors and typing
 
+Empty `listOf()` / `setOf()` / `mapOf()` need a known collection type. That can come from:
+
+- an assignment, init, or `let` target (`xs : List<Int>` then `xs := listOf()`)
+- the same target pushed into `if` / `when` branches and `let` bodies (`s := if (c) setOf() else s`)
+- an explicit type argument: `setOf<Int>()`, `listOf<Int>()`, `mapOf<String, Int>()`
+
 | Form | Needs |
 |------|--------|
-| `listOf()` | known `List<…>` target |
-| `mapOf()` | known `Map<…>` target |
-| `setOf()` | known `Set<…>` target |
+| `listOf()` | known `List<…>` target, or `listOf<T>()` |
+| `mapOf()` | known `Map<…>` target, or `mapOf<K, V>()` |
+| `setOf()` | known `Set<…>` target, or `setOf<T>()` |
 
 ```jul
 var xs : List<Int>
 xs := listOf()                    // OK
+xs := if (reset) listOf() else xs // OK (target pushed into branches)
+n := length(listOf())             // error: no target
+n := length(setOf<Int>())         // OK
 var mp : Map<String, Int>
 mp := mapOf()                     // OK
 ```

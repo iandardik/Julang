@@ -271,7 +271,7 @@ private fun emitProjectedTla(
         }
     }
     collectProjectedSortConstants(leaves, pclassesForTla, leafSpecNodes, emittedOffers, constants)
-    collectActionArgDomainModels(emittedOffers, pclassesForTla, cfgOverrides)
+    collectActionArgDomainModels(emittedOffers, pclassesForTla, leafSpecNodes, cfgOverrides)
     collectIoHavocDomainModels(emittedOffers, cfgOverrides)
     collectTypeOkDomainModels(leaves, pclassesForTla, cfgOverrides)
     collectConstGlobalInitDomainModels(leaves, pclassesForTla, cfgOverrides)
@@ -1376,10 +1376,26 @@ private fun negateLocalGuards(
     self: String?,
     stateVarsByLeaf: Map<String, Set<String>>,
     stateVarNames: Map<Pair<String, String>, String>,
+    pclasses: Map<String, ProcClassNode> = emptyMap(),
+    leafSpecs: Map<String, LeafSpecNode> = emptyMap(),
 ): String {
     val guards = offer.decl.guards
     if (guards.isEmpty()) return "FALSE"
-    val plan = analyzeTlaArgBind(listOf(offer), TlaEmitOpts.get())
+    val extra = collectTlaExtraArgNames(listOf(offer), pclasses, leafSpecs)
+    val plan = analyzeTlaArgBind(listOf(offer), TlaEmitOpts.get(), extra)
+    return TlaSkipConjuncts.with(plan.skipConjuncts) {
+        negateLocalGuardsBody(offer, self, stateVarsByLeaf, stateVarNames, plan)
+    }
+}
+
+private fun negateLocalGuardsBody(
+    offer: TlaActionOffer,
+    self: String?,
+    stateVarsByLeaf: Map<String, Set<String>>,
+    stateVarNames: Map<Pair<String, String>, String>,
+    plan: TlaArgBindPlan,
+): String {
+    val guards = offer.decl.guards
     offer.decl.action.args.forEach { TlaSymbolTypes.set(TlaSymbolTypes.get() + (it.name to it.type)) }
     val bindNames = linkedSetOf<String>().apply {
         addAll(plan.skipArgs)
@@ -1458,6 +1474,8 @@ private fun deadOperatorDef(
     stateVarNames: Map<Pair<String, String>, String>,
     killTargets: Set<String>,
     foldedCtorLeaves: Set<String> = emptySet(),
+    pclasses: Map<String, ProcClassNode> = emptyMap(),
+    leafSpecs: Map<String, LeafSpecNode> = emptyMap(),
 ): String {
     val self = if (leaf.isParameterized) {
         indexBinderName(leaf, stateVarsByLeaf[leaf.tlaName].orEmpty())
@@ -1470,7 +1488,7 @@ private fun deadOperatorDef(
         naturalParts += if (self != null) "/\\ $c[$self]" else "/\\ $c"
     }
     leafOffers.filter { !it.isConstructor }.forEach { offer ->
-        naturalParts += "/\\ ${negateLocalGuards(offer, self, stateVarsByLeaf, stateVarNames)}"
+        naturalParts += "/\\ ${negateLocalGuards(offer, self, stateVarsByLeaf, stateVarNames, pclasses, leafSpecs)}"
     }
     val naturalBody = naturalParts.joinToString("\n       ")
     val signature = if (self != null) "${deadOperatorName(leaf)}($self)" else deadOperatorName(leaf)
@@ -1766,7 +1784,9 @@ private fun buildTlaActions(
         .distinctBy { it.name }
     sessionLeaves.forEach { leaf ->
         val leafOffers = offers.filter { it.leaf.tlaName == leaf.tlaName }
-        helpers += deadOperatorDef(leaf, leafOffers, stateVarsByLeaf, stateVarNames, killTargets, foldedCtorLeaves)
+        helpers += deadOperatorDef(
+            leaf, leafOffers, stateVarsByLeaf, stateVarNames, killTargets, foldedCtorLeaves, pclasses, leafSpecs,
+        )
     }
 
     sessionPairs.forEach { pair ->
@@ -1844,7 +1864,9 @@ private fun emitConjoined(
     val argParams = mutableListOf<Pair<String, String>>()
     val auxParams = mutableListOf<Pair<String, String>>()
     val auxNamesByLeaf = mutableMapOf<String, Set<String>>()
-    val bindPlan = analyzeTlaArgBind(offers, TlaEmitOpts.get())
+    val extraArgNames = collectTlaExtraArgNames(offers, pclasses, leafSpecs)
+    val bindPlan = analyzeTlaArgBind(offers, TlaEmitOpts.get(), extraArgNames)
+    TlaSkipConjuncts.install(bindPlan.skipConjuncts)
     val symbolTypes = mutableMapOf<String, Type>()
     offers.forEach { offer ->
         offer.decl.action.args.forEach { symbolTypes[it.name] = it.type }
@@ -1875,7 +1897,11 @@ private fun emitConjoined(
             leafSpecs,
         )
         auxNamesByLeaf[offer.leaf.tlaName] = aux.map { it.name }.toSet()
-        aux.forEach { a -> auxParams += a.name to a.domain }
+        aux.forEach { a ->
+            if (a.name !in bindPlan.omitArgTypeDomains()) {
+                auxParams += a.name to a.domain
+            }
+        }
     }
 
     // Collect action arg names that appear in this conjoined action (for binder clash checks).
@@ -2166,7 +2192,7 @@ private fun emitConjoined(
         }
     }
 
-    // Per-offer sections: assumptions (from error:), then comment + gates + guards + transits.
+    // Per-offer sections: assumptions (from error:), then comment + gates; keep; then guards + transits.
     offers.forEach { offer ->
         val self = selfOf(offer.leaf)
         val auxNames = auxNamesByLeaf[offer.leaf.tlaName].orEmpty()
@@ -2218,6 +2244,25 @@ private fun emitConjoined(
             val lit = argLiteralDomain(offers, arg.name, arg.type)
             argParams += arg.name to (lit ?: typeToTlaDomain(arg.type))
         }
+    }
+
+    bindPlan.structBinds.forEach { b ->
+        val elemType = try {
+            (b.set.getType() as? SetType)?.elementType
+        } catch (_: RuntimeException) {
+            null
+        }
+        b.keep.forEach { (path, expr) ->
+            val lhs = emitUnwrappedFieldPath(b.tmp, elemType, path)
+            parts += "/\\ $lhs = ${emitBound(expr)}"
+        }
+    }
+
+    offers.forEach { offer ->
+        val self = selfOf(offer.leaf)
+        val auxNames = auxNamesByLeaf[offer.leaf.tlaName].orEmpty()
+        val argNames = offer.decl.action.args.map { it.name }.toSet() + auxNames + bindNames
+        val leafCtx = mapOf(offer.leaf.name to offer.leaf, offer.leaf.tlaName to offer.leaf)
 
         offer.decl.guards.forEach { g ->
             // Flatten top-level `&` so each Julay conjunct is its own `/\\` line.
@@ -2243,18 +2288,6 @@ private fun emitConjoined(
                 parts += "/\\ ${killedAssignTrueExpr(offer.leaf, self, stateVarNames)}"
                 changed += killedVar
             }
-        }
-    }
-
-    bindPlan.structBinds.forEach { b ->
-        val elemType = try {
-            (b.set.getType() as? SetType)?.elementType
-        } catch (_: RuntimeException) {
-            null
-        }
-        b.keep.forEach { (path, expr) ->
-            val lhs = emitUnwrappedFieldPath(b.tmp, elemType, path)
-            parts += "/\\ $lhs = ${emitBound(expr)}"
         }
     }
 
@@ -2332,6 +2365,7 @@ private fun emitConjoined(
     val unchanged = allVars.filter { it !in changed }
     // Guard-only / pure-stutter actions: no primed updates → omit (stuttering via [][Next]_vars).
     if (changed.isEmpty()) {
+        TlaSkipConjuncts.clear()
         return null
     }
     if (unchanged.isNotEmpty()) {
@@ -2372,12 +2406,16 @@ private fun emitConjoined(
         binder to domain
     }
     // Aux params that are already index binders (same name) are dropped by distinctBy.
-    val params = (indexParams + auxParams + argParams).distinctBy { it.first }
+    val omitBinders = bindPlan.omitArgTypeDomains()
+    val params = (indexParams + auxParams + argParams)
+        .distinctBy { it.first }
+        .filter { it.first !in omitBinders }
     val signature = if (params.isEmpty()) {
         name
     } else {
         "$name(${params.joinToString(", ") { it.first }})"
     }
+    TlaSkipConjuncts.clear()
     return TlaAction(name, "$signature ==\n  $body", params, comment)
 }
 
@@ -3103,7 +3141,8 @@ private fun collectProjectedSortConstants(
         }
     }
     offers.groupBy { it.decl.action.name }.forEach { (_, group) ->
-        val omit = analyzeTlaArgBind(group, TlaEmitOpts.get()).omitArgTypeDomains()
+        val extra = collectTlaExtraArgNames(group, pclasses, leafSpecs)
+        val omit = analyzeTlaArgBind(group, TlaEmitOpts.get(), extra).omitArgTypeDomains()
         group.forEach { offer ->
             offer.decl.action.args.filter { offerRefsArg(offer, it.name) && it.name !in omit }.forEach { arg ->
                 collectSortConstants(arg.type, into)
@@ -3111,6 +3150,8 @@ private fun collectProjectedSortConstants(
         }
     }
     offers.forEach { offer ->
+        val extra = collectTlaExtraArgNames(listOf(offer), pclasses, leafSpecs)
+        val omit = analyzeTlaArgBind(listOf(offer), TlaEmitOpts.get(), extra).omitArgTypeDomains()
         val pc = pclasses[offer.leaf.name] ?: return@forEach
         val also = if (offer.isConstructor) {
             pc.localDecls().filterIsInstance<ConstructorNode>()
@@ -3122,6 +3163,7 @@ private fun collectProjectedSortConstants(
                 ?.alsoArgs()
         }
         also?.children?.filterIsInstance<ArgNode>()?.forEach { arg ->
+            if (arg.argName() in omit) return@forEach
             try {
                 collectSortConstants(arg.type, into)
             } catch (_: RuntimeException) {
@@ -3136,10 +3178,12 @@ private fun collectProjectedSortConstants(
 private fun collectActionArgDomainModels(
     offers: List<TlaActionOffer>,
     pclasses: Map<String, ProcClassNode>,
+    leafSpecs: Map<String, LeafSpecNode>,
     into: MutableSet<String>,
 ) {
     offers.groupBy { it.decl.action.name }.forEach { (_, group) ->
-        val omit = analyzeTlaArgBind(group, TlaEmitOpts.get()).omitArgTypeDomains()
+        val extra = collectTlaExtraArgNames(group, pclasses, leafSpecs)
+        val omit = analyzeTlaArgBind(group, TlaEmitOpts.get(), extra).omitArgTypeDomains()
         group.forEach { offer ->
             offer.decl.action.args.filter { offerRefsArg(offer, it.name) && it.name !in omit }.forEach { arg ->
                 if (argLiteralDomain(group, arg.name, arg.type) == null) {
@@ -3149,6 +3193,8 @@ private fun collectActionArgDomainModels(
         }
     }
     offers.forEach { offer ->
+        val extra = collectTlaExtraArgNames(listOf(offer), pclasses, leafSpecs)
+        val omit = analyzeTlaArgBind(listOf(offer), TlaEmitOpts.get(), extra).omitArgTypeDomains()
         val pc = pclasses[offer.leaf.name] ?: return@forEach
         val also = if (offer.isConstructor) {
             pc.localDecls().filterIsInstance<ConstructorNode>()
@@ -3160,6 +3206,7 @@ private fun collectActionArgDomainModels(
                 ?.alsoArgs()
         }
         also?.children?.filterIsInstance<ArgNode>()?.forEach { arg ->
+            if (arg.argName() in omit) return@forEach
             try {
                 collectDomainModelNames(arg.type, into)
             } catch (_: RuntimeException) {
@@ -3948,7 +3995,7 @@ internal fun emitFunOperatorDef(funNode: FunNode, reservedNames: Set<String> = e
  * Nested `&` inside `|` / other operators is left intact.
  */
 internal fun flattenTopLevelAnd(expr: ExprNode): List<ExprNode> {
-    if (expr is BinaryOpExprNode && expr.op() == "&") {
+    if (expr is BinaryOpExprNode && expr.op() == "&" && !isDesugaredIff(expr)) {
         return flattenTopLevelAnd(expr.lhsOperand()) + flattenTopLevelAnd(expr.rhsOperand())
     }
     return listOf(expr)
@@ -4325,11 +4372,13 @@ internal fun emitMultiLineAnd(
     linePrefix: String,
     render: (ExprNode, String) -> String,
 ): String {
+    val kept = conjuncts.filter { !TlaSkipConjuncts.skipped(it) }
+    if (kept.isEmpty()) return "TRUE"
     val andOp = "/\\ "
     val visualBefore = visualObjOpenLinePrefix(linePrefix)
     val andContIndent = " ".repeat(visualBefore.length)
     return buildString {
-        conjuncts.forEachIndexed { i, c ->
+        kept.forEachIndexed { i, c ->
             val prefix = if (i == 0) linePrefix + andOp else andContIndent + andOp
             if (i > 0) {
                 append("\n")
@@ -4496,6 +4545,7 @@ internal fun exprToTla(
     /** Class / TLA leaf name → `global` state vars (omit index on Peer[idx].var). */
     globalByLeaf: Map<String, Set<String>> = emptyMap(),
 ): String {
+    if (TlaSkipConjuncts.skipped(expr)) return "TRUE"
     fun rec(e: ExprNode, prefix: String = linePrefix, prec: Int = parentPrec): String =
         exprToTla(
             e, leafCtx, argNames, self, bareStateVars, reservedNames, stateVarNames, symbolOverrides,
@@ -4868,12 +4918,27 @@ internal fun exprToTla(
             }
             when (expr.op()) {
                 "&" -> {
-                    if (isMultiLineExpr(expr)) {
-                        emitMultiLineAnd(flattenTopLevelAnd(expr), linePrefix) { e, p ->
-                            rec(e, p, PREC_AND)
+                    val all = flattenTopLevelAnd(expr)
+                    val conjuncts = all.filter { !TlaSkipConjuncts.skipped(it) }
+                    when {
+                        conjuncts.isEmpty() -> "TRUE"
+                        conjuncts.size != all.size && conjuncts.size == 1 ->
+                            rec(conjuncts.single(), linePrefix, parentPrec)
+                        conjuncts.size != all.size -> {
+                            if (isMultiLineExpr(expr)) {
+                                emitMultiLineAnd(conjuncts, linePrefix) { e, p ->
+                                    rec(e, p, PREC_AND)
+                                }
+                            } else {
+                                conjuncts.joinToString(" /\\ ") { rec(it, linePrefix, PREC_AND) }
+                            }
                         }
-                    } else {
-                        bin(" /\\ ", PREC_AND)
+                        isMultiLineExpr(expr) -> {
+                            emitMultiLineAnd(all, linePrefix) { e, p ->
+                                rec(e, p, PREC_AND)
+                            }
+                        }
+                        else -> bin(" /\\ ", PREC_AND)
                     }
                 }
                 "|" -> {

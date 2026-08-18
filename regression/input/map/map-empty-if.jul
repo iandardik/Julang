@@ -1,0 +1,33 @@
+import julay.funlib.length
+import julay.funlib.exitProgram
+import julay.funlib.mapOf
+
+proc MapEmptyIfDemo {
+    var mp : Map<String, Int>
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            mp := mapOf("a" to 1)
+            done := false
+    }
+
+    internal transition clear() {
+        guard:
+            ~done
+        transit:
+            mp := if (length(mp) >= 1) mapOf() else mp
+            done := length(mp) = 0
+    }
+
+    internal transition exitSystem() {
+        guard:
+            done
+        after:
+            exitProgram(0)
+    }
+}
+
+proc MapEmptyIfTest := MapEmptyIfDemo
+
+compile MapEmptyIfTest

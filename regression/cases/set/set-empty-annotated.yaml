@@ -1,0 +1,5 @@
+source: regression/input/set/set-empty-annotated.jul
+programs:
+  - name: SetEmptyAnnotatedTest
+    run:
+      timeoutMs: 60000

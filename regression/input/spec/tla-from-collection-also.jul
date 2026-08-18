@@ -1,0 +1,44 @@
+import julay.funlib.setOf
+
+sort NodeSet := { "n1", "n2" }
+
+obj Msg {
+    src : NodeSet
+    dest : NodeSet
+    value : Int
+}
+
+proc Peer {
+    var dummy : Boolean := false
+
+    constructor initially(args : List<String>) {
+        transit: dummy := false
+    }
+
+    transition ping() {
+        transit: dummy := true
+    }
+}
+
+spec Net[n : NodeSet] {
+    var msgs : Set<Msg> := setOf()
+    var got : Int := 0
+
+    constructor initially(args : List<String>) {}
+
+    transition recv(x : Int) also (m : NodeSet) {
+        guard: Msg { src := m, dest := n, value := x } in msgs
+        transit: got := x
+    }
+}
+
+spec PeerIndexed := Peer[n : NodeSet]
+
+invariant GotOk := Net.got >= 0 | Net.got < 0
+
+spec AlsoStructSys := with (n : NodeSet) {
+    PeerIndexed[n] || Net[n]
+}
+
+spec AlsoStructChecked := AlsoStructSys |= GotOk
+compile AlsoStructChecked

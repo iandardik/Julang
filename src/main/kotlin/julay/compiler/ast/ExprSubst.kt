@@ -100,16 +100,19 @@ fun substituteExpr(expr: ExprNode, name: String, replacement: ExprNode): ExprNod
             expr.elements.map { substituteExpr(it, name, replacement) },
             expr.programLocation(),
             expr.resolvedListTypeOrNull(),
+            typeArgs = expr.typeArgs,
         ).withTypeOf(expr)
         is SetLiteralExprNode -> SetLiteralExprNode(
             expr.elements.map { substituteExpr(it, name, replacement) },
             expr.programLocation(),
             expr.resolvedSetTypeOrNull(),
+            typeArgs = expr.typeArgs,
         ).withTypeOf(expr)
         is MapLiteralExprNode -> MapLiteralExprNode(
             expr.entries.map { (k, v) -> substituteExpr(k, name, replacement) to substituteExpr(v, name, replacement) },
             expr.programLocation(),
             expr.resolvedMapTypeOrNull(),
+            typeArgs = expr.typeArgs,
         ).withTypeOf(expr)
         is IndexExprNode -> IndexExprNode(
             substituteExpr(expr.base, name, replacement),

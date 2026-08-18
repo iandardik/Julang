@@ -2464,15 +2464,39 @@ private fun FunNode.typePassFunSignature(registry: ObjClassRegistry): List<Compi
 }
 
 private fun applyExpectedCollectionType(expr: ExprNode, expected: Type) {
-    when {
-        expr is ListLiteralExprNode && expr.elements.isEmpty() && expected is ListType ->
-            expr.resolveListType(expected)
-        expr is SetLiteralExprNode && expr.elements.isEmpty() && expected is SetType ->
-            expr.resolveSetType(expected)
-        expr is MapLiteralExprNode && expr.entries.isEmpty() && expected is MapType ->
-            expr.resolveMapType(expected)
+    when (expr) {
+        is ListLiteralExprNode ->
+            if (expr.elements.isEmpty() && expected is ListType) expr.resolveListType(expected)
+        is SetLiteralExprNode ->
+            if (expr.elements.isEmpty() && expected is SetType) expr.resolveSetType(expected)
+        is MapLiteralExprNode ->
+            if (expr.entries.isEmpty() && expected is MapType) expr.resolveMapType(expected)
+        is ParenExprNode -> applyExpectedCollectionType(expr.innerExpr(), expected)
+        is IfElseExprNode -> {
+            applyExpectedCollectionType(expr.thenExpr(), expected)
+            applyExpectedCollectionType(expr.elseExpr(), expected)
+        }
+        is LetExprNode -> applyExpectedCollectionType(expr.bodyExpr(), expected)
+        is WhenExprNode -> expr.arms().forEach { arm ->
+            when (arm) {
+                is WhenArm.Subject -> applyExpectedCollectionType(arm.expr, expected)
+                is WhenArm.Guard -> applyExpectedCollectionType(arm.expr, expected)
+                is WhenArm.Else -> applyExpectedCollectionType(arm.expr, expected)
+            }
+        }
     }
 }
+
+private fun resolveLiteralTypeArg(
+    typeExpr: TypeExpr,
+    registry: ObjClassRegistry,
+    typeParamEnv: Map<String, Type>,
+    loc: ProgramLoc,
+): Pair<Type?, CompileError?> =
+    when (val result = registry.resolveTypeExpr(typeExpr, typeParamEnv, loc)) {
+        is TypeResolveResult.Found -> typingView(result.type) to null
+        is TypeResolveResult.Error -> null to OneLocCompileError(loc, result.message)
+    }
 
 private fun requireCollectionFunlib(
     name: String,
@@ -2498,11 +2522,35 @@ private fun ListLiteralExprNode.typePassListLiteral(
     if (childErrors.isNotEmpty()) {
         return childErrors
     }
-    resolvedListTypeOrNull()?.let {
-        inferExprType(symbolEnv)
-        return emptyList()
+    if (typeArgs.isNotEmpty()) {
+        if (typeArgs.size != 1) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "listOf type annotation expects 1 type argument but got ${typeArgs.size}",
+                ),
+            )
+        }
+        val (elemTy, err) = resolveLiteralTypeArg(typeArgs[0], registry, typeParamEnv, programLocation())
+        if (err != null) return listOf(err)
+        val annotated = listType(elemTy!!)
+        resolvedListTypeOrNull()?.let { existing ->
+            if (existing != annotated) {
+                return listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "listOf type annotation $annotated does not match target type $existing",
+                    ),
+                )
+            }
+        }
+        resolveListType(annotated)
     }
     if (elements.isEmpty()) {
+        if (resolvedListTypeOrNull() != null) {
+            inferExprType(symbolEnv)
+            return emptyList()
+        }
         return listOf(
             OneLocCompileError(
                 programLocation(),
@@ -2520,7 +2568,19 @@ private fun ListLiteralExprNode.typePassListLiteral(
             )
         }
     }
-    resolveListType(listType(elemType))
+    val resolved = resolvedListTypeOrNull()
+    if (resolved != null) {
+        if (elemType != resolved.elementType) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected list elements to have type ${resolved.elementType} but got $elemType",
+                ),
+            )
+        }
+    } else {
+        resolveListType(listType(elemType))
+    }
     inferExprType(symbolEnv)
     return emptyList()
 }
@@ -2660,11 +2720,35 @@ private fun SetLiteralExprNode.typePassSetLiteral(
     if (childErrors.isNotEmpty()) {
         return childErrors
     }
-    resolvedSetTypeOrNull()?.let {
-        inferExprType(symbolEnv)
-        return emptyList()
+    if (typeArgs.isNotEmpty()) {
+        if (typeArgs.size != 1) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "setOf type annotation expects 1 type argument but got ${typeArgs.size}",
+                ),
+            )
+        }
+        val (elemTy, err) = resolveLiteralTypeArg(typeArgs[0], registry, typeParamEnv, programLocation())
+        if (err != null) return listOf(err)
+        val annotated = setType(elemTy!!)
+        resolvedSetTypeOrNull()?.let { existing ->
+            if (existing != annotated) {
+                return listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "setOf type annotation $annotated does not match target type $existing",
+                    ),
+                )
+            }
+        }
+        resolveSetType(annotated)
     }
     if (elements.isEmpty()) {
+        if (resolvedSetTypeOrNull() != null) {
+            inferExprType(symbolEnv)
+            return emptyList()
+        }
         return listOf(
             OneLocCompileError(
                 programLocation(),
@@ -2682,7 +2766,19 @@ private fun SetLiteralExprNode.typePassSetLiteral(
             )
         }
     }
-    resolveSetType(setType(elemType))
+    val resolved = resolvedSetTypeOrNull()
+    if (resolved != null) {
+        if (elemType != resolved.elementType) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected set elements to have type ${resolved.elementType} but got $elemType",
+                ),
+            )
+        }
+    } else {
+        resolveSetType(setType(elemType))
+    }
     inferExprType(symbolEnv)
     return emptyList()
 }
@@ -2703,11 +2799,37 @@ private fun MapLiteralExprNode.typePassMapLiteral(
     if (childErrors.isNotEmpty()) {
         return childErrors
     }
-    resolvedMapTypeOrNull()?.let {
-        inferExprType(symbolEnv)
-        return emptyList()
+    if (typeArgs.isNotEmpty()) {
+        if (typeArgs.size != 2) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "mapOf type annotation expects 2 type arguments but got ${typeArgs.size}",
+                ),
+            )
+        }
+        val (keyTy, keyErr) = resolveLiteralTypeArg(typeArgs[0], registry, typeParamEnv, programLocation())
+        if (keyErr != null) return listOf(keyErr)
+        val (valTy, valErr) = resolveLiteralTypeArg(typeArgs[1], registry, typeParamEnv, programLocation())
+        if (valErr != null) return listOf(valErr)
+        val annotated = mapType(keyTy!!, valTy!!)
+        resolvedMapTypeOrNull()?.let { existing ->
+            if (existing != annotated) {
+                return listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "mapOf type annotation $annotated does not match target type $existing",
+                    ),
+                )
+            }
+        }
+        resolveMapType(annotated)
     }
     if (entries.isEmpty()) {
+        if (resolvedMapTypeOrNull() != null) {
+            inferExprType(symbolEnv)
+            return emptyList()
+        }
         return listOf(
             OneLocCompileError(
                 programLocation(),
@@ -2735,7 +2857,27 @@ private fun MapLiteralExprNode.typePassMapLiteral(
             )
         }
     }
-    resolveMapType(mapType(keyType, valueType))
+    val resolved = resolvedMapTypeOrNull()
+    if (resolved != null) {
+        if (keyType != resolved.keyType) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected map keys to have type ${resolved.keyType} but got $keyType",
+                ),
+            )
+        }
+        if (valueType != resolved.valueType) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected map values to have type ${resolved.valueType} but got $valueType",
+                ),
+            )
+        }
+    } else {
+        resolveMapType(mapType(keyType, valueType))
+    }
     inferExprType(symbolEnv)
     return emptyList()
 }

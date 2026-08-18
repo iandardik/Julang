@@ -1,0 +1,32 @@
+import julay.funlib.length
+import julay.funlib.exitProgram
+import julay.funlib.setOf
+
+proc SetEmptyAnnotatedDemo {
+    var n : Int
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            n := length(setOf<Int>())
+            done := false
+    }
+
+    internal transition check() {
+        guard:
+            ~done
+        transit:
+            done := n = 0
+    }
+
+    internal transition exitSystem() {
+        guard:
+            done
+        after:
+            exitProgram(0)
+    }
+}
+
+proc SetEmptyAnnotatedTest := SetEmptyAnnotatedDemo
+
+compile SetEmptyAnnotatedTest

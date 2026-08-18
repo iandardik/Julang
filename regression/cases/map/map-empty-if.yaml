@@ -1,0 +1,5 @@
+source: regression/input/map/map-empty-if.jul
+programs:
+  - name: MapEmptyIfTest
+    run:
+      timeoutMs: 60000

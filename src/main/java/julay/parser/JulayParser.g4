@@ -311,15 +311,15 @@ collection_literal
     ;
 
 list_literal
-    : LISTOF LPAREN (expr (COMMA expr)*)? RPAREN
+    : LISTOF typeArgs? LPAREN (expr (COMMA expr)*)? RPAREN
     ;
 
 set_literal
-    : SETOF LPAREN (expr (COMMA expr)*)? RPAREN
+    : SETOF typeArgs? LPAREN (expr (COMMA expr)*)? RPAREN
     ;
 
 map_literal
-    : MAPOF LPAREN (map_entry (COMMA map_entry)*)? RPAREN
+    : MAPOF typeArgs? LPAREN (map_entry (COMMA map_entry)*)? RPAREN
     ;
 
 map_entry

@@ -905,12 +905,14 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
 
     override fun visitList_literal(ctx: JulayParser.List_literalContext?): ASTNode {
         val elements = ctx!!.expr().map { visit(it) as ExprNode }
-        return ListLiteralExprNode(elements, sourceLocation(ctx))
+        val typeArgs = ctx.typeArgs()?.typeExpr()?.map { parseTypeExpr(it) } ?: emptyList()
+        return ListLiteralExprNode(elements, sourceLocation(ctx), typeArgs = typeArgs)
     }
 
     override fun visitSet_literal(ctx: JulayParser.Set_literalContext?): ASTNode {
         val elements = ctx!!.expr().map { visit(it) as ExprNode }
-        return SetLiteralExprNode(elements, sourceLocation(ctx))
+        val typeArgs = ctx.typeArgs()?.typeExpr()?.map { parseTypeExpr(it) } ?: emptyList()
+        return SetLiteralExprNode(elements, sourceLocation(ctx), typeArgs = typeArgs)
     }
 
     override fun visitMap_literal(ctx: JulayParser.Map_literalContext?): ASTNode {
@@ -919,7 +921,8 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             val value = visit(entry.expr(1)) as ExprNode
             key to value
         }
-        return MapLiteralExprNode(entries, sourceLocation(ctx))
+        val typeArgs = ctx.typeArgs()?.typeExpr()?.map { parseTypeExpr(it) } ?: emptyList()
+        return MapLiteralExprNode(entries, sourceLocation(ctx), typeArgs = typeArgs)
     }
 
     override fun visitMethod_prop_expr(ctx: JulayParser.Method_prop_exprContext?): ASTNode {

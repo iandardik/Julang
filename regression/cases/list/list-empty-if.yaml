@@ -1,0 +1,5 @@
+source: regression/input/list/list-empty-if.jul
+programs:
+  - name: ListEmptyIfTest
+    run:
+      timeoutMs: 60000
