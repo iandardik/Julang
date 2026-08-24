@@ -1,6 +1,7 @@
 import node.core.RaftProtocol
-import node.protocol.NodeSet
 import julay.funlib.setOf
+
+export sort NodeSet := { "n1", "n2", "n3" }
 
 obj VoteRequestMsg {
     src : NodeSet
