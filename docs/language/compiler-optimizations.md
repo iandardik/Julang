@@ -55,15 +55,17 @@ The compiler also infers a TLC `CONSTRAINT StateConstraint` (not an `INVARIANT`)
 
 TypeOK still uses `TypeOKInt` (`Int ∪ Nat ∪ extras`) so membership stays pointwise; CONSTRAINT is what keeps reachable Int state inside cfg `Int`. That also makes `\A i \in Int` complete for properties whose bound is an Int state var (Raft `StateMachineSafety` vs `commitIndex`).
 
+Always-on (not named opt ids): singleton `init:` that uniquely determines a const-global list emits `xs = <<1, 2, …>>` instead of `\in BoundedSeq` plus those filters; TypeOK may add `Len(x[n]) = Len(cluster)` for `cluster.map` lists and `x[n] \subseteq Range(cluster)` for id sets from that sequence; the `.cfg` omits a named invariant whose formula is only `&` of other invariants already in the closure (the TLA operator is still emitted).
+
 ### Named TLA+ optimizations
 
 | ID | Role | Kind |
 |----|------|------|
 | `unused-fields` | Omit obj fields that the TLA-relevant fragment never projects (field access / struct patterns / comparison-operand literals) | Projection |
 | `unused-vars` | Omit state vars/consts the TLA-relevant fragment never reads (emitted-action guards/transits and the guarantee). Not TLA+ liveness (`WF`/`SF`). | Equivalent rewrite (of the emitted spec) |
-| `determined-args` | Drop `\E` for action args fixed by `arg = expr` or `arg <=> expr`; substitute with `LET`. Not the same as JAR `directed-eval` | Equivalent rewrite |
-| `from-collection` | Quantify remaining args from a state collection: `a in S` on a set, `S[a.f] = a` on a list (index binder `i \in 1..Len(S)`), or a struct literal `in` a set | Equivalent rewrite |
-| `literal-domains` | Per-site finite `{…}` for String/Int that only use a closed literal set. Does **not** by itself shrink the global `String` CONSTANT (so e.g. `Entry.value` stays open); the cfg String/Int models are still the residual open-site literals | Projection (when it excludes values the type would otherwise allow) |
+| `determined-args` | Drop `\E` for action args fixed by `arg = expr` or `arg <=> expr`; substitute with `LET`. A `|` of `&`-branches that determines the same arg on every arm binds a `LET` of `IF`/`CASE` and skips the per-branch equalities (not the rest of the `|` tree). Not the same as JAR `directed-eval` | Equivalent rewrite |
+| `from-collection` | Quantify remaining args from a state collection: `a in S` on a set, `S[a.f] = a` on a list (index binder `i \in 1..Len(S)`), a struct literal `in` a set, or `S.filter(x -> x.f = a).length > 0` (`\E a \in { x.f : x \in S }`; a `|` of bags unions the projections) | Equivalent rewrite |
+| `literal-domains` | Per-site finite `{…}` for String/Int that only use a closed literal set, including TypeOK var/field ranges and const-global Init `\in` domains. Does **not** by itself shrink the global `String` CONSTANT (so e.g. `Entry.value` stays open); the cfg String/Int models are still the residual open-site literals | Projection (when it excludes values the type would otherwise allow) |
 | `unwrap-singletons` | After unused-fields, an obj with one remaining field emits as that field’s type (Raft `Node` → `Int`) | Equivalent rewrite |
 
 If a field is omitted from a type that still appears in whole-record comparison or set containment, `julayc` warns and points at `--disable-tla-opt=unused-fields`. Values that differed only in omitted fields become equal.

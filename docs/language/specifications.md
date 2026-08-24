@@ -200,9 +200,9 @@ TLA+ emit may rewrite the composed spec (JAR codegen is unchanged). Named ids, a
 
 - `unused-fields` — project unread `obj` fields out of TLA records and TLC domains
 - `unused-vars` — omit state vars/consts the TLA-relevant fragment never reads
-- `determined-args` — substitute args fixed by `arg = expr` / `<=>` with `LET` instead of `\E`
-- `from-collection` — quantify remaining args from a state set/list (or a struct literal `in` a set)
-- `literal-domains` — per-site finite `{…}` for String/Int that only use a closed literal set
+- `determined-args` — substitute args fixed by `arg = expr` / `<=>` with `LET` instead of `\E`. Also binds an arg determined on every arm of a mutually exclusive `|` tree (`LET` of `IF`/`CASE`)
+- `from-collection` — quantify remaining args from a state set/list (or a struct literal `in` a set), or from `S.filter(x -> x.f = a).length > 0` (`\E a \in { x.f : x \in S }`)
+- `literal-domains` — per-site finite `{…}` for String/Int that only use a closed literal set (including TypeOK ranges and const-global Init `\in` domains)
 - `unwrap-singletons` — emit a one-field obj as that field’s type
 
 Disable with `--disable-tla-opt` / `--disable-tla-opt=ID,...`.
@@ -210,6 +210,8 @@ Disable with `--disable-tla-opt` / `--disable-tla-opt=ID,...`.
 Open `Int` / `String` sites that still need a TLC universe (leaf index, remaining `\E`, havoc) get a `.cfg` assignment from literals in the emitted spec — not a fixed `{0..5}` or a 9-string set. Cfg `Int` is the contiguous range `{0, …, max(highest non-negative literal, MaxListLen)}` (default `MaxListLen` is `3`). If nothing enumerates `Int`/`String`, that CONSTANT is omitted. Always-on; not a named opt.
 
 TLC also infers `CONSTRAINT StateConstraint` (not `INVARIANT`): each `Int` state variable inhabits cfg `Int` (union negative literals already in the model, so `votedFor = -1` stays allowed), and each list state variable has `Len(x) <= MaxListLen`. Parameterized leaves quantify `\A n \in NodeSet : currentTerm[n] \in Int`. Successors outside those bounds are discarded. That keeps `commitIndex` inside cfg `Int`, so `\A i \in Int` is complete for `StateMachineSafety` in this model. Always-on; not a `--disable-tla-opt` id.
+
+When `init:` uniquely determines a const-global list (length plus identity `xs[i] = i`), Init emits `xs = <<1, 2, …>>` instead of `\in BoundedSeq` plus those filters. TypeOK may add `Len(x[n]) = Len(cluster)` for lists assigned `cluster.map(...)` and `x[n] \subseteq Range(cluster)` for id sets drawn from that sequence. The `.cfg` lists each user invariant once: a named operator that is only `&` of other invariants in the closure is still emitted in the `.tla` but omitted from `INVARIANT` lines. Always-on; not named opt ids.
 
 ### Lists and sequences
 

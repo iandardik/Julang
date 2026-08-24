@@ -1,0 +1,27 @@
+import julay.funlib.setOf
+
+obj Msg {
+    term : Int
+}
+
+proc Mail {
+    var msgs : Set<Msg>
+    var seen : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            msgs := setOf()
+            seen := 0
+    }
+
+    transition take(t : Int) {
+        guard: msgs.filter(m -> m.term = t).length > 0
+        transit: seen := t
+    }
+}
+
+invariant Saw := Mail.seen >= 0
+
+spec FromCollectionProject := Mail |= Saw
+
+compile FromCollectionProject

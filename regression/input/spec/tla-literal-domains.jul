@@ -1,11 +1,13 @@
 proc Modes {
     var payload : String
     var step : Int
+    var role : String
 
     constructor initially(args : List<String>) {
         transit:
             payload := "seed"
             step := 0
+            role := "idle"
     }
 
     transition go(mode : String, note : String) {
@@ -13,10 +15,11 @@ proc Modes {
         transit:
             payload := note
             step := step + 1
+            role := "run"
     }
 }
 
-invariant Keep := Modes.step >= 0 & Modes.payload ~= ""
+invariant Keep := Modes.step >= 0 & Modes.payload ~= "" & Modes.role ~= ""
 
 spec LiteralDomains := Modes |= Keep
 

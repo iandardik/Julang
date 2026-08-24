@@ -1,0 +1,20 @@
+proc Counter {
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            n := 0
+    }
+
+    transition bump() {
+        transit: n := n + 1
+    }
+}
+
+invariant A := Counter.n >= 0
+invariant B := Counter.n <= 10
+invariant C := A & B
+
+spec ConjInv := Counter |= C
+
+compile ConjInv

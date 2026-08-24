@@ -69,6 +69,7 @@ internal fun analyzeTlaLiteralDomains(
     }
 
     offers.forEach { offer ->
+        val argNames = offer.decl.action.args.map { it.name }.toSet()
         offer.decl.guards.forEach { walkLits(it, offer.leaf.name, ::varSite, ::fieldSite, inWrite = false) }
         offer.decl.errors.forEach { arm ->
             walkLits(arm.condExpr(), offer.leaf.name, ::varSite, ::fieldSite, inWrite = false)
@@ -77,7 +78,7 @@ internal fun analyzeTlaLiteralDomains(
             when (update) {
                 is TransitUpdate.Assign -> {
                     if (TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar())) {
-                        noteWrite(update.transitRootVar(), update.expr, offer.leaf.name, ::varSite, ::fieldSite)
+                        noteWrite(update.transitRootVar(), update.expr, offer.leaf.name, ::varSite, ::fieldSite, argNames)
                         walkLits(update.expr, offer.leaf.name, ::varSite, ::fieldSite, inWrite = true)
                     }
                 }
@@ -139,11 +140,13 @@ private fun noteWrite(
     leaf: String,
     varSite: (String, String) -> SiteLits,
     fieldSite: (String, String) -> SiteLits,
+    argNames: Set<String> = emptySet(),
 ) {
     val site = varSite(leaf, name)
     val lit = literalToken(expr)
     when {
         lit != null -> site.lits += lit
+        expr is SymbolValueExprNode && expr.symbol in argNames -> site.open = true
         isSelfOrIfSelf(expr, name) -> {
             collectLiteralsFromIf(expr, name, site)
         }

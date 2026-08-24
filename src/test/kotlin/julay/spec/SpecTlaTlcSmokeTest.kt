@@ -571,6 +571,31 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun determinedArgsBindsCaseBranches() {
+        val source = File("regression/input/spec/tla-case-determined.jul")
+        val (tlaText, _) = compileSpecTla(source, "CaseDetermined")
+        assertTrue(
+            !Regex("""\\E x \\in Int""").containsMatchIn(tlaText),
+            "CASE determined-args should omit x exists;\n$tlaText",
+        )
+        assertTrue(
+            tlaText.contains("LET x ==") &&
+                tlaText.contains("IF") &&
+                (tlaText.contains("THEN 0") || tlaText.contains("THEN  0")),
+            "expected LET x == IF ... THEN 0;\n$tlaText",
+        )
+        val (offText, _) = compileSpecTla(
+            source,
+            "CaseDetermined",
+            tlaOptConfig = TlaOptConfig.fromDisableTlaOptFlag("determined-args"),
+        )
+        assertTrue(
+            Regex("""\\E x \\in Int""").containsMatchIn(offText),
+            "disabling determined-args should restore x exists;\n$offText",
+        )
+    }
+
+    @Test
     fun fromCollectionBindsListIndex() {
         val source = File("regression/input/spec/tla-from-collection.jul")
         val (tlaText, _) = compileSpecTla(source, "FromCollection")
@@ -644,6 +669,31 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun fromCollectionProjectsFilterField() {
+        val source = File("regression/input/spec/tla-from-collection-project.jul")
+        val (tlaText, _) = compileSpecTla(source, "FromCollectionProject")
+        assertTrue(
+            !Regex("""\\E t \\in Int""").containsMatchIn(tlaText),
+            "from-collection projection should not quantify t over Int;\n$tlaText",
+        )
+        assertTrue(
+            Regex("""\\E t \\in \{[^}]*term""").containsMatchIn(tlaText) ||
+                tlaText.contains("{ m.term : m \\in") ||
+                tlaText.contains("{m.term : m \\in"),
+            "t should be quantified from the filter projection;\n$tlaText",
+        )
+        val (offText, _) = compileSpecTla(
+            source,
+            "FromCollectionProject",
+            tlaOptConfig = TlaOptConfig.fromDisableTlaOptFlag("from-collection"),
+        )
+        assertTrue(
+            Regex("""\\E t \\in Int""").containsMatchIn(offText),
+            "disabling from-collection should restore \\E t \\in Int;\n$offText",
+        )
+    }
+
+    @Test
     fun literalDomainsShrinkArgNotGlobalString() {
         val source = File("regression/input/spec/tla-literal-domains.jul")
         val emit = compileSpecEmit(source, "LiteralDomains")
@@ -656,6 +706,12 @@ class SpecTlaTlcSmokeTest {
         assertTrue(
             tlaText.contains("String"),
             "open payload String site should keep the global String model;\n$tlaText",
+        )
+        val typeOk = tlaText.substringAfter("TypeOK ==").substringBefore("\n\n")
+        assertTrue(
+            typeOk.contains("role \\in {\"idle\", \"run\"}") ||
+                typeOk.contains("role \\in {\"run\", \"idle\"}"),
+            "TypeOK should use the closed role-string set;\n$typeOk",
         )
         val stringConst = emit.cfgText.lineSequence().firstOrNull { it.startsWith("CONSTANT String") }
         assertTrue(
@@ -682,6 +738,39 @@ class SpecTlaTlcSmokeTest {
             offText.contains("\\E mode, note \\in String") ||
                 offText.contains("\\E mode \\in String"),
             "disabling literal-domains should restore String for mode;\n$offText",
+        )
+    }
+
+    @Test
+    fun singletonInitEmitsSequenceLiteral() {
+        val source = File("regression/input/spec/tla-singleton-init.jul")
+        val (tlaText, _) = compileSpecTla(source, "SingletonInit")
+        val initBlock = tlaText.substringAfter("Init ==").substringBefore("\n\n")
+        assertTrue(
+            initBlock.contains("xs = <<1, 2>>") || initBlock.contains("Box_xs = <<1, 2>>"),
+            "singleton init should assign the identity sequence;\n$initBlock",
+        )
+        assertTrue(
+            !initBlock.contains("xs \\in BoundedSeq") && !initBlock.contains("Box_xs \\in BoundedSeq"),
+            "singleton init should drop BoundedSeq membership;\n$initBlock",
+        )
+    }
+
+    @Test
+    fun cfgSkipsConjunctiveInvariant() {
+        val source = File("regression/input/spec/tla-cfg-skip-conjunction.jul")
+        val emit = compileSpecEmit(source, "ConjInv")
+        assertTrue(
+            emit.tlaText.contains("C == A /\\ B") || emit.tlaText.contains("C == A /\\ B\n"),
+            "TLA should keep the conjunctive operator;\n${emit.tlaText.substringAfter("user-specified invariants")}",
+        )
+        assertTrue(
+            emit.cfgText.contains("INVARIANT A") && emit.cfgText.contains("INVARIANT B"),
+            "cfg should list the leaf invariants;\n${emit.cfgText}",
+        )
+        assertTrue(
+            !emit.cfgText.contains("INVARIANT C"),
+            "cfg should omit the conjunctive name;\n${emit.cfgText}",
         )
     }
 
@@ -789,9 +878,15 @@ class SpecTlaTlcSmokeTest {
             "with (n) should share one binder for RaftProtocol and Net, not n_RaftProtocol;\n${tlaText.take(4000)}",
         )
         assertTrue(
-            Regex("""Len\([^)]*cluster[^)]*\)\s*=\s*Cardinality\(NodeSet\)""").containsMatchIn(tlaText) ||
-                tlaText.contains("Len(RaftProtocol_cluster) = Cardinality(NodeSet)"),
-            "Init should constrain cluster length to |NodeSet|;\n${tlaText.substringAfter("Init ==").take(2500)}",
+            Regex("""cluster = <<1, 2, 3>>""")
+                .containsMatchIn(tlaText) ||
+                tlaText.contains("RaftProtocol_cluster = <<1, 2, 3>>"),
+            "Init should assign the identity cluster sequence;\n${tlaText.substringAfter("Init ==").take(2500)}",
+        )
+        assertTrue(
+            !tlaText.contains("cluster \\in BoundedSeq") &&
+                !tlaText.contains("RaftProtocol_cluster \\in BoundedSeq"),
+            "singleton cluster init should drop BoundedSeq membership;\n${tlaText.substringAfter("Init ==").take(2500)}",
         )
         assertTrue(
             tlaText.contains("\\E n, m \\in NodeSet :") &&
@@ -815,12 +910,8 @@ class SpecTlaTlcSmokeTest {
         )
         val initBlock = tlaText.substringAfter("Init ==").substringBefore("\n\n")
         assertTrue(
-            Regex("""\\A i \\in Int :""").containsMatchIn(initBlock) &&
-                (
-                    initBlock.contains("RaftProtocol_cluster[i] = i") ||
-                        initBlock.contains("cluster[i] = i")
-                    ),
-            "Init should pin identity cluster[i] = i;\n$initBlock",
+            !Regex("""\\A i \\in Int :""").containsMatchIn(initBlock),
+            "singleton cluster init should drop cluster[i] = i filters;\n$initBlock",
         )
         assertTrue(
             Regex("""self\[n1\] = self\[n2\]""").containsMatchIn(initBlock) &&
@@ -848,6 +939,15 @@ class SpecTlaTlcSmokeTest {
                         updateTermDef.contains("inTerm > RaftProtocol_currentTerm")
                     ),
             "updateTerm should be one paired action whose guard mentions all four bags and inTerm > currentTerm;\n$updateTermDef",
+        )
+        assertTrue(
+            !Regex("""\\E inTerm \\in Int""").containsMatchIn(tlaText),
+            "exists-from-projection should drop \\E inTerm \\in Int;\n${tlaText.substringAfter("Next ==").take(2500)}",
+        )
+        assertTrue(
+            !Regex("""\\E matchIdx \\in Int""").containsMatchIn(tlaText) &&
+                !Regex("""\\E success \\in BOOLEAN""").containsMatchIn(tlaText),
+            "CASE determined-args should drop matchIdx and success exists;\n${tlaText.substringAfter("handleAppendEntriesRequest").take(2500)}",
         )
         val handleRvDef = tlaText.substringAfter("handleRequestVoteRequest(").substringBefore("\n\n")
         assertTrue(
@@ -901,6 +1001,12 @@ class SpecTlaTlcSmokeTest {
             "cfg Int should pad through MaxListLen so node id 3 is in the universe;\n$cfgText",
         )
         assertTrue(
+            cfgText.contains("INVARIANT OneLeaderPerTerm") &&
+                cfgText.contains("INVARIANT StateMachineSafety") &&
+                !cfgText.contains("INVARIANT AllInvariants"),
+            "cfg should check leaf invariants, not AllInvariants;\n$cfgText",
+        )
+        assertTrue(
             cfgText.contains("CONSTRAINT StateConstraint") &&
                 !cfgText.contains("INVARIANT StateConstraint"),
             "inferred StateConstraint should be a TLC CONSTRAINT;\n$cfgText",
@@ -925,6 +1031,29 @@ class SpecTlaTlcSmokeTest {
         assertTrue(
             tlaText.contains("self \\in [NodeSet -> TypeOKInt]"),
             "TypeOK should type self as [NodeSet -> TypeOKInt];\n${tlaText.substringAfter("TypeOK ==").take(1500)}",
+        )
+        val typeOkBlock = tlaText.substringAfter("TypeOK ==").substringBefore("\n\n")
+        assertTrue(
+            Regex("""state \\in \[NodeSet -> \{[^]]*Follower[^]]*\}]""").containsMatchIn(typeOkBlock) ||
+                (
+                    typeOkBlock.contains("state \\in [NodeSet -> {") &&
+                        typeOkBlock.contains("\"Follower\"") &&
+                        typeOkBlock.contains("\"Candidate\"") &&
+                        typeOkBlock.contains("\"Leader\"") &&
+                        !typeOkBlock.contains("state \\in [NodeSet -> String]")
+                    ),
+            "TypeOK state should use the three roles, not String;\n$typeOkBlock",
+        )
+        assertTrue(
+            Regex("""Len\([^)]*nextIndex\[n\]\)\s*=\s*Len\([^)]*cluster""").containsMatchIn(typeOkBlock) ||
+                typeOkBlock.contains("Len(nextIndex[n]) = Len("),
+            "TypeOK should pin nextIndex length to cluster;\n$typeOkBlock",
+        )
+        assertTrue(
+            typeOkBlock.contains("votesGranted[n] \\subseteq Range(") ||
+                typeOkBlock.contains("votesGranted[n] \\subseteq Range(cluster") ||
+                typeOkBlock.contains("votesGranted[n] \\subseteq Range(RaftProtocol_cluster"),
+            "TypeOK should pin votesGranted to Range(cluster);\n$typeOkBlock",
         )
         assertTrue(
             tlaText.contains("\\A n1, n2 \\in NodeSet :") &&

@@ -231,6 +231,7 @@ fun tlaCodegenPass(
             usedUserFunOps = usedUserFunOps,
             usedFunOps = usedFunOps,
             unusedFieldWarnings = unusedFieldWarnings,
+            sorts = ast.cachedObjClassRegistry()?.sorts ?: emptyMap(),
         )
     } finally {
         TlaFieldProjection.set(TlaRelevantFields.IDENTITY)
@@ -259,6 +260,7 @@ private fun emitProjectedTla(
     usedUserFunOps: List<FunNode>,
     usedFunOps: List<FunNode>,
     unusedFieldWarnings: List<OneLocCompileWarning>,
+    sorts: Map<String, SortType>,
 ): TlaCodegenResult {
     val emittedOffers = collectEmittedOfferLists(offers).filter { offerGroupHasEmittedUpdate(it) }.flatten()
     invClosure.forEach { collectBuiltinDomainUses(it.invariantFormula(), cfgOverrides) }
@@ -320,7 +322,8 @@ private fun emitProjectedTla(
         offersUseStartsWith(offers) ||
             usedFunOps.any { exprContainsStartsWith(it.funBody()) } ||
             invClosure.any { exprContainsStartsWith(it.invariantFormula()) }
-    val needsRangeOperator =
+    val typeOkShapes = analyzeTypeOkShapes(leaves, pclassesForTla, offers)
+    var needsRangeOperator =
         offersUseListMembership(offers) ||
             offersUseToSet(offers) ||
             offersUseAllDistinct(offers) ||
@@ -333,7 +336,8 @@ private fun emitProjectedTla(
                 exprContainsListMembership(it.invariantFormula()) ||
                     exprContainsToSet(it.invariantFormula()) ||
                     exprContainsAllDistinct(it.invariantFormula())
-            }
+            } ||
+            typeOkShapes.usesRange
     val needsSetToSeqOperator =
         offersUseToList(offers) ||
             usedFunOps.any { exprContainsToList(it.funBody()) } ||
@@ -359,6 +363,17 @@ private fun emitProjectedTla(
     val typeOkIntDef = emitTypeOkIntDef(intModelValues)
 
     val intConstraintRange = constraintIntRange(intModelValues)
+    val singletonConstGlobals = linkedMapOf<Pair<String, String>, String>()
+    val consumedInitExprs = mutableSetOf<ExprNode>()
+    leaves.forEach { leaf ->
+        val pc = pclassesForTla[leaf.name] ?: return@forEach
+        pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
+            if (vn.name !in leaf.globalConstVars) return@forEach
+            val hit = matchSingletonConstGlobalInit(vn.name, safeType(vn), leaf.initExprs, sorts) ?: return@forEach
+            singletonConstGlobals[leaf.tlaName to vn.name] = hit.value
+            consumedInitExprs += hit.consumed
+        }
+    }
     val variables = mutableListOf<String>()
     val initParts = mutableListOf<String>()
     val typeOkParts = mutableListOf<String>()
@@ -409,21 +424,29 @@ private fun emitProjectedTla(
                 if (folded != null) {
                     initParts += folded
                     if (leaf.indexesState(vn.name)) {
-                        typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange), domain)
+                        typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange, leafClass = leaf.name, varName = vn.name), domain)
                     } else {
-                        typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange), null)
+                        typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange, leafClass = leaf.name, varName = vn.name), null)
                     }
                 } else if (leaf.indexesState(vn.name)) {
                     initParts += "/\\ $v = [$binder \\in $domain |-> ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}]"
-                    typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange), domain)
+                    typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange, leafClass = leaf.name, varName = vn.name), domain)
                 } else if (vn.name in leaf.globalConstVars) {
-                    // TypeOK uses Seq/TypeOKInt (not enumerable). Init must be a finite TLC set.
-                    initParts += "/\\ $v \\in ${typeToTlaDomain(safeType(vn))}"
-                    typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange), null)
+                    val singleton = singletonConstGlobals[leaf.tlaName to vn.name]
+                    if (singleton != null) {
+                        initParts += "/\\ $v = $singleton"
+                    } else {
+                        initParts += "/\\ $v \\in ${typeToTlaDomain(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
+                    }
+                    typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange, leafClass = leaf.name, varName = vn.name), null)
                 } else {
                     initParts += "/\\ $v = ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
-                    typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange), null)
+                    typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange, leafClass = leaf.name, varName = vn.name), null)
                 }
+                typeOkParts += typeOkShapeConjuncts(
+                    leaf, vn.name, v, leaf.indexesState(vn.name), binder, domain,
+                    typeOkShapes, stateVarNames,
+                )
                 appendStateConstraint(
                     constraintParts, v, safeType(vn),
                     indexed = leaf.indexesState(vn.name),
@@ -467,7 +490,11 @@ private fun emitProjectedTla(
                 } else {
                     initParts += "/\\ $v = ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
                 }
-                typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange), null)
+                typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange, leafClass = leaf.name, varName = vn.name), null)
+                typeOkParts += typeOkShapeConjuncts(
+                    leaf, vn.name, v, indexed = false, binder = null, domain = null,
+                    typeOkShapes, stateVarNames,
+                )
                 appendStateConstraint(
                     constraintParts, v, safeType(vn),
                     indexed = false, binder = null, domain = null, intRange = intConstraintRange,
@@ -592,7 +619,7 @@ private fun emitProjectedTla(
         initParts += "/\\ dummy = 0"
         typeOkParts += typeOkConjunct("dummy", typeOkIntRange, null)
     }
-    emitInitConstraintParts(leaves, stateVarNames, constants, initParts)
+    emitInitConstraintParts(leaves, stateVarNames, constants, initParts, consumedInitExprs)
 
     val typeOkDef = buildString {
         appendLine("TypeOK ==")
@@ -749,8 +776,10 @@ private fun emitProjectedTla(
             appendLine("INVARIANT SessionIntegrity")
         }
         if (invDefs.isNotEmpty()) {
+            val skipCfgInv = cfgSkipConjunctiveInvariants(invClosure)
             invDefs.forEach { def ->
                 val invOp = def.substringBefore(" ==")
+                if (invOp in skipCfgInv) return@forEach
                 appendLine("INVARIANT $invOp")
             }
         }
@@ -1141,11 +1170,10 @@ private fun typeOkVarRange(
     intRange: String,
     fieldOfObj: String? = null,
     fieldName: String? = null,
+    leafClass: String? = null,
+    varName: String? = null,
 ): String {
-    if (type is StringType && fieldOfObj != null && fieldName != null) {
-        val lits = TlaLiteralDomainProjection.get().objFieldSet(fieldOfObj, fieldName)
-        if (!lits.isNullOrEmpty()) return TlaLiteralDomainProjection.get().render(lits)
-    }
+    closedLiteralDomain(type, leafClass, varName, fieldOfObj, fieldName)?.let { return it }
     return when (type) {
         is BoolType -> "BOOLEAN"
         is IntType, is RealType -> intRange
@@ -1173,6 +1201,25 @@ private fun typeOkVarRange(
         }
         else -> intRange
     }
+}
+
+private fun closedLiteralDomain(
+    type: Type,
+    leafClass: String?,
+    varName: String?,
+    fieldOfObj: String?,
+    fieldName: String?,
+): String? {
+    if (type !is StringType && type !is IntType) return null
+    val lits = when {
+        leafClass != null && varName != null ->
+            TlaLiteralDomainProjection.get().varSet(leafClass, varName)
+        fieldOfObj != null && fieldName != null ->
+            TlaLiteralDomainProjection.get().objFieldSet(fieldOfObj, fieldName)
+        else -> null
+    }
+    if (lits.isNullOrEmpty()) return null
+    return TlaLiteralDomainProjection.get().render(lits)
 }
 
 private fun typeOkConjunct(name: String, range: String, paramDomain: String?): String {
@@ -1531,10 +1578,16 @@ private fun negateLocalGuardsBody(
         existsParams += b.tmp to emit(b.set)
     }
     val omit = plan.omitArgTypeDomains()
-    offer.decl.action.args.filter { arg ->
+        offer.decl.action.args.filter { arg ->
         arg.name !in omit && guards.any { exprReferencesSymbol(it, arg.name) }
     }.forEach { arg ->
-        existsParams += arg.name to (argLiteralDomain(listOf(offer), arg.name, arg.type) ?: typeToTlaDomain(arg.type))
+        val proj = plan.projectedBind(arg.name)
+        val domain = if (proj != null) {
+            emitProjectedArgDomain(proj) { emit(it) }
+        } else {
+            argLiteralDomain(listOf(offer), arg.name, arg.type) ?: typeToTlaDomain(arg.type)
+        }
+        existsParams += arg.name to domain
     }
     val exists = wrapTlaExists(existsParams, inner)
     return "~($exists)"
@@ -2314,8 +2367,13 @@ private fun emitConjoined(
         offer.decl.action.args.filter { offerRefsArg(offer, it.name) }.forEach { arg ->
             if (arg.name in bindPlan.omitArgTypeDomains()) return@forEach
             if (arg.name in constGlobalArgBinds) return@forEach
-            val lit = argLiteralDomain(offers, arg.name, arg.type)
-            argParams += arg.name to (lit ?: typeToTlaDomain(arg.type))
+            val proj = bindPlan.projectedBind(arg.name)
+            val domain = if (proj != null) {
+                emitProjectedArgDomain(proj) { emitBound(it) }
+            } else {
+                argLiteralDomain(offers, arg.name, arg.type) ?: typeToTlaDomain(arg.type)
+            }
+            argParams += arg.name to domain
         }
     }
 
@@ -2590,13 +2648,17 @@ private fun emitInitConstraintParts(
     stateVarNames: Map<Pair<String, String>, String>,
     constants: Set<String>,
     initParts: MutableList<String>,
+    skipExprs: Set<ExprNode> = emptySet(),
 ) {
-    val withInits = leaves.filter { it.initExprs.isNotEmpty() }
+    val withInits = leaves.filter { leaf ->
+        leaf.initExprs.any { it !in skipExprs }
+    }
     if (withInits.isEmpty()) return
     initParts += "\\* init constraints"
     withInits.forEach { leaf ->
         val leafCtx = mapOf(leaf.name to leaf, leaf.tlaName to leaf)
         leaf.initExprs.forEach { expr ->
+            if (expr in skipExprs) return@forEach
             val body = exprToTla(
                 expr,
                 leafCtx = leafCtx,
@@ -3106,17 +3168,10 @@ internal fun typeToTlaDomain(
     type: Type,
     fieldOfObj: String? = null,
     fieldName: String? = null,
+    leafClass: String? = null,
+    varName: String? = null,
 ): String {
-    if (type is StringType || type is IntType) {
-        val lits = if (fieldOfObj != null && fieldName != null) {
-            TlaLiteralDomainProjection.get().objFieldSet(fieldOfObj, fieldName)
-        } else {
-            null
-        }
-        if (lits != null && lits.isNotEmpty()) {
-            return TlaLiteralDomainProjection.get().render(lits)
-        }
-    }
+    closedLiteralDomain(type, leafClass, varName, fieldOfObj, fieldName)?.let { return it }
     return when (type) {
     is BoolType -> "BOOLEAN"
     is IntType -> "Int"
@@ -4204,6 +4259,21 @@ internal fun wrapTlaLet(bindings: List<Pair<String, String>>, body: String): Str
         "LET $defs\n  IN\n  $body"
     } else {
         "LET $defs IN $body"
+    }
+}
+
+/** `{ x.f : x \in S }` or a UNION of several, from exists-from-projection. */
+internal fun emitProjectedArgDomain(
+    bind: ProjectedArgBind,
+    emit: (ExprNode) -> String,
+): String {
+    val parts = bind.sources.map { src ->
+        "{ ${emit(src.projection)} : ${src.param} \\in ${emit(src.set)} }"
+    }
+    return if (parts.size == 1) {
+        parts.single()
+    } else {
+        "UNION { ${parts.joinToString(", ")} }"
     }
 }
 

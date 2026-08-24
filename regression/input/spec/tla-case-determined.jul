@@ -1,0 +1,17 @@
+proc Box {
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            n := 0
+    }
+
+    transition go(x : Int) {
+        guard: (n = 0 & x = 0) | (n > 0 & x = n + 1)
+        transit: n := n + 1
+    }
+}
+
+spec CaseDetermined := <true> Box <true>
+
+compile CaseDetermined
