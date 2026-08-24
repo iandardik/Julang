@@ -7,13 +7,16 @@ import node.lib.Node
 import node.lib.AppendEntriesData
 import node.lib.entryValueAt
 import node.lib.entryTermAt
+import node.lib.noneNode
+import node.lib.nodeById
 import node.rpc_in.RpcIn
 import node.rpc_out.RpcOut
 import node.vote_requester.VoteRequester
-import julay.funlib.allDistinct
 import julay.funlib.listOf
 import julay.funlib.setOf
 import julay.funlib.splice
+import julay.optional.Optional
+import julay.optional.some
 
 export api RaftCore {
     proc: RaftProtocol || ElectionTimeout || VoteRequester || LeaderHeartbeat || RpcIn || RpcOut
@@ -21,38 +24,38 @@ export api RaftCore {
 
 export proc RaftProtocol {
     const self : Node
-    const cluster : List<Node>
+    const cluster : Set<Node>
     var currentTerm : Int
     var state : String
-    var votedFor : Int
+    var votedFor : Optional<Node>
     var log : List<Entry>
-    var lastLogTermVar : Int
+    var lastLogTerm : Int
     var commitIndex : Int
-    var votesGranted : Set<Int>
-    var votesResponded : Set<Int> //Set<Node>
-    var knownLeaderId : Int
-    var nextIndex : List<Int> // Map<Int, Int>
-    var matchIndex : List<Int> // Map<Int, Int>
+    var votesGranted : Set<Node>
+    var votesResponded : Set<Node>
+    var knownLeader : Optional<Node>
+    var nextIndex : Map<Node, Int>
+    var matchIndex : Map<Node, Int>
 
-    constructor startRaftCore(me : Node, cluster : List<Node>) {
+    constructor startRaftCore(me : Node, cluster : Set<Node>) {
         transit:
             let _ : Boolean := ElectionTimeout.startElectionTimeout(me, 0)
             self := me
             cluster := cluster
             currentTerm := 0
             state := "Follower"
-            votedFor := -1
+            votedFor := noneNode()
             log := listOf()
-            lastLogTermVar := 0
+            lastLogTerm := 0
             commitIndex := 0
             votesGranted := setOf()
             votesResponded := setOf()
-            knownLeaderId := -1
-            nextIndex := cluster.map(n -> 1)
-            matchIndex := cluster.map(n -> 0)
+            knownLeader := noneNode()
+            nextIndex := cluster.associateWith(n -> 1)
+            matchIndex := cluster.associateWith(n -> 0)
         error:
             (me ~in cluster) -> "Invalid config: node not in cluster"
-            ~allDistinct(cluster) -> "Invalid config: duplicate node IDs"
+            length(cluster.map(n -> n.id)) ~= length(cluster) -> "Invalid config: duplicate node IDs"
     }
 
     /*
@@ -65,10 +68,10 @@ export proc RaftProtocol {
             let _ : Boolean := ElectionTimeout.startElectionTimeout(self, currentTerm + 1)
             state := "Candidate"
             currentTerm := currentTerm + 1
-            votedFor := self.id
-            votesGranted := setOf(self.id)
-            votesResponded := setOf(self.id)
-            knownLeaderId := -1
+            votedFor := some(self)
+            votesGranted := setOf(self)
+            votesResponded := setOf(self)
+            knownLeader := noneNode()
     }
 
     /*
@@ -77,28 +80,24 @@ export proc RaftProtocol {
     transition requestVote(target : Node, payload : VoteRequestData) {
         guard:
             & state = "Candidate"
-            & target.id >= 1
-            & target.id <= length(cluster)
-            & cluster[target.id] = target
-            & target.id ~in votesResponded
+            & target in cluster
+            & target ~in votesResponded
             & payload = VoteRequestData {
                 term := currentTerm,
                 candidateId := self.id,
                 lastLogIndex := length(log),
-                lastLogTerm := lastLogTermVar
+                lastLogTerm := lastLogTerm
             }
     }
 
     transition appendEntries(target : Node, payload : AppendEntriesData) {
         guard:
-            & target.id >= 1
-            & target.id <= length(cluster)
-            & cluster[target.id] = target
+            & target in cluster
             & target ~= self
             & state = "Leader"
-            & payload = if (nextIndex[target.id] <= length(log)) {
+            & payload = if (nextIndex[target] <= length(log)) {
                 // if there's at least one entry to send
-                let (nextLogIndex : Int := nextIndex[target.id])
+                let (nextLogIndex : Int := nextIndex[target])
                 // prevLogIndex is the previous entry's index, or 0 if none
                 let (prevLogIndex : Int := nextLogIndex - 1)
                 let (prevLogTerm : Int := if (prevLogIndex > 0) entryTermAt(log, prevLogIndex) else 0)
@@ -119,7 +118,7 @@ export proc RaftProtocol {
                     term := currentTerm,
                     leaderId := self.id,
                     prevLogIndex := length(log),
-                    prevLogTerm := lastLogTermVar,
+                    prevLogTerm := lastLogTerm,
                     entry := Entry { term := 0, value := "" },
                     entriesLen := 0,
                     leaderCommit := commitIndex
@@ -135,9 +134,9 @@ export proc RaftProtocol {
             let _ : Boolean := LeaderHeartbeat.startLeaderHeartbeat(self, currentTerm, cluster)
             let _ : Boolean := ElectionTimeout.stopElectionTimeout(currentTerm)
             state := "Leader"
-            knownLeaderId := self.id
-            nextIndex := cluster.map(n -> length(log) + 1)
-            matchIndex := cluster.map(n -> 0)
+            knownLeader := some(self)
+            nextIndex := cluster.associateWith(n -> length(log) + 1)
+            matchIndex := cluster.associateWith(n -> 0)
     }
 
     // TODO do we really need to send back the idx to the client?
@@ -147,7 +146,7 @@ export proc RaftProtocol {
             & idx = length(log) + 1
         transit:
             log := log + listOf(Entry { term := currentTerm, value := value })
-            lastLogTermVar := currentTerm
+            lastLogTerm := currentTerm
     }
 
     internal transition advanceCommitIndex(newCommitIndex : Int) {
@@ -160,7 +159,7 @@ export proc RaftProtocol {
             // with +1. Filter uses commitIndex (state), not newCommitIndex (action arg),
             // so the HOF stays a fast guard; stepping by 1 makes i > commitIndex
             // equivalent to i >= newCommitIndex. Zeros therefore do not count.
-            & let (numAgree : Int := 1 + matchIndex.filter(i -> i > commitIndex).length) {
+            & let (numAgree : Int := 1 + matchIndex.keys.filter(k -> matchIndex[k] > commitIndex).length) {
                 numAgree * 2 > length(cluster)
             }
         transit:
@@ -177,23 +176,23 @@ export proc RaftProtocol {
     ) {
         guard:
             let (logOk : Boolean :=
-                (lastLogTerm > lastLogTermVar) | (lastLogTerm = lastLogTermVar & lastLogIndex >= length(log))) {
-            let (voteCondition : Boolean := inTerm = currentTerm & (votedFor = -1 | votedFor = candidateId) & logOk) {
+                (lastLogTerm > lastLogTerm) | (lastLogTerm = lastLogTerm & lastLogIndex >= length(log))) {
+            let (voteCondition : Boolean := inTerm = currentTerm & (~votedFor.present | votedFor.value.id = candidateId) & logOk) {
                 & inTerm <= currentTerm
                 & outTerm = currentTerm
                 & (voteGranted <=> voteCondition)
             }}
         transit:
-            votedFor := if (voteGranted) candidateId else votedFor
+            votedFor := if (voteGranted) some(nodeById(cluster, candidateId)) else votedFor
     }
 
-    provider transition handleRequestVoteResponse(peerId : Int, term : Int, granted : Boolean) {
+    provider transition handleRequestVoteResponse(peer : Node, term : Int, granted : Boolean) {
         guard:
             & state = "Candidate"
             & term = currentTerm
         transit:
-            votesGranted := if (granted) votesGranted + setOf(peerId) else votesGranted
-            votesResponded := votesResponded + setOf(peerId)
+            votesGranted := if (granted) votesGranted + setOf(peer) else votesGranted
+            votesResponded := votesResponded + setOf(peer)
     }
 
     provider transition handleAppendEntriesRequest(
@@ -258,7 +257,7 @@ export proc RaftProtocol {
             let index : Int := prevLogIndex + 1
             let alreadyDone : Boolean :=
                 success & entriesLen = 1 & length(log) >= index & entryTermAt(log, index) = entryTerm
-            knownLeaderId := if (success) leaderId else knownLeaderId
+            knownLeader := if (success) some(nodeById(cluster, leaderId)) else knownLeader
             // Matching-term AE: Candidate -> Follower, accept or reject.
             state := if (inTerm = currentTerm) "Follower" else state
             // accept paths, one-shot for sync RPC: already-done | conflict truncate+append | append.
@@ -278,10 +277,10 @@ export proc RaftProtocol {
             } else {
                 log
             }
-            lastLogTermVar := if (success & entriesLen = 1 & ~alreadyDone) {
+            lastLogTerm := if (success & entriesLen = 1 & ~alreadyDone) {
                 entryTerm
             } else {
-                lastLogTermVar
+                lastLogTerm
             }
             commitIndex := if (success & leaderCommit > commitIndex) {
                 let (lastNew : Int := if (entriesLen = 1) prevLogIndex + 1 else length(log)) {
@@ -293,7 +292,7 @@ export proc RaftProtocol {
     }
 
     provider transition handleAppendEntriesResponse(
-        peerId : Int,
+        peer : Node,
         inTerm : Int,
         success : Boolean,
         matchIdx : Int
@@ -302,12 +301,12 @@ export proc RaftProtocol {
             & state = "Leader"
             & inTerm = currentTerm
         transit:
-            nextIndex[peerId] := if (success) {
-                max(matchIdx + 1, nextIndex[peerId]) // ensure that nextIndex increases monotonically
-            } else { max(nextIndex[peerId] - 1, 1) }
-            matchIndex[peerId] := if (success) {
-                max(matchIdx, matchIndex[peerId]) // ensure that matchIndex increases monotonically
-            } else { matchIndex[peerId] }
+            nextIndex[peer] := if (success) {
+                max(matchIdx + 1, nextIndex[peer]) // ensure that nextIndex increases monotonically
+            } else { max(nextIndex[peer] - 1, 1) }
+            matchIndex[peer] := if (success) {
+                max(matchIdx, matchIndex[peer]) // ensure that matchIndex increases monotonically
+            } else { matchIndex[peer] }
     }
 
     /*
@@ -322,8 +321,8 @@ export proc RaftProtocol {
             } else { true }
             currentTerm := if (advance) inTerm else currentTerm
             state := if (advance) "Follower" else state
-            votedFor := if (advance) -1 else votedFor
-            knownLeaderId := if (advance) -1 else knownLeaderId
+            votedFor := if (advance) noneNode() else votedFor
+            knownLeader := if (advance) noneNode() else knownLeader
             votesGranted := if (advance) {
                 setOf()
             } else { votesGranted }
@@ -352,7 +351,7 @@ export proc RaftProtocol {
     provider transition noLeader() {
         guard:
             & state ~= "Leader"
-            & knownLeaderId < 0
+            & ~knownLeader.present
     }
 
     provider transition getCommitted(stateMachine : List<String>) {
@@ -367,9 +366,7 @@ export proc RaftProtocol {
     provider transition leaderRedirect(leader : Node) {
         guard:
             & state ~= "Leader"
-            & knownLeaderId >= 1
-            & leader.id = knownLeaderId
-            & knownLeaderId <= length(cluster)
-            & cluster[knownLeaderId] = leader
+            & knownLeader.present
+            & knownLeader.value = leader
     }
 }

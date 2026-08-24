@@ -1,0 +1,23 @@
+sort Ids := { "a", "b" }
+
+proc Box {
+    const xs : Set<Int>
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            n := 0
+    }
+
+    transition bump() {
+        transit: n := n + 1
+    }
+}
+
+spec SingletonSetInit := Box[i : Ids] {
+    const global xs
+    init: xs.length = Ids.length
+    init: forall i : Int, (i >= 1 & i <= xs.length) => i in xs
+}
+
+compile SingletonSetInit

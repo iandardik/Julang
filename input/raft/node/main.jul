@@ -20,7 +20,7 @@ export proc NodeLogic := Raft
 
 obj CfgPair {
     me : Node
-    cluster : List<Node>
+    cluster : Set<Node>
 }
 
 procfun parseCfg(cfg : String, myIdx : Int) : CfgPair {
@@ -56,13 +56,13 @@ procfun parseCfg(cfg : String, myIdx : Int) : CfgPair {
         guard:
             idx = length(rawLines) + 1
         return:
-            CfgPair { me := meBuilder, cluster := clusterBuilder }
+            CfgPair { me := meBuilder, cluster := clusterBuilder.toSet() }
     }
 }
 
 proc RaftNodeMain {
     const me : Node
-    const cluster : List<Node>
+    const cluster : Set<Node>
     const port : Int
     var step : String := "startRpcIn"
 
@@ -92,7 +92,7 @@ proc RaftNodeMain {
             step := "startCore"
     }
 
-    transition startRaftCore(me : Node, cluster : List<Node>) {
+    transition startRaftCore(me : Node, cluster : Set<Node>) {
         guard:
             & step = "startCore"
             & me = this.me

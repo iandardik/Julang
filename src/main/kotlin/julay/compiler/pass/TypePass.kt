@@ -1655,6 +1655,7 @@ private fun MethodCallExprNode.typePassMethodCall(
     return when (kind) {
         CollectionMethodKind.Filter -> typePassFilter(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv, collType)
         CollectionMethodKind.Map -> typePassMapMethod(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv, collType)
+        CollectionMethodKind.AssociateWith -> typePassAssociateWith(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv, collType)
         CollectionMethodKind.Fold -> typePassFold(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv, collType)
         CollectionMethodKind.ToSet -> typePassToSet(collType)
         CollectionMethodKind.ToList -> typePassToList(collType)
@@ -1746,6 +1747,37 @@ private fun MethodCallExprNode.typePassMapMethod(
     )
 }
 
+private fun MethodCallExprNode.typePassAssociateWith(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    procFunEnv: Map<String, ProcFunNode>,
+    collType: Type,
+): List<CompileError> {
+    val setTy = collType as? SetType
+        ?: return listOf(
+            OneLocCompileError(
+                programLocation(),
+                "Expected receiver of \"associateWith\" to have a Set type but got $collType",
+            ),
+        )
+    if (args.size != 1) {
+        return listOf(
+            OneLocCompileError(
+                programLocation(),
+                "Expected method \"associateWith\" to take 1 argument(s) but got ${args.size}",
+            ),
+        )
+    }
+    return typePassUnaryHofArg(
+        symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, procFunEnv,
+        args[0], setTy.elementType, expectedBodyType = null, resultType = null,
+        mapCollType = setTy, toMapFromSet = true,
+    )
+}
+
 private fun MethodCallExprNode.typePassFold(
     symbolEnv: Map<String, Type>,
     registry: ObjClassRegistry,
@@ -1821,6 +1853,7 @@ private fun MethodCallExprNode.typePassUnaryHofArg(
     expectedBodyType: Type?,
     resultType: Type?,
     mapCollType: Type? = null,
+    toMapFromSet: Boolean = false,
 ): List<CompileError> {
     return when (funArg) {
         is LambdaExprNode -> {
@@ -1849,6 +1882,13 @@ private fun MethodCallExprNode.typePassUnaryHofArg(
             }
             val outType = when {
                 resultType != null -> resultType
+                toMapFromSet -> {
+                    val st = mapCollType as? SetType
+                        ?: return listOf(
+                            OneLocCompileError(programLocation(), "associateWith expected a Set receiver"),
+                        )
+                    mapType(st.elementType, bodyType)
+                }
                 mapCollType != null -> mapResultCollectionType(mapCollType, bodyType)
                     ?: return listOf(OneLocCompileError(programLocation(), "map expected List or Set"))
                 else -> error("unreachable")
@@ -1900,6 +1940,13 @@ private fun MethodCallExprNode.typePassUnaryHofArg(
                     }
                     val outType = when {
                         resultType != null -> resultType
+                        toMapFromSet -> {
+                            val st = mapCollType as? SetType
+                                ?: return listOf(
+                                    OneLocCompileError(programLocation(), "associateWith expected a Set receiver"),
+                                )
+                            mapType(st.elementType, ret.type)
+                        }
                         mapCollType != null -> mapResultCollectionType(mapCollType, ret.type)
                             ?: return listOf(OneLocCompileError(programLocation(), "map expected List or Set"))
                         else -> error("unreachable")
@@ -3004,7 +3051,8 @@ private fun ProcFunNode.typePassProcFunBody(
     } catch (_: RuntimeException) {
         return emptyList()
     }
-    val stateEnv = vars.associate { it.name to typingView(it.type) }
+    val stateEnv = argEnv.mapValues { typingView(it.value) } +
+        vars.associate { it.name to typingView(it.type) }
     val prevState = typePassStateEnv
     typePassStateEnv = stateEnv
     try {

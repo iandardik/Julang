@@ -78,30 +78,21 @@ data class SetType(val elementType: Type) : Type {
         val cell = model.eval(expr, true)
         @Suppress("UNCHECKED_CAST")
         val arrExpr = model.eval(ctx.mkApp(meta.arrAccessor, cell), true) as ArrayExpr<Sort, BoolSort>
-        return when (elementType) {
-            is IntType -> {
-                val result = mutableSetOf<Int>()
-                for (i in -50..50) {
-                    if (model.eval(ctx.mkSetMemberAny(ctx.mkInt(i), arrExpr), true).isTrue) {
-                        result.add(i)
-                    }
-                }
-                result
-            }
-            is StringType -> {
-                val result = mutableSetOf<String>()
-                for (decl in model.constDecls) {
-                    if (decl.range == ctx.stringSort) {
-                        val candidate = decl.name.toString().trim('"')
-                        if (model.eval(ctx.mkSetMemberAny(ctx.mkString(candidate), arrExpr), true).isTrue) {
-                            result.add(candidate)
-                        }
-                    }
-                }
-                result
-            }
-            else -> throw RuntimeException("Set fromZ3Expr not implemented for element type $elementType")
+        val expectedSize = intType.fromZ3Expr(model.eval(ctx.mkApp(meta.sizeAccessor, cell), true), model) as Int
+        val fromInterp = membersFromZ3SetArray(arrExpr, model, elementType)
+        if (fromInterp.size == expectedSize || expectedSize < 0) {
+            return fromInterp
         }
+        val fallback = bruteForceSetMembers(arrExpr, model, elementType)
+        if (fallback != null && (fallback.size == expectedSize || fromInterp.isEmpty())) {
+            return fallback
+        }
+        if (fromInterp.size >= expectedSize) {
+            return fromInterp
+        }
+        throw RuntimeException(
+            "Set fromZ3Expr could not recover $expectedSize element(s) of type $elementType (found ${fromInterp.size})",
+        )
     }
 
     override fun isOfType(obj: Any): Boolean {
@@ -113,3 +104,66 @@ data class SetType(val elementType: Type) : Type {
 }
 
 fun setType(element: Type): SetType = SetType(element)
+
+/** Reconstruct finite set members from a Z3 set-array (store chain and/or as-array interp). */
+internal fun membersFromZ3SetArray(arrExpr: Expr<*>, model: Model, elementType: Type): MutableSet<Any> {
+    val result = linkedSetOf<Any>()
+    val seen = mutableSetOf<Any>()
+    var cur = model.eval(arrExpr, true)
+    while (cur.isStore && cur.numArgs == 3) {
+        val elem = elementType.fromZ3Expr(model.eval(cur.args[1], true), model)
+        if (seen.add(elem) && model.eval(cur.args[2], true).isTrue) {
+            result.add(elem)
+        }
+        cur = model.eval(cur.args[0], true)
+    }
+    if (cur.isAsArray) {
+        val func = try {
+            cur.funcDecl.parameters.firstOrNull()?.funcDecl
+        } catch (_: Exception) {
+            null
+        }
+        val interp = try {
+            func?.let { model.getFuncInterp(it) }
+        } catch (_: Exception) {
+            null
+        }
+        if (interp != null) {
+            for (entry in interp.entries) {
+                if (model.eval(entry.value, true).isTrue) {
+                    val elem = elementType.fromZ3Expr(model.eval(entry.args[0], true), model)
+                    if (seen.add(elem)) result.add(elem)
+                }
+            }
+        }
+    }
+    return result
+}
+
+internal fun bruteForceSetMembers(arrExpr: Expr<*>, model: Model, elementType: Type): MutableSet<Any>? {
+    val ctx = model.julangContext()
+    return when (elementType) {
+        is IntType -> {
+            val result = mutableSetOf<Any>()
+            for (i in -50..50) {
+                if (model.eval(ctx.mkSetMemberAny(ctx.mkInt(i), arrExpr), true).isTrue) {
+                    result.add(i)
+                }
+            }
+            result
+        }
+        is StringType -> {
+            val result = mutableSetOf<Any>()
+            for (decl in model.constDecls) {
+                if (decl.range == ctx.stringSort) {
+                    val candidate = decl.name.toString().trim('"')
+                    if (model.eval(ctx.mkSetMemberAny(ctx.mkString(candidate), arrExpr), true).isTrue) {
+                        result.add(candidate)
+                    }
+                }
+            }
+            result
+        }
+        else -> null
+    }
+}

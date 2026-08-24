@@ -10,8 +10,8 @@ export api LeaderHeartbeat {
     calls: startLeaderHeartbeat
 }
 
-procfun startLeaderHeartbeat(self : Node, leaderTerm : Int, theCluster : List<Node>) : Boolean {
-    transition startLeaderHeartbeat(me : Node, term : Int, cluster : List<Node>) {
+procfun startLeaderHeartbeat(self : Node, leaderTerm : Int, theCluster : Set<Node>) : Boolean {
+    transition startLeaderHeartbeat(me : Node, term : Int, cluster : Set<Node>) {
         guard:
             & me = self
             & term = leaderTerm
@@ -23,11 +23,11 @@ procfun startLeaderHeartbeat(self : Node, leaderTerm : Int, theCluster : List<No
 proc LeaderHeartbeatImpl {
     const me : Node
     const leaderTerm : Int
-    const cluster : List<Node>
+    const cluster : Set<Node>
     var step : String
     var sentThisRound : Set<Node>
 
-    constructor startLeaderHeartbeat(me : Node, term : Int, cluster : List<Node>) {
+    constructor startLeaderHeartbeat(me : Node, term : Int, cluster : Set<Node>) {
         transit:
             me := me
             leaderTerm := term

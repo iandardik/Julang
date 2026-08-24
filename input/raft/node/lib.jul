@@ -1,6 +1,8 @@
 import julay.funlib.length
 import julay.funlib.split
 import julay.funlib.startsWith
+import julay.optional.Optional
+import julay.optional.none
 
 /*
  * Shared Raft types and helpers (RPC encoding, config parsing, log access).
@@ -15,6 +17,12 @@ export obj Node {
     id : Int
     url : String
 }
+
+export fun noneNode() : Optional<Node> =
+    none(Node { id := 0, url := "" })
+
+export fun nodeById(cluster : Set<Node>, id : Int) : Node =
+    cluster.filter(n -> n.id = id).toList()[1]
 
 export obj VoteRequestData {
     term : Int

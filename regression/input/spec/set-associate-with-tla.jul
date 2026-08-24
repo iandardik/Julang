@@ -1,0 +1,27 @@
+sort Ids := { "a", "b" }
+
+proc Box {
+    const cluster : Set<Int>
+    var nextIndex : Map<Int, Int>
+    var n : Int
+
+    constructor start(cluster : Set<Int>) {
+        transit:
+            cluster := cluster
+            nextIndex := cluster.associateWith(x -> 1)
+            n := 0
+    }
+
+    transition bump() {
+        guard: 1 in nextIndex & nextIndex[1] = 1
+        transit: n := n + 1
+    }
+}
+
+spec AssocMap := Box[i : Ids] {
+    const global cluster
+    init: cluster.length = Ids.length
+    init: forall i : Int, (i >= 1 & i <= cluster.length) => i in cluster
+}
+
+compile AssocMap

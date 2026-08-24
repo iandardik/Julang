@@ -1,0 +1,10 @@
+export obj Optional<T> {
+    present : Boolean
+    value : T
+}
+
+export fun some<T>(v : T) : Optional<T> =
+    Optional<T> { present := true, value := v }
+
+export fun none<T>(placeholder : T) : Optional<T> =
+    Optional<T> { present := false, value := placeholder }

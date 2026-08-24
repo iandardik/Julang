@@ -1,0 +1,40 @@
+import julay.funlib.exitProgram
+import julay.optional.Optional
+import julay.optional.some
+import julay.optional.none
+
+proc OptionalDemo {
+    var opt : Optional<Int>
+    var steps : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            opt := none(0)
+            steps := 0
+    }
+
+    internal transition fill() {
+        guard:
+            steps = 0 & ~opt.present
+        transit:
+            opt := some(5)
+            steps := 1
+    }
+
+    internal transition checkSome() {
+        guard:
+            steps = 1 & opt.present & opt.value = 5 & opt = some(5) & opt ~= none(0)
+        transit:
+            steps := 2
+    }
+
+    internal transition exitSystem() {
+        guard: steps = 2
+        after:
+            exitProgram(0)
+    }
+}
+
+proc OptionalSomeNoneTest := OptionalDemo
+
+compile OptionalSomeNoneTest

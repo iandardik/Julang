@@ -1,0 +1,6 @@
+source: regression/input/set/set-in-obj.jul
+programs:
+  - name: SetInObjTest
+    run:
+      background: true
+      durationMs: 500

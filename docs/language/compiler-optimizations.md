@@ -55,7 +55,7 @@ The compiler also infers a TLC `CONSTRAINT StateConstraint` (not an `INVARIANT`)
 
 TypeOK still uses `TypeOKInt` (`Int ∪ Nat ∪ extras`) so membership stays pointwise; CONSTRAINT is what keeps reachable Int state inside cfg `Int`. That also makes `\A i \in Int` complete for properties whose bound is an Int state var (Raft `StateMachineSafety` vs `commitIndex`).
 
-Always-on (not named opt ids): singleton `init:` that uniquely determines a const-global list emits `xs = <<1, 2, …>>` instead of `\in BoundedSeq` plus those filters; TypeOK may add `Len(x[n]) = Len(cluster)` for `cluster.map` lists and `x[n] \subseteq Range(cluster)` for id sets from that sequence; the `.cfg` omits a named invariant whose formula is only `&` of other invariants already in the closure (the TLA operator is still emitted).
+Always-on (not named opt ids): singleton `init:` that uniquely determines a const-global list emits `xs = <<1, 2, …>>` instead of `\in BoundedSeq` plus those filters; a const-global set with length plus covering `1..n` membership emits `xs = {1, 2, …}` instead of `\in SUBSET`; TypeOK may add `Len(x[n]) = Len(cluster)` for `cluster.map` lists, `DOMAIN x[n] = cluster` for `cluster.associateWith` maps, `x[n] \subseteq Range(cluster)` for id sets from a sequence, and `x[n] \subseteq cluster` when the source is already a set; the `.cfg` omits a named invariant whose formula is only `&` of other invariants already in the closure (the TLA operator is still emitted).
 
 ### Named TLA+ optimizations
 
@@ -81,7 +81,7 @@ java -jar build/libs/julayc.jar --disable-tla-opt --compile RaftNodeSpec path/to
 # Disable only unused-field projection (use '=' so the source path is not consumed)
 java -jar build/libs/julayc.jar --disable-tla-opt=unused-fields path/to/file.jul
 
-# Keep unread state vars in TLA (e.g. Raft knownLeaderId)
+# Keep unread state vars in TLA (e.g. Raft knownLeader)
 java -jar build/libs/julayc.jar --disable-tla-opt=unused-vars path/to/file.jul
 
 # Disable a mix

@@ -62,6 +62,7 @@ fun resolveCollectionPropertyPath(rootType: Type, path: List<String>): Collectio
 sealed interface CollectionMethodKind {
     data object Filter : CollectionMethodKind
     data object Map : CollectionMethodKind
+    data object AssociateWith : CollectionMethodKind
     data object Fold : CollectionMethodKind
     data object ToSet : CollectionMethodKind
     data object ToList : CollectionMethodKind
@@ -70,6 +71,7 @@ sealed interface CollectionMethodKind {
 fun collectionMethodKind(name: String): CollectionMethodKind? = when (name) {
     "filter" -> CollectionMethodKind.Filter
     "map" -> CollectionMethodKind.Map
+    "associateWith" -> CollectionMethodKind.AssociateWith
     "fold" -> CollectionMethodKind.Fold
     "toSet" -> CollectionMethodKind.ToSet
     "toList" -> CollectionMethodKind.ToList

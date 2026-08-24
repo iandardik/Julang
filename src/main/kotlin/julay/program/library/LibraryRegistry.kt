@@ -3,6 +3,7 @@ package julay.program.library
 const val JULAY_MODULE = "julay"
 const val JULAY_PROCLIB = "proclib"
 const val JULAY_FUNLIB = "funlib"
+const val JULAY_OPTIONAL = "optional"
 
 object LibraryRegistry {
     val julayStdlibNames: Set<String> = setOf("Timer")
@@ -33,6 +34,10 @@ object LibraryRegistry {
     /** True for imports like julay.funlib.max or julay.funlib.println. */
     fun isFunlibImport(parts: List<String>): Boolean =
         parts.size == 3 && parts[0] == JULAY_MODULE && parts[1] == JULAY_FUNLIB
+
+    /** True for imports like julay.optional.Optional / some / none. */
+    fun isOptionalImport(parts: List<String>): Boolean =
+        parts.size == 3 && parts[0] == JULAY_MODULE && parts[1] == JULAY_OPTIONAL
 
     fun proclibModulePath(name: String): String =
         listOf(JULAY_MODULE, JULAY_PROCLIB, name).joinToString(".")

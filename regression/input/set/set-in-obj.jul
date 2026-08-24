@@ -1,0 +1,46 @@
+import julay.funlib.exitProgram
+import julay.funlib.setOf
+
+obj Node {
+    id : Int
+}
+
+obj Cfg {
+    me : Node
+    cluster : Set<Node>
+    nextIndex : Map<Node, Int>
+}
+
+proc SetInObjDemo {
+    var cfg : Cfg
+    var steps : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            let n1 : Node := Node { id := 1 }
+            let n2 : Node := Node { id := 2 }
+            cfg := Cfg {
+                me := n1,
+                cluster := setOf(n1, n2),
+                nextIndex := setOf(n1, n2).associateWith(n -> 1)
+            }
+            steps := 0
+    }
+
+    internal transition check() {
+        guard:
+            steps = 0 & cfg.me.id = 1 & cfg.me in cfg.cluster & cfg.nextIndex[cfg.me] = 1
+        transit:
+            steps := 1
+    }
+
+    internal transition exitSystem() {
+        guard: steps = 1
+        after:
+            exitProgram(0)
+    }
+}
+
+proc SetInObjTest := SetInObjDemo
+
+compile SetInObjTest

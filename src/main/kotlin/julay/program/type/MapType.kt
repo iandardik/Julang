@@ -96,36 +96,13 @@ data class MapType(val keyType: Type, val valueType: Type) : Type {
         val arrExpr = model.eval(ctx.mkApp(meta.arrAccessor, cell), true)
         @Suppress("UNCHECKED_CAST")
         val keysExpr = model.eval(ctx.mkApp(meta.keysAccessor, cell), true) as ArrayExpr<Sort, BoolSort>
+        val keys = membersFromZ3SetArray(keysExpr, model, keyType)
+        val keySet = if (keys.isNotEmpty()) keys else bruteForceSetMembers(keysExpr, model, keyType) ?: keys
         val result = mutableMapOf<Any, Any>()
-        when (keyType) {
-            is StringType -> {
-                for (decl in model.constDecls) {
-                    if (decl.range == ctx.stringSort) {
-                        val candidate = decl.name.toString().trim('"')
-                        val keyExpr = ctx.mkString(candidate)
-                        if (model.eval(ctx.mkSetMemberAny(keyExpr, keysExpr), true).isTrue) {
-                            val valExpr = model.eval(
-                                mapSelectExpr(ctx, arrExpr, keyExpr),
-                                true,
-                            )
-                            result[candidate] = valueType.fromZ3Expr(valExpr, model)
-                        }
-                    }
-                }
-            }
-            is IntType -> {
-                for (i in -50..50) {
-                    val keyExpr = ctx.mkInt(i)
-                    if (model.eval(ctx.mkSetMemberAny(keyExpr, keysExpr), true).isTrue) {
-                        val valExpr = model.eval(
-                            mapSelectExpr(ctx, arrExpr, keyExpr),
-                            true,
-                        )
-                        result[i] = valueType.fromZ3Expr(valExpr, model)
-                    }
-                }
-            }
-            else -> throw RuntimeException("Map fromZ3Expr not implemented for key type $keyType")
+        for (k in keySet) {
+            val keyExpr = keyType.toZ3Expr(Value(k, keyType), ctx)
+            val valExpr = model.eval(mapSelectExpr(ctx, arrExpr, keyExpr), true)
+            result[k] = valueType.fromZ3Expr(valExpr, model)
         }
         return result
     }

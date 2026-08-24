@@ -109,10 +109,11 @@ class IntType : Type {
     }
 
     override fun fromZ3Expr(expr: Expr<*>, model: Model): Any {
-        if (expr is IntNum) {
-            return expr.int
+        val evaluated = if (expr is IntNum) expr else model.eval(expr, true)
+        if (evaluated is IntNum) {
+            return evaluated.int
         }
-        return Integer.parseInt(expr.toString())
+        return Integer.parseInt(evaluated.toString())
     }
 
     override fun isOfType(obj: Any): Boolean {

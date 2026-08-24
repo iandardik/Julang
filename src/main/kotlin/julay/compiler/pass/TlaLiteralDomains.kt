@@ -3,6 +3,9 @@ package julay.compiler.pass
 import julay.compiler.ast.*
 import julay.compiler.decl.TransitUpdate
 import julay.program.type.IntType
+import julay.program.type.MapType
+import julay.program.type.ObjClassType
+import julay.program.type.SetType
 import julay.program.type.StringType
 import julay.program.type.Type
 
@@ -96,6 +99,32 @@ internal fun analyzeTlaLiteralDomains(
     }
     usedFuns.forEach { walkLits(it.funBody(), "", ::varSite, ::fieldSite, inWrite = false) }
     invClosure.forEach { walkLits(it.invariantFormula(), "", ::varSite, ::fieldSite, inWrite = false) }
+    // Placeholder obj literals (e.g. Optional none) must not close Int fields of types that
+    // also appear as set elements / map keys — cluster ids come from init, not those literals.
+    leaves.forEach { leaf ->
+        val pc = pclasses[leaf.name] ?: return@forEach
+        pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
+            if (!TlaVarProjection.get().isRelevant(leaf.name, vn.name)) return@forEach
+            val t = try {
+                vn.type
+            } catch (_: RuntimeException) {
+                return@forEach
+            }
+            fun openIntFields(obj: ObjClassType) {
+                obj.fields.forEach { f ->
+                    if (f.type is IntType) fieldSite(obj.name, f.name).open = true
+                }
+            }
+            when (t) {
+                is SetType -> (t.elementType as? ObjClassType)?.let { openIntFields(it) }
+                is MapType -> {
+                    (t.keyType as? ObjClassType)?.let { openIntFields(it) }
+                    (t.valueType as? ObjClassType)?.let { openIntFields(it) }
+                }
+                else -> {}
+            }
+        }
+    }
 
     fun closed(map: Map<Pair<String, String>, SiteLits>) =
         map.mapNotNull { (k, v) ->

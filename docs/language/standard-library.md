@@ -51,6 +51,24 @@ Void effectful functions belong in `before:` / `after:`. Value-returning IO may 
 
 Guard-unsafe functions throw at compile/check time if used where Z3 encoding is required.
 
+## Optional
+
+`import julay.optional.Optional`, `julay.optional.some`, and `julay.optional.none`. Julay has no sum types, so `Optional<T>` is a product:
+
+```jul
+obj Optional<T> {
+    present : Boolean
+    value : T
+}
+```
+
+- `some(v)` — `present = true`, `value = v`
+- `none(placeholder)` — `present = false`; `placeholder` is required because fields cannot be omitted. Only read `.value` when `.present` is true.
+
+`.present` / `.value` are ordinary field reads (guard-safe). Equality is structural: `some(5) ~= none(0)` even when the placeholder is `0`.
+
+See also [Types and expressions](types-and-expressions.md) (polymorphic objs).
+
 ## See also
 
 - [Creating libraries](creating-libraries.md) — how to add `.jul` or Kotlin-native procs/funs

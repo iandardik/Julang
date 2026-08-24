@@ -1,0 +1,32 @@
+import julay.funlib.exitProgram
+import julay.funlib.setOf
+
+proc AssociateWithDemo {
+    var s : Set<Int>
+    var mp : Map<Int, Int>
+    var steps : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            s := setOf(1, 2)
+            mp := s.associateWith(x -> x + 10)
+            steps := 0
+    }
+
+    internal transition checkMap() {
+        guard:
+            steps = 0 & mp.length = 2 & 1 in mp & 2 in mp & mp[1] = 11 & mp[2] = 12
+        transit:
+            steps := 1
+    }
+
+    internal transition exitSystem() {
+        guard: steps = 1
+        after:
+            exitProgram(0)
+    }
+}
+
+proc AssociateWithTest := AssociateWithDemo
+
+compile AssociateWithTest

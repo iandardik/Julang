@@ -1,0 +1,6 @@
+source: regression/input/poly/optional-some-none.jul
+programs:
+  - name: OptionalSomeNoneTest
+    run:
+      background: true
+      durationMs: 500

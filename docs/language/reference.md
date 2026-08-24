@@ -29,7 +29,7 @@ Compact cheat sheet. For explanations, use the other chapters.
 | Assign | `:=` |
 | Models | `\|=` (system with guarantee) |
 | Parallel | `\|\|` |
-| Other | `.` `->` (lambdas / `when` / `error` arms), `to` (only inside `mapOf`); funlib `listOf` / `setOf` / `mapOf` / `splice` / `allDistinct`; collection `.keys` / `.length` / `.filter` / `.map` / `.fold` / `.toSet` / `.toList` — [Collections](collections.md); TLA limits — [Specifications](specifications.md#tla-translation-limits) |
+| Other | `.` `->` (lambdas / `when` / `error` arms), `to` (only inside `mapOf`); funlib `listOf` / `setOf` / `mapOf` / `splice` / `allDistinct`; collection `.keys` / `.length` / `.filter` / `.map` / `.associateWith` / `.fold` / `.toSet` / `.toList` — [Collections](collections.md); TLA limits — [Specifications](specifications.md#tla-translation-limits) |
 
 ## Top-level declarations
 

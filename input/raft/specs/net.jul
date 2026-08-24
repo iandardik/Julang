@@ -11,7 +11,7 @@ obj VoteRequestMsg {
 obj VoteResponseMsg {
     src : NodeSet
     dest : NodeSet
-    id : Int
+    node : Node
     term : Int
     granted : Boolean
 }
@@ -23,7 +23,7 @@ obj AppendEntriesRequestMsg {
 obj AppendEntriesResponseMsg {
     src : NodeSet
     dest : NodeSet
-    id : Int
+    node : Node
     term : Int
     success : Boolean
     matchIdx : Int
@@ -81,18 +81,18 @@ export spec Net[n : NodeSet] {
             voteResponseMsgs := voteResponseMsgs + setOf(VoteResponseMsg {
                 src := n,
                 dest := m,
-                id := RaftProtocol[n].self.id,
+                node := RaftProtocol[n].self,
                 term := outTerm,
                 granted := voteGranted
             })
     }
 
-    client transition handleRequestVoteResponse(peerId : Int, term : Int, granted : Boolean) also (m : NodeSet) {
+    client transition handleRequestVoteResponse(peer : Node, term : Int, granted : Boolean) also (m : NodeSet) {
         guard:
             VoteResponseMsg {
                 src := m,
                 dest := n,
-                id := peerId,
+                node := peer,
                 term := term,
                 granted := granted
             } in voteResponseMsgs
@@ -100,7 +100,7 @@ export spec Net[n : NodeSet] {
             voteResponseMsgs := voteResponseMsgs - setOf(VoteResponseMsg {
                 src := m,
                 dest := n,
-                id := peerId,
+                node := peer,
                 term := term,
                 granted := granted
             })
@@ -167,7 +167,7 @@ export spec Net[n : NodeSet] {
             appendEntriesResponseMsgs := appendEntriesResponseMsgs + setOf(AppendEntriesResponseMsg {
                 src := n,
                 dest := m,
-                id := RaftProtocol[n].self.id,
+                node := RaftProtocol[n].self,
                 term := outTerm,
                 success := success,
                 matchIdx := matchIdx
@@ -175,7 +175,7 @@ export spec Net[n : NodeSet] {
     }
 
     client transition handleAppendEntriesResponse(
-        peerId : Int,
+        peer : Node,
         inTerm : Int,
         success : Boolean,
         matchIdx : Int
@@ -184,7 +184,7 @@ export spec Net[n : NodeSet] {
             AppendEntriesResponseMsg {
                 src := m,
                 dest := n,
-                id := peerId,
+                node := peer,
                 term := inTerm,
                 success := success,
                 matchIdx := matchIdx
@@ -193,7 +193,7 @@ export spec Net[n : NodeSet] {
             appendEntriesResponseMsgs := appendEntriesResponseMsgs - setOf(AppendEntriesResponseMsg {
                 src := m,
                 dest := n,
-                id := peerId,
+                node := peer,
                 term := inTerm,
                 success := success,
                 matchIdx := matchIdx

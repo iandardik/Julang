@@ -2,6 +2,7 @@ import julay.funlib.min
 import specs.net.Net
 import node.core.RaftProtocol
 import specs.net.NodeSet
+import node.lib.Node
 
 invariant OneLeaderPerTerm := forall n1 : NodeSet, forall n2 : NodeSet,
     (RaftProtocol[n1].state = "Leader" & RaftProtocol[n2].state = "Leader" & RaftProtocol[n1].currentTerm = RaftProtocol[n2].currentTerm) => (n1 = n2)
@@ -15,7 +16,7 @@ invariant AllInvariants := OneLeaderPerTerm & StateMachineSafety
 spec ClusterSpec := RaftProtocol[n : NodeSet] {
     const global cluster
     init: cluster.length = NodeSet.length
-    init: forall i : Int, (i >= 1 & i <= cluster.length) => cluster[i].id = i
+    init: forall i : Int, (i >= 1 & i <= cluster.length) => (exists node : Node, node in cluster & node.id = i)
     init: forall n1 : NodeSet, forall n2 : NodeSet,
         (RaftProtocol[n1].self = RaftProtocol[n2].self) => (n1 = n2)
 }

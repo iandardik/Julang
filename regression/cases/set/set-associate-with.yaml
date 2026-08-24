@@ -1,0 +1,6 @@
+source: regression/input/set/set-associate-with.jul
+programs:
+  - name: AssociateWithTest
+    run:
+      background: true
+      durationMs: 500

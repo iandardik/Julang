@@ -1,0 +1,30 @@
+import julay.optional.Optional
+import julay.optional.some
+import julay.optional.none
+
+proc Box {
+    var opt : Optional<Int>
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            opt := none(0)
+            n := 0
+    }
+
+    transition put(v : Int) {
+        guard: v = 3 & ~opt.present
+        transit:
+            opt := some(v)
+            n := n + 1
+    }
+
+    transition check() {
+        guard: opt.present & opt.value = 3
+        transit: n := n + 1
+    }
+}
+
+spec OptionalSpec := Box
+
+compile OptionalSpec

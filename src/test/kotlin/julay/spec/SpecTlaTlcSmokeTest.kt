@@ -677,10 +677,11 @@ class SpecTlaTlcSmokeTest {
             "from-collection projection should not quantify t over Int;\n$tlaText",
         )
         assertTrue(
-            Regex("""\\E t \\in \{[^}]*term""").containsMatchIn(tlaText) ||
+            Regex("""\\E t \\in msgs""").containsMatchIn(tlaText) ||
+                Regex("""\\E t \\in \{[^}]*term""").containsMatchIn(tlaText) ||
                 tlaText.contains("{ m.term : m \\in") ||
                 tlaText.contains("{m.term : m \\in"),
-            "t should be quantified from the filter projection;\n$tlaText",
+            "t should be quantified from the filter projection (unwrapped set or m.term);\n$tlaText",
         )
         val (offText, _) = compileSpecTla(
             source,
@@ -757,6 +758,67 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun singletonSetInitEmitsSetLiteral() {
+        val source = File("regression/input/spec/tla-singleton-set-init.jul")
+        val (tlaText, _) = compileSpecTla(source, "SingletonSetInit")
+        val initBlock = tlaText.substringAfter("Init ==").substringBefore("\n\n")
+        assertTrue(
+            initBlock.contains("xs = {1, 2}") || initBlock.contains("Box_xs = {1, 2}"),
+            "singleton set init should assign {1, 2};\n$initBlock",
+        )
+        assertTrue(
+            !initBlock.contains("xs \\in SUBSET") && !initBlock.contains("Box_xs \\in SUBSET"),
+            "singleton set init should drop SUBSET membership;\n$initBlock",
+        )
+        assertTrue(
+            !Regex("""\\A i \\in Int :""").containsMatchIn(initBlock),
+            "singleton set init should drop covering filters;\n$initBlock",
+        )
+    }
+
+    @Test
+    fun associateWithEmitsFunctionComprehension() {
+        val source = File("regression/input/spec/set-associate-with-tla.jul")
+        val (tlaText, _) = compileSpecTla(source, "AssocMap")
+        assertTrue(
+            Regex("""\[__k \\in [^\]]*cluster[^\]]* \|-> 1]""").containsMatchIn(tlaText) ||
+                tlaText.contains("[__k \\in cluster |-> 1]") ||
+                tlaText.contains("[__k \\in Box_cluster |-> 1]"),
+            "associateWith should emit [__k \\in cluster |-> 1];\n$tlaText",
+        )
+        val typeOkBlock = tlaText.substringAfter("TypeOK ==").substringBefore("\n\n")
+        assertTrue(
+            typeOkBlock.contains("DOMAIN nextIndex[i] = cluster") ||
+                typeOkBlock.contains("DOMAIN nextIndex[i] = Box_cluster") ||
+                Regex("""DOMAIN \S*nextIndex\[[^\]]+\] = \S*cluster""").containsMatchIn(typeOkBlock),
+            "TypeOK should pin DOMAIN nextIndex to cluster;\n$typeOkBlock",
+        )
+    }
+
+    @Test
+    fun optionalRecordEmitsPresentValue() {
+        val source = File("regression/input/spec/tla-optional.jul")
+        val (tlaText, _) = compileSpecTla(source, "OptionalSpec")
+        assertTrue(
+            tlaText.contains("present:") &&
+                tlaText.contains("value:") &&
+                (tlaText.contains("present |-> FALSE") || tlaText.contains("present |-> false") ||
+                    tlaText.contains("[present |-> FALSE, value |-> 0]") ||
+                    tlaText.contains("present |-> FALSE")),
+            "Optional Init should be a present/value record;\n${tlaText.substringAfter("Init ==").take(2000)}",
+        )
+        val typeOkBlock = tlaText.substringAfter("TypeOK ==").substringBefore("\n\n")
+        assertTrue(
+            typeOkBlock.contains("present: BOOLEAN") && typeOkBlock.contains("value:"),
+            "TypeOK should type Optional as a present/value record;\n$typeOkBlock",
+        )
+        assertTrue(
+            !tlaText.contains("votedFor = -1") && !Regex("""opt = -1""").containsMatchIn(tlaText),
+            "Optional should not use Int -1 sentinels;\n$tlaText",
+        )
+    }
+
+    @Test
     fun cfgSkipsConjunctiveInvariant() {
         val source = File("regression/input/spec/tla-cfg-skip-conjunction.jul")
         val emit = compileSpecEmit(source, "ConjInv")
@@ -771,6 +833,27 @@ class SpecTlaTlcSmokeTest {
         assertTrue(
             !emit.cfgText.contains("INVARIANT C"),
             "cfg should omit the conjunctive name;\n${emit.cfgText}",
+        )
+    }
+
+    @Test
+    fun unwrapSingletonsDropsIdOnHofBinders() {
+        val source = File("regression/input/spec/tla-unwrap-hof-field.jul")
+        val (tlaText, _) = compileSpecTla(source, "UnwrapHofField")
+        val initBlock = tlaText.substringAfter("Init ==").substringBefore("\n\n")
+        assertTrue(
+            initBlock.contains("cluster = {1, 2, 3}") || initBlock.contains("Box_cluster = {1, 2, 3}"),
+            "unwrapped Node set init should be {1, 2, 3};\n$initBlock",
+        )
+        assertTrue(
+            !Regex("""\w+\.id""").containsMatchIn(tlaText),
+            "HOF/fun binders should unwrap Node.id;\n$tlaText",
+        )
+        assertTrue(
+            Regex("""\{ x \\in \S*cluster : \(x = id\) \}""").containsMatchIn(tlaText) ||
+                tlaText.contains("{ x \\in cluster : (x = id) }") ||
+                tlaText.contains("{ x \\in Box_cluster : (x = id) }"),
+            "lookup filter should compare the unwrapped binder, not x.id;\n$tlaText",
         )
     }
 
@@ -878,15 +961,17 @@ class SpecTlaTlcSmokeTest {
             "with (n) should share one binder for RaftProtocol and Net, not n_RaftProtocol;\n${tlaText.take(4000)}",
         )
         assertTrue(
-            Regex("""cluster = <<1, 2, 3>>""")
+            Regex("""cluster = \{1, 2, 3\}""")
                 .containsMatchIn(tlaText) ||
-                tlaText.contains("RaftProtocol_cluster = <<1, 2, 3>>"),
-            "Init should assign the identity cluster sequence;\n${tlaText.substringAfter("Init ==").take(2500)}",
+                tlaText.contains("RaftProtocol_cluster = {1, 2, 3}"),
+            "Init should assign the identity cluster set;\n${tlaText.substringAfter("Init ==").take(2500)}",
         )
         assertTrue(
             !tlaText.contains("cluster \\in BoundedSeq") &&
-                !tlaText.contains("RaftProtocol_cluster \\in BoundedSeq"),
-            "singleton cluster init should drop BoundedSeq membership;\n${tlaText.substringAfter("Init ==").take(2500)}",
+                !tlaText.contains("RaftProtocol_cluster \\in BoundedSeq") &&
+                !tlaText.substringAfter("Init ==").substringBefore("\n\n").contains("cluster \\in SUBSET") &&
+                !tlaText.substringAfter("Init ==").substringBefore("\n\n").contains("RaftProtocol_cluster \\in SUBSET"),
+            "singleton cluster init should drop BoundedSeq/SUBSET membership;\n${tlaText.substringAfter("Init ==").take(2500)}",
         )
         assertTrue(
             tlaText.contains("\\E n, m \\in NodeSet :") &&
@@ -911,7 +996,19 @@ class SpecTlaTlcSmokeTest {
         val initBlock = tlaText.substringAfter("Init ==").substringBefore("\n\n")
         assertTrue(
             !Regex("""\\A i \\in Int :""").containsMatchIn(initBlock),
-            "singleton cluster init should drop cluster[i] = i filters;\n$initBlock",
+            "singleton cluster init should drop covering-membership filters;\n$initBlock",
+        )
+        assertTrue(
+            !Regex("""\w+\.id""").containsMatchIn(tlaText),
+            "unwrap-singletons should drop .id on Node, including HOF binders;\n$tlaText",
+        )
+        assertTrue(
+            !tlaText.contains(".keys") &&
+                (
+                    tlaText.contains("DOMAIN matchIndex[n]") ||
+                        tlaText.contains("{ k \\in DOMAIN matchIndex")
+                    ),
+            "map .keys should emit DOMAIN, not record field keys;\n${tlaText.substringAfter("advanceCommitIndex(").take(800)}",
         )
         assertTrue(
             Regex("""self\[n1\] = self\[n2\]""").containsMatchIn(initBlock) &&
@@ -965,6 +1062,11 @@ class SpecTlaTlcSmokeTest {
             !Regex("""\\E n, m \\in NodeSet :[^\n]*handleRequestVoteRequest""").containsMatchIn(nextBlock) &&
                 !Regex("""\\E n, m \\in NodeSet :[^\n]*handleAppendEntriesResponse""").containsMatchIn(nextBlock),
             "handle Next should not wrap bag exists with \\E n, m \\in NodeSet;\n$nextBlock",
+        )
+        assertTrue(
+            !nextBlock.contains("\\E peer \\in Int : handleRequestVoteResponse") &&
+                !nextBlock.contains("\\E peer \\in Int : handleAppendEntriesResponse"),
+            "response handlers should bind peer from the message, not \\E peer \\in Int;\n$nextBlock",
         )
         assertTrue(
             nextBlock.contains("dropStaleResponse"),
@@ -1021,12 +1123,11 @@ class SpecTlaTlcSmokeTest {
                     constraintDef.contains("commitIndex[n] \\in Int") ||
                         constraintDef.contains("RaftProtocol_commitIndex[n] \\in Int")
                     ) &&
-                constraintDef.contains("\\cup {-1}") &&
                 (
                     Regex("""Len\([^)]*log\[n\]\)\s*<=\s*MaxListLen""").containsMatchIn(constraintDef) ||
                         Regex("""Len\(RaftProtocol_log\[n\]\)\s*<=\s*MaxListLen""").containsMatchIn(constraintDef)
                     ),
-            "CONSTRAINT should bind Int vars to cfg Int (plus -1) and list Len to MaxListLen;\n$constraintDef",
+            "CONSTRAINT should bind Int vars to cfg Int and list Len to MaxListLen;\n$constraintDef",
         )
         assertTrue(
             tlaText.contains("self \\in [NodeSet -> TypeOKInt]"),
@@ -1045,15 +1146,28 @@ class SpecTlaTlcSmokeTest {
             "TypeOK state should use the three roles, not String;\n$typeOkBlock",
         )
         assertTrue(
-            Regex("""Len\([^)]*nextIndex\[n\]\)\s*=\s*Len\([^)]*cluster""").containsMatchIn(typeOkBlock) ||
-                typeOkBlock.contains("Len(nextIndex[n]) = Len("),
-            "TypeOK should pin nextIndex length to cluster;\n$typeOkBlock",
+            Regex("""DOMAIN [^\n]*nextIndex\[n\]\s*=\s*[^\n]*cluster""").containsMatchIn(typeOkBlock) ||
+                typeOkBlock.contains("DOMAIN nextIndex[n] = cluster") ||
+                typeOkBlock.contains("DOMAIN nextIndex[n] = RaftProtocol_cluster"),
+            "TypeOK should pin nextIndex domain to cluster;\n$typeOkBlock",
         )
         assertTrue(
-            typeOkBlock.contains("votesGranted[n] \\subseteq Range(") ||
-                typeOkBlock.contains("votesGranted[n] \\subseteq Range(cluster") ||
-                typeOkBlock.contains("votesGranted[n] \\subseteq Range(RaftProtocol_cluster"),
-            "TypeOK should pin votesGranted to Range(cluster);\n$typeOkBlock",
+            typeOkBlock.contains("[RaftProtocol_cluster -> TypeOKInt]") ||
+                typeOkBlock.contains("[cluster -> TypeOKInt]") ||
+                Regex("""nextIndex \\in \[NodeSet -> \[[^\]]*cluster[^\]]* -> TypeOKInt]]""").containsMatchIn(typeOkBlock),
+            "TypeOK nextIndex must use enumerable cluster as the map domain, not TypeOKInt;\n$typeOkBlock",
+        )
+        assertTrue(
+            !typeOkBlock.contains("SUBSET TypeOKInt") && !typeOkBlock.contains("[TypeOKInt -> TypeOKInt]"),
+            "TypeOK must not ask TLC to enumerate TypeOKInt as a set/function domain;\n$typeOkBlock",
+        )
+        assertTrue(
+            (
+                typeOkBlock.contains("votesGranted[n] \\subseteq cluster") ||
+                    typeOkBlock.contains("votesGranted[n] \\subseteq RaftProtocol_cluster")
+                ) &&
+                !typeOkBlock.contains("votesGranted[n] \\subseteq Range("),
+            "TypeOK should pin votesGranted to cluster;\n$typeOkBlock",
         )
         assertTrue(
             tlaText.contains("\\A n1, n2 \\in NodeSet :") &&
@@ -1078,11 +1192,15 @@ class SpecTlaTlcSmokeTest {
             "user-specified invariants should be separated by a blank line;\n${tlaText.substringAfter("user-specified invariants").take(1200)}",
         )
         assertTrue(
-            tlaText.contains("votedFor \\in [NodeSet -> TypeOKInt]") &&
+            (
+                tlaText.contains("votedFor \\in [NodeSet -> [present: BOOLEAN, value: TypeOKInt]]") ||
+                    tlaText.contains("votedFor \\in [NodeSet -> [present: BOOLEAN, value: TypeOKInt]") ||
+                    Regex("""votedFor \\in \[NodeSet -> \[present: BOOLEAN, value: TypeOKInt]]""").containsMatchIn(tlaText)
+                ) &&
+                !tlaText.contains("votedFor \\in [NodeSet -> TypeOKInt]") &&
                 tlaText.contains("TypeOKInt == Int \\cup Nat \\cup {") &&
-                tlaText.contains("-1") &&
                 Regex("""\\* cfg Int[^\n]+\nTypeOKInt ==""").containsMatchIn(tlaText),
-            "TypeOKInt should union Int, Nat, and extras including -1;\n${tlaText.substringAfter("automatically generated invariants").take(2500)}",
+            "votedFor should be Optional records; TypeOKInt should union Int and Nat;\n${tlaText.substringAfter("automatically generated invariants").take(2500)}",
         )
         assertTrue(
             !Regex("""LET nextLogIndex ==[^\n]* IN\s+LET prevLogIndex""").containsMatchIn(tlaText) &&
@@ -1105,8 +1223,8 @@ class SpecTlaTlcSmokeTest {
             tlaOptConfig = TlaOptConfig.fromDisableTlaOptFlag("unused-vars"),
         )
         assertTrue(
-            offVars.contains("knownLeaderId"),
-            "disabling unused-vars should restore knownLeaderId;\n${offVars.take(4000)}",
+            offVars.contains("knownLeader"),
+            "disabling unused-vars should restore knownLeader;\n${offVars.take(4000)}",
         )
         assertTrue(
             offWarn.any { it.contains("unused-fields") && it.contains("\"url\"") },

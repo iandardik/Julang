@@ -2324,6 +2324,14 @@ class MethodCallExprNode(
                     else -> throw RuntimeException("map expected List or Set at $loc")
                 }
             }
+            "associateWith" -> {
+                val p = paramNames.single()
+                val bodyStr = body.toTransitString(extendedTypes, argSymbols)
+                when (baseExpr.getType()) {
+                    is SetType -> "$base.associateWith { $p -> $bodyStr }"
+                    else -> throw RuntimeException("associateWith expected Set at $loc")
+                }
+            }
             "fold" -> {
                 val init = args[0].toTransitString(symbolTypes, argSymbols)
                 val acc = paramNames[0]

@@ -41,10 +41,10 @@ procfun outRequestVoteRPC(
             step := "handleResponse"
     }
 
-    client transition handleRequestVoteResponse(peerId : Int, term : Int, granted : Boolean) {
+    client transition handleRequestVoteResponse(peer : Node, term : Int, granted : Boolean) {
         guard:
             & step = "handleResponse"
-            & peerId = peer.id
+            & peer = this.peer
             & term = responseTerm
             & granted = grantedFlag
         return:
@@ -89,14 +89,14 @@ procfun outAppendEntriesRPC(peer : Node, data : AppendEntriesData) : Boolean {
     }
 
     client transition handleAppendEntriesResponse(
-        peerId : Int,
+        peer : Node,
         inTerm : Int,
         success : Boolean,
         matchIdx : Int
     ) {
         guard:
             & step = "handleResponse"
-            & peerId = peer.id
+            & peer = this.peer
             & inTerm = responseTerm
             & success = successFlag
             & matchIdx = matchIdxVal

@@ -26,6 +26,10 @@ Write normal `proc` / `api` / `fun` / `spec` declarations. Use `export` when the
 
 Pure or effectful functions in `.jul` are declared with `export fun` under `stdlib/julay/funlib/` and imported as `julay.funlib.<funName>`. A module may export several funs (e.g. [`math.jul`](../../src/main/resources/stdlib/julay/funlib/math.jul) exports `max` / `min`); callers still import each by function name. Effectful functions must follow the same `before` / `transit` / `after` rules as the rest of the language ([Side effects](effects.md)).
 
+### Optional
+
+[`optional.jul`](../../src/main/resources/stdlib/julay/optional.jul) is a multi-export stdlib module: import `julay.optional.Optional`, `julay.optional.some`, and `julay.optional.none` (same name-per-import rule as funlib). See [Standard library — Optional](standard-library.md#optional).
+
 ### Example pattern (proclib)
 
 See [`Timer.jul`](../../src/main/resources/stdlib/julay/proclib/Timer.jul): a `proc` with session constructors/transitions, funlib effects (`delaySeconds`, `exitSession`, …), and an optional `spec` for model checking.

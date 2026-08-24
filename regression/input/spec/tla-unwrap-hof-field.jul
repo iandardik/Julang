@@ -1,0 +1,35 @@
+sort Ids := { "a", "b", "c" }
+
+obj Node {
+    id : Int
+    url : String
+}
+
+fun lookup(cluster : Set<Node>, id : Int) : Node =
+    cluster.filter(x -> x.id = id).toList()[1]
+
+proc Box {
+    const cluster : Set<Node>
+    var n : Int
+
+    constructor start(cluster : Set<Node>) {
+        transit:
+            cluster := cluster
+            n := 0
+        error:
+            cluster.map(x -> x.id).length ~= cluster.length -> "dup ids"
+    }
+
+    transition pick(id : Int) {
+        guard: lookup(cluster, id) in cluster
+        transit: n := n + 1
+    }
+}
+
+spec UnwrapHofField := Box[i : Ids] {
+    const global cluster
+    init: cluster.length = Ids.length
+    init: forall i : Int, (i >= 1 & i <= cluster.length) => (exists node : Node, node in cluster & node.id = i)
+}
+
+compile UnwrapHofField

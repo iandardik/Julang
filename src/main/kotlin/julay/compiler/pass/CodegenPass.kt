@@ -408,7 +408,8 @@ private fun fieldToZ3ExprString(valueExpr: String, type: Type): String = when (t
     is RealType -> "ctx.mkReal($valueExpr.toString())"
     is StringType -> "ctx.mkString($valueExpr)"
     is ObjClassType -> "${objClassToZ3FunName(type.name)}(ctx, $valueExpr)"
-    is ListType -> "${type.toCodegenTypeVal()}.toZ3Expr(Value($valueExpr, ${type.toCodegenTypeVal()}), ctx)"
+    is ListType, is SetType, is MapType ->
+        "${type.toCodegenTypeVal()}.toZ3Expr(Value($valueExpr, ${type.toCodegenTypeVal()}), ctx)"
     else -> throw RuntimeException("Invalid field type for Z3 conversion: $type")
 }
 
@@ -418,7 +419,7 @@ private fun fieldFromZ3ExprString(exprStr: String, type: Type): String = when (t
     is RealType -> "realType.fromZ3Expr($exprStr, model) as Double"
     is StringType -> "stringType.fromZ3Expr($exprStr, model) as String"
     is ObjClassType -> "${objClassFromZ3FunName(type.name)}($exprStr, model)"
-    is ListType ->
+    is ListType, is SetType, is MapType ->
         "@Suppress(\"UNCHECKED_CAST\") (${type.toCodegenTypeVal()}.fromZ3Expr($exprStr, model) as ${type.toKotlinTypeString()})"
     else -> throw RuntimeException("Invalid field type for Z3 conversion: $type")
 }
@@ -428,8 +429,7 @@ private fun Type.toZ3ExprTypeString(): String = when (this) {
     is IntType -> "IntExpr"
     is RealType -> "RealExpr"
     is StringType -> "Expr<SeqSort<CharSort>>"
-    is ObjClassType -> "Expr<*>"
-    is ListType -> "Expr<*>"
+    is ObjClassType, is ListType, is SetType, is MapType -> "Expr<*>"
     else -> throw RuntimeException("Invalid field type for Z3 expr: $this")
 }
 

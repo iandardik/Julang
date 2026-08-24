@@ -35,6 +35,17 @@ internal object TlaSymbolTypes {
     fun set(types: Map<String, Type>) {
         current.set(types)
     }
+
+    fun <T> withExtra(extra: Map<String, Type>, block: () -> T): T {
+        if (extra.isEmpty()) return block()
+        val prev = current.get()
+        current.set(prev + extra)
+        try {
+            return block()
+        } finally {
+            current.set(prev)
+        }
+    }
 }
 
 fun compileSpecToTla(
@@ -374,6 +385,7 @@ private fun emitProjectedTla(
             consumedInitExprs += hit.consumed
         }
     }
+    dropConsumedOnlyTypeConstants(leaves, invClosure, consumedInitExprs, constants)
     val variables = mutableListOf<String>()
     val initParts = mutableListOf<String>()
     val typeOkParts = mutableListOf<String>()
@@ -415,6 +427,9 @@ private fun emitProjectedTla(
                 if (!TlaVarProjection.get().isRelevant(leaf.name, vn.name)) return@forEach
                 val v = stateTlaName(leaf.tlaName, vn.name, stateVarNames)
                 variables += v
+                val typeOkRange = typeOkRangeForVar(
+                    leaf, vn, typeOkIntRange, typeOkShapes, stateVarNames, binder,
+                )
                 val folded = foldCtor?.let {
                     foldedCtorVarInit(
                         leaf, vn, it, binder, domain, stateVarNames, constants, cfgOverrides, stateVarsByLeaf,
@@ -424,13 +439,13 @@ private fun emitProjectedTla(
                 if (folded != null) {
                     initParts += folded
                     if (leaf.indexesState(vn.name)) {
-                        typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange, leafClass = leaf.name, varName = vn.name), domain)
+                        typeOkParts += typeOkConjunct(v, typeOkRange, domain)
                     } else {
-                        typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange, leafClass = leaf.name, varName = vn.name), null)
+                        typeOkParts += typeOkConjunct(v, typeOkRange, null)
                     }
                 } else if (leaf.indexesState(vn.name)) {
                     initParts += "/\\ $v = [$binder \\in $domain |-> ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}]"
-                    typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange, leafClass = leaf.name, varName = vn.name), domain)
+                    typeOkParts += typeOkConjunct(v, typeOkRange, domain)
                 } else if (vn.name in leaf.globalConstVars) {
                     val singleton = singletonConstGlobals[leaf.tlaName to vn.name]
                     if (singleton != null) {
@@ -438,10 +453,10 @@ private fun emitProjectedTla(
                     } else {
                         initParts += "/\\ $v \\in ${typeToTlaDomain(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
                     }
-                    typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange, leafClass = leaf.name, varName = vn.name), null)
+                    typeOkParts += typeOkConjunct(v, typeOkRange, null)
                 } else {
                     initParts += "/\\ $v = ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
-                    typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange, leafClass = leaf.name, varName = vn.name), null)
+                    typeOkParts += typeOkConjunct(v, typeOkRange, null)
                 }
                 typeOkParts += typeOkShapeConjuncts(
                     leaf, vn.name, v, leaf.indexesState(vn.name), binder, domain,
@@ -490,7 +505,11 @@ private fun emitProjectedTla(
                 } else {
                     initParts += "/\\ $v = ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
                 }
-                typeOkParts += typeOkConjunct(v, typeOkVarRange(safeType(vn), typeOkIntRange, leafClass = leaf.name, varName = vn.name), null)
+                typeOkParts += typeOkConjunct(
+                    v,
+                    typeOkRangeForVar(leaf, vn, typeOkIntRange, typeOkShapes, stateVarNames, null),
+                    null,
+                )
                 typeOkParts += typeOkShapeConjuncts(
                     leaf, vn.name, v, indexed = false, binder = null, domain = null,
                     typeOkShapes, stateVarNames,
@@ -508,7 +527,9 @@ private fun emitProjectedTla(
             }
         }
     }
-    if (constraintParts.any { "\\in Int" in it }) {
+    if (constraintParts.any { "\\in Int" in it } ||
+        typeOkParts.any { "SUBSET Int" in it || "[Int ->" in it }
+    ) {
         cfgOverrides += "Int"
     }
     // Procfun spawn-await handshake vars
@@ -1172,6 +1193,8 @@ private fun typeOkVarRange(
     fieldName: String? = null,
     leafClass: String? = null,
     varName: String? = null,
+    mapKeyUniverse: String? = null,
+    setUniverse: String? = null,
 ): String {
     closedLiteralDomain(type, leafClass, varName, fieldOfObj, fieldName)?.let { return it }
     return when (type) {
@@ -1180,9 +1203,14 @@ private fun typeOkVarRange(
         is StringType -> "String"
         is SortType -> type.name
         is ListType -> "Seq(${typeOkVarRange(type.elementType, intRange)})"
-        is SetType -> "SUBSET ${typeOkVarRange(type.elementType, intRange)}"
-        is MapType ->
-            "[${typeOkVarRange(type.keyType, intRange)} -> ${typeOkVarRange(type.valueType, intRange)}]"
+        is SetType -> {
+            val univ = setUniverse ?: typeOkEnumerableUniverse(type.elementType, intRange)
+            "SUBSET $univ"
+        }
+        is MapType -> {
+            val key = mapKeyUniverse ?: typeOkEnumerableUniverse(type.keyType, intRange)
+            "[$key -> ${typeOkVarRange(type.valueType, intRange)}]"
+        }
         is ObjClassType -> {
             val single = TlaFieldProjection.get().singletonField(type)
             if (single != null) {
@@ -1201,6 +1229,39 @@ private fun typeOkVarRange(
         }
         else -> intRange
     }
+}
+
+/**
+ * TLC can check `x \in TypeOKInt` pointwise, but `SUBSET TypeOKInt` and `[TypeOKInt -> T]`
+ * require an enumerable universe. Cfg `Int` is finite; prefer a known state collection
+ * ([mapKeyUniverse] / [setUniverse]) when TypeOK shapes provide one.
+ */
+private fun typeOkEnumerableUniverse(type: Type, intRange: String): String =
+    if (tlaElemIsInt(type)) "Int" else typeOkVarRange(type, intRange)
+
+private fun typeOkRangeForVar(
+    leaf: SpecLeaf,
+    vn: VarNode,
+    intRange: String,
+    shapes: TypeOkShapePlan,
+    stateVarNames: Map<Pair<String, String>, String>,
+    binder: String?,
+): String {
+    fun srcRead(src: String): String {
+        val srcTla = stateTlaName(leaf.tlaName, src, stateVarNames)
+        return if (leaf.indexesState(src) && binder != null) "$srcTla[$binder]" else srcTla
+    }
+    val mapKey = shapes.domainEq[leaf.tlaName to vn.name]?.let { srcRead(it) }
+    val setUniv = shapes.subsetSrc[leaf.tlaName to vn.name]?.let { srcRead(it) }
+        ?: shapes.subsetRange[leaf.tlaName to vn.name]?.let { "Range(${srcRead(it)})" }
+    return typeOkVarRange(
+        safeType(vn),
+        intRange,
+        leafClass = leaf.name,
+        varName = vn.name,
+        mapKeyUniverse = mapKey,
+        setUniverse = setUniv,
+    )
 }
 
 private fun closedLiteralDomain(
@@ -2676,6 +2737,26 @@ private fun emitInitConstraintParts(
     }
 }
 
+/** Drop CONSTANT names that appear only in singleton-consumed `init:` (e.g. `exists node : Node`). */
+private fun dropConsumedOnlyTypeConstants(
+    leaves: List<SpecLeaf>,
+    invClosure: List<InvariantNode>,
+    consumedInitExprs: Set<ExprNode>,
+    constants: MutableSet<String>,
+) {
+    if (consumedInitExprs.isEmpty()) return
+    val fromConsumed = linkedSetOf<String>()
+    consumedInitExprs.forEach { collectTypeConstants(it, fromConsumed) }
+    val fromLive = linkedSetOf<String>()
+    invClosure.forEach { collectTypeConstants(it.invariantFormula(), fromLive) }
+    leaves.forEach { leaf ->
+        leaf.initExprs.forEach { expr ->
+            if (expr !in consumedInitExprs) collectTypeConstants(expr, fromLive)
+        }
+    }
+    constants.removeAll(fromConsumed - fromLive)
+}
+
 /** Last `x := arg` assign in a constructor (const-global binds handled separately). */
 private fun ctorArgStateAssigns(offer: TlaActionOffer): Map<String, String> {
     val argNames = offer.decl.action.args.map { it.name }.toSet()
@@ -4100,17 +4181,20 @@ internal fun emitFunOperatorDef(funNode: FunNode, reservedNames: Set<String> = e
         "${funNode.name()}(${renamed.values.joinToString(", ")})"
     }
     val bodyExpr = funNode.funBody()
-    val body = exprToTla(
-        bodyExpr,
-        leafCtx = emptyMap(),
-        argNames = renamed.values.toSet(),
-        self = null,
-        bareStateVars = emptySet(),
-        stateVarNames = emptyMap(),
-        symbolOverrides = renamed,
-        linePrefix = "  ",
-        parentPrec = PREC_BOTTOM,
-    )
+    val paramTypes = params.associate { it.name to it.type }
+    val body = TlaSymbolTypes.withExtra(paramTypes) {
+        exprToTla(
+            bodyExpr,
+            leafCtx = emptyMap(),
+            argNames = renamed.values.toSet(),
+            self = null,
+            bareStateVars = emptySet(),
+            stateVarNames = emptyMap(),
+            symbolOverrides = renamed,
+            linePrefix = "  ",
+            parentPrec = PREC_BOTTOM,
+        )
+    }
     return if (body.contains('\n') || isMultiLineExpr(bodyExpr)) {
         "$header ==\n  $body"
     } else {
@@ -4262,13 +4346,20 @@ internal fun wrapTlaLet(bindings: List<Pair<String, String>>, body: String): Str
     }
 }
 
-/** `{ x.f : x \in S }` or a UNION of several, from exists-from-projection. */
+/** `{ x.f : x \in S }` or a UNION of several, from exists-from-projection.
+ * After unwrap-singletons, `x.f` may collapse to `x`; emit `S` instead of `{ x : x \in S }`.
+ */
 internal fun emitProjectedArgDomain(
     bind: ProjectedArgBind,
     emit: (ExprNode) -> String,
 ): String {
     val parts = bind.sources.map { src ->
-        "{ ${emit(src.projection)} : ${src.param} \\in ${emit(src.set)} }"
+        val env = src.param to collectionElementType(src.set)
+        TlaSymbolTypes.withExtra(env.second?.let { mapOf(env.first to it) } ?: emptyMap()) {
+            val projected = emit(src.projection)
+            val set = emit(src.set)
+            if (projected == src.param) set else "{ $projected : ${src.param} \\in $set }"
+        }
     }
     return if (parts.size == 1) {
         parts.single()
@@ -4829,7 +4920,7 @@ internal fun exprToTla(
             // Lambda / HOF binder substitution (e.g. map(e -> e.value)).
             if (base in symbolOverrides) {
                 val baseRendered = symbolOverrides.getValue(base)
-                return emitUnwrappedFieldPath(baseRendered, TlaSymbolTypes.get()[base], expr.fieldPath)
+                return emitPeerPropPath(baseRendered, TlaSymbolTypes.get()[base], expr.fieldPath)
             }
             val isObjectField = base in argNames || base in bareStateVars
             val leafVarName = expr.fieldPath.singleOrNull()?.let { stateVarNames[base to it] }
@@ -4845,7 +4936,7 @@ internal fun exprToTla(
                     }
                     else -> base
                 }
-                emitUnwrappedFieldPath(baseRendered, TlaSymbolTypes.get()[base], expr.fieldPath)
+                emitPeerPropPath(baseRendered, TlaSymbolTypes.get()[base], expr.fieldPath)
             }
         }
         is MemberAccessExprNode -> {
@@ -4957,7 +5048,9 @@ internal fun exprToTla(
                     val hofParams = expr.hofParamNamesOrNull()
                     when {
                         hofBody != null && hofParams != null && hofParams.size == 1 ->
-                            emitMapLambdaToTla(expr.baseExpr, hofParams[0], hofBody, ::rec, ::recWithOverrides)
+                            TlaSymbolTypes.withExtra(hofBinderTypes(listOf(hofParams[0]), expr, expr.baseExpr)) {
+                                emitMapLambdaToTla(expr.baseExpr, hofParams[0], hofBody, ::rec, ::recWithOverrides)
+                            }
                         f != null ->
                             emitMapToTla(expr.baseExpr, f, ::rec, ::recWithOverrides)
                         else -> unresolvedTlaCall("method", "map")
@@ -4971,20 +5064,31 @@ internal fun exprToTla(
                     }
                     val p = hofParams[0]
                     val xs = rec(expr.baseExpr)
-                    when (try { expr.baseExpr.getType() } catch (_: RuntimeException) { null }) {
-                        is ListType -> {
-                            val pred = recWithOverrides(hofBody, mapOf(p to p))
-                            "SelectSeq($xs, LAMBDA $p: $pred)"
+                    TlaSymbolTypes.withExtra(hofBinderTypes(listOf(p), expr, expr.baseExpr)) {
+                        when (try { expr.baseExpr.getType() } catch (_: RuntimeException) { null }) {
+                            is ListType -> {
+                                val pred = recWithOverrides(hofBody, mapOf(p to p))
+                                "SelectSeq($xs, LAMBDA $p: $pred)"
+                            }
+                            is SetType -> {
+                                val pred = recWithOverrides(hofBody, mapOf(p to p))
+                                "{ $p \\in $xs : $pred }"
+                            }
+                            else -> unresolvedTlaCall("method", "filter")
                         }
-                        is SetType -> {
-                            val pred = recWithOverrides(hofBody, mapOf(p to p))
-                            "{ $p \\in $xs : $pred }"
-                        }
-                        else -> unresolvedTlaCall("method", "filter")
                     }
                 }
                 "toSet" -> "Range(${rec(expr.baseExpr)})"
                 "toList" -> "SetToSeq(${rec(expr.baseExpr)})"
+                "associateWith" -> {
+                    val hofBody = expr.hofBodyOrNull()
+                    val hofParams = expr.hofParamNamesOrNull()
+                    if (hofBody == null || hofParams == null || hofParams.size != 1) {
+                        unresolvedTlaCall("method", "associateWith")
+                    } else {
+                        emitAssociateWithToTla(expr.baseExpr, hofParams[0], hofBody, ::rec, ::recWithOverrides)
+                    }
+                }
                 else -> unresolvedTlaCall("method", expr.methodName)
             }
         }
@@ -5211,6 +5315,27 @@ internal fun exprToTla(
     }
 }
 
+private fun collectionElementType(expr: ExprNode): Type? =
+    try {
+        when (val t = expr.getType()) {
+            is ListType -> t.elementType
+            is SetType -> t.elementType
+            else -> null
+        }
+    } catch (_: RuntimeException) {
+        null
+    }
+
+private fun hofBinderTypes(params: List<String>, call: MethodCallExprNode, xsExpr: ExprNode): Map<String, Type> {
+    val declared = call.hofParamTypesOrNull()
+    val fallback = collectionElementType(xsExpr)
+    val out = mutableMapOf<String, Type>()
+    params.forEachIndexed { i, p ->
+        (declared?.getOrNull(i) ?: fallback)?.let { out[p] = it }
+    }
+    return out
+}
+
 private fun emitMapLambdaToTla(
     xsExpr: ExprNode,
     param: String,
@@ -5219,19 +5344,38 @@ private fun emitMapLambdaToTla(
     recWithOverrides: (ExprNode, Map<String, String>) -> String,
 ): String {
     val xs = rec(xsExpr)
-    return when (try { xsExpr.getType() } catch (_: RuntimeException) { null }) {
-        is ListType -> {
-            val i = "__i"
-            val elem = "$xs[$i]"
-            val mapped = recWithOverrides(body, mapOf(param to elem))
-            "[$i \\in DOMAIN $xs |-> $mapped]"
+    val env = param to collectionElementType(xsExpr)
+    return TlaSymbolTypes.withExtra(env.second?.let { mapOf(env.first to it) } ?: emptyMap()) {
+        when (try { xsExpr.getType() } catch (_: RuntimeException) { null }) {
+            is ListType -> {
+                val i = "__i"
+                val elem = "$xs[$i]"
+                val mapped = recWithOverrides(body, mapOf(param to elem))
+                "[$i \\in DOMAIN $xs |-> $mapped]"
+            }
+            is SetType -> {
+                val mapped = recWithOverrides(body, mapOf(param to param))
+                "{ $mapped : $param \\in $xs }"
+            }
+            else -> "TRUE"
         }
-        is SetType -> {
-            val mapped = recWithOverrides(body, mapOf(param to param))
-            "{ $mapped : $param \\in $xs }"
-        }
-        else -> "TRUE"
     }
+}
+
+private fun emitAssociateWithToTla(
+    xsExpr: ExprNode,
+    param: String,
+    body: ExprNode,
+    rec: (ExprNode) -> String,
+    recWithOverrides: (ExprNode, Map<String, String>) -> String,
+): String {
+    val xs = rec(xsExpr)
+    val k = "__k"
+    val env = param to collectionElementType(xsExpr)
+    val mapped = TlaSymbolTypes.withExtra(env.second?.let { mapOf(env.first to it) } ?: emptyMap()) {
+        recWithOverrides(body, mapOf(param to k))
+    }
+    return "[$k \\in $xs |-> $mapped]"
 }
 
 private fun emitMapToTla(

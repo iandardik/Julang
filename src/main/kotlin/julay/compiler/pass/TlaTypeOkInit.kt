@@ -4,6 +4,7 @@ import julay.compiler.ast.*
 import julay.compiler.decl.TransitUpdate
 import julay.program.type.IntType
 import julay.program.type.ListType
+import julay.program.type.MapType
 import julay.program.type.SetType
 import julay.program.type.SortType
 import julay.program.type.Type
@@ -15,7 +16,9 @@ internal data class SingletonInitHit(
 
 internal data class TypeOkShapePlan(
     val lenEq: Map<Pair<String, String>, String>,
+    val domainEq: Map<Pair<String, String>, String>,
     val subsetRange: Map<Pair<String, String>, String>,
+    val subsetSrc: Map<Pair<String, String>, String>,
 ) {
     val usesRange: Boolean get() = subsetRange.isNotEmpty()
 }
@@ -30,15 +33,24 @@ internal fun matchSingletonConstGlobalInit(
     initExprs: List<ExprNode>,
     sorts: Map<String, SortType>,
 ): SingletonInitHit? {
-    val listTy = type as? ListType ?: return null
-    if (!tlaElemIsInt(listTy.elementType)) return null
     val lenHit = initExprs.mapNotNull { expr ->
         lengthEqSize(expr, varName, sorts)?.let { expr to it }
     }.singleOrNull() ?: return null
-    val idHit = initExprs.firstOrNull { isIdentityIndexInit(it, varName) } ?: return null
     if (lenHit.second < 0) return null
     val elems = (1..lenHit.second).joinToString(", ")
-    return SingletonInitHit("<<$elems>>", listOf(lenHit.first, idHit))
+    return when (type) {
+        is ListType -> {
+            if (!tlaElemIsInt(type.elementType)) return null
+            val idHit = initExprs.firstOrNull { isIdentityIndexInit(it, varName) } ?: return null
+            SingletonInitHit("<<$elems>>", listOf(lenHit.first, idHit))
+        }
+        is SetType -> {
+            if (!tlaElemIsInt(type.elementType)) return null
+            val coverHit = initExprs.firstOrNull { isCoveringMembershipInit(it, varName) } ?: return null
+            SingletonInitHit("{$elems}", listOf(lenHit.first, coverHit))
+        }
+        else -> null
+    }
 }
 
 internal fun analyzeTypeOkShapes(
@@ -47,29 +59,36 @@ internal fun analyzeTypeOkShapes(
     offers: List<TlaActionOffer>,
 ): TypeOkShapePlan {
     val lenEq = linkedMapOf<Pair<String, String>, String>()
+    val domainEq = linkedMapOf<Pair<String, String>, String>()
     val subsetRange = linkedMapOf<Pair<String, String>, String>()
+    val subsetSrc = linkedMapOf<Pair<String, String>, String>()
     leaves.forEach { leaf ->
         val pc = pclasses[leaf.name] ?: return@forEach
         val vars = pc.localDecls().filterIsInstance<VarNode>()
         val mapSources = linkedMapOf<String, String>()
+        val assocSources = linkedMapOf<String, String>()
         val mapConflicted = mutableSetOf<String>()
+        val assocConflicted = mutableSetOf<String>()
         val declared = vars.map { it.name }.toSet()
         offers.filter { it.leaf.tlaName == leaf.tlaName }.forEach { offer ->
             offer.decl.transits.filterIsInstance<TransitUpdate.Assign>().forEach { update ->
-                val src = mapSourceVar(update.expr) ?: return@forEach
-                if (src !in declared) return@forEach
-                if (!TlaVarProjection.get().isRelevant(leaf.name, src)) return@forEach
+                val hof = hofSourceVar(update.expr) ?: return@forEach
+                if (hof.src !in declared) return@forEach
+                if (!TlaVarProjection.get().isRelevant(leaf.name, hof.src)) return@forEach
                 val root = update.transitRootVar()
                 if (!TlaVarProjection.get().isRelevant(leaf.name, root)) return@forEach
-                val prev = mapSources[root]
-                if (prev != null && prev != src) {
-                    mapConflicted += root
+                val dest = if (hof.method == "associateWith") assocSources else mapSources
+                val conflicted = if (hof.method == "associateWith") assocConflicted else mapConflicted
+                val prev = dest[root]
+                if (prev != null && prev != hof.src) {
+                    conflicted += root
                 } else {
-                    mapSources[root] = src
+                    dest[root] = hof.src
                 }
             }
         }
         mapSources.keys.removeAll(mapConflicted)
+        assocSources.keys.removeAll(assocConflicted)
         mapSources.forEach { (listVar, src) ->
             val vn = vars.firstOrNull { it.name == listVar } ?: return@forEach
             val ty = try {
@@ -81,7 +100,18 @@ internal fun analyzeTypeOkShapes(
                 lenEq[leaf.tlaName to listVar] = src
             }
         }
-        val clusterSources = mapSources.values.distinct()
+        assocSources.forEach { (mapVar, src) ->
+            val vn = vars.firstOrNull { it.name == mapVar } ?: return@forEach
+            val ty = try {
+                vn.type
+            } catch (_: RuntimeException) {
+                return@forEach
+            }
+            if (ty is MapType) {
+                domainEq[leaf.tlaName to mapVar] = src
+            }
+        }
+        val clusterSources = (mapSources.values + assocSources.values).distinct()
         if (clusterSources.size != 1) return@forEach
         val sourceName = clusterSources.single()
         val sourceVn = vars.firstOrNull { it.name == sourceName } ?: return@forEach
@@ -89,7 +119,7 @@ internal fun analyzeTypeOkShapes(
             sourceVn.type
         } catch (_: RuntimeException) {
             return@forEach
-        } as? ListType ?: return@forEach
+        }
         vars.forEach { vn ->
             if (vn.name == sourceName) return@forEach
             val ty = try {
@@ -97,12 +127,23 @@ internal fun analyzeTypeOkShapes(
             } catch (_: RuntimeException) {
                 return@forEach
             }
-            if (ty is SetType && tlaElemIsInt(ty.elementType) && tlaElemIsInt(sourceTy.elementType)) {
-                subsetRange[leaf.tlaName to vn.name] = sourceName
+            if (ty !is SetType || !tlaElemIsInt(ty.elementType)) return@forEach
+            when (sourceTy) {
+                is ListType -> {
+                    if (tlaElemIsInt(sourceTy.elementType)) {
+                        subsetRange[leaf.tlaName to vn.name] = sourceName
+                    }
+                }
+                is SetType -> {
+                    if (tlaElemIsInt(sourceTy.elementType)) {
+                        subsetSrc[leaf.tlaName to vn.name] = sourceName
+                    }
+                }
+                else -> {}
             }
         }
     }
-    return TypeOkShapePlan(lenEq, subsetRange)
+    return TypeOkShapePlan(lenEq, domainEq, subsetRange, subsetSrc)
 }
 
 internal fun cfgSkipConjunctiveInvariants(invClosure: List<InvariantNode>): Set<String> {
@@ -134,11 +175,33 @@ internal fun typeOkShapeConjuncts(
             "/\\ $body"
         }
     }
+    shapes.domainEq[leaf.tlaName to varName]?.let { src ->
+        val srcTla = stateTlaName(leaf.tlaName, src, stateVarNames)
+        val srcRead = if (leaf.indexesState(src) && binder != null) "$srcTla[$binder]" else srcTla
+        val lhs = if (indexed && binder != null) "DOMAIN $tlaName[$binder]" else "DOMAIN $tlaName"
+        val body = "$lhs = $srcRead"
+        parts += if (indexed && binder != null && domain != null) {
+            "/\\ \\A $binder \\in $domain : $body"
+        } else {
+            "/\\ $body"
+        }
+    }
     shapes.subsetRange[leaf.tlaName to varName]?.let { src ->
         val srcTla = stateTlaName(leaf.tlaName, src, stateVarNames)
         val srcRead = if (leaf.indexesState(src) && binder != null) "$srcTla[$binder]" else srcTla
         val lhs = if (indexed && binder != null) "$tlaName[$binder]" else tlaName
         val body = "$lhs \\subseteq Range($srcRead)"
+        parts += if (indexed && binder != null && domain != null) {
+            "/\\ \\A $binder \\in $domain : $body"
+        } else {
+            "/\\ $body"
+        }
+    }
+    shapes.subsetSrc[leaf.tlaName to varName]?.let { src ->
+        val srcTla = stateTlaName(leaf.tlaName, src, stateVarNames)
+        val srcRead = if (leaf.indexesState(src) && binder != null) "$srcTla[$binder]" else srcTla
+        val lhs = if (indexed && binder != null) "$tlaName[$binder]" else tlaName
+        val body = "$lhs \\subseteq $srcRead"
         parts += if (indexed && binder != null && domain != null) {
             "/\\ \\A $binder \\in $domain : $body"
         } else {
@@ -158,7 +221,7 @@ private fun isNamedConjunctionOfOthers(node: InvariantNode, names: Set<String>):
     }
 }
 
-private fun tlaElemIsInt(type: Type): Boolean {
+internal fun tlaElemIsInt(type: Type): Boolean {
     if (type is IntType) return true
     if (!TlaEmitOpts.get().unwrapSingletons) return false
     val obj = type as? julay.program.type.ObjClassType ?: return false
@@ -166,11 +229,15 @@ private fun tlaElemIsInt(type: Type): Boolean {
     return single.type is IntType
 }
 
-private fun mapSourceVar(expr: ExprNode): String? {
+private data class HofSource(val method: String, val src: String)
+
+private fun hofSourceVar(expr: ExprNode): HofSource? {
     val e = unwrapInitParen(expr)
-    if (e !is MethodCallExprNode || e.methodName != "map") return null
+    if (e !is MethodCallExprNode) return null
+    if (e.methodName != "map" && e.methodName != "associateWith") return null
     val base = unwrapInitParen(e.baseExpr)
-    return (base as? SymbolValueExprNode)?.symbol
+    val src = (base as? SymbolValueExprNode)?.symbol ?: return null
+    return HofSource(e.methodName, src)
 }
 
 private fun lengthEqSize(
@@ -233,6 +300,61 @@ private fun isIdentityIndexInit(expr: ExprNode, varName: String): Boolean {
     if (body !is BinaryOpExprNode || body.op() != "=>") return false
     if (!isIndexRange(body.lhsOperand(), binder, varName)) return false
     return isIdentityIndexEq(body.rhsOperand(), binder, varName)
+}
+
+/** `forall i, (1 <= i <= |xs|) => i in xs` or `exists n: n in xs & n.id = i`. */
+private fun isCoveringMembershipInit(expr: ExprNode, varName: String): Boolean {
+    val q = unwrapInitParen(expr) as? QuantifiedExprNode ?: return false
+    if (!q.isUniversal()) return false
+    val binder = q.binderName()
+    val body = unwrapInitParen(q.quantifiedBody())
+    if (body !is BinaryOpExprNode || body.op() != "=>") return false
+    if (!isIndexRange(body.lhsOperand(), binder, varName)) return false
+    return isCoveringMembership(body.rhsOperand(), binder, varName)
+}
+
+private fun isCoveringMembership(expr: ExprNode, binder: String, varName: String): Boolean {
+    if (isBinderInVar(expr, binder, varName)) return true
+    val q = unwrapInitParen(expr) as? QuantifiedExprNode ?: return false
+    if (q.isUniversal()) return false
+    val nodeBinder = q.binderName()
+    val parts = andLeavesInit(q.quantifiedBody())
+    val hasMem = parts.any { isBinderInVar(it, nodeBinder, varName) }
+    val hasId = parts.any { isIdOfBinderEquals(it, nodeBinder, binder) }
+    return hasMem && hasId
+}
+
+private fun isBinderInVar(expr: ExprNode, binder: String, varName: String): Boolean {
+    val e = unwrapInitParen(expr)
+    if (e !is BinaryOpExprNode || e.op() != "in") return false
+    val l = unwrapInitParen(e.lhsOperand())
+    val r = unwrapInitParen(e.rhsOperand())
+    val isBinder = l is SymbolValueExprNode && l.symbol == binder
+    val isVar = r is SymbolValueExprNode && r.symbol == varName
+    return isBinder && isVar
+}
+
+private fun isIdOfBinderEquals(expr: ExprNode, nodeBinder: String, intBinder: String): Boolean {
+    val e = unwrapInitParen(expr)
+    if (e !is BinaryOpExprNode || e.op() != "=") return false
+    val l = unwrapInitParen(e.lhsOperand())
+    val r = unwrapInitParen(e.rhsOperand())
+    fun isIntBinder(n: ExprNode) = n is SymbolValueExprNode && n.symbol == intBinder
+    fun isNodeId(n: ExprNode): Boolean {
+        val x = unwrapInitParen(n)
+        val baseOk: (ExprNode) -> Boolean = { b ->
+            val bb = unwrapInitParen(b)
+            bb is SymbolValueExprNode && bb.symbol == nodeBinder
+        }
+        return when (x) {
+            is MemberAccessExprNode -> x.fieldName == "id" && baseOk(x.baseExpr)
+            is FieldAccessOnExprNode -> x.fieldPath == listOf("id") && baseOk(x.baseExpr)
+            is FieldAccessExprNode -> x.fieldPath == listOf("id") && x.baseSymbol == nodeBinder
+            is SymbolValueExprNode -> x.symbol == nodeBinder
+            else -> false
+        }
+    }
+    return (isNodeId(l) && isIntBinder(r)) || (isNodeId(r) && isIntBinder(l))
 }
 
 private fun isIndexRange(expr: ExprNode, binder: String, varName: String): Boolean {

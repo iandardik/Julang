@@ -211,7 +211,7 @@ Open `Int` / `String` sites that still need a TLC universe (leaf index, remainin
 
 TLC also infers `CONSTRAINT StateConstraint` (not `INVARIANT`): each `Int` state variable inhabits cfg `Int` (union negative literals already in the model, so `votedFor = -1` stays allowed), and each list state variable has `Len(x) <= MaxListLen`. Parameterized leaves quantify `\A n \in NodeSet : currentTerm[n] \in Int`. Successors outside those bounds are discarded. That keeps `commitIndex` inside cfg `Int`, so `\A i \in Int` is complete for `StateMachineSafety` in this model. Always-on; not a `--disable-tla-opt` id.
 
-When `init:` uniquely determines a const-global list (length plus identity `xs[i] = i`), Init emits `xs = <<1, 2, …>>` instead of `\in BoundedSeq` plus those filters. TypeOK may add `Len(x[n]) = Len(cluster)` for lists assigned `cluster.map(...)` and `x[n] \subseteq Range(cluster)` for id sets drawn from that sequence. The `.cfg` lists each user invariant once: a named operator that is only `&` of other invariants in the closure is still emitted in the `.tla` but omitted from `INVARIANT` lines. Always-on; not named opt ids.
+When `init:` uniquely determines a const-global list (length plus identity `xs[i] = i`) or set (length plus covering membership `1..n` in the set), Init emits `xs = <<1, 2, …>>` or `xs = {1, 2, …}` instead of `\in BoundedSeq` / `SUBSET` plus those filters. TypeOK may add `Len(x[n]) = Len(cluster)` for lists assigned `cluster.map(...)`, `DOMAIN x[n] = cluster` for maps assigned `cluster.associateWith(...)`, `x[n] \subseteq Range(cluster)` for id sets drawn from a sequence, and `x[n] \subseteq cluster` when `cluster` is already a set. The `.cfg` lists each user invariant once: a named operator that is only `&` of other invariants in the closure is still emitted in the `.tla` but omitted from `INVARIANT` lines. Always-on; not named opt ids.
 
 ### Lists and sequences
 
@@ -233,6 +233,7 @@ When `init:` uniquely determines a const-global list (length plus identity `xs[i
 | `length(xs)` / `xs.length` on lists | `Len(xs)` |
 | `length` / `.length` on sets | `Cardinality(…)` |
 | list/set `.map` (lambda) | function/set comprehension |
+| set `.associateWith` (lambda) | `[__k \in S \|-> e]` |
 | list `.filter` | `SelectSeq` |
 | set `.filter` | set comprehension |
 | `xs.toSet()` | `Range(xs)` |

@@ -6,6 +6,7 @@ import julay.parser.JulayLexer
 import julay.parser.JulayParser
 import julay.program.library.JULAY_FUNLIB
 import julay.program.library.JULAY_MODULE
+import julay.program.library.JULAY_OPTIONAL
 import julay.program.library.LibraryRegistry
 import org.antlr.v4.runtime.CharStreams
 import org.antlr.v4.runtime.CommonTokenStream
@@ -52,6 +53,9 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
                 // Funlib .jul modules may export several funs; import as julay.funlib.<funName>.
                 module.modulePath.startsWith("$JULAY_MODULE.$JULAY_FUNLIB.") ->
                     LibraryRegistry.funlibModulePath(decl.name())
+                // optional.jul exports Optional / some / none as julay.optional.<name>.
+                module.modulePath == "$JULAY_MODULE.$JULAY_OPTIONAL" ->
+                    qualifiedKey(listOf(JULAY_MODULE, JULAY_OPTIONAL, decl.name()))
                 // Proclib: one primary export matching the module file (e.g. Timer).
                 module.modulePath.startsWith("$JULAY_MODULE.") ->
                     module.modulePath
@@ -168,6 +172,15 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
                         )
                         noteChildDependency(modulePath, child, importLoc)
                     }
+                    return@forEach
+                }
+                if (LibraryRegistry.isOptionalImport(parts)) {
+                    val child = loadModule(
+                        "$JULAY_MODULE.$JULAY_OPTIONAL",
+                        isEntry = false,
+                        requestedFrom = importLoc,
+                    )
+                    noteChildDependency(modulePath, child, importLoc)
                     return@forEach
                 }
                 val importedModule = if (parts.first() == JULAY_MODULE) {

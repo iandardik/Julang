@@ -289,6 +289,7 @@ Lambdas may close over outer variables (state, locals, action args in transit). 
 |--------|----------|-----------|--------|
 | `.filter(p)` | `List` / `Set` | unary pred → `Boolean` | same collection kind |
 | `.map(f)` | `List` / `Set` | unary → `U` | `List<U>` / `Set<U>` |
+| `.associateWith(f)` | `Set` | unary → `U` | `Map<T, U>` (keys are the set elements) |
 | `.fold(init, f)` | `List` / `Set` | init + `(Acc, Elem) -> Acc` | type of `init` |
 | `.toSet()` | `List` | none | `Set<T>` (duplicates dropped) |
 | `.toList()` | `Set` | none | `List<T>` (order unspecified) |
@@ -296,6 +297,7 @@ Lambdas may close over outer variables (state, locals, action args in transit). 
 ```jul
 ys := xs.filter(i -> i >= 3)
 ts := s.map(x -> x + 1)
+mp := s.associateWith(n -> 1)
 n := xs.fold(0, (acc, x) -> acc + x)
 agree := mp.keys.filter(k -> mp[k] >= commitIndex)
 uniq := xs.toSet()
@@ -313,9 +315,9 @@ Freestanding `map(xs, f)` from `julay.funlib.map` accepts a named fun or a lambd
 
 ## Guards
 
-Higher-order calls that only depend on concrete process state are encoded by evaluating the Kotlin form and embedding the result in Z3 (so patterns like `mp.keys.filter(...).length` work in guards). Calls that depend on **symbolic action arguments** are rejected in guards.
+Higher-order calls that only depend on concrete process state are encoded by evaluating the Kotlin form and embedding the result in Z3 (so patterns like `mp.keys.filter(...).length` work in guards). Calls that depend on **symbolic action arguments** are rejected in guards. Set `.associateWith` uses that same embed-or-reject policy; there is no symbolic SMT array comprehension.
 
-For **TLA+ / TLC**, list and set `.map` / `.filter` / `.length` / `.toSet` / `.toList` are emitted (Julay list indexes already match TLA `Sequences`); `.fold` and map HOFs are not — see [Specifications — TLA+ translation limits](specifications.md#tla-translation-limits). `.toList` order is unspecified in TLC (`SetToSeq` via `CHOOSE`). `allDistinct(xs)` emits `Len(xs) = Cardinality(Range(xs))`.
+For **TLA+ / TLC**, list and set `.map` / `.filter` / `.length` / `.toSet` / `.toList` and set `.associateWith` are emitted (Julay list indexes already match TLA `Sequences`); `.fold` and map HOFs are not — see [Specifications — TLA+ translation limits](specifications.md#tla-translation-limits). `.toList` order is unspecified in TLC (`SetToSeq` via `CHOOSE`). `allDistinct(xs)` emits `Len(xs) = Cardinality(Range(xs))`. Set `.associateWith(n -> e)` emits `[__k \in S |-> e]`.
 
 Runtime list/map indexing throws on out-of-bounds or missing keys. Symbolic map reads in guards may soft-default missing keys — do not rely on that for executable behavior; check `k in mp` first.
 
