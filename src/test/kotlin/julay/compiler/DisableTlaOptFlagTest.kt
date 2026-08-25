@@ -26,6 +26,7 @@ class DisableTlaOptFlagTest {
         assertEquals(true, cfg.fromCollection)
         assertEquals(true, cfg.literalDomains)
         assertEquals(true, cfg.unwrapSingletons)
+        assertEquals(true, cfg.unusedLets)
     }
 
     @Test
@@ -37,6 +38,7 @@ class DisableTlaOptFlagTest {
         assertEquals(false, cfg.fromCollection)
         assertEquals(true, cfg.literalDomains)
         assertEquals(true, cfg.unwrapSingletons)
+        assertEquals(true, cfg.unusedLets)
     }
 
     @Test
@@ -45,6 +47,16 @@ class DisableTlaOptFlagTest {
         assertEquals(true, cfg.unusedFields)
         assertEquals(false, cfg.unusedVars)
         assertEquals(true, cfg.determinedArgs)
+        assertEquals(true, cfg.unusedLets)
+    }
+
+    @Test
+    fun unusedLetsIdDisablesOnlyThat() {
+        val cfg = TlaOptConfig.fromDisableTlaOptFlag("unused-lets")
+        assertEquals(true, cfg.unusedFields)
+        assertEquals(true, cfg.unusedVars)
+        assertEquals(true, cfg.determinedArgs)
+        assertEquals(false, cfg.unusedLets)
     }
 
     @Test

@@ -183,14 +183,14 @@ class SpecTlaTlcSmokeTest {
             assertTrue(cfg.exists(), "expected SpawnWorker.cfg")
             val tlaText = tla.readText()
             assertTrue(
-                tlaText.contains("spawnWorker(i, id) =="),
-                "expected spawnWorker(i, id) operator with index first;\n$tlaText",
+                tlaText.contains("spawnWorker(i, id_) =="),
+                "expected spawnWorker(i, id_) operator with index first;\n$tlaText",
             )
             assertTrue(
                 tlaText.contains("~Worker_constructed[i]"),
                 "expected parameterized ctor enabling on Worker for spawnWorker;\n$tlaText",
             )
-            val spawnDef = tlaText.substringAfter("spawnWorker(i, id) ==").substringBefore("\n\n")
+            val spawnDef = tlaText.substringAfter("spawnWorker(i, id_) ==").substringBefore("\n\n")
             assertTrue(
                 !spawnDef.trimStart().startsWith("\\E i \\in Int :"),
                 "index quantification should be in Next, not inside spawnWorker;\n$tlaText",
@@ -200,7 +200,7 @@ class SpecTlaTlcSmokeTest {
                 "expected Worker_constructed' flip in spawnWorker;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("\\E i, id \\in Int : spawnWorker(i, id)"),
+                tlaText.contains("\\E i, id_ \\in Int : spawnWorker(i, id_)"),
                 "expected Next to quantify index then args;\n$tlaText",
             )
             assertFalse(
@@ -213,8 +213,10 @@ class SpecTlaTlcSmokeTest {
                 "expected Init state-var comments; Server initially is folded, Worker keeps Next ctors;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("Worker_id") && tlaText.contains("/\\ ready = FALSE"),
-                "id clashes with action arg so stays Worker_id; ready is bare;\n$tlaText",
+                tlaText.contains("/\\ id = [i \\in Int |-> 0]") &&
+                    tlaText.contains("/\\ ready = FALSE") &&
+                    !tlaText.contains("Worker_id"),
+                "id is a unique state var so stays bare (indexed Init); spawn arg is id_; ready is bare;\n$tlaText",
             )
             assertTrue(
                 !tlaText.contains("Server_constructed") &&
@@ -235,7 +237,7 @@ class SpecTlaTlcSmokeTest {
             )
             val afterInit = tlaText.substringAfter("Init ==")
             val workerInitIdx = afterInit.indexOf("Worker_initially(i) ==")
-            val spawnIdx = afterInit.indexOf("spawnWorker(i, id) ==")
+            val spawnIdx = afterInit.indexOf("spawnWorker(i, id_) ==")
             assertTrue(
                 workerInitIdx >= 0 && spawnIdx >= 0 && workerInitIdx < spawnIdx,
                 "Worker initially def should appear after Init and before spawnWorker;\n$tlaText",
@@ -565,7 +567,7 @@ class SpecTlaTlcSmokeTest {
             "expected LET g and LET out;\n$tlaText",
         )
         assertTrue(
-            !tlaText.contains("voteCondition") && !Regex("""LET g == c\b""").containsMatchIn(tlaText),
+            !Regex("""LET g == c\b""").containsMatchIn(tlaText),
             "determiner should inline the let-bound name c;\n$tlaText",
         )
     }
@@ -592,6 +594,32 @@ class SpecTlaTlcSmokeTest {
         assertTrue(
             Regex("""\\E x \\in Int""").containsMatchIn(offText),
             "disabling determined-args should restore x exists;\n$offText",
+        )
+    }
+
+    @Test
+    fun boolIteIfFalseElseTrueEmitsNegation() {
+        val source = File("regression/input/spec/tla-bool-ite.jul")
+        val (tlaText, _) = compileSpecTla(source, "BoolIte")
+        val goDef = tlaText.substringAfter("go ==").substringBefore("\n\n")
+        assertTrue(
+            Regex("""ok ==\s*~""").containsMatchIn(goDef) &&
+                !Regex("""ok ==\s*IF""").containsMatchIn(goDef) &&
+                !goDef.contains("THEN FALSE") &&
+                !goDef.contains("ELSE TRUE"),
+            "IF P THEN FALSE ELSE TRUE should emit ~P;\n$goDef",
+        )
+        val okInit = goDef.lineSequence()
+            .dropWhile { !it.contains("ok ==") }
+            .takeWhile { !it.trimStart().startsWith("IN") }
+            .toList()
+        val andCols = okInit.mapNotNull { line ->
+            val i = line.indexOf("/\\")
+            if (i >= 0) i else null
+        }
+        assertTrue(
+            andCols.size >= 2 && andCols[0] == andCols[1],
+            "multi-line ~P should align /\\ under ~(\n${okInit.joinToString("\n")}",
         )
     }
 
@@ -930,6 +958,25 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun unusedLetsDropsUnreferencedBindings() {
+        val source = File("regression/input/spec/tla-unused-lets.jul")
+        val (tlaText, _) = compileSpecTla(source, "UnusedLets")
+        assertTrue(
+            !tlaText.contains("a ==") && !tlaText.contains("b =="),
+            "unused-lets should drop both unused let names;\n$tlaText",
+        )
+        val (offText, _) = compileSpecTla(
+            source,
+            "UnusedLets",
+            tlaOptConfig = TlaOptConfig.fromDisableTlaOptFlag("unused-lets"),
+        )
+        assertTrue(
+            offText.contains("a ==") && offText.contains("b =="),
+            "disabling unused-lets should keep a and b;\n$offText",
+        )
+    }
+
+    @Test
     fun raftNodeSpecOmitsUrlAndWarns() {
         val source = File("input/raft/sys.jul")
         assertTrue(source.exists(), "missing ${source.path}")
@@ -961,17 +1008,18 @@ class SpecTlaTlcSmokeTest {
             "with (n) should share one binder for RaftProtocol and Net, not n_RaftProtocol;\n${tlaText.take(4000)}",
         )
         assertTrue(
-            Regex("""cluster = \{1, 2, 3\}""")
-                .containsMatchIn(tlaText) ||
-                tlaText.contains("RaftProtocol_cluster = {1, 2, 3}"),
-            "Init should assign the identity cluster set;\n${tlaText.substringAfter("Init ==").take(2500)}",
+            Regex("""self\[n1] = self\[n2]""").containsMatchIn(tlaText),
+            "Init should require injective self;\n${tlaText.substringAfter("Init ==").take(2500)}",
         )
         assertTrue(
             !tlaText.contains("cluster \\in BoundedSeq") &&
                 !tlaText.contains("RaftProtocol_cluster \\in BoundedSeq") &&
-                !tlaText.substringAfter("Init ==").substringBefore("\n\n").contains("cluster \\in SUBSET") &&
-                !tlaText.substringAfter("Init ==").substringBefore("\n\n").contains("RaftProtocol_cluster \\in SUBSET"),
-            "singleton cluster init should drop BoundedSeq/SUBSET membership;\n${tlaText.substringAfter("Init ==").take(2500)}",
+                (tlaText.contains("cluster = {1, 2, 3}") || tlaText.contains("RaftProtocol_cluster = {1, 2, 3}")),
+            "length+covering init should emit the singleton cluster set;\n${tlaText.substringAfter("Init ==").take(2500)}",
+        )
+        assertTrue(
+            !tlaText.contains("voteCondition") && !tlaText.contains("logOk"),
+            "unused-lets should drop voteCondition and then logOk;\n${tlaText.substringAfter("handleRequestVoteRequest").take(1500)}",
         )
         assertTrue(
             tlaText.contains("\\E n, m \\in NodeSet :") &&
@@ -1010,16 +1058,6 @@ class SpecTlaTlcSmokeTest {
                     ),
             "map .keys should emit DOMAIN, not record field keys;\n${tlaText.substringAfter("advanceCommitIndex(").take(800)}",
         )
-        assertTrue(
-            Regex("""self\[n1\] = self\[n2\]""").containsMatchIn(initBlock) &&
-                (initBlock.contains("n1 = n2") || initBlock.contains("(n1 = n2)")),
-            "Init should require injective self;\n$initBlock",
-        )
-        assertTrue(
-            Regex("""\\A n1, n2 \\in NodeSet :""").containsMatchIn(initBlock) &&
-                !Regex("""\\A n1, n2 \\in NodeSet :\s*\n\s*/\\ """).containsMatchIn(initBlock),
-            "injective-self quantifier must be one Init conjunct (not /\\ per source line);\n$initBlock",
-        )
         val updateTermDef = tlaText.substringAfter("updateTerm(").substringBefore("\n\n")
         assertTrue(
             !tlaText.contains("updateTerm_RaftProtocol_Net") &&
@@ -1046,6 +1084,25 @@ class SpecTlaTlcSmokeTest {
                 !Regex("""\\E success \\in BOOLEAN""").containsMatchIn(tlaText),
             "CASE determined-args should drop matchIdx and success exists;\n${tlaText.substringAfter("handleAppendEntriesRequest").take(2500)}",
         )
+        val handleAppendEntriesRequestDef = tlaText.substringAfter("handleAppendEntriesRequest(").substringBefore("\n\n")
+        assertTrue(
+            Regex("""success ==\s*~""").containsMatchIn(handleAppendEntriesRequestDef) &&
+                !Regex("""success ==\s*IF""").containsMatchIn(handleAppendEntriesRequestDef) &&
+                !handleAppendEntriesRequestDef.contains("THEN FALSE"),
+            "success LET should be ~P, not IF P THEN FALSE ELSE TRUE;\n$handleAppendEntriesRequestDef",
+        )
+        val successLet = handleAppendEntriesRequestDef.lineSequence()
+            .dropWhile { !it.contains("success ==") }
+            .takeWhile { !it.contains("matchIdx") }
+            .toList()
+        val successOrCols = successLet.mapNotNull { line ->
+            val i = line.indexOf("\\/")
+            if (i >= 0) i else null
+        }
+        assertTrue(
+            successOrCols.size >= 2 && successOrCols[0] == successOrCols[1],
+            "success ~(\\/ …) should align top-level \\/;\n${successLet.joinToString("\n")}",
+        )
         val handleRvDef = tlaText.substringAfter("handleRequestVoteRequest(").substringBefore("\n\n")
         assertTrue(
             handleRvDef.contains("voteRequestMsgs' =") &&
@@ -1056,6 +1113,16 @@ class SpecTlaTlcSmokeTest {
             !Regex("""\\E outTerm \\in Int""").containsMatchIn(tlaText) &&
                 !Regex("""\\E voteGranted \\in BOOLEAN""").containsMatchIn(tlaText),
             "determined-args through let should drop outTerm and voteGranted exists;\n$handleRvDef",
+        )
+        assertTrue(
+            handleRvDef.contains("lastLogTerm_") &&
+                !Regex("""(?m)^\s+lastLogTerm == """).containsMatchIn(handleRvDef),
+            "VARIABLE lastLogTerm stays bare; the message-field LET is lastLogTerm_;\n$handleRvDef",
+        )
+        assertTrue(
+            handleRvDef.contains("lastLogTerm_ > lastLogTerm[") &&
+                handleRvDef.contains("lastLogTerm_ = lastLogTerm["),
+            "vote logOk should compare the candidate term to state lastLogTerm[n], not the arg to itself;\n$handleRvDef",
         )
         val nextBlock = tlaText.substringAfter("Next ==").substringBefore("\n\n")
         assertTrue(
@@ -1872,7 +1939,7 @@ class SpecTlaTlcSmokeTest {
                 tlaText.contains("\\* Session connection semantics"),
                 "expected session connection comment;\n$tlaText",
             )
-            val spawnDef = tlaText.substringAfter("spawnWorker(i, id) ==").substringBefore("\n\n")
+            val spawnDef = tlaText.substringAfter("spawnWorker(i, id_) ==").substringBefore("\n\n")
                 .ifEmpty { tlaText.substringAfter("spawnWorker(").let { rest ->
                     val sigEnd = rest.indexOf(" ==")
                     if (sigEnd < 0) "" else rest.substring(sigEnd + 3).substringBefore("\n\n")
@@ -2322,12 +2389,12 @@ class SpecTlaTlcSmokeTest {
             assertTrue(cfg.exists(), "expected Indexed.cfg")
             val tlaText = tla.readText()
             assertTrue(
-                tlaText.contains("/\\ Peer_cluster \\in BoundedSeq("),
+                tlaText.contains("/\\ cluster \\in BoundedSeq("),
                 "expected const-global Init as \\\\in BoundedSeq (enumerable);\n$tlaText",
             )
             assertTrue(
-                !tlaText.contains("Peer_cluster = [n \\in") &&
-                    !tlaText.contains("/\\ Peer_cluster = <<>>"),
+                !tlaText.contains("cluster = [n \\in") &&
+                    !tlaText.contains("/\\ cluster = <<>>"),
                 "global cluster must not be a function of n or default Init;\n$tlaText",
             )
             assertTrue(
@@ -2339,8 +2406,8 @@ class SpecTlaTlcSmokeTest {
                 "expected indexed Init for per-instance state;\n$tlaText",
             )
             assertTrue(
-                !tlaText.contains("Peer_cluster' =") &&
-                    !tlaText.contains("Peer_cluster'"),
+                !tlaText.contains("cluster' =") &&
+                    !tlaText.contains("cluster'"),
                 "const-global cluster must not be primed;\n$tlaText",
             )
             assertTrue(
@@ -2362,8 +2429,8 @@ class SpecTlaTlcSmokeTest {
                 "expected EXCEPT ![n] for per-instance state;\n$tlaText",
             )
             assertTrue(
-                (tlaText.contains("Len(Peer_cluster)") || tlaText.contains("Len(cluster)")) &&
-                    !tlaText.contains("Peer_cluster[i]"),
+                (tlaText.contains("Len(cluster)") || tlaText.contains("Len(cluster)")) &&
+                    !tlaText.contains("cluster[i]"),
                 "expected unindexed Peer[i].cluster in invariant;\n$tlaText",
             )
             assertTrue(
@@ -2373,7 +2440,7 @@ class SpecTlaTlcSmokeTest {
             val initDef = tlaText.substringAfter("Init ==").substringBefore("\n\n")
             assertTrue(
                 tlaText.contains("\\* Peer constructor assumption") &&
-                    initDef.contains("\\E me \\in String : me \\in Range(Peer_cluster)") &&
+                    initDef.contains("\\E me \\in String : me \\in Range(cluster)") &&
                     rangeHelperUnderTlaHelpers(tlaText),
                 "expected folded ~in error as Range membership with unbound me existential;\n$initDef",
             )
@@ -2383,7 +2450,7 @@ class SpecTlaTlcSmokeTest {
                     if (sigEnd < 0) "" else rest.substring(sigEnd + 3).substringBefore("\n\n")
                 } }
             assertTrue(
-                bumpDef.contains("UNCHANGED") && bumpDef.contains("Peer_cluster"),
+                bumpDef.contains("UNCHANGED") && bumpDef.contains("cluster"),
                 "const-global cluster must stay in UNCHANGED;\n$bumpDef",
             )
             tla.copyTo(File(work, "Indexed.tla"), overwrite = true)
@@ -2411,13 +2478,13 @@ class SpecTlaTlcSmokeTest {
             assertTrue(tla.exists(), "expected Indexed.tla")
             val tlaText = tla.readText()
             assertTrue(
-                tlaText.contains("/\\ Peer_cluster \\in BoundedSeq(") ||
+                tlaText.contains("/\\ cluster \\in BoundedSeq(") ||
                     tlaText.contains("/\\ cluster \\in BoundedSeq("),
                 "expected const-global Init as BoundedSeq;\n$tlaText",
             )
             val initBlock = tlaText.substringAfter("Init ==").substringBefore("\n\n")
             val constraint = listOf(
-                "Len(Peer_cluster) = Cardinality(Node)",
+                "Len(cluster) = Cardinality(Node)",
                 "Len(cluster) = Cardinality(Node)",
             ).firstOrNull { it in initBlock }
             assertTrue(
@@ -2458,14 +2525,14 @@ class SpecTlaTlcSmokeTest {
             val tlaText = tla.readText()
             assertTrue(
                 tlaText.contains("/\\ cluster \\in BoundedSeq(") ||
-                    tlaText.contains("/\\ Peer_cluster \\in BoundedSeq("),
+                    tlaText.contains("/\\ cluster \\in BoundedSeq("),
                 "expected const-global Init as \\\\in BoundedSeq (enumerable);\n$tlaText",
             )
             assertTrue(
                 (tlaText.contains("/\\ cluster = <<\"a\">> \\* global const check") ||
-                    tlaText.contains("/\\ Peer_cluster = <<\"a\">> \\* global const check")) &&
+                    tlaText.contains("/\\ cluster = <<\"a\">> \\* global const check")) &&
                     !tlaText.contains("cluster'") &&
-                    !tlaText.contains("Peer_cluster'"),
+                    !tlaText.contains("cluster'"),
                 "expected unprimed equality check for non-arg RHS;\n$tlaText",
             )
             tla.copyTo(File(work, "ConstCheck.tla"), overwrite = true)

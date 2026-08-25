@@ -1,0 +1,24 @@
+proc Box {
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            n := 0
+    }
+
+    transition step() {
+        guard:
+            let (a : Boolean := true) {
+                let (b : Boolean := a) {
+                    true
+                }
+            }
+            & n >= 0
+        transit:
+            n := n + 1
+    }
+}
+
+spec UnusedLets := <true> Box <true>
+
+compile UnusedLets

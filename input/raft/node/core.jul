@@ -176,7 +176,7 @@ export proc RaftProtocol {
     ) {
         guard:
             let (logOk : Boolean :=
-                (lastLogTerm > lastLogTerm) | (lastLogTerm = lastLogTerm & lastLogIndex >= length(log))) {
+                (lastLogTerm > this.lastLogTerm) | (lastLogTerm = this.lastLogTerm & lastLogIndex >= length(log))) {
             let (voteCondition : Boolean := inTerm = currentTerm & (~votedFor.present | votedFor.value.id = candidateId) & logOk) {
                 & inTerm <= currentTerm
                 & outTerm = currentTerm

@@ -55,7 +55,7 @@ The compiler also infers a TLC `CONSTRAINT StateConstraint` (not an `INVARIANT`)
 
 TypeOK still uses `TypeOKInt` (`Int ∪ Nat ∪ extras`) so membership stays pointwise; CONSTRAINT is what keeps reachable Int state inside cfg `Int`. That also makes `\A i \in Int` complete for properties whose bound is an Int state var (Raft `StateMachineSafety` vs `commitIndex`).
 
-Always-on (not named opt ids): singleton `init:` that uniquely determines a const-global list emits `xs = <<1, 2, …>>` instead of `\in BoundedSeq` plus those filters; a const-global set with length plus covering `1..n` membership emits `xs = {1, 2, …}` instead of `\in SUBSET`; TypeOK may add `Len(x[n]) = Len(cluster)` for `cluster.map` lists, `DOMAIN x[n] = cluster` for `cluster.associateWith` maps, `x[n] \subseteq Range(cluster)` for id sets from a sequence, and `x[n] \subseteq cluster` when the source is already a set; the `.cfg` omits a named invariant whose formula is only `&` of other invariants already in the closure (the TLA operator is still emitted).
+Always-on (not named opt ids): singleton `init:` that uniquely determines a const-global list emits `xs = <<1, 2, …>>` instead of `\in BoundedSeq` plus those filters; a const-global set with length plus covering `1..n` membership emits `xs = {1, 2, …}` instead of `\in SUBSET`; TypeOK may add `Len(x[n]) = Len(cluster)` for `cluster.map` lists, `DOMAIN x[n] = cluster` for `cluster.associateWith` maps, `x[n] \subseteq Range(cluster)` for id sets from a sequence, and `x[n] \subseteq cluster` when the source is already a set; the `.cfg` omits a named invariant whose formula is only `&` of other invariants already in the closure (the TLA operator is still emitted); `IF P THEN FALSE ELSE TRUE` emits `~P` and `IF P THEN TRUE ELSE FALSE` emits `P`.
 
 ### Named TLA+ optimizations
 
@@ -67,6 +67,7 @@ Always-on (not named opt ids): singleton `init:` that uniquely determines a cons
 | `from-collection` | Quantify remaining args from a state collection: `a in S` on a set, `S[a.f] = a` on a list (index binder `i \in 1..Len(S)`), a struct literal `in` a set, or `S.filter(x -> x.f = a).length > 0` (`\E a \in { x.f : x \in S }`; a `|` of bags unions the projections) | Equivalent rewrite |
 | `literal-domains` | Per-site finite `{…}` for String/Int that only use a closed literal set, including TypeOK var/field ranges and const-global Init `\in` domains. Does **not** by itself shrink the global `String` CONSTANT (so e.g. `Entry.value` stays open); the cfg String/Int models are still the residual open-site literals | Projection (when it excludes values the type would otherwise allow) |
 | `unwrap-singletons` | After unused-fields, an obj with one remaining field emits as that field’s type (Raft `Node` → `Int`) | Equivalent rewrite |
+| `unused-lets` | Drop expression and transit `LET` bindings that the `IN` body (and later kept inits) never read; walk inner-to-outer so dropping `voteCondition` then drops `logOk` | Equivalent rewrite |
 
 If a field is omitted from a type that still appears in whole-record comparison or set containment, `julayc` warns and points at `--disable-tla-opt=unused-fields`. Values that differed only in omitted fields become equal.
 

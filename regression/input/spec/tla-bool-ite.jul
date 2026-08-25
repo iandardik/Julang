@@ -1,0 +1,22 @@
+proc Box {
+    var n : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            n := 0
+    }
+
+    transition go(ok : Boolean) {
+        guard:
+            (~ok
+             & n < 0
+             & n < 1)
+            | (ok
+               & n >= 0)
+        transit: n := if (ok) n + 1 else n
+    }
+}
+
+spec BoolIte := <true> Box <true>
+
+compile BoolIte

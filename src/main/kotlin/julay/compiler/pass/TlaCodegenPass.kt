@@ -322,9 +322,7 @@ private fun emitProjectedTla(
             invClosure.any { exprContainsIntToStringCoerce(it.invariantFormula()) } ||
             usedFunOps.any { exprContainsIntToStringCoerce(it.funBody()) }
 
-    val reservedTlaIds = constants + setOf("Int", "Nat", "Boolean", "Real") +
-        actionArgNames(leaves, pclassesForTla) +
-        leaves.mapNotNull { it.paramName }.toSet()
+    val reservedTlaIds = constants + setOf("Int", "Nat", "Boolean", "Real")
     val needsSpliceOperator =
         offersUseSlice(offers) ||
             usedFunOps.any { exprContainsSlice(it.funBody()) } ||
@@ -1589,8 +1587,27 @@ private fun negateLocalGuardsBody(
     val argNames = offer.decl.action.args.map { it.name }.toSet() + bindNames
     val leafCtx = mapOf(offer.leaf.name to offer.leaf, offer.leaf.tlaName to offer.leaf)
     val bare = stateVarsByLeaf[offer.leaf.tlaName].orEmpty()
+    val takenParamIds = stateVarNames.values.toMutableSet()
+    val argRenames = linkedMapOf<String, String>()
+    val seenArgs = mutableSetOf<String>()
+    fun argTla(name: String): String = argRenames[name] ?: name
+    fun renameIfTaken(name: String) {
+        if (name in seenArgs) return
+        seenArgs += name
+        val tlaArg = firstFreeParamTlaName(name, takenParamIds)
+        takenParamIds += tlaArg
+        if (tlaArg != name) argRenames[name] = tlaArg
+    }
+    offer.decl.action.args.forEach { arg -> renameIfTaken(arg.name) }
+    bindNames.forEach { renameIfTaken(it) }
     fun emit(expr: ExprNode, linePrefix: String = ""): String =
-        exprToTla(expr, leafCtx, argNames, self, bareStateVars = bare, stateVarNames = stateVarNames, linePrefix = linePrefix)
+        exprToTla(
+            expr, leafCtx, argNames, self,
+            bareStateVars = bare,
+            stateVarNames = stateVarNames,
+            symbolOverrides = argRenames,
+            linePrefix = linePrefix,
+        )
     val guardStrs = guards.flatMap { flattenTopLevelAnd(it) }
         .filter { !plan.skipped(it) }
         .map { emit(it) }
@@ -1601,7 +1618,7 @@ private fun negateLocalGuardsBody(
             null
         }
         b.keep.map { (path, expr) ->
-            "${emitUnwrappedFieldPath(b.tmp, elemType, path)} = ${emit(expr)}"
+            "${emitUnwrappedFieldPath(argTla(b.tmp), elemType, path)} = ${emit(expr)}"
         }
     }
     val allGuards = guardStrs + keepStrs
@@ -1612,7 +1629,7 @@ private fun negateLocalGuardsBody(
     }
     val letBindings = mutableListOf<Pair<String, String>>()
     plan.listBinds.forEach { b ->
-        letBindings += b.arg to "${emit(b.list)}[${b.index}]"
+        letBindings += argTla(b.arg) to "${emit(b.list)}[${argTla(b.index)}]"
     }
     plan.structBinds.forEach { b ->
         val elemType = try {
@@ -1621,22 +1638,22 @@ private fun negateLocalGuardsBody(
             null
         }
         b.argPaths.forEach { (arg, path) ->
-            letBindings += arg to emitUnwrappedFieldPath(b.tmp, elemType, path)
+            letBindings += argTla(arg) to emitUnwrappedFieldPath(argTla(b.tmp), elemType, path)
         }
     }
     plan.determined.forEach { (arg, expr) ->
-        letBindings += arg to emit(expr)
+        letBindings += argTla(arg) to emit(expr)
     }
     val inner = wrapTlaLet(letBindings, conj)
     val existsParams = mutableListOf<Pair<String, String>>()
     plan.listBinds.forEach { b ->
-        existsParams += b.index to "1..Len(${emit(b.list)})"
+        existsParams += argTla(b.index) to "1..Len(${emit(b.list)})"
     }
     plan.setBinds.forEach { b ->
-        existsParams += b.arg to emit(b.set)
+        existsParams += argTla(b.arg) to emit(b.set)
     }
     plan.structBinds.forEach { b ->
-        existsParams += b.tmp to emit(b.set)
+        existsParams += argTla(b.tmp) to emit(b.set)
     }
     val omit = plan.omitArgTypeDomains()
         offer.decl.action.args.filter { arg ->
@@ -1648,7 +1665,7 @@ private fun negateLocalGuardsBody(
         } else {
             argLiteralDomain(listOf(offer), arg.name, arg.type) ?: typeToTlaDomain(arg.type)
         }
-        existsParams += arg.name to domain
+        existsParams += argTla(arg.name) to domain
     }
     val exists = wrapTlaExists(existsParams, inner)
     return "~($exists)"
@@ -2091,15 +2108,8 @@ private fun emitConjoined(
         }
     }
 
-    // Collect action arg names that appear in this conjoined action (for binder clash checks).
-    val usedArgNames = mutableSetOf<String>()
-    usedArgNames += auxParams.map { it.first }
-    offers.forEach { offer ->
-        offer.decl.action.args.filter { offerRefsArg(offer, it.name) }.forEach { usedArgNames += it.name }
-    }
-    usedArgNames += bindNames
-
     val constGlobalArgBinds = collectGlobalConstArgBinds(offers, stateVarNames)
+    val variableTlaIds = stateVarNames.values.toSet()
 
     // Instance binders for parameterized leaves: paramName indexes into the type domain.
     val selfBinders = linkedMapOf<String, String>() // leafName -> binder
@@ -2107,17 +2117,19 @@ private fun emitConjoined(
     fun registerWithBinder(leaf: SpecLeaf) {
         val scope = leaf.withScopeId ?: return
         val name = leaf.paramName ?: return
+        // Keep VARIABLE `n` when a state var is named `n`; clash-rename the binder instead.
+        if (name in variableTlaIds) return
         sharedWithBinders.putIfAbsent(scope, name)
     }
     // Pre-register before clash-rename: a reserved leaf-spec decl param (Net's `n`)
     // must not force `n_RaftProtocol` on a peer that shares the same `with` scope.
     offers.forEach { registerWithBinder(it.leaf) }
-    val reserved = usedArgNames.toMutableSet()
-    offers.forEach { offer ->
-        if (offer.leaf.isParameterized) {
-            reserved += stateVarsByLeaf[offer.leaf.tlaName].orEmpty()
-        }
-    }
+    // Module-level TLA ids only. Do not reserve action-arg names here: that would
+    // suffix-rename every param (`target` → `target_`) because the name is taken by itself.
+    // Snapshot before bindLeaf: dest LETs may share the index binder (`n`) and must
+    // not be suffix-renamed just because that binder is in `reserved`.
+    val moduleLevelTaken = (variableTlaIds + allVars).toMutableSet()
+    val reserved = moduleLevelTaken.toMutableSet()
     // Session pair may need binders for both leaves even when indexing session after updates.
     val effectSessionPair = resolveSessionEffectPair(offers, sessionPair, allSessionPairs)
     val tearsDownSameSessionPair =
@@ -2129,15 +2141,17 @@ private fun emitConjoined(
         listOf(pair.leafA, pair.leafB).forEach { leaf ->
             registerWithBinder(leaf)
             if (leaf.isParameterized) {
-                reserved += stateVarsByLeaf[leaf.tlaName].orEmpty()
+                reserved += variableTlaIds
             }
         }
     }
     fun bindLeaf(leaf: SpecLeaf) {
         // Apply-only / leaf-spec under `with`: register shared binder without lifting state.
         if (!leaf.isParameterized && leaf.withScopeId != null && leaf.paramName != null) {
-            sharedWithBinders.putIfAbsent(leaf.withScopeId!!, leaf.paramName!!)
-            reserved += leaf.paramName!!
+            if (leaf.paramName!! !in variableTlaIds) {
+                sharedWithBinders.putIfAbsent(leaf.withScopeId!!, leaf.paramName!!)
+                reserved += leaf.paramName!!
+            }
             return
         }
         if (!leaf.isParameterized || leaf.tlaName in selfBinders) return
@@ -2151,6 +2165,28 @@ private fun emitConjoined(
         bindLeaf(pair.leafA)
         bindLeaf(pair.leafB)
     }
+
+    val takenParamIds = moduleLevelTaken.toMutableSet()
+    val argRenames = linkedMapOf<String, String>()
+    val seenArgs = mutableSetOf<String>()
+    fun renameIfTaken(name: String) {
+        if (name in constGlobalArgBinds) return
+        if (name in seenArgs) return
+        seenArgs += name
+        val tlaArg = firstFreeParamTlaName(name, takenParamIds)
+        takenParamIds += tlaArg
+        if (tlaArg != name) argRenames[name] = tlaArg
+    }
+    offers.forEach { offer ->
+        offer.decl.action.args.filter { offerRefsArg(offer, it.name) }.forEach { arg ->
+            renameIfTaken(arg.name)
+        }
+    }
+    // Determined / from-collection binders still become LET / `\E` names and must
+    // not collide with VARIABLES (`lastLogTerm` vs. the message-field LET).
+    bindNames.forEach { renameIfTaken(it) }
+    val exprOverrides = argRenames + constGlobalArgBinds
+    fun argTla(name: String): String = exprOverrides[name] ?: name
 
     fun selfOf(leaf: SpecLeaf): String? = selfBinders[leaf.tlaName]
 
@@ -2173,19 +2209,19 @@ private fun emitConjoined(
             expr, leafCtx, names, self,
             bareStateVars = stateVarsByLeaf[offer.leaf.tlaName].orEmpty(),
             stateVarNames = stateVarNames,
-            symbolOverrides = constGlobalArgBinds,
+            symbolOverrides = exprOverrides,
             linePrefix = linePrefix,
         )
     }
 
     bindPlan.listBinds.forEach { b ->
-        argParams += b.index to "1..Len(${emitBound(b.list)})"
+        argParams += argTla(b.index) to "1..Len(${emitBound(b.list)})"
     }
     bindPlan.setBinds.forEach { b ->
-        argParams += b.arg to emitBound(b.set)
+        argParams += argTla(b.arg) to emitBound(b.set)
     }
     bindPlan.structBinds.forEach { b ->
-        argParams += b.tmp to emitBound(b.set)
+        argParams += argTla(b.tmp) to emitBound(b.set)
     }
 
     val deferCtorSpawn = sessionPair != null && offers.any { it.isConstructor }
@@ -2217,7 +2253,7 @@ private fun emitConjoined(
                 expr, leafCtx, effectiveArgNames(), self,
                 bareStateVars = bare,
                 stateVarNames = stateVarNames,
-                symbolOverrides = constGlobalArgBinds + letOverrides.toMap(),
+                symbolOverrides = exprOverrides + letOverrides.toMap(),
                 linePrefix = linePrefix,
             )
 
@@ -2395,7 +2431,7 @@ private fun emitConjoined(
                     assumed, leafCtx, argNames, self,
                     bareStateVars = bare,
                     stateVarNames = stateVarNames,
-                    symbolOverrides = constGlobalArgBinds,
+                    symbolOverrides = exprOverrides,
                     linePrefix = "/\\ ",
                 )}"
             }
@@ -2434,7 +2470,7 @@ private fun emitConjoined(
             } else {
                 argLiteralDomain(offers, arg.name, arg.type) ?: typeToTlaDomain(arg.type)
             }
-            argParams += arg.name to domain
+            argParams += argTla(arg.name) to domain
         }
     }
 
@@ -2445,7 +2481,7 @@ private fun emitConjoined(
             null
         }
         b.keep.forEach { (path, expr) ->
-            val lhs = emitUnwrappedFieldPath(b.tmp, elemType, path)
+            val lhs = emitUnwrappedFieldPath(argTla(b.tmp), elemType, path)
             parts += "/\\ $lhs = ${emitBound(expr)}"
         }
     }
@@ -2464,7 +2500,7 @@ private fun emitConjoined(
                     conjunct, leafCtx, argNames, self,
                     bareStateVars = stateVarsByLeaf[offer.leaf.tlaName].orEmpty(),
                     stateVarNames = stateVarNames,
-                    symbolOverrides = constGlobalArgBinds,
+                    symbolOverrides = exprOverrides,
                     linePrefix = "/\\ ",
                 )}"
             }
@@ -2567,7 +2603,7 @@ private fun emitConjoined(
     val innerBody = parts.joinToString("\n  ")
     val letBindings = mutableListOf<Pair<String, String>>()
     bindPlan.listBinds.forEach { b ->
-        letBindings += b.arg to "${emitBound(b.list)}[${b.index}]"
+        letBindings += argTla(b.arg) to "${emitBound(b.list)}[${argTla(b.index)}]"
     }
     bindPlan.structBinds.forEach { b ->
         val elemType = try {
@@ -2576,12 +2612,12 @@ private fun emitConjoined(
             null
         }
         b.argPaths.forEach { (arg, path) ->
-            letBindings += arg to emitUnwrappedFieldPath(b.tmp, elemType, path)
+            letBindings += argTla(arg) to emitUnwrappedFieldPath(argTla(b.tmp), elemType, path)
         }
     }
     bindPlan.determined.forEach { (arg, expr) ->
         if (arg in constGlobalArgBinds) return@forEach
-        letBindings += arg to emitBound(expr, "      $arg == ")
+        letBindings += argTla(arg) to emitBound(expr, "      ${argTla(arg)} == ")
     }
     val body = wrapTlaLet(letBindings, innerBody)
     val indexParams = selfBinders.map { (leafName, binder) ->
@@ -2611,7 +2647,7 @@ private fun emitConjoined(
     return TlaAction(name, "$signature ==\n  $body", params, comment)
 }
 
-/** Prefer [SpecLeaf.paramName] as the TLA binder; append `_<leaf>` on name clashes.
+/** Prefer [SpecLeaf.paramName] as the TLA binder; suffix `_` / `_2` on name clashes.
  * Leaves that share [SpecLeaf.withScopeId] reuse the same binder string.
  */
 internal fun indexBinderName(leaf: SpecLeaf, reserved: Set<String>, sharedBinders: Map<String, String> = emptyMap()): String {
@@ -2620,7 +2656,7 @@ internal fun indexBinderName(leaf: SpecLeaf, reserved: Set<String>, sharedBinder
     if (scope != null) {
         sharedBinders[scope]?.let { return it }
     }
-    return if (base !in reserved) base else "${base}_${leaf.tlaName}"
+    return if (base !in reserved) base else firstFreeParamTlaName(base, reserved)
 }
 
 /**
@@ -2658,24 +2694,10 @@ internal fun buildStateVarNames(
         val pc = pclasses[leaf.name] ?: return@forEach
         pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
             val clash = (ownersByVar[vn.name]?.size ?: 0) > 1 || vn.name in reservedIds
-            out[id to vn.name] = if (clash) "${id}_${vn.name}" else vn.name
+            out[id to vn.name] = if (clash) "${vn.name}_$id" else vn.name
         }
     }
     return out
-}
-
-/** Action argument names across leaves — reserved so bare state vars do not shadow params. */
-internal fun actionArgNames(
-    leaves: List<SpecLeaf>,
-    pclasses: Map<String, ProcClassNode>,
-): Set<String> {
-    val names = linkedSetOf<String>()
-    leaves.forEach { leaf ->
-        val pc = pclasses[leaf.name] ?: return@forEach
-        (pc.localDecls().flatMap { it.constructors() } + pc.localDecls().flatMap { it.transitions() })
-            .forEach { action -> action.action.args.forEach { names += it.name } }
-    }
-    return names
 }
 
 internal fun stateTlaName(
@@ -2987,7 +3009,7 @@ internal fun globalVarsByLeaf(leaves: List<SpecLeaf>): Map<String, Set<String>> 
     return out
 }
 
-internal fun tlaVar(leaf: String, varName: String): String = "${leaf}_$varName"
+internal fun tlaVar(leaf: String, varName: String): String = "${varName}_$leaf"
 
 internal fun defaultTlaValue(
     type: Type,
@@ -4010,9 +4032,20 @@ internal fun orderFunsForTlaEmit(funs: Set<FunNode>): List<FunNode> {
 }
 
 /**
- * Prefer [preferred]; if taken, use `p_preferred`, then `p_preferred_2`, …
- * Adds the chosen name to [taken].
+ * Prefer [preferred]. On clash: `preferred_`, then `preferred_2`, `preferred_3`, …
+ * Does not mutate [taken].
  */
+internal fun firstFreeParamTlaName(preferred: String, taken: Set<String>): String {
+    if (preferred !in taken) return preferred
+    var name = "${preferred}_"
+    var n = 2
+    while (name in taken) {
+        name = "${preferred}_$n"
+        n++
+    }
+    return name
+}
+
 internal fun allocTlaName(preferred: String, taken: MutableSet<String>): String {
     var name = preferred
     if (name in taken) {
@@ -4043,7 +4076,15 @@ internal fun wrapTransitLetBlock(
     bindings: List<TransitLetEmit>,
     bodyConjuncts: List<String>,
 ): String {
-    require(bindings.isNotEmpty()) { "wrapTransitLetBlock requires bindings" }
+    val effective = if (TlaEmitOpts.get().unusedLets) {
+        pruneUnusedTransitLets(bindings, bodyConjuncts)
+    } else {
+        bindings
+    }
+    if (effective.isEmpty()) {
+        return if (bodyConjuncts.isEmpty()) "TRUE" else bodyConjuncts.joinToString("\n")
+    }
+    require(effective.isNotEmpty()) { "wrapTransitLetBlock requires bindings" }
     var text = if (bodyConjuncts.isEmpty()) {
         "TRUE"
     } else {
@@ -4052,20 +4093,20 @@ internal fun wrapTransitLetBlock(
     data class Seg(val io: TransitLetEmit?, val lets: List<TransitLetEmit>)
     val segs = mutableListOf<Seg>()
     var i = 0
-    while (i < bindings.size) {
-        val b = bindings[i]
+    while (i < effective.size) {
+        val b = effective[i]
         if (b.ioDomain != null) {
             i++
             val extra = mutableListOf<TransitLetEmit>()
-            while (i < bindings.size && bindings[i].ioDomain == null) {
-                extra += bindings[i]
+            while (i < effective.size && effective[i].ioDomain == null) {
+                extra += effective[i]
                 i++
             }
             segs += Seg(b, extra)
         } else {
             val plain = mutableListOf<TransitLetEmit>()
-            while (i < bindings.size && bindings[i].ioDomain == null) {
-                plain += bindings[i]
+            while (i < effective.size && effective[i].ioDomain == null) {
+                plain += effective[i]
                 i++
             }
             segs += Seg(null, plain)
@@ -4113,6 +4154,39 @@ internal fun wrapTransitLetBlock(
     }
     return text
 }
+
+internal fun pruneUnusedTransitLets(
+    bindings: List<TransitLetEmit>,
+    bodyConjuncts: List<String>,
+): List<TransitLetEmit> {
+    val body = bodyConjuncts.joinToString("\n")
+    val kept = mutableListOf<TransitLetEmit>()
+    for (b in bindings.asReversed()) {
+        val rest = buildString {
+            kept.forEach { append(it.initTla).append('\n') }
+            append(body)
+        }
+        if (tlaIdentReferenced(rest, b.tlaName)) kept.add(0, b)
+    }
+    return kept
+}
+
+internal fun pruneUnusedExprLets(
+    chain: List<Pair<String, ExprNode>>,
+    body: ExprNode,
+): List<Pair<String, ExprNode>> {
+    val emittedParts = flattenTopLevelAnd(body).filter { !TlaSkipConjuncts.skipped(it) }
+    val kept = mutableListOf<Pair<String, ExprNode>>()
+    for ((name, init) in chain.asReversed()) {
+        val used = emittedParts.any { exprReferencesSymbol(it, name) } ||
+            kept.any { exprReferencesSymbol(it.second, name) }
+        if (used) kept.add(0, name to init)
+    }
+    return kept
+}
+
+private fun tlaIdentReferenced(text: String, name: String): Boolean =
+    Regex("(?<![A-Za-z0-9_])${Regex.escape(name)}(?![A-Za-z0-9_])").containsMatchIn(text)
 
 /**
  * `LET` defs plus `IN` body for [wrapTransitLetBlock]. Consecutive non-IO lets share one `LET`.
@@ -4224,6 +4298,11 @@ internal fun unwrapParens(expr: ExprNode): ExprNode {
     var e = expr
     while (e is ParenExprNode) e = e.innerExpr()
     return e
+}
+
+private fun isBoolLiteral(expr: ExprNode, text: String): Boolean {
+    val e = unwrapParens(expr)
+    return e is LiteralValueExprNode && e.literalText() == text
 }
 
 internal fun isActionArgSymbol(expr: ExprNode, argNames: Set<String>): Boolean {
@@ -4825,7 +4904,7 @@ internal fun exprToTla(
             }
             exprToTla(
                 inner, leafCtx, forcedArgs, self, bareStateVars, reservedNames, stateVarNames,
-                symbolOverrides, linePrefix, parentPrec, globalByLeaf,
+                symbolOverrides - root, linePrefix, parentPrec, globalByLeaf,
             )
         }
         is ListLiteralExprNode -> {
@@ -4869,11 +4948,15 @@ internal fun exprToTla(
             if (chain.isEmpty()) {
                 return rec(cur, linePrefix, parentPrec)
             }
+            val kept = if (TlaEmitOpts.get().unusedLets) pruneUnusedExprLets(chain, cur) else chain
+            if (kept.isEmpty()) {
+                return rec(cur, linePrefix, parentPrec)
+            }
             val extra = mutableMapOf<String, String>()
             val rendered = mutableListOf<Pair<String, String>>()
             val kwIndent = exprKeywordIndent(linePrefix + open)
             val nameIndent = kwIndent + "    "
-            chain.forEachIndexed { i, (name, initExpr) ->
+            kept.forEachIndexed { i, (name, initExpr) ->
                 val initPrefix = when {
                     anyMulti && isMultiLineExpr(initExpr) -> exprBodyIndent(linePrefix + open)
                     i == 0 -> "$linePrefix${open}LET $name == "
@@ -5135,7 +5218,9 @@ internal fun exprToTla(
         is UnaryOpExprNode -> {
             when (expr.op()) {
                 "~" -> {
-                    val o = rec(expr.operand(), linePrefix, PREC_UNARY)
+                    // Include `~` in linePrefix so multi-line `\/` / `/\` continuations
+                    // line up with the first junction after `~(` / `~`.
+                    val o = rec(expr.operand(), "$linePrefix~", PREC_UNARY)
                     val s = "~$o"
                     if (PREC_UNARY < parentPrec) "($s)" else s
                 }
@@ -5294,20 +5379,38 @@ internal fun exprToTla(
             }
         }
         is IfElseExprNode -> {
-            val needParen = PREC_IMPLIES < parentPrec // IF binds loosely; paren when nested tightly
-            val open = if (needParen) "(" else ""
-            val close = if (needParen) ")" else ""
-            if (isMultiLineExpr(expr)) {
-                val c = rec(expr.condExpr(), "$linePrefix${open}IF ", PREC_BOTTOM)
-                val bodyPrefix = exprBodyIndent(linePrefix + open)
-                val t = rec(expr.thenExpr(), bodyPrefix, PREC_BOTTOM)
-                val e = rec(expr.elseExpr(), bodyPrefix, PREC_BOTTOM)
-                emitMultiLineIf(c, t, e, linePrefix, open, close)
-            } else {
-                val c = rec(expr.condExpr(), "$linePrefix$open", PREC_BOTTOM)
-                val t = rec(expr.thenExpr(), "$linePrefix${open}IF $c THEN ", PREC_BOTTOM)
-                val e = rec(expr.elseExpr(), "$linePrefix${open}IF $c THEN $t ELSE ", PREC_BOTTOM)
-                "${open}IF $c THEN $t ELSE $e$close"
+            // IF P THEN FALSE ELSE TRUE → ~P; IF P THEN TRUE ELSE FALSE → P.
+            when {
+                isBoolLiteral(expr.thenExpr(), "false") && isBoolLiteral(expr.elseExpr(), "true") ->
+                    rec(
+                        UnaryOpExprNode(
+                            "~",
+                            // Multiline `\/` emit ignores parentPrec; parens keep `~` over the whole cond.
+                            ParenExprNode(expr.condExpr(), expr.programLocation()),
+                            expr.programLocation(),
+                        ),
+                        linePrefix,
+                        parentPrec,
+                    )
+                isBoolLiteral(expr.thenExpr(), "true") && isBoolLiteral(expr.elseExpr(), "false") ->
+                    rec(expr.condExpr(), linePrefix, parentPrec)
+                else -> {
+                    val needParen = PREC_IMPLIES < parentPrec // IF binds loosely; paren when nested tightly
+                    val open = if (needParen) "(" else ""
+                    val close = if (needParen) ")" else ""
+                    if (isMultiLineExpr(expr)) {
+                        val c = rec(expr.condExpr(), "$linePrefix${open}IF ", PREC_BOTTOM)
+                        val bodyPrefix = exprBodyIndent(linePrefix + open)
+                        val t = rec(expr.thenExpr(), bodyPrefix, PREC_BOTTOM)
+                        val e = rec(expr.elseExpr(), bodyPrefix, PREC_BOTTOM)
+                        emitMultiLineIf(c, t, e, linePrefix, open, close)
+                    } else {
+                        val c = rec(expr.condExpr(), "$linePrefix$open", PREC_BOTTOM)
+                        val t = rec(expr.thenExpr(), "$linePrefix${open}IF $c THEN ", PREC_BOTTOM)
+                        val e = rec(expr.elseExpr(), "$linePrefix${open}IF $c THEN $t ELSE ", PREC_BOTTOM)
+                        "${open}IF $c THEN $t ELSE $e$close"
+                    }
+                }
             }
         }
         is WhenExprNode -> emitWhenToTla(expr, { e, p -> rec(e, p, PREC_BOTTOM) }, linePrefix, parentPrec)

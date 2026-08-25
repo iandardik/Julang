@@ -2047,11 +2047,17 @@ private fun SymbolValueExprNode.typePassSymbol(
         )
     }
     if (symbol !in symbolEnv) {
+        if (typePassAllowSortDomains) {
+            registry.sorts[symbol]?.let { sort ->
+                setInferredType(TypePassType.Inferred(sort))
+                return emptyList()
+            }
+        }
         if (typePassInitConstGlobals != null) {
             return listOf(
                 OneLocCompileError(
                     programLocation(),
-                    "unbound symbol \"$symbol\" in init: (use a const-global name or Sort.length)",
+                    "unbound symbol \"$symbol\" in init: (use a const-global name, a sort name, or Sort.length)",
                 ),
             )
         }

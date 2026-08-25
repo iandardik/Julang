@@ -49,7 +49,7 @@ class SpecInvariantExprTest {
         ),
         Pos(
             "let-if-when-exists",
-            "forall k : N, let (x : Int := Worker[k].n) { x >= 0 } & if (Worker[k].n >= 0) true else false & when (Worker[k].n) { 0 -> true else -> Worker[k].n > 0 } & exists i : Int, i = Worker[k].n",
+            "forall k : N, let (x : Int := Worker[k].n) { x >= 0 } & if (Worker[k].n >= 0) (Worker[k].n >= 0) else (Worker[k].n < 0) & when (Worker[k].n) { 0 -> true else -> Worker[k].n > 0 } & exists i : Int, i = Worker[k].n",
         ),
         Pos(
             "listOf-setOf",
@@ -305,7 +305,7 @@ class SpecInvariantExprTest {
             Worker[k].log.toSet().length >= 0
         invariant LetIfWhenExists := forall k : N,
             let (x : Int := Worker[k].n) { x >= 0 } &
-            if (Worker[k].n >= 0) true else false &
+            if (Worker[k].n >= 0) (Worker[k].n >= 0) else (Worker[k].n < 0) &
             when (Worker[k].n) { 0 -> true else -> Worker[k].n > 0 } &
             exists i : Int, i = Worker[k].n
         invariant Literals := 1 in listOf(1, 2) & 1 in setOf(1)

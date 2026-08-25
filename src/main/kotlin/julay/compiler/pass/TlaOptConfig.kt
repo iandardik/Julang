@@ -13,6 +13,7 @@ data class TlaOptConfig(
     val fromCollection: Boolean = true,
     val literalDomains: Boolean = true,
     val unwrapSingletons: Boolean = true,
+    val unusedLets: Boolean = true,
 ) {
     companion object {
         val ALL_ON = TlaOptConfig()
@@ -23,6 +24,7 @@ data class TlaOptConfig(
             fromCollection = false,
             literalDomains = false,
             unwrapSingletons = false,
+            unusedLets = false,
         )
 
         /** Stable CLI / docs IDs. */
@@ -33,6 +35,7 @@ data class TlaOptConfig(
             "from-collection",
             "literal-domains",
             "unwrap-singletons",
+            "unused-lets",
         )
 
         /**
@@ -60,6 +63,7 @@ data class TlaOptConfig(
                 fromCollection = "from-collection" !in disabled,
                 literalDomains = "literal-domains" !in disabled,
                 unwrapSingletons = "unwrap-singletons" !in disabled,
+                unusedLets = "unused-lets" !in disabled,
             )
         }
     }
