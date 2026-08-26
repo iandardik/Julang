@@ -1,4 +1,5 @@
-sort Idx := {"a", "b"}
+type Idx
+Idx := {"a", "b"}
 
 procfun countUp(n : Int) : Int {
     var steps : Int := 0

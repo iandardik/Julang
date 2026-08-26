@@ -1,6 +1,7 @@
 import julay.proclib.HttpServer
 import julay.funlib.parseInt
 import julay.funlib.split
+import node.lib.Value
 import node.lib.fieldValue
 import node.lib.encodeAppendEntriesResp
 import node.lib.encodeRequestVoteResp
@@ -125,7 +126,7 @@ procfun inAppendEntriesRPC(req :  HttpServerRequest) : HttpServerResponse {
 
     client transition handleAppendEntriesRequest(
         inTerm : Int, leaderId : Int, prevLogIndex : Int, prevLogTerm : Int,
-        entriesLen : Int, entryTerm : Int, entryValue : String, leaderCommit : Int,
+        entriesLen : Int, entryTerm : Int, entryValue : Value, leaderCommit : Int,
         outTerm : Int, success : Boolean, matchIdx : Int
     ) {
         guard:
@@ -146,7 +147,7 @@ procfun clientAppendRPC(req : HttpServerRequest) : HttpServerResponse {
     var step : String := "clientRequest"
     var appendIdx : Int := -1
 
-    client transition clientRequest(value : String, idx : Int) {
+    client transition clientRequest(value : Value, idx : Int) {
         guard:
             & step = "clientRequest"
             & value = req.body
@@ -158,7 +159,7 @@ procfun clientAppendRPC(req : HttpServerRequest) : HttpServerResponse {
     /*
      * Per the RaftProtocol, respond to the client once the value is committed.
      */
-    client transition committed(value : String, idx : Int) {
+    client transition committed(value : Value, idx : Int) {
         guard:
             & step = "waitForCommit"
             & value = req.body

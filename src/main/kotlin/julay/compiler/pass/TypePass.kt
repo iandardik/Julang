@@ -150,34 +150,42 @@ private fun resolveAccessPath(rootType: Type, path: List<String>): Pair<Type?, S
 /** Prefer an obj-literal hint when `Name(...)` names a known obj type rather than a function. */
 internal fun unknownFunctionMessage(name: String, registry: ObjClassRegistry): String =
     if (registry.rawDecl(name) != null || ObjClassBuiltinRegistry.isBuiltin(name)) {
-        "\"$name\" is an obj type, not a function; write $name { field := ... }, not $name(...)"
+        "\"$name\" is a type, not a function; write $name { field := ... }, not $name(...)"
     } else {
         "Unknown function \"$name\""
     }
 
 private fun sortDomainBan(type: Type, loc: ProgramLoc): CompileError? =
-    if (typePassAllowSortDomains) null else sortDomainOnlyError(type, loc)
+    if (typePassAllowSortDomains) null else domainOnlyError(type, loc)
 
-/** Value-level view: a sort domain is inhabited by its element type. */
-private fun valueView(type: Type): Type =
-    if (type is SortType) type.elementType else type
+/** Value-level view: domain types use their carrier / element type in specs. */
+private fun valueView(type: Type): Type = when (type) {
+    is DomainType -> type.carrierType
+    else -> type
+}
 
-/** Typing view of a type in leaf-spec bodies: sort domains behave as their element type. */
+/** Proc/JAR view: typedefs erase to carrier; uninterpreted stays (and is banned). */
+private fun procErasure(type: Type): Type = when (type) {
+    is DomainType -> if (type.kind == DomainKind.Typedef) type.carrierType else type
+    else -> type
+}
+
+/** Typing view: specs use carrier for domains; procs erase typedefs to carrier. */
 private fun typingView(type: Type): Type =
-    if (typePassAllowSortDomains) valueView(type) else type
+    if (typePassAllowSortDomains) valueView(type) else procErasure(type)
 
 fun RootNode.typePass(
     unit: CompilationUnit,
     allowUnindexedSpec: Boolean = false,
 ): TypePassResult {
-    val sortResult = unit.collectSorts()
-    if (sortResult.errors.isNotEmpty()) {
-        return TypePassResult(sortResult.errors)
+    val domainResult = unit.collectDomains()
+    if (domainResult.errors.isNotEmpty()) {
+        return TypePassResult(domainResult.errors)
     }
     val allRawObjClasses = unit.modules.flatMap { module ->
         module.root.declNodes().flatMap { it.objClassPass() }
     }
-    val built = ObjClassRegistry.build(allRawObjClasses, sortResult.sorts)
+    val built = ObjClassRegistry.build(allRawObjClasses, domainResult.domains)
     cacheObjClassRegistry(built)
     unit.modules.forEach { it.root.cacheObjClassRegistry(built) }
     if (built.errors.isNotEmpty()) {
@@ -368,7 +376,7 @@ private fun LeafSpecNode.typePassLeafSpec(
             is TypeResolveResult.Found -> {
                 // Sort params are domain binders; in the body they behave as the sort's element type.
                 val bodyType = when (val t = result.type) {
-                    is SortType -> t.elementType
+                    is DomainType -> t.carrierType
                     else -> t
                 }
                 env = env + (pName to bodyType)
@@ -1268,7 +1276,7 @@ private fun FieldAccessExprNode.typePassFieldAccess(
     procFunEnv: Map<String, ProcFunNode> = emptyMap(),
 ): List<CompileError> {
     if (typePassAllowSortDomains && fieldPath == listOf("length") && baseSymbol !in symbolEnv &&
-        registry.sorts.containsKey(baseSymbol)
+        registry.domains.containsKey(baseSymbol)
     ) {
         resolveFieldAccess(intType, "length")
         inferExprType(symbolEnv)
@@ -1990,7 +1998,7 @@ private fun QuantifiedExprNode.typePassQuantified(
     }
     sortDomainBan(binderType, programLocation())?.let { return listOf(it) }
     val bodyType = when (binderType) {
-        is SortType -> binderType.elementType
+        is DomainType -> binderType.carrierType
         else -> binderType
     }
     val bodyErrors = quantifiedBody().typePass(
@@ -2048,8 +2056,8 @@ private fun SymbolValueExprNode.typePassSymbol(
     }
     if (symbol !in symbolEnv) {
         if (typePassAllowSortDomains) {
-            registry.sorts[symbol]?.let { sort ->
-                setInferredType(TypePassType.Inferred(sort))
+            registry.domains[symbol]?.let { domain ->
+                setInferredType(TypePassType.Inferred(domain))
                 return emptyList()
             }
         }
@@ -2232,9 +2240,9 @@ private fun FunCallExprNode.typePassFunCall(
     if (typePassAllowSortDomains && callName() == "length" && callArgs().size == 1) {
         val arg = callArgs().single()
         if (arg is SymbolValueExprNode && arg.symbol !in symbolEnv &&
-            registry.sorts.containsKey(arg.symbol)
+            registry.domains.containsKey(arg.symbol)
         ) {
-            arg.setInferredType(TypePassType.Inferred(registry.sorts.getValue(arg.symbol)))
+            arg.setInferredType(TypePassType.Inferred(registry.domains.getValue(arg.symbol)))
             setInferredType(TypePassType.Inferred(intType))
             return emptyList()
         }
@@ -2964,8 +2972,9 @@ private fun FunNode.typePassFunBody(
     if (bodyErrors.isNotEmpty()) {
         return bodyErrors
     }
+    val expectedReturn = typingView(returnType)
     return assertOrCompileError(
-        funBody().getType() == returnType,
+        funBody().getType() == expectedReturn,
         OneLocCompileError(
             funBody().programLocation(),
             "Expected function \"${name()}\" to return $returnType but body has type ${funBody().getType()}",

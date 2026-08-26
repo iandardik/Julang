@@ -70,7 +70,8 @@ class AlphabetJsonTest {
         val file = dir.resolve("main.jul")
         file.writeText(
             """
-            sort Node := { "n1", "n2" }
+            type Node
+            Node := { "n1", "n2" }
 
             proc Protocol {
                 constructor initially(args : List<String>) { transit: }
@@ -146,7 +147,8 @@ class AlphabetJsonTest {
         val file = dir.resolve("main.jul")
         file.writeText(
             """
-            sort Node := { "n1" }
+            type Node
+            Node := { "n1" }
             spec Net[n : Node] {
                 constructor initially(args : List<String>) {}
                 transition requestVote() { transit: }

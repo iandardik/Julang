@@ -81,8 +81,8 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         val decl = oneChoice(
             ctx!!.proc(),
             ctx.api_decl(),
-            ctx.obj(),
-            ctx.sort_decl(),
+            ctx.type_decl(),
+            ctx.type_model(),
             ctx.compile_decl(),
             ctx.spec(),
             ctx.invariant_decl(),
@@ -96,7 +96,29 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         return node
     }
 
-    override fun visitSort_decl(ctx: JulayParser.Sort_declContext?): ASTNode {
+    override fun visitType_decl(ctx: JulayParser.Type_declContext?): ASTNode {
+        val name = ctx!!.ID().text
+        return when {
+            ctx.LCURLY() != null -> {
+                val typeParams = parseTypeParams(ctx.typeParams())
+                val fields = ctx.field()
+                    .map { visit(it) }
+                    .map {
+                        if (it !is FieldNode) {
+                            throw RuntimeException("Expected FieldNode but got $it")
+                        }
+                        it
+                    }
+                ObjClassNode(name, typeParams, fields, sourceLocation(ctx))
+            }
+            ctx.ASGN_EQ() != null -> {
+                DomainDeclNode(name, parseTypeExpr(ctx.typeExpr()), sourceLocation(ctx))
+            }
+            else -> DomainDeclNode(name, null, sourceLocation(ctx))
+        }
+    }
+
+    override fun visitType_model(ctx: JulayParser.Type_modelContext?): ASTNode {
         val name = ctx!!.ID().text
         val elements = ctx.literal().map { litCtx ->
             val node = visit(litCtx)
@@ -105,7 +127,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             }
             node
         }
-        return SortDeclNode(name, elements, sourceLocation(ctx))
+        return TypeModelNode(name, elements, sourceLocation(ctx))
     }
 
     override fun visitFun_decl(ctx: JulayParser.Fun_declContext?): ASTNode {
@@ -194,20 +216,6 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             throw RuntimeException("Expected call argument to be an expression")
         }
         return e
-    }
-
-    override fun visitObj(ctx: JulayParser.ObjContext?): ASTNode {
-        val name = ctx!!.ID().text
-        val typeParams = parseTypeParams(ctx.typeParams())
-        val fields = ctx.field()
-            .map { visit(it) }
-            .map {
-                if (it !is FieldNode) {
-                    throw RuntimeException("Expected FieldNode but got $it")
-                }
-                it
-            }
-        return ObjClassNode(name, typeParams, fields, sourceLocation(ctx))
     }
 
     override fun visitField(ctx: JulayParser.FieldContext?): ASTNode {
@@ -324,6 +332,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 val paramType = parseTypeExpr(ctx.typeExpr())
                 val globalDecls = mutableListOf<GlobalDeclNames>()
                 val initExprs = mutableListOf<ExprNode>()
+                val typeModels = mutableListOf<TypeModelNode>()
                 ctx.create_index_item().forEach { item ->
                     val decl = item.global_decl()
                     if (decl != null) {
@@ -333,17 +342,26 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                             loc = sourceLocation(decl),
                         )
                     } else {
-                        val init = item.init_clause()
-                            ?: return@forEach
-                        val expr = visit(init.expr())
-                        if (expr !is ExprNode) {
-                            throw RuntimeException("Expected init: clause to be an expression")
+                        val model = item.type_model()
+                        if (model != null) {
+                            val node = visit(model)
+                            if (node !is TypeModelNode) {
+                                throw RuntimeException("Expected TypeModelNode but got $node")
+                            }
+                            typeModels += node
+                        } else {
+                            val init = item.init_clause()
+                                ?: return@forEach
+                            val expr = visit(init.expr())
+                            if (expr !is ExprNode) {
+                                throw RuntimeException("Expected init: clause to be an expression")
+                            }
+                            initExprs += expr
                         }
-                        initExprs += expr
                     }
                 }
                 ParamProcExprNode(
-                    primary, paramName, paramType, sourceLocation(ctx), globalDecls, initExprs,
+                    primary, paramName, paramType, sourceLocation(ctx), globalDecls, initExprs, typeModels,
                 )
             }
             ctx.LBRACK() != null -> {
@@ -677,7 +695,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             ctx.method_prop_expr() != null -> visit(ctx.method_prop_expr())
             ctx.index_expr() != null -> visit(ctx.index_expr())
             ctx.field_access() != null -> visit(ctx.field_access())
-            ctx.obj_literal() != null -> visit(ctx.obj_literal())
+            ctx.record_literal() != null -> visit(ctx.record_literal())
             ctx.fun_call() != null -> visit(ctx.fun_call())
             // Prefix & / | have no semantic effect (TLA+ style guard formatting)
             (ctx.AND() != null || ctx.OR() != null) && ctx.expr().size == 1 -> {
@@ -792,8 +810,8 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     private fun parseWhenPattern(ctx: JulayParser.When_patternContext): WhenPattern {
         return when {
             ctx.literal() != null -> WhenPattern.Primitive(parseWhenLiteral(ctx.literal()))
-            ctx.obj_literal() != null -> {
-                val literal = visit(ctx.obj_literal())
+            ctx.record_literal() != null -> {
+                val literal = visit(ctx.record_literal())
                 if (literal !is ObjClassLiteralExprNode) {
                     throw RuntimeException("Expected obj literal in when pattern")
                 }
@@ -851,13 +869,13 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         }
     }
 
-    override fun visitObj_literal(ctx: JulayParser.Obj_literalContext?): ASTNode {
+    override fun visitRecord_literal(ctx: JulayParser.Record_literalContext?): ASTNode {
         val typeExpr = parseTypeExpr(ctx!!.typeExpr())
-        val fieldEntries = ctx.obj_field_assign().map { assign ->
+        val fieldEntries = ctx.record_field_assign().map { assign ->
             val fieldName = assign.ID().text
             val expr = visit(assign.expr())
             if (expr !is ExprNode) {
-                throw RuntimeException("Expected obj literal field value to be an expression")
+                throw RuntimeException("Expected record literal field value to be an expression")
             }
             fieldName to expr
         }

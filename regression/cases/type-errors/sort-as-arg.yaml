@@ -1,5 +1,5 @@
 source: regression/input/type-errors/sort-as-arg.jul
 expectCompileFailure: true
 expectCompileOutputContains:
-  - "sort \"Node\" can only be used as a spec or quantifier domain"
+  - "type \"Node\" can only be used as a spec or quantifier domain"
   - "Found type errors; exiting."

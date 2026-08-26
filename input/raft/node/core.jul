@@ -5,6 +5,7 @@ import node.leader_heartbeat.LeaderHeartbeat
 import node.lib.Entry
 import node.lib.Node
 import node.lib.AppendEntriesData
+import node.lib.Value
 import node.lib.entryValueAt
 import node.lib.entryTermAt
 import node.lib.noneNode
@@ -140,7 +141,7 @@ export proc RaftProtocol {
     }
 
     // TODO do we really need to send back the idx to the client?
-    provider transition clientRequest(value : String, idx : Int) {
+    provider transition clientRequest(value : Value, idx : Int) {
         guard:
             & state = "Leader"
             & idx = length(log) + 1
@@ -202,7 +203,7 @@ export proc RaftProtocol {
         prevLogTerm : Int,
         entriesLen : Int,
         entryTerm : Int,
-        entryValue : String,
+        entryValue : Value,
         leaderCommit : Int,
         outTerm : Int,
         success : Boolean,
@@ -339,7 +340,7 @@ export proc RaftProtocol {
      * Getter actions that are not technically part of the protocol.
     */
 
-    provider transition committed(value : String, idx : Int) {
+    provider transition committed(value : Value, idx : Int) {
         guard:
             & state = "Leader"
             & idx > 0

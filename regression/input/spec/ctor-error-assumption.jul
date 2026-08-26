@@ -1,6 +1,7 @@
 import julay.funlib.allDistinct
 
-sort Idx := {"a"}
+type Idx
+Idx := {"a"}
 
 proc P {
     var x : Int

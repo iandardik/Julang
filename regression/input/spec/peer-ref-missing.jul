@@ -1,4 +1,5 @@
-sort Node := { "n1" }
+type Node
+Node := { "n1" }
 
 proc Peer {
     var self : String := ""

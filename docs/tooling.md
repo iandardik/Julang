@@ -17,7 +17,7 @@ java -jar build/libs/julayc.jar --compile EchoServer --compile EchoClient path/t
 java -jar build/libs/julayc.jar --compile-tla IncServer path/to/file.jul
 ```
 
-Compiling a **proc** fails (no `.jar`) if that target reaches a sort-bearing type — a `sort`, or an `obj`/collection that nests one. Spec `compile` targets are unaffected and may use sort-typed state and sort-field objs freely. `julayc check` reports the same JAR reachability errors for named `compile` procs.
+Compiling a **proc** fails (no `.jar`) if that target reaches an **uninterpreted** type — directly or nested in a record or collection. Spec `compile` targets are unaffected and may use uninterpreted types and typedefs freely. `julayc check` reports the same JAR reachability errors for named `compile` procs.
 ### Useful flags
 
 | Flag | Meaning |

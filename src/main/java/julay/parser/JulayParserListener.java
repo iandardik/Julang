@@ -148,25 +148,25 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitProc(JulayParser.ProcContext ctx);
 	/**
-	 * Enter a parse tree produced by {@link JulayParser#obj}.
+	 * Enter a parse tree produced by {@link JulayParser#type_decl}.
 	 * @param ctx the parse tree
 	 */
-	void enterObj(JulayParser.ObjContext ctx);
+	void enterType_decl(JulayParser.Type_declContext ctx);
 	/**
-	 * Exit a parse tree produced by {@link JulayParser#obj}.
+	 * Exit a parse tree produced by {@link JulayParser#type_decl}.
 	 * @param ctx the parse tree
 	 */
-	void exitObj(JulayParser.ObjContext ctx);
+	void exitType_decl(JulayParser.Type_declContext ctx);
 	/**
-	 * Enter a parse tree produced by {@link JulayParser#sort_decl}.
+	 * Enter a parse tree produced by {@link JulayParser#type_model}.
 	 * @param ctx the parse tree
 	 */
-	void enterSort_decl(JulayParser.Sort_declContext ctx);
+	void enterType_model(JulayParser.Type_modelContext ctx);
 	/**
-	 * Exit a parse tree produced by {@link JulayParser#sort_decl}.
+	 * Exit a parse tree produced by {@link JulayParser#type_model}.
 	 * @param ctx the parse tree
 	 */
-	void exitSort_decl(JulayParser.Sort_declContext ctx);
+	void exitType_model(JulayParser.Type_modelContext ctx);
 	/**
 	 * Enter a parse tree produced by {@link JulayParser#compile_decl}.
 	 * @param ctx the parse tree
@@ -648,25 +648,25 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitLambda_expr(JulayParser.Lambda_exprContext ctx);
 	/**
-	 * Enter a parse tree produced by {@link JulayParser#obj_literal}.
+	 * Enter a parse tree produced by {@link JulayParser#record_literal}.
 	 * @param ctx the parse tree
 	 */
-	void enterObj_literal(JulayParser.Obj_literalContext ctx);
+	void enterRecord_literal(JulayParser.Record_literalContext ctx);
 	/**
-	 * Exit a parse tree produced by {@link JulayParser#obj_literal}.
+	 * Exit a parse tree produced by {@link JulayParser#record_literal}.
 	 * @param ctx the parse tree
 	 */
-	void exitObj_literal(JulayParser.Obj_literalContext ctx);
+	void exitRecord_literal(JulayParser.Record_literalContext ctx);
 	/**
-	 * Enter a parse tree produced by {@link JulayParser#obj_field_assign}.
+	 * Enter a parse tree produced by {@link JulayParser#record_field_assign}.
 	 * @param ctx the parse tree
 	 */
-	void enterObj_field_assign(JulayParser.Obj_field_assignContext ctx);
+	void enterRecord_field_assign(JulayParser.Record_field_assignContext ctx);
 	/**
-	 * Exit a parse tree produced by {@link JulayParser#obj_field_assign}.
+	 * Exit a parse tree produced by {@link JulayParser#record_field_assign}.
 	 * @param ctx the parse tree
 	 */
-	void exitObj_field_assign(JulayParser.Obj_field_assignContext ctx);
+	void exitRecord_field_assign(JulayParser.Record_field_assignContext ctx);
 	/**
 	 * Enter a parse tree produced by {@link JulayParser#field_access}.
 	 * @param ctx the parse tree

@@ -46,8 +46,7 @@ SETOF : 'setOf' ;
 MAPOF : 'mapOf' ;
 
 
-OBJ : 'obj' ;
-SORT : 'sort' ;
+TYPE : 'type' ;
 PROC : 'proc' ;
 API : 'api' ;
 CALLS : 'calls' ;

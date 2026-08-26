@@ -1,4 +1,5 @@
-sort Node := {"n1", "n2", "n3"}
+type Node
+Node := {"n1", "n2", "n3"}
 
 proc Counter {
     var n : Int

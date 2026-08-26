@@ -6,7 +6,7 @@ import julay.program.type.IntType
 import julay.program.type.ListType
 import julay.program.type.MapType
 import julay.program.type.SetType
-import julay.program.type.SortType
+import julay.program.type.DomainType
 import julay.program.type.Type
 
 internal data class SingletonInitHit(
@@ -31,10 +31,10 @@ internal fun matchSingletonConstGlobalInit(
     varName: String,
     type: Type,
     initExprs: List<ExprNode>,
-    sorts: Map<String, SortType>,
+    domains: Map<String, DomainType>,
 ): SingletonInitHit? {
     val lenHit = initExprs.mapNotNull { expr ->
-        lengthEqSize(expr, varName, sorts)?.let { expr to it }
+        lengthEqSize(expr, varName, domains)?.let { expr to it }
     }.singleOrNull() ?: return null
     if (lenHit.second < 0) return null
     val elems = (1..lenHit.second).joinToString(", ")
@@ -243,7 +243,7 @@ private fun hofSourceVar(expr: ExprNode): HofSource? {
 private fun lengthEqSize(
     expr: ExprNode,
     varName: String,
-    sorts: Map<String, SortType>,
+    domains: Map<String, DomainType>,
 ): Int? {
     val e = unwrapInitParen(expr)
     if (e !is BinaryOpExprNode || e.op() != "=") return null
@@ -252,14 +252,14 @@ private fun lengthEqSize(
     fun size(lenExpr: ExprNode, other: ExprNode): Int? {
         if (!isLengthOfName(lenExpr, varName)) return null
         literalNonNegInt(other)?.let { return it }
-        return sortCardinality(other, sorts)
+        return sortCardinality(other, domains)
     }
     return size(l, r) ?: size(r, l)
 }
 
-private fun sortCardinality(expr: ExprNode, sorts: Map<String, SortType>): Int? {
+private fun sortCardinality(expr: ExprNode, domains: Map<String, DomainType>): Int? {
     val name = lengthBaseName(expr) ?: return null
-    return sorts[name]?.cfgElements?.size
+    return domains[name]?.cfgElements?.size
 }
 
 private fun isLengthOfName(expr: ExprNode, name: String): Boolean =

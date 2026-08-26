@@ -488,7 +488,7 @@ private fun missingSyncPeerWarnings(offers: List<ActionOffer>): List<CompileWarn
     }
 
 private fun RootNode.overlappingDeclNamesErrors(): List<CompileError> {
-    val decls = declNodes().filter { it !is CompileNode }
+    val decls = declNodes().filter { it !is CompileNode && it !is TypeModelNode }
     return decls.flatMap { refDecl ->
         decls
             .filter { decl -> refDecl != decl && refDecl.name() == decl.name() }

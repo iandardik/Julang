@@ -1,5 +1,5 @@
 source: regression/input/oclass/oclass-unknown-field.jul
 expectCompileFailure: true
 expectCompileOutputContains:
-  - "Unknown field \"z\" on obj Point"
+  - "Unknown field \"z\" on type Point"
   - "Found type errors; exiting."

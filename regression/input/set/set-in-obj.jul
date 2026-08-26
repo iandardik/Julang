@@ -1,11 +1,11 @@
 import julay.funlib.exitProgram
 import julay.funlib.setOf
 
-obj Node {
+type Node {
     id : Int
 }
 
-obj Cfg {
+type Cfg {
     me : Node
     cluster : Set<Node>
     nextIndex : Map<Node, Int>

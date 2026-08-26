@@ -12,17 +12,18 @@ import julay.compiler.ast.RootNode
 import julay.compiler.ast.TransitionNode
 import julay.compiler.ast.VarNode
 import julay.compiler.decl.ProcDecl
+import julay.program.type.DomainKind
+import julay.program.type.DomainType
 import julay.program.type.ListType
 import julay.program.type.MapType
 import julay.program.type.ObjClassType
 import julay.program.type.SetType
-import julay.program.type.SortType
 import julay.program.type.Type
-import julay.program.type.containsSortType
+import julay.program.type.containsUninterpretedType
 
 /**
- * JAR targets must not reach sort-bearing types (sorts, or objs/collections that nest them).
- * Specs / TLA+ may use those types freely.
+ * JAR targets must not reach uninterpreted types (including nested in records/collections).
+ * Typedefs erase to their carrier and are JAR-legal. Specs / TLA+ may use uninterpreted freely.
  */
 fun jarSortReachabilityErrors(
     jarTargets: List<ProcDecl>,
@@ -37,35 +38,34 @@ fun jarSortReachabilityErrors(
         val leafNames = target.allProcNames(procDecls)
         for (leafName in leafNames) {
             val pc = pclasses[leafName] ?: procFuns[leafName]?.asSyntheticProcClass() ?: continue
-            errors += sortBearingUsesInProcClass(pc, target.name)
+            errors += uninterpretedUsesInProcClass(pc, target.name)
         }
     }
     return errors
 }
 
-private fun sortBearingUsesInProcClass(pc: ProcClassNode, jarTargetName: String): List<CompileError> {
+private fun uninterpretedUsesInProcClass(pc: ProcClassNode, jarTargetName: String): List<CompileError> {
     val errors = mutableListOf<CompileError>()
     for (decl in pc.localDecls()) {
         when (decl) {
             is VarNode -> {
                 try {
-                    reportIfSortBearing(decl.type, decl.programLocation(), jarTargetName, "state variable \"${decl.name}\"")
+                    reportIfUninterpreted(decl.type, decl.programLocation(), jarTargetName, "state variable \"${decl.name}\"")
                         ?.let { errors += it }
                 } catch (_: RuntimeException) {
-                    // Unresolved type — typePass would have failed already.
                 }
             }
             is ConstructorNode ->
-                errors += sortBearingUsesInArgs(decl.constructorArgs(), jarTargetName, "constructor \"${decl.constructorName()}\"")
+                errors += uninterpretedUsesInArgs(decl.constructorArgs(), jarTargetName, "constructor \"${decl.constructorName()}\"")
             is TransitionNode ->
-                errors += sortBearingUsesInArgs(decl.transitionArgs(), jarTargetName, "transition \"${decl.transitionName()}\"")
+                errors += uninterpretedUsesInArgs(decl.transitionArgs(), jarTargetName, "transition \"${decl.transitionName()}\"")
             else -> {}
         }
     }
     return errors
 }
 
-private fun sortBearingUsesInArgs(
+private fun uninterpretedUsesInArgs(
     args: ArgsNode,
     jarTargetName: String,
     context: String,
@@ -74,7 +74,7 @@ private fun sortBearingUsesInArgs(
     for (child in args.children) {
         if (child !is ArgNode) continue
         try {
-            reportIfSortBearing(child.type, child.programLocation(), jarTargetName, "$context argument \"${child.argName()}\"")
+            reportIfUninterpreted(child.type, child.programLocation(), jarTargetName, "$context argument \"${child.argName()}\"")
                 ?.let { errors += it }
         } catch (_: RuntimeException) {
         }
@@ -82,37 +82,38 @@ private fun sortBearingUsesInArgs(
     return errors
 }
 
-private fun reportIfSortBearing(
+private fun reportIfUninterpreted(
     type: Type,
     loc: ProgramLoc,
     jarTargetName: String,
     useSite: String,
 ): CompileError? {
-    if (!type.containsSortType()) return null
-    val detail = sortBearingDetail(type) ?: type.toString()
+    if (!type.containsUninterpretedType()) return null
+    val detail = uninterpretedDetail(type) ?: type.toString()
     return OneLocCompileError(
         loc,
-        "JAR target \"$jarTargetName\" uses sort-bearing type at $useSite ($detail); sorts are only for specs / TLA+",
+        "JAR target \"$jarTargetName\" uses uninterpreted type at $useSite ($detail); uninterpreted types are only for specs / TLA+",
     )
 }
 
-/** Prefer naming the offending obj field and sort when possible. */
-internal fun sortBearingDetail(type: Type): String? = when {
-    type is SortType -> "sort \"${type.name}\""
+internal fun sortBearingDetail(type: Type): String? = uninterpretedDetail(type)
+
+internal fun uninterpretedDetail(type: Type): String? = when {
+    type is DomainType && type.kind == DomainKind.Uninterpreted -> "type \"${type.name}\""
     type is ObjClassType -> {
-        val hit = type.fields.firstOrNull { it.type.containsSortType() }
+        val hit = type.fields.firstOrNull { it.type.containsUninterpretedType() }
         if (hit == null) {
             "\"${type.name}\""
         } else {
-            val nested = sortBearingDetail(hit.type) ?: hit.type.toString()
+            val nested = uninterpretedDetail(hit.type) ?: hit.type.toString()
             "\"${type.name}\" (field ${hit.name} : $nested)"
         }
     }
-    type is ListType -> sortBearingDetail(type.elementType)?.let { "List<$it>" }
-    type is SetType -> sortBearingDetail(type.elementType)?.let { "Set<$it>" }
+    type is ListType -> uninterpretedDetail(type.elementType)?.let { "List<$it>" }
+    type is SetType -> uninterpretedDetail(type.elementType)?.let { "Set<$it>" }
     type is MapType -> {
-        val k = sortBearingDetail(type.keyType)
-        val v = sortBearingDetail(type.valueType)
+        val k = uninterpretedDetail(type.keyType)
+        val v = uninterpretedDetail(type.valueType)
         when {
             k != null && v != null -> "Map<$k, $v>"
             k != null -> "Map<$k, …>"

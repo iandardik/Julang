@@ -1,4 +1,5 @@
-sort Bad := {-1, 0, 1}
+type Bad
+Bad := {-1, 0, 1}
 
 proc P {
     var n : Int

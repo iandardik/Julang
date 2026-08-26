@@ -28,8 +28,8 @@ name_id
 decl
     : EXPORT? proc
     | EXPORT? api_decl
-    | EXPORT? obj
-    | EXPORT? sort_decl
+    | EXPORT? type_decl
+    | EXPORT? type_model
     | compile_decl
     | EXPORT? spec
     | EXPORT? invariant_decl
@@ -77,12 +77,14 @@ proc
     | PROC ID ASGN_EQ proc_expr
     ;
 
-obj
-    : OBJ ID typeParams? LCURLY field* RCURLY
+type_decl
+    : TYPE ID typeParams? LCURLY field* RCURLY
+    | TYPE ID ASGN_EQ typeExpr
+    | TYPE ID
     ;
 
-sort_decl
-    : SORT ID ASGN_EQ LCURLY literal (COMMA literal)* RCURLY
+type_model
+    : ID ASGN_EQ LCURLY literal (COMMA literal)* RCURLY
     ;
 
 compile_decl
@@ -124,6 +126,7 @@ system_atom
 create_index_item
     : global_decl
     | init_clause
+    | type_model
     ;
 
 global_decl
@@ -241,7 +244,7 @@ expr
     | method_prop_expr
     | index_expr
     | field_access
-    | obj_literal
+    | record_literal
     | fun_call
     | NOT expr
     // Prefix & / | are no-ops (TLA+ style formatting); same precedence as ~
@@ -286,7 +289,7 @@ when_guard_arm
 
 when_pattern
     : literal
-    | obj_literal
+    | record_literal
     ;
 
 proc_expr
@@ -361,11 +364,11 @@ lambda_expr
     | LPAREN ID COMMA ID RPAREN ARROW expr
     ;
 
-obj_literal
-    : typeExpr LCURLY obj_field_assign (COMMA obj_field_assign)* RCURLY
+record_literal
+    : typeExpr LCURLY record_field_assign (COMMA record_field_assign)* RCURLY
     ;
 
-obj_field_assign
+record_field_assign
     : ID ASGN_EQ expr
     ;
 

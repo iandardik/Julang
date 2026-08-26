@@ -1,6 +1,7 @@
 import julay.funlib.listOf
 
-sort Node := {"n1"}
+type Node
+Node := {"n1"}
 
 proc Peer {
     const cluster : List<String>

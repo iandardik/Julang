@@ -4,7 +4,7 @@ import julay.funlib.listOf
 import julay.funlib.mapOf
 import julay.funlib.setOf
 
-obj Point {
+type Point {
     x : Int
     y : Int
 }

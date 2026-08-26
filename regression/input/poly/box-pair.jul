@@ -1,10 +1,10 @@
 import julay.funlib.exitProgram
 
-obj Box<T> {
+type Box<T> {
     value : T
 }
 
-obj Pair<A, B> {
+type Pair<A, B> {
     left : A
     right : B
 }

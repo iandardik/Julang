@@ -8,8 +8,9 @@ import julay.compiler.pass.sortBearingDetail
 import julay.compiler.pass.typePass
 import julay.program.type.ObjClassType
 import julay.program.type.SetType
-import julay.program.type.SortType
-import julay.program.type.containsSortType
+import julay.program.type.DomainKind
+import julay.program.type.DomainType
+import julay.program.type.containsUninterpretedType
 import julay.program.type.stringType
 import julay.program.Variable
 import java.io.File
@@ -25,8 +26,9 @@ class ObjSortFieldTest {
     fun objWithSortFieldTypeChecksAlone() {
         val result = typeCheck(
             """
-            sort NodeSet := { "n1", "n2" }
-            obj VoteRequestMsg {
+            type NodeSet
+            NodeSet := { "n1", "n2" }
+            type VoteRequestMsg {
                 dest : NodeSet
                 msg : String
             }
@@ -39,7 +41,8 @@ class ObjSortFieldTest {
     fun leafSpecSortStateTypeChecks() {
         val result = typeCheck(
             """
-            sort Node := { "n1", "n2" }
+            type Node
+            Node := { "n1", "n2" }
             spec E {
                 var d : Node := "n1"
                 constructor initially(args : List<String>) { transit: d := "n1" }
@@ -54,8 +57,9 @@ class ObjSortFieldTest {
         val result = typeCheck(
             """
             import julay.funlib.setOf
-            sort NodeSet := { "n1", "n2" }
-            obj VoteRequestMsg {
+            type NodeSet
+            NodeSet := { "n1", "n2" }
+            type VoteRequestMsg {
                 dest : NodeSet
                 msg : String
             }
@@ -72,7 +76,8 @@ class ObjSortFieldTest {
     fun procDirectSortStateStillErrors() {
         val result = typeCheck(
             """
-            sort Node := { "n1" }
+            type Node
+            Node := { "n1" }
             proc P {
                 var d : Node := "n1"
                 constructor initially(args : List<String>) { transit: d := "n1" }
@@ -94,8 +99,9 @@ class ObjSortFieldTest {
         net.writeText(
             """
             import julay.funlib.setOf
-            export sort NodeSet := { "n1", "n2" }
-            obj VoteRequestMsg {
+            export type NodeSet
+            export NodeSet := { "n1", "n2" }
+            type VoteRequestMsg {
                 dest : NodeSet
                 msg : String
             }
@@ -169,8 +175,9 @@ class ObjSortFieldTest {
     @Test
     fun procSortBearingObjTypeChecksButJarRefused() {
         val source = """
-            sort NodeSet := { "n1", "n2" }
-            obj VoteRequestMsg {
+            type NodeSet
+            NodeSet := { "n1", "n2" }
+            type VoteRequestMsg {
                 dest : NodeSet
                 msg : String
             }
@@ -190,7 +197,7 @@ class ObjSortFieldTest {
         file.writeText(source)
         val check = checkJulFile(file)
         assertTrue(
-            check.diagnostics.any { it.message.contains("sort-bearing") && it.message.contains("Bad") },
+            check.diagnostics.any { it.message.contains("uninterpreted") && it.message.contains("Bad") },
             check.diagnostics.toString(),
         )
 
@@ -213,7 +220,7 @@ class ObjSortFieldTest {
         val check = checkJulFile(source.toPath())
         assertTrue(
             check.diagnostics.any {
-                it.message.contains("sort-bearing") &&
+                it.message.contains("uninterpreted") &&
                     (it.message.contains("Outer") || it.message.contains("Inner") || it.message.contains("Node"))
             },
             check.diagnostics.toString(),
@@ -223,8 +230,9 @@ class ObjSortFieldTest {
     @Test
     fun specAndJarSameFile() {
         val source = """
-            sort NodeSet := { "n1" }
-            obj Msg { dest : NodeSet }
+            type NodeSet
+            NodeSet := { "n1" }
+            type Msg { dest : NodeSet }
             spec Good {
                 var m : Msg
                 constructor initially(args : List<String>) {
@@ -255,8 +263,9 @@ class ObjSortFieldTest {
             // Spec-only compile of Good still works when Bad is not a compile target:
             file.writeText(
                 """
-                sort NodeSet := { "n1" }
-                obj Msg { dest : NodeSet }
+                type NodeSet
+                NodeSet := { "n1" }
+                type Msg { dest : NodeSet }
                 spec Good {
                     var m : Msg
                     constructor initially(args : List<String>) {
@@ -279,8 +288,9 @@ class ObjSortFieldTest {
     fun leafSpecParamIntoSortField() {
         val result = typeCheck(
             """
-            sort Node := { "n1", "n2" }
-            obj Vote { dest : Node }
+            type Node
+            Node := { "n1", "n2" }
+            type Vote { dest : Node }
             spec Net[n : Node] {
                 var last : Vote
                 constructor initially(args : List<String>) {
@@ -315,14 +325,14 @@ class ObjSortFieldTest {
 
     @Test
     fun sortBearingDetailNamesFieldAndSort() {
-        val node = SortType("Node", stringType, listOf("\"n1\""))
+        val node = DomainType("Node", DomainKind.Uninterpreted, stringType, listOf("\"n1\""))
         val inner = ObjClassType(
             "Inner",
             listOf(Variable("d", node)),
             { _, _ -> throw UnsupportedOperationException() },
             { _, _ -> throw UnsupportedOperationException() },
         )
-        assertTrue(inner.containsSortType())
+        assertTrue(inner.containsUninterpretedType())
         val detail = sortBearingDetail(inner)
         assertTrue(detail != null && detail.contains("d") && detail.contains("Node"), detail)
         val setDetail = sortBearingDetail(SetType(inner))

@@ -3,7 +3,7 @@ package julay.compiler.pass
 import julay.compiler.TypeExpr
 import julay.compiler.ast.*
 import julay.compiler.decl.TransitUpdate
-import julay.program.type.SortType
+import julay.program.type.DomainType
 import julay.program.type.Type
 
 /**
@@ -71,7 +71,7 @@ fun collectLeafSpecAuxParams(
         try {
             val t = arg.type
             val domain = when (t) {
-                is SortType -> t.name
+                is DomainType -> t.name
                 else -> typeToTlaDomain(t)
             }
             out += LeafSpecAuxParam(arg.argName(), domain)
@@ -85,4 +85,4 @@ fun collectLeafSpecAuxParams(
 
 /** Surface type of a sort aux/decl param in leaf-spec bodies. */
 fun leafSpecBinderSurfaceType(type: Type): Type =
-    if (type is SortType) type.elementType else type
+    if (type is DomainType) type.carrierType else type

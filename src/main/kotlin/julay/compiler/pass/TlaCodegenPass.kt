@@ -1,6 +1,8 @@
 package julay.compiler.pass
 
+import julay.compiler.CompileError
 import julay.compiler.CompilationUnit
+import julay.compiler.OneLocCompileError
 import julay.compiler.FieldPathResult
 import julay.compiler.FunBuiltinRegistry
 import julay.compiler.OneLocCompileWarning
@@ -87,9 +89,6 @@ fun tlaCodegenPass(
     val apiAliases = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<ApiNode>() }
         .associateBy { it.name() }
-    val sortModels = ast.cachedObjClassRegistry()?.sorts
-        ?.mapValues { (_, sort) -> "{${sort.cfgElements.joinToString(", ")}}" }
-        ?: emptyMap()
 
     val compositionLeaves = compositionLeavesOfSpec(spec)
     val procFunNameSet = procFunNodes.keys
@@ -121,6 +120,29 @@ fun tlaCodegenPass(
     val havocDrafts = callSiteDraftsAll.filter { it.procFunName !in composedProcFuns }
     val procFunLeavesRaw = procFunLeavesFromDrafts(coupledDrafts)
     val leaves = assignTlaLeafNames(hostLeavesRaw + procFunLeavesRaw)
+
+    val recordNames = unit.modules.flatMap { m ->
+        m.root.declNodes().filterIsInstance<ObjClassNode>().map { it.name() }
+    }.toSet()
+    var mergedDomains = ast.cachedObjClassRegistry()?.domains?.toMutableMap() ?: mutableMapOf()
+    val domainModelErrors = mutableListOf<CompileError>()
+    leaves.forEach { leaf ->
+        val (merged, errs) = mergeSpecTypeModels(leaf.typeModels, mergedDomains, recordNames)
+        mergedDomains = merged.toMutableMap()
+        domainModelErrors += errs
+    }
+    if (domainModelErrors.isNotEmpty()) {
+        val msg = domainModelErrors.joinToString("\n") {
+            (it as? OneLocCompileError)?.msg ?: it.toString()
+        }
+        throw RuntimeException(msg)
+    }
+    val domains = mergedDomains.toMap()
+    val domainModels = domains.mapNotNull { (name, d) ->
+        d.cfgElements?.let { name to "{${it.joinToString(", ")}}" }
+    }.toMap()
+    val domainNames = domains.keys
+
     val callSites = resolveProcFunCallSites(coupledDrafts, leaves)
     val havocSites = resolveHavocProcFunCallSites(havocDrafts, leaves)
     val handshake = buildProcFunHandshakeVars(callSites)
@@ -156,7 +178,7 @@ fun tlaCodegenPass(
         emptyList()
     }
     invClosure.forEach { collectTypeConstants(it.invariantFormula(), constants) }
-    val sortNames = ast.cachedObjClassRegistry()?.sorts?.keys.orEmpty()
+    val sortNames = domainNames
     leaves.forEach { leaf ->
         leaf.initExprs.forEach { expr ->
             collectTypeConstants(expr, constants)
@@ -211,8 +233,8 @@ fun tlaCodegenPass(
     TlaLiteralDomainProjection.set(literalDomains)
     TlaEmitOpts.set(tlaOptConfig)
     val symbolTypes = mutableMapOf<String, Type>()
-    ast.cachedObjClassRegistry()?.sorts?.forEach { (name, sort) ->
-        symbolTypes[name] = sort
+    domains.forEach { (name, domain) ->
+        symbolTypes[name] = domain
     }
     pclassesForTla.values.forEach { pc ->
         pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
@@ -236,13 +258,13 @@ fun tlaCodegenPass(
             constants = constants,
             cfgOverrides = cfgOverrides,
             invClosure = invClosure,
-            sortModels = sortModels,
+            domainModels = domainModels,
             offers = offers,
             usedFunlibOps = usedFunlibOps,
             usedUserFunOps = usedUserFunOps,
             usedFunOps = usedFunOps,
             unusedFieldWarnings = unusedFieldWarnings,
-            sorts = ast.cachedObjClassRegistry()?.sorts ?: emptyMap(),
+            domains = domains,
         )
     } finally {
         TlaFieldProjection.set(TlaRelevantFields.IDENTITY)
@@ -265,13 +287,13 @@ private fun emitProjectedTla(
     constants: LinkedHashSet<String>,
     cfgOverrides: LinkedHashSet<String>,
     invClosure: List<InvariantNode>,
-    sortModels: Map<String, String>,
+    domainModels: Map<String, String>,
     offers: List<TlaActionOffer>,
     usedFunlibOps: List<FunNode>,
     usedUserFunOps: List<FunNode>,
     usedFunOps: List<FunNode>,
     unusedFieldWarnings: List<OneLocCompileWarning>,
-    sorts: Map<String, SortType>,
+    domains: Map<String, DomainType>,
 ): TlaCodegenResult {
     val emittedOffers = collectEmittedOfferLists(offers).filter { offerGroupHasEmittedUpdate(it) }.flatten()
     invClosure.forEach { collectBuiltinDomainUses(it.invariantFormula(), cfgOverrides) }
@@ -378,7 +400,7 @@ private fun emitProjectedTla(
         val pc = pclassesForTla[leaf.name] ?: return@forEach
         pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
             if (vn.name !in leaf.globalConstVars) return@forEach
-            val hit = matchSingletonConstGlobalInit(vn.name, safeType(vn), leaf.initExprs, sorts) ?: return@forEach
+            val hit = matchSingletonConstGlobalInit(vn.name, safeType(vn), leaf.initExprs, domains) ?: return@forEach
             singletonConstGlobals[leaf.tlaName to vn.name] = hit.value
             consumedInitExprs += hit.consumed
         }
@@ -806,12 +828,19 @@ private fun emitProjectedTla(
             appendLine("PROPERTY $name")
         }
         appendLine("CHECK_DEADLOCK FALSE")
-        fun modelFor(name: String): String = when {
-            name in sortModels -> sortModels.getValue(name)
-            name == "Int" || name == "Nat" || name == "Real" ->
-                cfgIntModel(intModelValues, DEFAULT_MAX_LIST_LEN)
-            name == "String" -> cfgStringModel(stringModelValues, intModelValues, coerceIntToString)
-            else -> cfgConstantModel(name)
+        fun modelFor(name: String): String {
+            if (name in domainModels) return domainModels.getValue(name)
+            domains[name]?.let { d ->
+                if (!d.hasModel && d.kind == DomainKind.Typedef) {
+                    carrierTlaName(d.carrierType)?.let { return it }
+                }
+            }
+            return when (name) {
+                "Int", "Nat", "Real" ->
+                    cfgIntModel(intModelValues, DEFAULT_MAX_LIST_LEN)
+                "String" -> cfgStringModel(stringModelValues, intModelValues, coerceIntToString)
+                else -> cfgConstantModel(name)
+            }
         }
         constants.forEach { c ->
             appendLine("CONSTANT $c = ${modelFor(c)}")
@@ -1199,7 +1228,7 @@ private fun typeOkVarRange(
         is BoolType -> "BOOLEAN"
         is IntType, is RealType -> intRange
         is StringType -> "String"
-        is SortType -> type.name
+        is DomainType -> type.name
         is ListType -> "Seq(${typeOkVarRange(type.elementType, intRange)})"
         is SetType -> {
             val univ = setUniverse ?: typeOkEnumerableUniverse(type.elementType, intRange)
@@ -3033,7 +3062,7 @@ internal fun defaultTlaValue(
     is IntType -> "0"
     is RealType -> "0"
     is StringType -> "\"\""
-    is SortType -> type.cfgElements.firstOrNull() ?: defaultTlaValue(type.elementType)
+    is DomainType -> type.cfgElements?.firstOrNull() ?: defaultTlaValue(type.carrierType)
     is ListType -> "<<>>"
     is SetType -> "{}"
     is MapType -> "[x \\in {} |-> 0]"
@@ -3280,7 +3309,7 @@ internal fun typeToTlaDomain(
     is IntType -> "Int"
     is RealType -> "Int"
     is StringType -> "String"
-    is SortType -> type.name
+    is DomainType -> type.name
     // Seq(S) is infinite; TLC needs a length-bounded set of sequences.
     is ListType -> "BoundedSeq(${typeToTlaDomain(type.elementType)}, MaxListLen)"
     is SetType -> "SUBSET ${typeToTlaDomain(type.elementType)}"
@@ -3308,7 +3337,7 @@ internal fun typeToTlaDomain(
 /** Collect sort CONSTANT names nested in [type]. */
 internal fun collectSortConstants(type: Type, into: MutableSet<String>) {
     when (type) {
-        is SortType -> into += type.name
+        is DomainType -> into += type.name
         is ObjClassType -> TlaFieldProjection.get().fieldsFor(type).forEach { collectSortConstants(it.type, into) }
         is ListType -> collectSortConstants(type.elementType, into)
         is SetType -> collectSortConstants(type.elementType, into)
@@ -3325,7 +3354,7 @@ internal fun collectDomainModelNames(type: Type, into: MutableSet<String>) {
     when (type) {
         is IntType, is RealType -> into += "Int"
         is StringType -> into += "String"
-        is SortType -> into += type.name
+        is DomainType -> into += type.name
         is ObjClassType -> TlaFieldProjection.get().fieldsFor(type).forEach { collectDomainModelNames(it.type, into) }
         is ListType -> {
             into += "MaxListLen"
@@ -3672,13 +3701,13 @@ private fun tlaLengthOf(baseRendered: String, baseExpr: ExprNode): String =
         is ListType -> "Len($baseRendered)"
         is SetType -> "Cardinality($baseRendered)"
         is MapType -> "Cardinality($baseRendered)" // maps emit as functions; prefer keys cardinality if needed
-        is SortType -> "Cardinality($baseRendered)"
+        is DomainType -> "Cardinality($baseRendered)"
         else -> "Len($baseRendered)"
     }
 
 private fun tlaLengthOfType(baseRendered: String, type: Type?): String =
     when (type) {
-        is SetType, is MapType, is SortType -> "Cardinality($baseRendered)"
+        is SetType, is MapType, is DomainType -> "Cardinality($baseRendered)"
         else -> "Len($baseRendered)"
     }
 

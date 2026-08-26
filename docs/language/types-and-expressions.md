@@ -10,10 +10,22 @@
 
 `length` from `julay.funlib` works on lists, sets, and maps (see [Standard library](standard-library.md)).
 
-## Objects (`obj`)
+## User-defined types (`type`)
+
+Julay has one keyword, `type`, with three forms:
+
+| Form | Syntax | Meaning |
+|------|--------|---------|
+| **Record** | `type Pair { x : Int, y : Int }` | Structural product type (old `obj`). TLA+ record; not a `CONSTANT`. |
+| **Typedef** | `type Value := String` | Named domain with a known carrier. **JAR-legal** — erases to `String` / `Int` / `Boolean` in procs. Spec TLA+ uses a separate `CONSTANT Value`. |
+| **Uninterpreted** | `type NodeSet` | Opaque named domain (old `sort`). **Spec-only** — a JAR compile that reaches one is an error. Spec TLA+ uses `CONSTANT NodeSet`. |
+
+There is **no enum form**. `type Name := { "n1", "n2" }` is a parse error; `:=` after `type` is only for typedef (`type Name := typeExpr`). Finite sets for uninterpreted and typedef names come from a **delayed model** (below).
+
+### Records
 
 ```jul
-obj ReqInfo {
+type ReqInfo {
     req : String
     resp : String
 }
@@ -24,21 +36,118 @@ info := ReqInfo {
 }
 ```
 
-Field access uses `.` (e.g. `info.req`). Polymorphic objects and functions are supported (`obj Box<T>`, `fun f<T>(...)`).
+Field access uses `.` (e.g. `info.req`). Polymorphic records and functions are supported (`type Box<T> { ... }`, `fun f<T>(...)`).
 
-Fields may use `sort` types (and nest objs/collections that mention sorts). Those objs are fine in **specs / TLA+**, including leaf-spec state. They must **not** appear in any **JAR** compile target: `compile` of a proc that reaches a sort-bearing type is an error (no `.jar`).
+Record fields may use uninterpreted types (and nest records/collections that mention them). Those records are fine in **specs / TLA+**, including leaf-spec state. They must **not** appear in any **JAR** compile target that reaches an uninterpreted type: `compile` of such a proc is an error (no `.jar`). Typedef fields are JAR-legal (they erase to the carrier).
 
-## Finite sorts (`sort`)
+### Typedefs and uninterpreted types
 
 ```jul
-sort Node := {"n1", "n2", "n3"}
+type NodeSet                    // uninterpreted — opaque domain for specs
+type Value := String            // typedef — carrier is String; erases in procs
 ```
 
-Declares a finite homogeneous domain for **spec index, quantifier, and leaf-spec parameter binders**, and for **leaf-spec state** (and `obj` fields used from specs). Ordinary **proc** state and action args still cannot be sorts directly. Allowed element types: `String`, non-negative `Int`, and `Boolean`. Compiling a spec that uses the sort emits `CONSTANT Node` in TLA+ and assigns the exact set in the `.cfg`. Mark with `export` and import by name like other decls (`import path.Node`).
+**Uninterpreted** types may appear in leaf specs, composition specs, invariants, `init:`, quantifiers, index binders, and record fields used only from specs. They must not appear in ordinary **proc** / **procfun** state, action args, or return types.
 
-In **spec/TLA expressions** (invariants, `init:`), `Node.length` and `length(Node)` are the domain size (`Cardinality(Node)` in TLA+). They are not legal in ordinary proc bodies.
+**Typedefs** behave like their carrier in proc bodies (`value : Value` is a `String` at runtime) but stay a distinct `CONSTANT` in TLA+ (not interchangeable with `String` in spec typing).
 
-**JAR refusal:** if a JAR compile target’s leaf procs mention a sort-bearing type (a sort, or an `obj`/collection that nests one), compile and `julayc check` report an error. Specs are unaffected.
+In **spec/TLA expressions** (invariants, `init:`), `NodeSet.length` and `length(NodeSet)` are the domain size (`Cardinality(NodeSet)` in TLA+). They are not legal in ordinary proc bodies.
+
+**JAR refusal:** `compile` of a **proc** (and `julayc check` for those targets) errors if the assembly can reach an **uninterpreted** type, including nested in a record or collection. Spec `compile` targets are unaffected. A delayed model does **not** make an uninterpreted type JAR-legal.
+
+### Delayed models
+
+A **delayed model** assigns a finite literal set to a typedef or uninterpreted name:
+
+```jul
+NodeSet := { "n1", "n2", "n3" }
+```
+
+It may appear:
+
+- **Top-level** in a module (alongside other decls), or
+- **Inside a create-index block** (next to `const global` / `init:`), or
+- On a **leaf spec** compile target that has no create-index (top-level only).
+
+Models are collected for the **spec you `compile`**: walk that spec’s system AST (including aliased specs and merged `init:`) plus top-level bindings in the compilation unit. Two disagreeing models for one name in one compile → error.
+
+**Rules (any violation is a compile error):**
+
+#### 1. Uninterpreted — delayed model **required**
+
+When an uninterpreted type is used by the spec compile target, it **must** have a delayed model. Missing, duplicate, or disagreeing models are errors.
+
+```jul
+type NodeSet
+spec ClusterSpec := RaftProtocol[n : NodeSet] {
+    NodeSet := { "n1", "n2", "n3" }   // required
+}
+compile ClusterSpec
+// .tla: CONSTANT NodeSet, …
+// .cfg: CONSTANT NodeSet = {"n1", "n2", "n3"}
+```
+
+```jul
+type NodeSet
+spec S := P[n : NodeSet] { }          // error: NodeSet has no delayed model
+compile S
+```
+
+Top-level assignment is also valid when the type is visible:
+
+```jul
+type Node
+Node := { "n1", "n2", "n3" }          // old sort Node := { … } migration
+```
+
+#### 2. Record — delayed model **forbidden**
+
+Record types are not `CONSTANT`s. Assigning a model to a record name is always an error.
+
+```jul
+type Pair { x : Int, y : Int }
+Pair := { 1, 2 }                      // error: cannot assign a model to a record type
+```
+
+#### 3. Typedef — delayed model **optional**
+
+If present, literals must match the carrier (`String`, non-negative `Int`, or `Boolean`). If absent, the `.cfg` binds the `CONSTANT` to the **erasure type** (`String`, `Int`, or `BOOLEAN`), so TLC uses the same universe as that builtin.
+
+**No delayed model** — cfg aliases the carrier:
+
+```jul
+type Value := String
+spec S := P { var x : Value }
+compile S
+// .tla: CONSTANT Value, String, …
+// .cfg: CONSTANT Value = String
+//       CONSTANT String = { … inferred string model … }
+```
+
+**With delayed model** — cfg pins an exact subset (must match carrier):
+
+```jul
+type Value := String
+spec S := P[n : NodeSet] {
+    NodeSet := { "n1", "n2" }
+    Value := { "", "v1", "v2" }       // optional pin; literals must be Strings
+}
+// .cfg: CONSTANT Value = {"", "v1", "v2"}
+```
+
+**Carrier mismatch** — error:
+
+```jul
+type Value := String
+Value := { 1, 2 }                     // error: carrier is String, not Int
+```
+
+Without a pin, `Value` and `String` share TLC’s string universe (including any role strings in the inferred `String` model). Specs that need a dedicated client-value alphabet should pin `Value := { "", "v1", "v2" }` (see Raft in [Specifications](specifications.md)).
+
+Allowed model elements: homogeneous `String`, non-negative `Int`, or `Boolean` literals. Export the type with `export type …` and import by name like other decls (`import path.NodeSet`).
+
+See [Specifications — delayed models](specifications.md#delayed-models) for create-index placement and TLA+ details.
+
 ## Expressions
 
 - Arithmetic and comparisons: `+`, `-`, `*`, `/`, `%`, `<`, `<=`, `>`, `>=`, `=`, `~=`
@@ -104,4 +213,4 @@ Collection methods (`.filter`, `.map`, `.fold`, `.toSet`, `.toList`), properties
 - [Reference](reference.md)
 - [Collections](collections.md)
 - [Standard library](standard-library.md) — funlib catalog including `map`
-- Regression coverage under [`regression/input/list/`](../../regression/input/list/), [`map/`](../../regression/input/map/), [`set/`](../../regression/input/set/), [`obj` fixtures](../../regression/input/oclass/), [`expr/`](../../regression/input/expr/)
+- Regression coverage under [`regression/input/list/`](../../regression/input/list/), [`map/`](../../regression/input/map/), [`set/`](../../regression/input/set/), [`record` fixtures](../../regression/input/oclass/), [`expr/`](../../regression/input/expr/)

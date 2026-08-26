@@ -1,14 +1,14 @@
-obj Point {
+type Point {
     x : Int
     y : Int
 }
 
-obj Line {
+type Line {
     start : Point
     end : Point
 }
 
-obj Mixed {
+type Mixed {
     label : String
     count : Int
 }

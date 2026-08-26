@@ -2,9 +2,10 @@ import julay.funlib.allDistinct
 import julay.funlib.length
 import julay.funlib.splice
 
-sort Node := { "n1", "n2" }
+type Node
+Node := { "n1", "n2" }
 
-obj Peer {
+type Peer {
     id : Int
 }
 

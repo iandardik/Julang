@@ -1,7 +1,8 @@
 import julay.funlib.setOf
-export sort NodeSet := { "n1", "n2" }
+export type NodeSet
+export NodeSet := { "n1", "n2" }
 
-obj VoteRequestMsg {
+type VoteRequestMsg {
     dest : NodeSet
     msg : String
 }

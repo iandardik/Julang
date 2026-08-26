@@ -31,7 +31,8 @@ class LeafSpecTest {
     fun parameterizedLeafSpecBinderInScope() {
         val result = typeCheck(
             """
-            sort Node := { "n1", "n2" }
+            type Node
+            Node := { "n1", "n2" }
             spec Net[n : Node] {
                 var lastDest : String := ""
                 constructor initially(args : List<String>) {}
@@ -49,7 +50,8 @@ class LeafSpecTest {
     fun assignToLeafSpecParamIsError() {
         val result = typeCheck(
             """
-            sort Node := { "n1" }
+            type Node
+            Node := { "n1" }
             spec Net[n : Node] {
                 constructor initially(args : List<String>) {}
                 transition bump() {
@@ -137,8 +139,10 @@ class LeafSpecTest {
     fun mismatchedReindexOnLeafSpecIsError() {
         val result = typeCheck(
             """
-            sort Node := { "n1" }
-            sort Other := { "x" }
+            type Node
+            Node := { "n1" }
+            type Other
+            Other := { "x" }
             spec Net[n : Node] {
                 constructor initially(args : List<String>) {}
             }
@@ -189,7 +193,8 @@ class LeafSpecTest {
     fun alsoArgsTypeCheckOnLeafSpec() {
         val result = typeCheck(
             """
-            sort Node := { "n1" }
+            type Node
+            Node := { "n1" }
             proc Peer {
                 var self : String := ""
                 constructor initially(args : List<String>) { transit: self := "n1" }
@@ -235,7 +240,8 @@ class LeafSpecTest {
         val file = dir.resolve("main.jul")
         file.writeText(
             """
-            sort Node := { "n1", "n2" }
+            type Node
+            Node := { "n1", "n2" }
             proc Counter {
                 var count : Int := 0
                 constructor initially(args : List<String>) { transit: count := 0 }
@@ -296,7 +302,8 @@ class LeafSpecTest {
     fun createIndexInsideWithIsError() {
         val result = typeCheck(
             """
-            sort Node := { "n1" }
+            type Node
+            Node := { "n1" }
             proc Counter {
                 var n : Int := 0
                 constructor initially(args : List<String>) { transit: n := 0 }
@@ -315,7 +322,8 @@ class LeafSpecTest {
     fun applyIndexOutsideWithIsError() {
         val result = typeCheck(
             """
-            sort Node := { "n1" }
+            type Node
+            Node := { "n1" }
             proc Counter {
                 var n : Int := 0
                 constructor initially(args : List<String>) { transit: n := 0 }

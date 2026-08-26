@@ -11,7 +11,8 @@ export api RpcOut {
     calls: rpcOutClientCaller
 }
 export fun add(x : Int, y : Int) : Int = x + y
-export sort NodeSet := { "n1", "n2", "n3" }
+export type NodeSet
+NodeSet := { "n1", "n2", "n3" }
 export spec Net[n : Node] { ... }   // leaf or composition specs
 ```
 

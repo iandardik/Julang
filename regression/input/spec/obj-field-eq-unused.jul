@@ -1,4 +1,4 @@
-obj NodeLike {
+type NodeLike {
     id : Int
     url : String
 }

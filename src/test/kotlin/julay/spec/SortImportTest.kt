@@ -18,7 +18,8 @@ class SortImportTest {
         modDir.createDirectories()
         modDir.resolve("nodes.jul").writeText(
             """
-            export sort NodeSet := { "n1", "n2" }
+            export type NodeSet
+            export NodeSet := { "n1", "n2" }
             """.trimIndent(),
         )
         val main = root.resolve("main.jul")
@@ -47,7 +48,8 @@ class SortImportTest {
         modDir.createDirectories()
         modDir.resolve("nodes.jul").writeText(
             """
-            sort NodeSet := { "n1", "n2" }
+            type NodeSet
+            NodeSet := { "n1", "n2" }
             export proc Dummy {
                 constructor initially(args : List<String>) {}
             }

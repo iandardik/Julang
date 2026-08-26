@@ -593,7 +593,7 @@ private fun initClauseErrors(
                         }
                     } catch (_: RuntimeException) {
                     }
-                    errors += sortLengthMaxListLenErrors(expr, registry.sorts)
+                    errors += sortLengthMaxListLenErrors(expr, registry.domains)
                 }
             }
         }
@@ -605,15 +605,16 @@ private fun initClauseErrors(
 
 private fun sortLengthMaxListLenErrors(
     expr: ExprNode,
-    sorts: Map<String, SortType>,
+    domains: Map<String, DomainType>,
 ): List<CompileError> {
     val errors = mutableListOf<CompileError>()
     fun checkSort(name: String, loc: julay.compiler.ProgramLoc) {
-        val sort = sorts[name] ?: return
-        if (sort.cfgElements.size > INIT_MAX_LIST_LEN) {
+        val domain = domains[name] ?: return
+        val size = domain.cfgElements?.size ?: return
+        if (size > INIT_MAX_LIST_LEN) {
             errors += OneLocCompileError(
                 loc,
-                "\"init:\" constraint uses sort \"$name\" of size ${sort.cfgElements.size}, " +
+                "\"init:\" constraint uses type \"$name\" of size $size, " +
                     "which exceeds MaxListLen ($INIT_MAX_LIST_LEN)",
             )
         }

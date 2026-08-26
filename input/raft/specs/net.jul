@@ -1,26 +1,28 @@
+import node.lib.Value
 import node.core.RaftProtocol
 import julay.funlib.setOf
 
-export sort NodeSet := { "n1", "n2", "n3" }
+export type NodeSet
+export NodeSet := { "n1", "n2", "n3" }
 
-obj VoteRequestMsg {
+type VoteRequestMsg {
     src : NodeSet
     dest : NodeSet
     msg : VoteRequestData
 }
-obj VoteResponseMsg {
+type VoteResponseMsg {
     src : NodeSet
     dest : NodeSet
     node : Node
     term : Int
     granted : Boolean
 }
-obj AppendEntriesRequestMsg {
+type AppendEntriesRequestMsg {
     src : NodeSet
     dest : NodeSet
     msg : AppendEntriesData
 }
-obj AppendEntriesResponseMsg {
+type AppendEntriesResponseMsg {
     src : NodeSet
     dest : NodeSet
     node : Node
@@ -124,7 +126,7 @@ export spec Net[n : NodeSet] {
         prevLogTerm : Int,
         entriesLen : Int,
         entryTerm : Int,
-        entryValue : String,
+        entryValue : Value,
         leaderCommit : Int,
         outTerm : Int,
         success : Boolean,

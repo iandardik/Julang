@@ -1,7 +1,7 @@
 import julay.proclib.HttpServer
 import julay.funlib.println
 
-obj ReqInfo {
+type ReqInfo {
     req : String
     resp : String
 }

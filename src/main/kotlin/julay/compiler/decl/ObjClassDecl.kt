@@ -51,7 +51,7 @@ fun mangleTypeForName(type: Type): String = when (type) {
     is IntType -> "Int"
     is RealType -> "Real"
     is StringType -> "String"
-    is SortType -> type.name
+    is DomainType -> type.name
     is ObjClassType -> type.name
     is ListType -> "List_${mangleTypeForName(type.elementType)}"
     is SetType -> "Set_${mangleTypeForName(type.elementType)}"
@@ -81,7 +81,7 @@ internal class ObjClassResolver(
     private val resolving: MutableSet<String>,
     private val declsByName: Map<String, RawObjClassDecl>,
     private val instantiationLocs: MutableMap<String, ProgramLoc>,
-    private val sorts: Map<String, SortType> = emptyMap(),
+    private val domains: Map<String, DomainType> = emptyMap(),
 ) {
     fun resolveTypeExpr(
         expr: TypeExpr,
@@ -107,7 +107,7 @@ internal class ObjClassResolver(
             "Set" -> return FieldTypeResolveResult.Failed("Type \"Set\" expects 1 type argument")
             "Map" -> return FieldTypeResolveResult.Failed("Type \"Map\" expects 2 type arguments")
         }
-        sorts[name]?.let {
+        domains[name]?.let {
             return FieldTypeResolveResult.Success(it)
         }
         ObjClassBuiltinRegistry.lookup(name)?.let {
@@ -240,7 +240,7 @@ internal class ObjClassResolver(
         is IntType -> TypeExpr.Simple("Int")
         is RealType -> TypeExpr.Simple("Real")
         is StringType -> TypeExpr.Simple("String")
-        is SortType -> TypeExpr.Simple(type.name)
+        is DomainType -> TypeExpr.Simple(type.name)
         is TypeVar -> TypeExpr.Simple(type.name)
         is ObjClassType -> TypeExpr.Simple(type.name)
         is ListType -> TypeExpr.Parametric("List", listOf(typeToTypeExpr(type.elementType)))
@@ -300,8 +300,10 @@ class ObjClassRegistry private constructor(
     private val resolver: ObjClassResolver?,
     private val declsByName: Map<String, RawObjClassDecl>,
     private val instantiationLocs: MutableMap<String, ProgramLoc>,
-    val sorts: Map<String, SortType> = emptyMap(),
+    val domains: Map<String, DomainType> = emptyMap(),
 ) {
+    val sorts: Map<String, DomainType>
+        get() = domains
     val types: Map<String, ObjClassType>
         get() = resolvedTypes.toMap()
 
@@ -324,7 +326,7 @@ class ObjClassRegistry private constructor(
                     "Int" -> TypeResolveResult.Found(intType)
                     "String" -> TypeResolveResult.Found(stringType)
                     else -> typeParamEnv[expr.name]?.let { TypeResolveResult.Found(it) }
-                        ?: sorts[expr.name]?.let { TypeResolveResult.Found(it) }
+                        ?: domains[expr.name]?.let { TypeResolveResult.Found(it) }
                         ?: ObjClassBuiltinRegistry.lookup(expr.name)?.let { TypeResolveResult.Found(it) }
                         ?: resolvedTypes[expr.name]?.let { TypeResolveResult.Found(it) }
                         ?: TypeResolveResult.Error("Unknown type \"${expr.name}\"")
@@ -403,7 +405,7 @@ class ObjClassRegistry private constructor(
 
         fun build(
             rawDecls: List<RawObjClassDecl>,
-            sorts: Map<String, SortType> = emptyMap(),
+            domains: Map<String, DomainType> = emptyMap(),
         ): ObjClassRegistry {
             val errors = mutableListOf<CompileError>()
             for (raw in rawDecls) {
@@ -411,22 +413,22 @@ class ObjClassRegistry private constructor(
                     errors.add(
                         OneLocCompileError(
                             raw.loc,
-                            "obj \"${raw.name}\" conflicts with a builtin obj type",
+                            "type \"${raw.name}\" conflicts with a builtin type",
                         ),
                     )
                 }
-                if (raw.name in sorts) {
+                if (raw.name in domains) {
                     errors.add(
                         OneLocCompileError(
                             raw.loc,
-                            "obj \"${raw.name}\" conflicts with a sort of the same name",
+                            "record type \"${raw.name}\" conflicts with a domain type of the same name",
                         ),
                     )
                 }
                 val dupParams = raw.typeParams.groupingBy { it }.eachCount().filter { it.value > 1 }.keys
                 for (dup in dupParams) {
                     errors.add(
-                        OneLocCompileError(raw.loc, "Duplicate type parameter \"$dup\" on obj \"${raw.name}\""),
+                        OneLocCompileError(raw.loc, "Duplicate type parameter \"$dup\" on type \"${raw.name}\""),
                     )
                 }
             }
@@ -435,7 +437,7 @@ class ObjClassRegistry private constructor(
             val declsByName = rawDecls.associateBy { it.name }
             val instantiationLocs = mutableMapOf<String, ProgramLoc>()
 
-            val resolver = ObjClassResolver(resolved, resolving, declsByName, instantiationLocs, sorts)
+            val resolver = ObjClassResolver(resolved, resolving, declsByName, instantiationLocs, domains)
             rawDecls.filter { it.typeParams.isEmpty() }.forEach { raw ->
                 when (val result = resolver.resolveNullaryObjClass(raw.name)) {
                     is ObjClassResolveResult.Success -> {
@@ -446,7 +448,7 @@ class ObjClassRegistry private constructor(
                 }
             }
 
-            return ObjClassRegistry(resolved, errors, resolver, declsByName, instantiationLocs, sorts)
+            return ObjClassRegistry(resolved, errors, resolver, declsByName, instantiationLocs, domains)
         }
     }
 }

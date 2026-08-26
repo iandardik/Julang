@@ -1,4 +1,5 @@
-sort NodeSet := {"a", "b"}
+type NodeSet
+NodeSet := {"a", "b"}
 
 proc Worker {
     var log : List<String>

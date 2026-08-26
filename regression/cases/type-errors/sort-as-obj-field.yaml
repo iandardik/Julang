@@ -1,6 +1,6 @@
 source: regression/input/type-errors/sort-as-obj-field.jul
 expectCompileFailure: true
 expectCompileOutputContains:
-  - "sort-bearing type"
+  - "uninterpreted type"
   - "Peer"
   - "Found compile errors, exiting."

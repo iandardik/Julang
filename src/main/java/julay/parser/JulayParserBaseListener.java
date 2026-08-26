@@ -185,25 +185,25 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void enterObj(JulayParser.ObjContext ctx) { }
+	@Override public void enterType_decl(JulayParser.Type_declContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void exitObj(JulayParser.ObjContext ctx) { }
+	@Override public void exitType_decl(JulayParser.Type_declContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void enterSort_decl(JulayParser.Sort_declContext ctx) { }
+	@Override public void enterType_model(JulayParser.Type_modelContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void exitSort_decl(JulayParser.Sort_declContext ctx) { }
+	@Override public void exitType_model(JulayParser.Type_modelContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
@@ -785,25 +785,25 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void enterObj_literal(JulayParser.Obj_literalContext ctx) { }
+	@Override public void enterRecord_literal(JulayParser.Record_literalContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void exitObj_literal(JulayParser.Obj_literalContext ctx) { }
+	@Override public void exitRecord_literal(JulayParser.Record_literalContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void enterObj_field_assign(JulayParser.Obj_field_assignContext ctx) { }
+	@Override public void enterRecord_field_assign(JulayParser.Record_field_assignContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
-	@Override public void exitObj_field_assign(JulayParser.Obj_field_assignContext ctx) { }
+	@Override public void exitRecord_field_assign(JulayParser.Record_field_assignContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *

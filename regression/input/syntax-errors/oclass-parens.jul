@@ -1,5 +1,5 @@
 import julay.funlib.setOf
-obj Message {
+type Message {
     msgType : String
 }
 

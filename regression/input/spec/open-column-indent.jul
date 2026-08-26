@@ -1,5 +1,5 @@
 import julay.funlib.setOf
-obj Msg {
+type Msg {
     src : Int
     dest : Int
 }

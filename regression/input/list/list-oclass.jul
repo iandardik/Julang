@@ -1,7 +1,7 @@
 import julay.funlib.exitProgram
 import julay.funlib.listOf
 
-obj Point {
+type Point {
     x : Int
     y : Int
 }

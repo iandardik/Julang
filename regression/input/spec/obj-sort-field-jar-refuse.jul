@@ -1,10 +1,11 @@
-sort Node := { "n1", "n2" }
+type Node
+Node := { "n1", "n2" }
 
-obj Inner {
+type Inner {
     d : Node
 }
 
-obj Outer {
+type Outer {
     inner : Inner
 }
 

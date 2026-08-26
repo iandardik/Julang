@@ -10,7 +10,7 @@ invariant AllInvs := NonNegative & CorrectCounter
 invariant Bound := forall k : Int, Counter.n <= 3
 ```
 
-Invariants are Boolean expressions over proc state. Quantifiers (`forall`, `exists`) are common. Indexed state uses `Leaf[i].var`; collection properties and nested obj fields are allowed (`Leaf[i].log.length`, `Leaf[i].log[j]`).
+Invariants are Boolean expressions over proc state. Quantifiers (`forall`, `exists`) are common. Indexed state uses `Leaf[i].var`; collection properties and nested record fields are allowed (`Leaf[i].log.length`, `Leaf[i].log[j]`).
 
 ## Specs
 
@@ -53,7 +53,8 @@ compile Env, Sys
 Optional **declaration parameters** bind an immutable name usable in guards and transit. They do **not** lift leaf state to functions of that index (unlike create-index on a composition leaf):
 
 ```jul
-sort Node := {"n1", "n2"}
+type Node
+Node := { "n1", "n2" }
 spec Net[n : Node] {
     var lastDest : String := ""
     constructor initially(args : List<String>) {}
@@ -62,7 +63,7 @@ spec Net[n : Node] {
 spec Ag := <Net> Peer <true>
 ```
 
-When the parameter type is a `sort`, the body treats `n` as the sort’s element type (e.g. `String`); the TLA domain remains the sort. Assigning to a leaf-spec parameter is an error. If the action body mentions the decl param, TLA emits it as a leading auxiliary action parameter (`\E n \in Node: …`), except under `with (n : …)` where it shares that binder instead of a second `\E`.
+When the parameter type is an **uninterpreted** type, the body treats `n` as that type’s element view (e.g. `String` for a string-backed model); the TLA domain remains the uninterpreted name (`\in Node`). Assigning to a leaf-spec parameter is an error. If the action body mentions the decl param, TLA emits it as a leading auxiliary action parameter (`\E n \in Node: …`), except under `with (n : …)` where it shares that binder instead of a second `\E`.
 
 Leaf-spec actions may also declare explicit auxiliaries with `also (…)` (leaf specs only — illegal on ordinary `proc` / `procfun`):
 
@@ -99,7 +100,8 @@ Three roles:
 | **Create index** | `Name[v : Type]` | Lift `Name`’s state to functions of a new index |
 | **Global vars** | `Name[v : T] { global x, y }` | Leave listed **var**s unindexed (one mutable TLA VARIABLE for all `v`) |
 | **Const-global vars** | `Name[v : T] { const global x }` | Leave listed **const**s unindexed and immutable in TLA+ |
-| **Init constraints** | `Name[v : T] { const global x; init: expr }` | Extra Init conjuncts over const-globals / sort `.length` |
+| **Init constraints** | `Name[v : T] { const global x; init: expr }` | Extra Init conjuncts over const-globals / uninterpreted `.length` |
+| **Delayed model** | `Name[v : T] { NodeSet := { … } }` | Finite set for an uninterpreted or typedef name (see below) |
 | **Shared binder** | `with (v : Type) { system }` | Scope where `v` may be applied; one `\E v` for the group |
 | **Apply index** | `Name[v]` | Use binder `v` from an enclosing `with` (no type). Does not create an index |
 
@@ -110,6 +112,7 @@ spec PeerIndexed := Peer[n : NodeSet]          // create (lift state)
 
 spec ClusterSpec := RaftProtocol[n : NodeSet] {
   const global cluster
+  NodeSet := { "n1", "n2", "n3" }
   init: cluster.length = NodeSet.length
   init: forall i : Int, (i >= 1 & i <= cluster.length) =>
       (exists node : Node, node in cluster & node.id = i)
@@ -164,7 +167,59 @@ spec ClusterSpec := RaftProtocol[n : NodeSet] {
 }
 ```
 
-Several `init:` lines, or `init: A & B`, all become Init `/\`. Bare names are the listed const-globals (`cluster`); `RaftProtocol.cluster` also works. A sort identifier is a value of that sort (TLA `CONSTANT`). Indexed `RaftProtocol[n].cluster` is an error (const-globals are scalars). Indexed **`const`** state that is not const-global is allowed (`RaftProtocol[n1].self`), so Init can constrain per-index constants. Mutable `var`s are not. Sort `.length` / `length(Sort)` is spec/TLA-only (`Cardinality` in TLA+). If `|Sort| > MaxListLen` (default 3), compile errors — Init would be empty.
+Several `init:` lines, or `init: A & B`, all become Init `/\`. Bare names are the listed const-globals (`cluster`); `RaftProtocol.cluster` also works. An uninterpreted type identifier is a value of that type (TLA `CONSTANT`). Indexed `RaftProtocol[n].cluster` is an error (const-globals are scalars). Indexed **`const`** state that is not const-global is allowed (`RaftProtocol[n1].self`), so Init can constrain per-index constants. Mutable `var`s are not. Uninterpreted `.length` / `length(NodeSet)` is spec/TLA-only (`Cardinality` in TLA+). If `|NodeSet| > MaxListLen` (default 3), compile errors — Init would be empty.
+
+### Delayed models
+
+Delayed models assign finite literal sets to **uninterpreted** and **typedef** names for TLC. They are written `Name := { lit, … }` and may appear in a create-index block (alongside `const global` / `init:`) or at top level in the module.
+
+**Compile-time rules** (see [Types and expressions — delayed models](types-and-expressions.md#delayed-models) for full examples):
+
+| Type kind | Delayed model | `.cfg` when absent | `.cfg` when present |
+|-----------|---------------|--------------------|---------------------|
+| Uninterpreted | **Required** if used by the compile target | — (error) | `CONSTANT Name = {…}` |
+| Typedef | **Optional** | `CONSTANT Name = Carrier` (alias to erasure) | `CONSTANT Name = {…}` (must match carrier) |
+| Record | **Forbidden** | — | — (error) |
+
+**Uninterpreted on create-index** (required when the indexed type is used):
+
+```jul
+type NodeSet
+spec ClusterSpec := RaftProtocol[n : NodeSet] {
+    NodeSet := { "n1", "n2", "n3" }
+    init: forall n1 : NodeSet, forall n2 : NodeSet,
+        (RaftProtocol[n1].self = RaftProtocol[n2].self) => (n1 = n2)
+}
+compile ClusterSpec
+// .cfg: CONSTANT NodeSet = {"n1", "n2", "n3"}
+```
+
+**Typedef with optional pin** (Raft client values):
+
+```jul
+export type Value := String
+
+spec ClusterSpec := RaftProtocol[n : NodeSet] {
+    NodeSet := { "n1", "n2", "n3" }
+    Value := { "", "v1", "v2" }    // pin client log alphabet; omit → Value = String in .cfg
+}
+// .cfg: CONSTANT Value = {"", "v1", "v2"}
+```
+
+**Errors:**
+
+```jul
+type NodeSet
+spec S := P[n : NodeSet] { }       // error: no delayed model for NodeSet
+
+type Pair { x : Int, y : Int }
+Pair := { 1, 2 }                   // error: record cannot have a delayed model
+
+type Value := String
+Value := { 1, 2 }                  // error: literals must match String carrier
+```
+
+Models are merged from the compile target’s system AST (including aliased specs) and top-level bindings in the file. Two different sets for the same name in one compile → error.
 
 **Shorthand** `(A || B)[n : T]` means the same as create-temps + `with` + applies:
 
@@ -191,14 +246,24 @@ spec HandlerSpec := IncReqHandler[t : Int]
 spec IncSpec := <true> Counter || HandlerSpec <AllInvs>
 ```
 
-Finite domains can be declared with `sort` and used as the index type (and in quantifiers). TLC gets an exact `CONSTANT` assignment in the `.cfg`:
+Finite domains are declared with **uninterpreted** `type` and a **delayed model**, then used as the index type (and in quantifiers):
 
 ```jul
-sort Node := {"n1", "n2", "n3"}
+type Node
+Node := { "n1", "n2", "n3" }
 spec S := Counter[n : Node]
 ```
 
-Elements must be homogeneous String, non-negative Int, or Boolean literals. Sorts are illegal as ordinary **proc** state / action args. They **are** allowed on `obj` fields and in **leaf-spec state** (and leaf-spec parameters as domain binders). A JAR `compile` target that reaches any sort-bearing type (including via nested objs) is refused — see [Types and expressions](types-and-expressions.md#finite-sorts-sort). Fixtures: [`regression/input/spec/obj-sort-field.jul`](../../regression/input/spec/obj-sort-field.jul). A sort may be `export`ed and `import`ed from another module (same rules as other decls); see [Modules](modules.md).
+Or assign the model on the create-index block:
+
+```jul
+type Node
+spec S := Counter[n : Node] {
+    Node := { "n1", "n2", "n3" }
+}
+```
+
+Elements must be homogeneous String, non-negative Int, or Boolean literals. Uninterpreted types are illegal as ordinary **proc** state / action args. They **are** allowed on record fields and in **leaf-spec state** (and leaf-spec parameters as domain binders). A JAR `compile` target that reaches an uninterpreted type (including via nested records) is refused — see [Types and expressions](types-and-expressions.md#typedefs-and-uninterpreted-types). Fixtures: [`regression/input/spec/obj-sort-field.jul`](../../regression/input/spec/obj-sort-field.jul). A type may be `export`ed and `import`ed from another module (same rules as other decls); see [Modules](modules.md).
 
 See [`input/inc_server/main.jul`](../../input/inc_server/main.jul) and [`regression/input/spec/`](../../regression/input/spec/).
 
@@ -206,12 +271,12 @@ See [`input/inc_server/main.jul`](../../input/inc_server/main.jul) and [`regress
 
 TLA+ emit may rewrite the composed spec (JAR codegen is unchanged). Named ids, all default-on; see [Compiler optimizations](compiler-optimizations.md#tla-emission-optimizations):
 
-- `unused-fields` — project unread `obj` fields out of TLA records and TLC domains
+- `unused-fields` — project unread record fields out of TLA records and TLC domains
 - `unused-vars` — omit state vars/consts the TLA-relevant fragment never reads
 - `determined-args` — substitute args fixed by `arg = expr` / `<=>` with `LET` instead of `\E`. Also binds an arg determined on every arm of a mutually exclusive `|` tree (`LET` of `IF`/`CASE`)
 - `from-collection` — quantify remaining args from a state set/list (or a struct literal `in` a set), or from `S.filter(x -> x.f = a).length > 0` (`\E a \in { x.f : x \in S }`)
 - `literal-domains` — per-site finite `{…}` for String/Int that only use a closed literal set (including TypeOK ranges and const-global Init `\in` domains)
-- `unwrap-singletons` — emit a one-field obj as that field’s type
+- `unwrap-singletons` — emit a one-field record as that field’s type
 - `unused-lets` — drop expression and transit `LET`s that the `IN` body never reads (recursively)
 
 Disable with `--disable-tla-opt` / `--disable-tla-opt=ID,...`.
@@ -275,7 +340,7 @@ See also [Collections](collections.md).
 - Multi-leaf (and solo) actions group each participant under `\* <Proc> <transition type> logic` (e.g. `transition`, `constructor`, `session transition`, `provider transition`), with that leaf’s enablement gates, guards, and transits together — similar to Init’s `\* State variables for <Proc>` sections.
 - When an action has `error:` arms, TLA+ emits `\* <Proc> <transition type> assumption` **before** the logic section. Each arm’s condition is negated and becomes a `/\\` conjunct (a guard): top-level `~in` / `~=` / `~` flip to `\in` / `=` / the inner formula; otherwise a `~` wraps the condition. List `in` / `~in` emit as `\in Range(xs)` / `\notin Range(xs)` (sequences are functions; `Range` is a generated helper). Error messages are runtime-only (JAR still throws `JulayException`).
 - Top-level `&` guard conjuncts become separate `/\\` lines (matching multi-line Julay guards). Nested multi-line `&` / `|` are formatted recursively as `/\\` and `\\/` branches (single-line boolean ops stay compact).
-- Multi-line Julay `Obj { ... }` literals become TLA records with one field per line; field lines are indented 2 spaces past the first non-`/\`/`\/` symbol on the opening line (single-line obj inits stay compact).
+- Multi-line Julay `Rec { ... }` literals become TLA records with one field per line; field lines are indented 2 spaces past the first non-`/\`/`\/` symbol on the opening line (single-line record inits stay compact).
 - Multi-line Julay `if` / expression `let` / `when` / list / set literals use that same open-column indent for bodies, `ELSE`/`IN`/`[]`/`OTHER`, and closing brackets (not the full hanging left-hand text such as `EXCEPT` or `\cup`).
 - Transit-level `let` bindings become TLA `LET` around later assign conjuncts (not AST-inlined); consecutive lets share one `LET`. Discard `let _ := …` is omitted. Chained expression `let`s are also one `LET`.
 - Julay `when` becomes TLA `CASE` with `[]` arms and `OTHER` for the trailing else.

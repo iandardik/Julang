@@ -1,4 +1,5 @@
-sort Node := { "n1", "n2" }
+type Node
+Node := { "n1", "n2" }
 
 spec Net[n : Node] {
     var lastDest : String := ""

@@ -1,6 +1,7 @@
-sort Ids := { "a", "b", "c" }
+type Ids
+Ids := { "a", "b", "c" }
 
-obj Node {
+type Node {
     id : Int
     url : String
 }

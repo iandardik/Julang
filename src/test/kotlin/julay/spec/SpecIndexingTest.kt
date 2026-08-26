@@ -125,7 +125,8 @@ class SpecIndexingTest {
     fun unknownGlobalVarIsError() {
         val result = typeCheck(
             """
-            sort N := {"a"}
+            type N
+            N := {"a"}
             proc Worker {
                 var id : Int
                 constructor initially(args : List<String>) { transit: id := 0 }
@@ -146,7 +147,8 @@ class SpecIndexingTest {
     fun duplicateGlobalVarIsError() {
         val result = typeCheck(
             """
-            sort N := {"a"}
+            type N
+            N := {"a"}
             proc Worker {
                 var id : Int
                 constructor initially(args : List<String>) { transit: id := 0 }
@@ -167,7 +169,8 @@ class SpecIndexingTest {
     fun globalConstructedIsError() {
         val result = typeCheck(
             """
-            sort N := {"a"}
+            type N
+            N := {"a"}
             proc Worker {
                 var id : Int
                 constructor initially(args : List<String>) { transit: id := 0 }
@@ -188,7 +191,8 @@ class SpecIndexingTest {
     fun plainGlobalOnConstIsError() {
         val result = typeCheck(
             """
-            sort N := {"a"}
+            type N
+            N := {"a"}
             proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
@@ -212,7 +216,8 @@ class SpecIndexingTest {
     fun constGlobalOnVarIsError() {
         val result = typeCheck(
             """
-            sort N := {"a"}
+            type N
+            N := {"a"}
             proc Worker {
                 var cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
@@ -236,7 +241,8 @@ class SpecIndexingTest {
     fun constGlobalOnConstIsOk() {
         val result = typeCheck(
             """
-            sort N := {"a"}
+            type N
+            N := {"a"}
             proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
@@ -253,7 +259,8 @@ class SpecIndexingTest {
     fun initConstGlobalLengthEqualsSortLengthIsOk() {
         val result = typeCheck(
             """
-            sort N := {"a", "b"}
+            type N
+            N := {"a", "b"}
             proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
@@ -271,7 +278,8 @@ class SpecIndexingTest {
     fun initLengthFunOnSortIsOk() {
         val result = typeCheck(
             """
-            sort N := {"a", "b"}
+            type N
+            N := {"a", "b"}
             proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
@@ -289,7 +297,8 @@ class SpecIndexingTest {
     fun initNonBooleanIsError() {
         val result = typeCheck(
             """
-            sort N := {"a"}
+            type N
+            N := {"a"}
             proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
@@ -310,7 +319,8 @@ class SpecIndexingTest {
     fun initMutableVarIsError() {
         val result = typeCheck(
             """
-            sort N := {"a"}
+            type N
+            N := {"a"}
             proc Worker {
                 const cluster : List<String>
                 var extra : Int
@@ -339,7 +349,8 @@ class SpecIndexingTest {
     fun initSortLargerThanMaxListLenIsError() {
         val result = typeCheck(
             """
-            sort N := {"a", "b", "c", "d"}
+            type N
+            N := {"a", "b", "c", "d"}
             proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
@@ -362,7 +373,8 @@ class SpecIndexingTest {
     fun initIndexedConstGlobalIsError() {
         val result = typeCheck(
             """
-            sort N := {"a"}
+            type N
+            N := {"a"}
             proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
@@ -383,7 +395,8 @@ class SpecIndexingTest {
     fun initIndexedConstInjectiveIsOk() {
         val result = typeCheck(
             """
-            sort N := {"a", "b"}
+            type N
+            N := {"a", "b"}
             proc Worker {
                 const me : String
                 const cluster : List<String>
@@ -406,7 +419,8 @@ class SpecIndexingTest {
     fun initIndexedVarIsError() {
         val result = typeCheck(
             """
-            sort N := {"a"}
+            type N
+            N := {"a"}
             proc Worker {
                 const cluster : List<String>
                 var extra : Int
@@ -434,7 +448,8 @@ class SpecIndexingTest {
     fun invariantIndexedListLengthAndIndexIsOk() {
         val result = typeCheck(
             """
-            sort N := {"a", "b"}
+            type N
+            N := {"a", "b"}
             proc Worker {
                 var log : List<String>
                 constructor initially(args : List<String>) { transit: log := args }
@@ -452,7 +467,8 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             import julay.funlib.max
-            sort N := {"a", "b"}
+            type N
+            N := {"a", "b"}
             proc Worker {
                 var log : List<String>
                 var commitIndex : Int
@@ -474,7 +490,8 @@ class SpecIndexingTest {
     fun invariantMaxWithoutImportIsError() {
         val result = typeCheck(
             """
-            sort N := {"a"}
+            type N
+            N := {"a"}
             proc Worker {
                 var n : Int
                 constructor initially(args : List<String>) { transit: n := 0 }

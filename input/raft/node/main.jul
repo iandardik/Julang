@@ -18,7 +18,7 @@ import julay.funlib.listOf
 export proc Raft := RaftNodeMain || RaftCore
 export proc NodeLogic := Raft
 
-obj CfgPair {
+type CfgPair {
     me : Node
     cluster : Set<Node>
 }

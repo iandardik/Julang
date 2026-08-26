@@ -1,7 +1,7 @@
 import julay.funlib.length
 import julay.funlib.listOf
 
-obj Node {
+type Node {
     id : Int
     url : String
 }

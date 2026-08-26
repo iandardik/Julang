@@ -1,4 +1,4 @@
-export obj Optional<T> {
+export type Optional<T> {
     present : Boolean
     value : T
 }

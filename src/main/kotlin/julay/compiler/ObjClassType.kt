@@ -21,7 +21,7 @@ fun resolveFieldPath(rootType: Type, path: List<String>): FieldPathResult {
         }
         val field = current.fields.find { it.name == segment }
         if (field == null) {
-            return FieldPathResult.Error("Unknown field \"$segment\" on obj ${current.name}")
+            return FieldPathResult.Error("Unknown field \"$segment\" on type ${current.name}")
         }
         pathParts.add(segment)
         current = field.type

@@ -37,6 +37,8 @@ data class SpecLeaf(
      * Create-index `init:` Boolean exprs: extra Init conjuncts (const-global constraints).
      */
     val initExprs: List<ExprNode> = emptyList(),
+    /** Create-index delayed domain models (`Name := { … }`). */
+    val typeModels: List<TypeModelNode> = emptyList(),
 ) {
     val isParameterized: Boolean get() = paramName != null && paramType != null
     /** True when this leaf is create-indexed and [varName] is not a `global` model var. */
@@ -99,14 +101,16 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
                 val globals = n.globalVarNames().toSet()
                 val constGlobals = n.globalConstVarNames().toSet()
                 val inits = n.initExprs()
+                val typeModels = n.typeModels()
                 fun withGlobals(child: SpecLeaf): SpecLeaf =
-                    if (globals.isEmpty() && inits.isEmpty()) {
+                    if (globals.isEmpty() && inits.isEmpty() && typeModels.isEmpty()) {
                         child
                     } else {
                         child.copy(
                             globalVars = child.globalVars + globals,
                             globalConstVars = child.globalConstVars + constGlobals,
                             initExprs = child.initExprs + inits,
+                            typeModels = child.typeModels + typeModels,
                         )
                     }
                 when {

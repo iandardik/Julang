@@ -1,8 +1,9 @@
 import julay.funlib.setOf
 
-sort NodeSet := { "n1", "n2" }
+type NodeSet
+NodeSet := { "n1", "n2" }
 
-obj Msg {
+type Msg {
     src : NodeSet
     dest : NodeSet
     value : Int

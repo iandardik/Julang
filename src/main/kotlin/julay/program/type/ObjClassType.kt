@@ -119,7 +119,7 @@ class ObjClassType(
                 val objType = currentType as ObjClassType
                 val fieldIndex = objType.fields.indexOfFirst { it.name == segment }
                 if (fieldIndex < 0) {
-                    throw RuntimeException("Unknown field \"$segment\" on obj ${objType.name}")
+                    throw RuntimeException("Unknown field \"$segment\" on type ${objType.name}")
                 }
                 val field = objType.fields[fieldIndex]
                 expr = "${objClassAccessorFunName(objType.name, field.name)}(ctx, $expr)"
@@ -184,9 +184,12 @@ fun Type.toKotlinTypeString(): String = when (this) {
     is SetType -> "Set<${elementType.toKotlinTypeString()}>"
     is MapType -> "Map<${keyType.toKotlinTypeString()}, ${valueType.toKotlinTypeString()}>"
     is TypeVar -> throw RuntimeException("TypeVar \"$name\" must not reach Kotlin codegen")
-    is SortType -> throw RuntimeException(
-        "sort \"$name\" must not reach Kotlin codegen (sorts are specs/TLA+ only)",
-    )
+    is DomainType -> when (kind) {
+        DomainKind.Typedef -> carrierType.toKotlinTypeString()
+        DomainKind.Uninterpreted -> throw RuntimeException(
+            "type \"$name\" must not reach Kotlin codegen (uninterpreted types are specs/TLA+ only)",
+        )
+    }
     else -> throw RuntimeException("Invalid type: $this")
 }
 
@@ -200,9 +203,12 @@ fun Type.toCodegenTypeVal(): String = when (this) {
     is SetType -> setTypeValName(elementType)
     is MapType -> mapTypeValName(keyType, valueType)
     is TypeVar -> throw RuntimeException("TypeVar \"$name\" must not reach Kotlin codegen")
-    is SortType -> throw RuntimeException(
-        "sort \"$name\" must not reach Kotlin codegen (sorts are specs/TLA+ only)",
-    )
+    is DomainType -> when (kind) {
+        DomainKind.Typedef -> carrierType.toCodegenTypeVal()
+        DomainKind.Uninterpreted -> throw RuntimeException(
+            "type \"$name\" must not reach Kotlin codegen (uninterpreted types are specs/TLA+ only)",
+        )
+    }
     else -> throw RuntimeException("Invalid type: $this")
 }
 

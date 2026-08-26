@@ -1,6 +1,6 @@
 import julay.funlib.exitProgram
 
-obj Box<T> {
+type Box<T> {
     value : T
 }
 

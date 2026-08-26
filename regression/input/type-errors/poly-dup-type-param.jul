@@ -1,4 +1,4 @@
-obj Box<T, T> {
+type Box<T, T> {
     value : T
 }
 

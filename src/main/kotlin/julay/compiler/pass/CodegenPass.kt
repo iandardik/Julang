@@ -69,7 +69,7 @@ fun codegenPass(
     val objClassDecls = ast.resolvedObjClassDecls()
         .filterNot { ObjClassBuiltinRegistry.isBuiltin(it.name) }
         // Specs may define sort-bearing objs in the same CU; JAR codegen must not emit them.
-        .filterNot { decl -> decl.fields.any { it.type.containsSortType() } }
+        .filterNot { decl -> decl.fields.any { it.type.containsUninterpretedType() } }
     val runProgram =
         "Program(tsInfo, args.toList(), procFunInfo, ${SyncResolveConfig.toKotlinExpr(syncResolveConfig)}).run()"
     val mainFunction = "suspend fun main(args : Array<String>) {" +
@@ -282,7 +282,7 @@ private fun collectExprParametricTypes(
 ) {
     try {
         val t = expr.getType()
-        if (!t.containsSortType()) collectParametricTypes(t, out)
+        if (!t.containsUninterpretedType()) collectParametricTypes(t, out)
     } catch (_: RuntimeException) {
         // Uninferred — skip
     }
@@ -402,29 +402,29 @@ private fun ObjClassDecl.kotlinConversionHelpersString(): String {
     """.trimMargin()
 }
 
-private fun fieldToZ3ExprString(valueExpr: String, type: Type): String = when (type) {
+private fun fieldToZ3ExprString(valueExpr: String, type: Type): String = when (val t = type.codegenErasure()) {
     is BoolType -> "ctx.mkBool($valueExpr)"
     is IntType -> "ctx.mkInt($valueExpr)"
     is RealType -> "ctx.mkReal($valueExpr.toString())"
     is StringType -> "ctx.mkString($valueExpr)"
-    is ObjClassType -> "${objClassToZ3FunName(type.name)}(ctx, $valueExpr)"
+    is ObjClassType -> "${objClassToZ3FunName(t.name)}(ctx, $valueExpr)"
     is ListType, is SetType, is MapType ->
-        "${type.toCodegenTypeVal()}.toZ3Expr(Value($valueExpr, ${type.toCodegenTypeVal()}), ctx)"
+        "${t.toCodegenTypeVal()}.toZ3Expr(Value($valueExpr, ${t.toCodegenTypeVal()}), ctx)"
     else -> throw RuntimeException("Invalid field type for Z3 conversion: $type")
 }
 
-private fun fieldFromZ3ExprString(exprStr: String, type: Type): String = when (type) {
+private fun fieldFromZ3ExprString(exprStr: String, type: Type): String = when (val t = type.codegenErasure()) {
     is BoolType -> "boolType.fromZ3Expr($exprStr, model) as Boolean"
     is IntType -> "intType.fromZ3Expr($exprStr, model) as Int"
     is RealType -> "realType.fromZ3Expr($exprStr, model) as Double"
     is StringType -> "stringType.fromZ3Expr($exprStr, model) as String"
-    is ObjClassType -> "${objClassFromZ3FunName(type.name)}($exprStr, model)"
+    is ObjClassType -> "${objClassFromZ3FunName(t.name)}($exprStr, model)"
     is ListType, is SetType, is MapType ->
-        "@Suppress(\"UNCHECKED_CAST\") (${type.toCodegenTypeVal()}.fromZ3Expr($exprStr, model) as ${type.toKotlinTypeString()})"
+        "@Suppress(\"UNCHECKED_CAST\") (${t.toCodegenTypeVal()}.fromZ3Expr($exprStr, model) as ${t.toKotlinTypeString()})"
     else -> throw RuntimeException("Invalid field type for Z3 conversion: $type")
 }
 
-private fun Type.toZ3ExprTypeString(): String = when (this) {
+private fun Type.toZ3ExprTypeString(): String = when (val t = codegenErasure()) {
     is BoolType -> "BoolExpr"
     is IntType -> "IntExpr"
     is RealType -> "RealExpr"

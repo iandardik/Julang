@@ -1,4 +1,4 @@
-obj Rec {
+type Rec {
     x : Int
     y : Int
 }

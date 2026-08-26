@@ -1,4 +1,4 @@
-obj Point {
+type Point {
     x : Int
 }
 

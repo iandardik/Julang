@@ -4,7 +4,7 @@ Compact cheat sheet. For explanations, use the other chapters.
 
 ## Keywords
 
-`proc` `procfun` `obj` `sort` `fun` `import` `export` `compile` `spec` `invariant`  
+`proc` `procfun` `type` `fun` `import` `export` `compile` `spec` `invariant`  
 `var` `const` `constructor` `transition`  
 `internal` `provider` `client` `session`  
 `guard` `before` `transit` `error` `after` `return`  
@@ -38,8 +38,10 @@ import Module.Path
 proc Name { ... }
 proc Name := Expr
 procfun name(...) : Type { ... }
-obj Name { ... }
-sort Name := { lit, ... }
+type Name { ... }                           // record
+type Name := TypeExpr                       // typedef
+type Name                                   // uninterpreted
+Name := { lit, ... }                        // delayed model (typedef / uninterpreted only)
 fun name(...) : Type = expr
 invariant Name := Expr
 spec Name { ... }                          // leaf spec (optional [p : T] body binder; no state lift)
@@ -58,11 +60,11 @@ System atoms: `Name[v : T]` **creates** an index (lifts state); `{ const global 
 
 Leaf-spec actions: `transition name(args) also (aux : T) { … }` (leaf specs only). Bodies may read peer state `P.var` / `P[idx].var` (compile checks composition + indexing).
 
-`sort` declares a finite homogeneous domain (String, non-negative Int, or Boolean literals) for **spec index / quantifier / leaf-spec parameter domains**, **leaf-spec state**, and **`obj` fields**. It becomes a TLA+ `CONSTANT` with the exact set in the `.cfg`. Do not use sorts as ordinary proc state or action args. Sort-bearing objs in a JAR `compile` target are an error. Sorts may be `export`ed and imported by name.
+**Types:** record `type Name { fields }`; typedef `type Name := Carrier`; uninterpreted `type Name`. Delayed models `Name := { lits }` apply only to typedef/uninterpreted — required for uninterpreted when used, optional for typedef (cfg aliases carrier if absent), forbidden for records. Uninterpreted types are spec-only; JAR `compile` errors if a proc reaches one. Typedefs erase to the carrier in procs. Details and examples: [Types and expressions](types-and-expressions.md#delayed-models).
 
 `Guarantee` may be a named invariant, an inline Boolean formula (`true` / `false` included), or `true` meaning no guarantee. Plain `spec := System` equals `<true> System <true>` / `--compile-tla`.
 
-`compile` targets: **proc** → JAR (fails if the assembly reaches a sort-bearing type); **spec** (composition or leaf) → `.tla` / `.cfg`; **procfun** → standalone TLA/analyze (not a JAR root). Leaf specs must not appear in `proc Name := …` assemblies.
+`compile` targets: **proc** → JAR (fails if the assembly reaches an uninterpreted type); **spec** (composition or leaf) → `.tla` / `.cfg`; **procfun** → standalone TLA/analyze (not a JAR root). Leaf specs must not appear in `proc Name := …` assemblies.
 
 Procfuns cannot appear in `||`. List them in an [api](composition-and-actions.md#apis)'s `calls:` for TLA coupling. Parent **alphabets** always include called procfuns' non-synthetic actions. See [Procfuns](procfun.md).
 

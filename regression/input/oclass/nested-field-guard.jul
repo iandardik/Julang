@@ -1,11 +1,11 @@
 import julay.funlib.exitProgram
 
-obj Point {
+type Point {
     x : Int
     y : Int
 }
 
-obj Line {
+type Line {
     start : Point
     end : Point
 }

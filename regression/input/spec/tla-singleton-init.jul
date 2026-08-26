@@ -1,4 +1,5 @@
-sort Ids := { "a", "b" }
+type Ids
+Ids := { "a", "b" }
 
 proc Box {
     const xs : List<Int>

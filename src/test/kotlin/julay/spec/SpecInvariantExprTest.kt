@@ -190,7 +190,8 @@ class SpecInvariantExprTest {
             import julay.funlib.max
             import julay.funlib.allDistinct
             import julay.funlib.listOf
-            sort N := {"a"}
+            type N
+            N := {"a"}
             proc Worker {
                 var n : Int
                 var xs : List<Int>
@@ -245,8 +246,9 @@ class SpecInvariantExprTest {
         }
         return """
             $importBlock
-            obj Point { x : Int }
-            sort N := {"a"}
+            type Point { x : Int }
+            type N
+            N := {"a"}
             proc Worker {
                 var n : Int
                 var log : List<String>
@@ -274,8 +276,9 @@ class SpecInvariantExprTest {
         import julay.funlib.setOf
         import julay.funlib.mapOf
 
-        obj Point { x : Int }
-        sort N := {"a"}
+        type Point { x : Int }
+        type N
+        N := {"a"}
 
         proc Worker {
             var n : Int

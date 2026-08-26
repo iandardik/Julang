@@ -1,6 +1,6 @@
 import julay.funlib.setOf
 
-obj Msg {
+type Msg {
     term : Int
 }
 

@@ -279,7 +279,9 @@ class ParamProcExprNode(
     private val globalDecls: List<GlobalDeclNames> = emptyList(),
     /** Create-index `init:` Boolean exprs; empty for apply-index. */
     private val initExprs: List<ExprNode> = emptyList(),
-) : ASTNode(listOf(body) + initExprs) {
+    /** Create-index delayed domain models (`Name := { … }`). */
+    private val typeModels: List<TypeModelNode> = emptyList(),
+) : ASTNode(listOf(body) + initExprs + typeModels) {
     override fun programLocation() = loc
     internal fun paramBody() = body
     internal fun paramName() = paramName
@@ -290,16 +292,18 @@ class ParamProcExprNode(
     internal fun globalConstVarNames(): List<String> =
         globalDecls.filter { it.isConst }.flatMap { it.names }
     internal fun initExprs(): List<ExprNode> = initExprs
+    internal fun typeModels(): List<TypeModelNode> = typeModels
     override fun toString(): String {
         val index = if (paramType == null) "$body[$paramName]" else "$body[$paramName : $paramType]"
-        if (globalDecls.isEmpty() && initExprs.isEmpty()) return index
+        if (globalDecls.isEmpty() && initExprs.isEmpty() && typeModels.isEmpty()) return index
         val lines = globalDecls.map { decl ->
             val names = decl.names.joinToString(", ")
             val kw = if (decl.isConst) "const global" else "global"
             "  $kw $names"
-        } + initExprs.map { expr ->
-            "  init: $expr"
-        }
+        } + typeModels.map { it.toString().prependIndent("  ") } +
+            initExprs.map { expr ->
+                "  init: $expr"
+            }
         return "$index {\n${lines.joinToString("\n")}\n}"
     }
 }
@@ -332,22 +336,39 @@ class ObjClassNode(
     override fun toString(): String {
         val params = if (typeParams.isEmpty()) "" else typeParams.joinToString(", ", "<", ">")
         val body = fields.joinToString("\n") { "$it".prependIndent() }
-        return "obj $name$params {\n$body\n}"
+        return "type $name$params {\n$body\n}"
     }
 }
 
-/** Top-level `sort Name := { lit, ... }` finite domain for TLA+ CONSTANTs. */
-class SortDeclNode(
+/** `type Name` (uninterpreted) or `type Name := Carrier` (typedef). */
+class DomainDeclNode(
+    private val name: String,
+    private val aliasTypeExpr: TypeExpr?,
+    private val loc: ProgramLoc,
+) : DeclNode(emptyList()) {
+    override fun programLocation() = loc
+    override fun name() = name
+    internal fun aliasTypeExpr(): TypeExpr? = aliasTypeExpr
+    internal fun isTypedef(): Boolean = aliasTypeExpr != null
+    override fun toString(): String {
+        val export = if (isExported) "export " else ""
+        return if (aliasTypeExpr != null) {
+            "${export}type $name := $aliasTypeExpr"
+        } else {
+            "${export}type $name"
+        }
+    }
+}
+
+/** Delayed model `Name := { lit, ... }` for uninterpreted/typedef domains. */
+class TypeModelNode(
     private val name: String,
     val elements: List<LiteralValueExprNode>,
     private val loc: ProgramLoc,
 ) : DeclNode(elements) {
     override fun programLocation() = loc
-    override fun name() = name
-    override fun toString(): String {
-        val export = if (isExported) "export " else ""
-        return "${export}sort $name := {${elements.joinToString(", ")}}"
-    }
+    override fun name(): String = name
+    override fun toString(): String = "$name := {${elements.joinToString(", ")}}"
 }
 
 class FieldNode(
@@ -2467,8 +2488,9 @@ private fun mkIteGuardString(
 }
 
 private fun castFieldZ3(fieldZ3: String, leafType: Type, forceString: Boolean): String {
+    val type = leafType.codegenErasure()
     if (forceString) {
-        return when (leafType) {
+        return when (type) {
             is BoolType -> throw RuntimeException("Cannot convert a Bool to a string")
             is IntType -> "ctx.intToString($fieldZ3 as IntExpr)"
             is RealType -> throw RuntimeException("Cannot convert a symbolic Real to a string")
@@ -2478,10 +2500,10 @@ private fun castFieldZ3(fieldZ3: String, leafType: Type, forceString: Boolean): 
             else -> throw RuntimeException("Invalid field type: $leafType")
         }
     }
-    if (leafType is ObjClassType) {
+    if (type is ObjClassType) {
         return fieldZ3
     }
-    return when (leafType) {
+    return when (type) {
         is BoolType -> "$fieldZ3 as BoolExpr"
         is IntType -> "$fieldZ3 as IntExpr"
         is RealType -> "$fieldZ3 as RealExpr"
@@ -2497,7 +2519,7 @@ class SymbolValueExprNode(
 ) : ExprNode(listOf()) {
     override fun programLocation() = loc
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
-        val type = symbolTypes[symbol]
+        val type = symbolTypes[symbol]?.codegenErasure()
         if (forceString) {
             return when (type) {
                 is BoolType -> throw RuntimeException("Cannot convert a Bool to a string")

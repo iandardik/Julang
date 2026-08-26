@@ -13,8 +13,11 @@ invariant StateMachineSafety :=
 
 invariant AllInvariants := OneLeaderPerTerm & StateMachineSafety
 
+import node.lib.Value
+
 spec ClusterSpec := RaftProtocol[n : NodeSet] {
     const global cluster
+    Value := { "", "v1", "v2" }
     init: cluster.length = NodeSet.length
     init: forall i : Int, (i >= 1 & i <= cluster.length) => (exists node : Node, node in cluster & node.id = i)
     init: forall n1 : NodeSet, forall n2 : NodeSet,

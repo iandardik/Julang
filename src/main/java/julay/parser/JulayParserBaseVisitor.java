@@ -116,14 +116,14 @@ public class JulayParserBaseVisitor<T> extends AbstractParseTreeVisitor<T> imple
 	 * <p>The default implementation returns the result of calling
 	 * {@link #visitChildren} on {@code ctx}.</p>
 	 */
-	@Override public T visitObj(JulayParser.ObjContext ctx) { return visitChildren(ctx); }
+	@Override public T visitType_decl(JulayParser.Type_declContext ctx) { return visitChildren(ctx); }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation returns the result of calling
 	 * {@link #visitChildren} on {@code ctx}.</p>
 	 */
-	@Override public T visitSort_decl(JulayParser.Sort_declContext ctx) { return visitChildren(ctx); }
+	@Override public T visitType_model(JulayParser.Type_modelContext ctx) { return visitChildren(ctx); }
 	/**
 	 * {@inheritDoc}
 	 *
@@ -466,14 +466,14 @@ public class JulayParserBaseVisitor<T> extends AbstractParseTreeVisitor<T> imple
 	 * <p>The default implementation returns the result of calling
 	 * {@link #visitChildren} on {@code ctx}.</p>
 	 */
-	@Override public T visitObj_literal(JulayParser.Obj_literalContext ctx) { return visitChildren(ctx); }
+	@Override public T visitRecord_literal(JulayParser.Record_literalContext ctx) { return visitChildren(ctx); }
 	/**
 	 * {@inheritDoc}
 	 *
 	 * <p>The default implementation returns the result of calling
 	 * {@link #visitChildren} on {@code ctx}.</p>
 	 */
-	@Override public T visitObj_field_assign(JulayParser.Obj_field_assignContext ctx) { return visitChildren(ctx); }
+	@Override public T visitRecord_field_assign(JulayParser.Record_field_assignContext ctx) { return visitChildren(ctx); }
 	/**
 	 * {@inheritDoc}
 	 *
