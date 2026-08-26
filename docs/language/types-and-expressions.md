@@ -57,19 +57,22 @@ In **spec/TLA expressions** (invariants, `init:`), `NodeSet.length` and `length(
 
 ### Delayed models
 
-A **delayed model** assigns a finite literal set to a typedef or uninterpreted name:
+A **delayed model** assigns a finite literal set to a typedef or uninterpreted name. It may appear **only** inside a **create-index block** or a **leaf-spec body** — never as a top-level declaration (and never `export`ed). Export the type (`export type NodeSet`); pin the model on the spec you compile.
 
 ```jul
-NodeSet := { "n1", "n2", "n3" }
+type NodeSet
+spec ClusterSpec := RaftProtocol[n : NodeSet] {
+    NodeSet := { "n1", "n2", "n3" }   // create-index
+}
+
+spec Net[n : NodeSet] {
+    NodeSet := { "n1", "n2", "n3" }   // leaf-spec body
+    var lastDest : String := ""
+    ...
+}
 ```
 
-It may appear:
-
-- **Top-level** in a module (alongside other decls), or
-- **Inside a create-index block** (next to `const global` / `init:`), or
-- On a **leaf spec** compile target that has no create-index (top-level only).
-
-Models are collected for the **spec you `compile`**: walk that spec’s system AST (including aliased specs and merged `init:`) plus top-level bindings in the compilation unit. Two disagreeing models for one name in one compile → error.
+Models are collected from the **spec you `compile`** (create-index items and leaf-spec bodies in that system, including aliased specs). Two disagreeing models for one name → error.
 
 **Rules (any violation is a compile error):**
 
@@ -93,20 +96,15 @@ spec S := P[n : NodeSet] { }          // error: NodeSet has no delayed model
 compile S
 ```
 
-Top-level assignment is also valid when the type is visible:
-
-```jul
-type Node
-Node := { "n1", "n2", "n3" }          // old sort Node := { … } migration
-```
-
 #### 2. Record — delayed model **forbidden**
 
 Record types are not `CONSTANT`s. Assigning a model to a record name is always an error.
 
 ```jul
 type Pair { x : Int, y : Int }
-Pair := { 1, 2 }                      // error: cannot assign a model to a record type
+spec S := P[n : Int] {
+    Pair := { 1, 2 }                  // error: cannot assign a model to a record type
+}
 ```
 
 #### 3. Typedef — delayed model **optional**
@@ -139,7 +137,9 @@ spec S := P[n : NodeSet] {
 
 ```jul
 type Value := String
-Value := { 1, 2 }                     // error: carrier is String, not Int
+spec S := P[n : Int] {
+    Value := { 1, 2 }                 // error: carrier is String, not Int
+}
 ```
 
 Without a pin, `Value` and `String` share TLC’s string universe (including any role strings in the inferred `String` model). Specs that need a dedicated client-value alphabet should pin `Value := { "", "v1", "v2" }` (see Raft in [Specifications](specifications.md)).

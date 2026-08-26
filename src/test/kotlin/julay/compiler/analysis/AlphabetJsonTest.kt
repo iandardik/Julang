@@ -71,7 +71,6 @@ class AlphabetJsonTest {
         file.writeText(
             """
             type Node
-            Node := { "n1", "n2" }
 
             proc Protocol {
                 constructor initially(args : List<String>) { transit: }
@@ -80,6 +79,7 @@ class AlphabetJsonTest {
             }
 
             spec Net[n : Node] {
+                Node := { "n1", "n2" }
                 constructor initially(args : List<String>) {}
                 transition requestVote() { transit: }
                 client transition handleVote() { transit: }
@@ -148,8 +148,8 @@ class AlphabetJsonTest {
         file.writeText(
             """
             type Node
-            Node := { "n1" }
             spec Net[n : Node] {
+                Node := { "n1" }
                 constructor initially(args : List<String>) {}
                 transition requestVote() { transit: }
             }

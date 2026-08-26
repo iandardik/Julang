@@ -1,5 +1,4 @@
 type NodeSet
-NodeSet := {"a", "b"}
 
 proc Worker {
     var log : List<String>
@@ -9,6 +8,8 @@ proc Worker {
 invariant SameLog := forall n1 : NodeSet, forall n2 : NodeSet, forall i : Int,
     (i >= 1 & i <= Worker[n1].log.length & i <= Worker[n2].log.length) => (Worker[n1].log[i] = Worker[n2].log[i])
 
-spec ListIndexInv := Worker[n : NodeSet] |= SameLog
+spec ListIndexInv := Worker[n : NodeSet] {
+    NodeSet := {"a", "b"}
+} |= SameLog
 
 compile ListIndexInv

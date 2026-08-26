@@ -59,13 +59,6 @@ fun RootNode.domainPass(recordNames: Set<String> = emptySet()): DomainPassResult
         }
     }
 
-    declNodes().filterIsInstance<TypeModelNode>().forEach { model ->
-        when (val built = buildDomainModel(model, domains[model.name()], recordNames)) {
-            is DomainModelBuildResult.Ok -> domains[model.name()] = built.type
-            is DomainModelBuildResult.Failed -> errors += built.errors
-        }
-    }
-
     return DomainPassResult(domains, errors)
 }
 
@@ -82,19 +75,22 @@ fun CompilationUnit.collectDomains(): DomainPassResult {
         result.domains.forEach { (name, type) ->
             if (name !in domains) {
                 domains[name] = type
-            } else if (domains[name] != type && type.hasModel) {
-                // Top-level models from another module with same name — keep first unless identical.
-                val existing = domains.getValue(name)
-                if (existing.hasModel && existing.cfgElements != type.cfgElements) {
-                    errors += OneLocCompileError(
-                        module.root.programLocation(),
-                        "Conflicting delayed models for type \"$name\"",
-                    )
-                }
             }
         }
     }
-    return DomainPassResult(domains, errors)
+
+    // Delayed models live only inside create-index / leaf-spec bodies (not top-level decls).
+    val nestedModels = modules.flatMap { it.root.collectNestedTypeModels() }
+    val (merged, modelErrors) = mergeSpecTypeModels(nestedModels, domains, recordNames)
+    errors += modelErrors
+    return DomainPassResult(merged, errors)
+}
+
+/** Collect delayed models from create-index blocks and leaf-spec bodies. */
+fun ASTNode.collectNestedTypeModels(): List<TypeModelNode> = when (this) {
+    is TypeModelNode -> listOf(this)
+    is LeafSpecNode -> typeModels() + localDecls().flatMap { it.collectNestedTypeModels() }
+    else -> children.flatMap { it.collectNestedTypeModels() }
 }
 
 sealed interface DomainModelBuildResult {

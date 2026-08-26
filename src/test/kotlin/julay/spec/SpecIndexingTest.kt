@@ -126,7 +126,6 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            N := {"a"}
             proc Worker {
                 var id : Int
                 constructor initially(args : List<String>) { transit: id := 0 }
@@ -148,7 +147,6 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            N := {"a"}
             proc Worker {
                 var id : Int
                 constructor initially(args : List<String>) { transit: id := 0 }
@@ -170,7 +168,6 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            N := {"a"}
             proc Worker {
                 var id : Int
                 constructor initially(args : List<String>) { transit: id := 0 }
@@ -192,7 +189,6 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            N := {"a"}
             proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
@@ -217,7 +213,6 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            N := {"a"}
             proc Worker {
                 var cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
@@ -242,7 +237,6 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            N := {"a"}
             proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
@@ -260,7 +254,6 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            N := {"a", "b"}
             proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
@@ -279,7 +272,6 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            N := {"a", "b"}
             proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
@@ -298,7 +290,6 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            N := {"a"}
             proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
@@ -320,7 +311,6 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            N := {"a"}
             proc Worker {
                 const cluster : List<String>
                 var extra : Int
@@ -350,12 +340,12 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            N := {"a", "b", "c", "d"}
             proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
             spec Bad := Worker[i : N] {
+              N := {"a", "b", "c", "d"}
               const global cluster
               init: cluster.length = N.length
             }
@@ -374,7 +364,6 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            N := {"a"}
             proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
@@ -396,7 +385,6 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            N := {"a", "b"}
             proc Worker {
                 const me : String
                 const cluster : List<String>
@@ -420,7 +408,6 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            N := {"a"}
             proc Worker {
                 const cluster : List<String>
                 var extra : Int
@@ -449,14 +436,15 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            N := {"a", "b"}
             proc Worker {
                 var log : List<String>
                 constructor initially(args : List<String>) { transit: log := args }
             }
             invariant SameLog := forall n1 : N, forall n2 : N, forall i : Int,
                 (i >= 1 & i <= Worker[n1].log.length & i <= Worker[n2].log.length) => (Worker[n1].log[i] = Worker[n2].log[i])
-            spec Ok := Worker[n : N] |= SameLog
+            spec Ok := Worker[n : N] {
+                N := {"a", "b"}
+            } |= SameLog
             """.trimIndent(),
         )
         assertTrue(result.errors.isEmpty(), result.toString())
@@ -468,7 +456,6 @@ class SpecIndexingTest {
             """
             import julay.funlib.max
             type N
-            N := {"a", "b"}
             proc Worker {
                 var log : List<String>
                 var commitIndex : Int
@@ -480,7 +467,9 @@ class SpecIndexingTest {
             }
             invariant SameLog := forall n1 : N, forall n2 : N, forall i : Int,
                 (1 <= i & i <= max(Worker[n1].commitIndex, Worker[n2].commitIndex)) => (Worker[n1].log[i] = Worker[n2].log[i])
-            spec Ok := Worker[n : N] |= SameLog
+            spec Ok := Worker[n : N] {
+                N := {"a", "b"}
+            } |= SameLog
             """.trimIndent(),
         )
         assertTrue(result.errors.isEmpty(), result.toString())
@@ -491,13 +480,14 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            N := {"a"}
             proc Worker {
                 var n : Int
                 constructor initially(args : List<String>) { transit: n := 0 }
             }
             invariant Bound := forall k : N, Worker[k].n <= max(Worker[k].n, Worker[k].n)
-            spec Bad := Worker[a : N] |= Bound
+            spec Bad := Worker[a : N] {
+                N := {"a"}
+            } |= Bound
             """.trimIndent(),
         )
         assertTrue(

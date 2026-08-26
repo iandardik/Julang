@@ -15,6 +15,8 @@ proc Counter {
 
 invariant G := forall i : NodeSet, Counter[i].n <= 3
 
-spec SortImport := <true> Counter[i : NodeSet] <G>
+spec SortImport := <true> Counter[i : NodeSet] {
+    NodeSet := { "n1", "n2", "n3" }
+} <G>
 
 compile SortImport

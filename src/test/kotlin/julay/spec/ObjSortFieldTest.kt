@@ -27,7 +27,6 @@ class ObjSortFieldTest {
         val result = typeCheck(
             """
             type NodeSet
-            NodeSet := { "n1", "n2" }
             type VoteRequestMsg {
                 dest : NodeSet
                 msg : String
@@ -42,8 +41,8 @@ class ObjSortFieldTest {
         val result = typeCheck(
             """
             type Node
-            Node := { "n1", "n2" }
             spec E {
+                Node := { "n1", "n2" }
                 var d : Node := "n1"
                 constructor initially(args : List<String>) { transit: d := "n1" }
             }
@@ -58,12 +57,12 @@ class ObjSortFieldTest {
             """
             import julay.funlib.setOf
             type NodeSet
-            NodeSet := { "n1", "n2" }
             type VoteRequestMsg {
                 dest : NodeSet
                 msg : String
             }
             spec Env {
+                NodeSet := { "n1", "n2" }
                 var msgs : Set<VoteRequestMsg> := setOf()
                 constructor initially(args : List<String>) { transit: msgs := setOf() }
             }
@@ -77,7 +76,6 @@ class ObjSortFieldTest {
         val result = typeCheck(
             """
             type Node
-            Node := { "n1" }
             proc P {
                 var d : Node := "n1"
                 constructor initially(args : List<String>) { transit: d := "n1" }
@@ -100,12 +98,12 @@ class ObjSortFieldTest {
             """
             import julay.funlib.setOf
             export type NodeSet
-            export NodeSet := { "n1", "n2" }
             type VoteRequestMsg {
                 dest : NodeSet
                 msg : String
             }
             export spec Net {
+                NodeSet := { "n1", "n2" }
                 var msgs : Set<VoteRequestMsg> := setOf()
                 constructor initially(args : List<String>) {}
             }
@@ -176,7 +174,6 @@ class ObjSortFieldTest {
     fun procSortBearingObjTypeChecksButJarRefused() {
         val source = """
             type NodeSet
-            NodeSet := { "n1", "n2" }
             type VoteRequestMsg {
                 dest : NodeSet
                 msg : String
@@ -231,9 +228,9 @@ class ObjSortFieldTest {
     fun specAndJarSameFile() {
         val source = """
             type NodeSet
-            NodeSet := { "n1" }
             type Msg { dest : NodeSet }
             spec Good {
+                NodeSet := { "n1" }
                 var m : Msg
                 constructor initially(args : List<String>) {
                     transit: m := Msg { dest := "n1" }
@@ -264,9 +261,9 @@ class ObjSortFieldTest {
             file.writeText(
                 """
                 type NodeSet
-                NodeSet := { "n1" }
                 type Msg { dest : NodeSet }
                 spec Good {
+                    NodeSet := { "n1" }
                     var m : Msg
                     constructor initially(args : List<String>) {
                         transit: m := Msg { dest := "n1" }
@@ -289,9 +286,9 @@ class ObjSortFieldTest {
         val result = typeCheck(
             """
             type Node
-            Node := { "n1", "n2" }
             type Vote { dest : Node }
             spec Net[n : Node] {
+                Node := { "n1", "n2" }
                 var last : Vote
                 constructor initially(args : List<String>) {
                     transit: last := Vote { dest := n }

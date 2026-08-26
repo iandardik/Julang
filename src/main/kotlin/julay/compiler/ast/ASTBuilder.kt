@@ -82,7 +82,6 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             ctx!!.proc(),
             ctx.api_decl(),
             ctx.type_decl(),
-            ctx.type_model(),
             ctx.compile_decl(),
             ctx.spec(),
             ctx.invariant_decl(),
@@ -257,17 +256,29 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         val name = ctx!!.ID(0).text
         // Leaf form: spec Name [p : T]? { ... }
         if (ctx.LCURLY() != null) {
-            val localDecls = ctx.proc_body()
-                .map { visit(it) }
-                .map {
-                    if (it !is ProcClassDeclNode) {
-                        throw RuntimeException("Expected ProcClassDeclNode but got $it")
+            val localDecls = mutableListOf<ProcClassDeclNode>()
+            val typeModels = mutableListOf<TypeModelNode>()
+            ctx.leaf_spec_item().forEach { item ->
+                when {
+                    item.proc_body() != null -> {
+                        val node = visit(item.proc_body())
+                        if (node !is ProcClassDeclNode) {
+                            throw RuntimeException("Expected ProcClassDeclNode but got $node")
+                        }
+                        localDecls += node
                     }
-                    it
+                    item.type_model() != null -> {
+                        val node = visit(item.type_model())
+                        if (node !is TypeModelNode) {
+                            throw RuntimeException("Expected TypeModelNode but got $node")
+                        }
+                        typeModels += node
+                    }
                 }
+            }
             val paramName = if (ctx.LBRACK() != null) ctx.ID(1).text else null
             val paramType = if (ctx.LBRACK() != null) parseTypeExpr(ctx.typeExpr()) else null
-            return LeafSpecNode(name, paramName, paramType, localDecls, sourceLocation(ctx))
+            return LeafSpecNode(name, paramName, paramType, localDecls, sourceLocation(ctx), typeModels)
         }
         val value = when {
             ctx.ag_spec() != null -> visit(ctx.ag_spec())

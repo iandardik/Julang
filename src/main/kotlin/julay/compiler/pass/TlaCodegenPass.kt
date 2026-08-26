@@ -127,7 +127,8 @@ fun tlaCodegenPass(
     var mergedDomains = ast.cachedObjClassRegistry()?.domains?.toMutableMap() ?: mutableMapOf()
     val domainModelErrors = mutableListOf<CompileError>()
     leaves.forEach { leaf ->
-        val (merged, errs) = mergeSpecTypeModels(leaf.typeModels, mergedDomains, recordNames)
+        val models = leaf.typeModels + (leafSpecNodes[leaf.name]?.typeModels() ?: emptyList())
+        val (merged, errs) = mergeSpecTypeModels(models, mergedDomains, recordNames)
         mergedDomains = merged.toMutableMap()
         domainModelErrors += errs
     }

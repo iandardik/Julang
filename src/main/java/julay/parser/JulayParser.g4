@@ -29,7 +29,6 @@ decl
     : EXPORT? proc
     | EXPORT? api_decl
     | EXPORT? type_decl
-    | EXPORT? type_model
     | compile_decl
     | EXPORT? spec
     | EXPORT? invariant_decl
@@ -92,10 +91,16 @@ compile_decl
     ;
 
 spec
-    : SPEC ID (LBRACK ID COLON typeExpr RBRACK)? LCURLY proc_body* RCURLY
+    : SPEC ID (LBRACK ID COLON typeExpr RBRACK)? LCURLY leaf_spec_item* RCURLY
     | SPEC ID ASGN_EQ ag_spec
     | SPEC ID ASGN_EQ system_expr MODELS expr
     | SPEC ID ASGN_EQ system_expr
+    ;
+
+/* Leaf-spec body: state/actions plus delayed models (not top-level decls). */
+leaf_spec_item
+    : proc_body
+    | type_model
     ;
 
 ag_spec

@@ -191,7 +191,6 @@ class SpecInvariantExprTest {
             import julay.funlib.allDistinct
             import julay.funlib.listOf
             type N
-            N := {"a"}
             proc Worker {
                 var n : Int
                 var xs : List<Int>
@@ -203,7 +202,9 @@ class SpecInvariantExprTest {
             }
             invariant Ok := forall k : N,
                 Worker[k].n <= max(Worker[k].n, 0) & allDistinct(Worker[k].xs)
-            spec MaxDistinct := Worker[i : N] |= Ok
+            spec MaxDistinct := Worker[i : N] {
+                N := {"a"}
+            } |= Ok
             compile MaxDistinct
             """.trimIndent(),
         )
@@ -248,7 +249,6 @@ class SpecInvariantExprTest {
             $importBlock
             type Point { x : Int }
             type N
-            N := {"a"}
             proc Worker {
                 var n : Int
                 var log : List<String>
@@ -278,7 +278,6 @@ class SpecInvariantExprTest {
 
         type Point { x : Int }
         type N
-        N := {"a"}
 
         proc Worker {
             var n : Int
@@ -314,7 +313,9 @@ class SpecInvariantExprTest {
         invariant Literals := 1 in listOf(1, 2) & 1 in setOf(1)
         invariant AllIndexed := NestedLen & NestedKeys & ObjField & ListIndex & MaxMin & Distinct & Membership & Hof & LetIfWhenExists & Literals
 
-        spec ExprCov := Worker[i : N] |= AllIndexed
+        spec ExprCov := Worker[i : N] {
+            N := {"a"}
+        } |= AllIndexed
 
         invariant PlainLen := Worker.log.length >= 0
         invariant PlainKeys := Worker.table.keys.length >= 0

@@ -1,7 +1,6 @@
 import julay.funlib.listOf
 
 type Node
-Node := {"n1"}
 
 proc Peer {
     const cluster : List<String>
@@ -17,6 +16,7 @@ proc Peer {
 }
 
 spec ConstCheck := Peer[n : Node] {
+    Node := {"n1"}
   const global cluster
 }
 

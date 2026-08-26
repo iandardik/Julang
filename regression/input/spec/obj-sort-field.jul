@@ -1,6 +1,5 @@
 import julay.funlib.setOf
 type NodeSet
-NodeSet := { "n1", "n2" }
 
 type VoteRequestMsg {
     dest : NodeSet
@@ -8,6 +7,7 @@ type VoteRequestMsg {
 }
 
 spec Env {
+    NodeSet := { "n1", "n2" }
     var dest : NodeSet := "n1"
     var msgs : Set<VoteRequestMsg> := setOf()
     constructor initially(args : List<String>) {

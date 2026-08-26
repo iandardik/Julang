@@ -233,6 +233,18 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
+	@Override public void enterLeaf_spec_item(JulayParser.Leaf_spec_itemContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitLeaf_spec_item(JulayParser.Leaf_spec_itemContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
 	@Override public void enterAg_spec(JulayParser.Ag_specContext ctx) { }
 	/**
 	 * {@inheritDoc}

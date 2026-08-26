@@ -1,7 +1,7 @@
 type Node
-Node := { "n1", "n2" }
 
 spec Net[n : Node] {
+    Node := { "n1", "n2" }
     var lastDest : String := ""
 
     constructor initially(args : List<String>) {}

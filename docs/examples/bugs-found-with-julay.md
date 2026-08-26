@@ -15,8 +15,9 @@ Prove that Timer never throws a session-constructor rebind `JulayException`. In 
 The stdlib source already declares a finite multi-instance spec:
 
 ```jul
-sort Ctrl := {"c1", "c2", "c3"}
-sort Help := {"h1", "h2", "h3"}
+type Ctrl
+type Help
+// models pinned on TimerSpec create-index: Ctrl := {"c1","c2","c3"}, Help := {"h1","h2","h3"}
 spec TimerSpec := TimerController[c : Ctrl] || TimerHelper[h : Help]
 ```
 

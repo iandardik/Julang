@@ -1,5 +1,4 @@
 type Node
-Node := {"n1", "n2", "n3"}
 
 proc P {
     var x : Node

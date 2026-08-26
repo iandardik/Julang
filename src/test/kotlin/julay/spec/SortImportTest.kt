@@ -19,7 +19,6 @@ class SortImportTest {
         modDir.resolve("nodes.jul").writeText(
             """
             export type NodeSet
-            export NodeSet := { "n1", "n2" }
             """.trimIndent(),
         )
         val main = root.resolve("main.jul")
@@ -31,7 +30,9 @@ class SortImportTest {
                 constructor initially(args : List<String>) { transit: n := 0 }
                 transition bump() { transit: n := n + 1 }
             }
-            spec S := Counter[i : NodeSet]
+            spec S := Counter[i : NodeSet] {
+                NodeSet := { "n1", "n2" }
+            }
             """.trimIndent(),
         )
         val (unit, loadErrors) = loadCompilationUnit(main)
@@ -49,7 +50,6 @@ class SortImportTest {
         modDir.resolve("nodes.jul").writeText(
             """
             type NodeSet
-            NodeSet := { "n1", "n2" }
             export proc Dummy {
                 constructor initially(args : List<String>) {}
             }

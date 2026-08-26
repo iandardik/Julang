@@ -1,5 +1,4 @@
 type Node
-Node := {"n1", "n2"}
 
 proc Peer {
     const cluster : List<String>
@@ -28,6 +27,7 @@ invariant All := forall i : Node,
     Peer[i].extra >= 0 & (Peer[i].state = "busy" | Peer[i].state = "idle") & Peer[i].cluster = Peer[i].cluster
 
 spec Indexed := Peer[n : Node] {
+    Node := {"n1", "n2"}
   const global cluster
   global extra
 } |= All

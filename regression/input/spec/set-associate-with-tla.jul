@@ -1,5 +1,4 @@
 type Ids
-Ids := { "a", "b" }
 
 proc Box {
     const cluster : Set<Int>
@@ -20,6 +19,7 @@ proc Box {
 }
 
 spec AssocMap := Box[i : Ids] {
+    Ids := { "a", "b" }
     const global cluster
     init: cluster.length = Ids.length
     init: forall i : Int, (i >= 1 & i <= cluster.length) => i in cluster

@@ -1,5 +1,4 @@
 type Node
-Node := {"n1", "n2", "n3"}
 
 proc Counter {
     var n : Int
@@ -16,6 +15,8 @@ proc Counter {
 
 invariant G := forall i : Node, Counter[i].n <= 3
 
-spec SortIndex := <true> Counter[i : Node] <G>
+spec SortIndex := <true> Counter[i : Node] {
+    Node := {"n1", "n2", "n3"}
+} <G>
 
 compile SortIndex

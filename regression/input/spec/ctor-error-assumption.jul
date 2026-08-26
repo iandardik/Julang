@@ -1,7 +1,6 @@
 import julay.funlib.allDistinct
 
 type Idx
-Idx := {"a"}
 
 proc P {
     var x : Int
@@ -25,6 +24,8 @@ proc P {
     }
 }
 
-spec CtorErr := P[n : Idx]
+spec CtorErr := P[n : Idx] {
+    Idx := {"a"}
+}
 
 compile CtorErr

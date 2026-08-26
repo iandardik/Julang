@@ -1,5 +1,4 @@
 type Node
-Node := {"n1", "n2"}
 
 proc Peer {
     const cluster : List<String>
@@ -13,6 +12,7 @@ proc Peer {
 }
 
 spec Indexed := Peer[n : Node] {
+    Node := {"n1", "n2"}
   const global cluster
   init: cluster.length = Node.length
 }

@@ -32,8 +32,8 @@ class LeafSpecTest {
         val result = typeCheck(
             """
             type Node
-            Node := { "n1", "n2" }
             spec Net[n : Node] {
+                Node := { "n1", "n2" }
                 var lastDest : String := ""
                 constructor initially(args : List<String>) {}
                 transition send() {
@@ -51,8 +51,8 @@ class LeafSpecTest {
         val result = typeCheck(
             """
             type Node
-            Node := { "n1" }
             spec Net[n : Node] {
+                Node := { "n1" }
                 constructor initially(args : List<String>) {}
                 transition bump() {
                     transit: n := "n1"
@@ -140,13 +140,14 @@ class LeafSpecTest {
         val result = typeCheck(
             """
             type Node
-            Node := { "n1" }
             type Other
-            Other := { "x" }
             spec Net[n : Node] {
+                Node := { "n1" }
                 constructor initially(args : List<String>) {}
             }
-            spec Bad := Net[i : Other]
+            spec Bad := Net[i : Other] {
+                Other := { "x" }
+            }
             """.trimIndent(),
         )
         assertTrue(
@@ -194,13 +195,13 @@ class LeafSpecTest {
         val result = typeCheck(
             """
             type Node
-            Node := { "n1" }
             proc Peer {
                 var self : String := ""
                 constructor initially(args : List<String>) { transit: self := "n1" }
                 transition ping() { transit: self := self }
             }
             spec Net[n : Node] {
+                Node := { "n1" }
                 constructor initially(args : List<String>) {}
                 transition observe(target : String) also (m : Node) {
                     guard: Peer[m].self = target
@@ -241,13 +242,14 @@ class LeafSpecTest {
         file.writeText(
             """
             type Node
-            Node := { "n1", "n2" }
             proc Counter {
                 var count : Int := 0
                 constructor initially(args : List<String>) { transit: count := 0 }
                 transition bump() { guard: count >= 0 transit: count := count + 1 }
             }
-            spec C1 := Counter[x : Node]
+            spec C1 := Counter[x : Node] {
+                Node := { "n1", "n2" }
+            }
             spec C2 := Counter[x : Node]
             spec Sys := with (i : Node) { C1[i] || C2[i] }
             compile Sys
@@ -303,13 +305,14 @@ class LeafSpecTest {
         val result = typeCheck(
             """
             type Node
-            Node := { "n1" }
             proc Counter {
                 var n : Int := 0
                 constructor initially(args : List<String>) { transit: n := 0 }
                 transition bump() { transit: n := n + 1 }
             }
-            spec Bad := with (i : Node) { Counter[i : Node] }
+            spec Bad := with (i : Node) { Counter[i : Node] {
+                Node := { "n1" }
+            } }
             """.trimIndent(),
         )
         assertTrue(
@@ -323,7 +326,6 @@ class LeafSpecTest {
         val result = typeCheck(
             """
             type Node
-            Node := { "n1" }
             proc Counter {
                 var n : Int := 0
                 constructor initially(args : List<String>) { transit: n := 0 }

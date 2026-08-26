@@ -1,5 +1,4 @@
 type Node
-Node := { "n1", "n2" }
 
 proc Counter {
     var count : Int := 0
@@ -13,6 +12,8 @@ proc Counter {
     }
 }
 
-spec SharedIdx := (Counter || Counter)[i : Node]
+spec SharedIdx := (Counter || Counter)[i : Node] {
+    Node := { "n1", "n2" }
+}
 
 compile SharedIdx

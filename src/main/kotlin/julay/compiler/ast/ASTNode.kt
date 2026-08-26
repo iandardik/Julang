@@ -212,19 +212,22 @@ class LeafSpecNode(
     private val paramType: TypeExpr?,
     private val localDecls: List<ProcClassDeclNode>,
     private val loc: ProgramLoc,
-) : DeclNode(localDecls) {
+    /** Delayed models (`Name := { … }`) in the leaf-spec body. */
+    private val typeModels: List<TypeModelNode> = emptyList(),
+) : DeclNode(localDecls + typeModels) {
     override fun programLocation() = loc
     override fun name() = name
     internal fun leafSpecName() = name
     internal fun leafSpecParamName() = paramName
     internal fun leafSpecParamType() = paramType
     internal fun localDecls(): List<ProcClassDeclNode> = localDecls
+    internal fun typeModels(): List<TypeModelNode> = typeModels
     internal fun isParameterized(): Boolean = paramName != null
     /** View as a [ProcClassNode] for TLA / alphabet reuse. */
     internal fun asProcClass(): ProcClassNode =
         ProcClassNode(name, localDecls, loc).also { it.visibility = this.visibility }
     override fun toString(): String {
-        val body = localDecls.joinToString("\n") { "$it".prependIndent() }
+        val body = (typeModels + localDecls).joinToString("\n") { "$it".prependIndent() }
         val export = if (isExported) "export " else ""
         val params = if (paramName != null && paramType != null) "[$paramName : $paramType]" else ""
         return "${export}spec $name$params {\n$body\n}"
@@ -360,14 +363,14 @@ class DomainDeclNode(
     }
 }
 
-/** Delayed model `Name := { lit, ... }` for uninterpreted/typedef domains. */
+/** Delayed model `Name := { lit, ... }` for uninterpreted/typedef domains (inside specs only). */
 class TypeModelNode(
     private val name: String,
     val elements: List<LiteralValueExprNode>,
     private val loc: ProgramLoc,
-) : DeclNode(elements) {
+) : ASTNode(elements) {
     override fun programLocation() = loc
-    override fun name(): String = name
+    fun name(): String = name
     override fun toString(): String = "$name := {${elements.joinToString(", ")}}"
 }
 

@@ -1,5 +1,4 @@
 type Bad
-Bad := {-1, 0, 1}
 
 proc P {
     var n : Int
@@ -8,5 +7,9 @@ proc P {
     }
 }
 
+spec S := P[n : Bad] {
+    Bad := {-1, 0, 1}
+}
+
 proc Q := P
-compile Q
+compile Q, S

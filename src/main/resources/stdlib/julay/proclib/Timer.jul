@@ -100,7 +100,9 @@ proc TimerHelper {
 export proc Timer := TimerController || TimerHelper
 
 type Ctrl
-Ctrl := {"c1", "c2", "c3"}
 type Help
-Help := {"h1", "h2", "h3"}
-spec TimerSpec := TimerController[c : Ctrl] || TimerHelper[h : Help]
+spec TimerSpec := TimerController[c : Ctrl] {
+    Ctrl := {"c1", "c2", "c3"}
+} || TimerHelper[h : Help] {
+    Help := {"h1", "h2", "h3"}
+}

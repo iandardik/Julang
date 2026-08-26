@@ -1,5 +1,4 @@
 type Node
-Node := { "n1" }
 
 proc Peer {
     var self : String := ""
@@ -14,6 +13,7 @@ proc Peer {
 }
 
 spec Net[n : Node] {
+    Node := { "n1" }
     constructor initially(args : List<String>) {}
 
     transition observe(target : String) also (m : Node) {

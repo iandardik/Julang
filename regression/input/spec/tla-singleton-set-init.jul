@@ -1,5 +1,4 @@
 type Ids
-Ids := { "a", "b" }
 
 proc Box {
     const xs : Set<Int>
@@ -16,6 +15,7 @@ proc Box {
 }
 
 spec SingletonSetInit := Box[i : Ids] {
+    Ids := { "a", "b" }
     const global xs
     init: xs.length = Ids.length
     init: forall i : Int, (i >= 1 & i <= xs.length) => i in xs

@@ -54,8 +54,8 @@ Optional **declaration parameters** bind an immutable name usable in guards and 
 
 ```jul
 type Node
-Node := { "n1", "n2" }
 spec Net[n : Node] {
+    Node := { "n1", "n2" }
     var lastDest : String := ""
     constructor initially(args : List<String>) {}
     transition send() { transit: lastDest := n }   // n is an aux binder; lastDest stays scalar
@@ -171,7 +171,7 @@ Several `init:` lines, or `init: A & B`, all become Init `/\`. Bare names are th
 
 ### Delayed models
 
-Delayed models assign finite literal sets to **uninterpreted** and **typedef** names for TLC. They are written `Name := { lit, … }` and may appear in a create-index block (alongside `const global` / `init:`) or at top level in the module.
+Delayed models assign finite literal sets to **uninterpreted** and **typedef** names for TLC. They are written `Name := { lit, … }` and may appear **only** in a create-index block (alongside `const global` / `init:`) or in a **leaf-spec body** — not as top-level decls.
 
 **Compile-time rules** (see [Types and expressions — delayed models](types-and-expressions.md#delayed-models) for full examples):
 
@@ -213,13 +213,17 @@ type NodeSet
 spec S := P[n : NodeSet] { }       // error: no delayed model for NodeSet
 
 type Pair { x : Int, y : Int }
-Pair := { 1, 2 }                   // error: record cannot have a delayed model
+spec Bad := P[n : Int] {
+    Pair := { 1, 2 }               // error: record cannot have a delayed model
+}
 
 type Value := String
-Value := { 1, 2 }                  // error: literals must match String carrier
+spec Bad := P[n : Int] {
+    Value := { 1, 2 }              // error: literals must match String carrier
+}
 ```
 
-Models are merged from the compile target’s system AST (including aliased specs) and top-level bindings in the file. Two different sets for the same name in one compile → error.
+Models are merged from the compile target’s system AST (create-index items and leaf-spec bodies, including aliased specs). Two different sets for the same name in one compile → error.
 
 **Shorthand** `(A || B)[n : T]` means the same as create-temps + `with` + applies:
 
@@ -246,15 +250,7 @@ spec HandlerSpec := IncReqHandler[t : Int]
 spec IncSpec := <true> Counter || HandlerSpec <AllInvs>
 ```
 
-Finite domains are declared with **uninterpreted** `type` and a **delayed model**, then used as the index type (and in quantifiers):
-
-```jul
-type Node
-Node := { "n1", "n2", "n3" }
-spec S := Counter[n : Node]
-```
-
-Or assign the model on the create-index block:
+Finite domains are declared with **uninterpreted** `type` and a **delayed model** on the create-index (or leaf-spec body), then used as the index type (and in quantifiers):
 
 ```jul
 type Node

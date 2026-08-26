@@ -41,7 +41,7 @@ procfun name(...) : Type { ... }
 type Name { ... }                           // record
 type Name := TypeExpr                       // typedef
 type Name                                   // uninterpreted
-Name := { lit, ... }                        // delayed model (typedef / uninterpreted only)
+// delayed model Name := { lit, ... } only inside create-index / leaf-spec body
 fun name(...) : Type = expr
 invariant Name := Expr
 spec Name { ... }                          // leaf spec (optional [p : T] body binder; no state lift)
@@ -60,7 +60,7 @@ System atoms: `Name[v : T]` **creates** an index (lifts state); `{ const global 
 
 Leaf-spec actions: `transition name(args) also (aux : T) { … }` (leaf specs only). Bodies may read peer state `P.var` / `P[idx].var` (compile checks composition + indexing).
 
-**Types:** record `type Name { fields }`; typedef `type Name := Carrier`; uninterpreted `type Name`. Delayed models `Name := { lits }` apply only to typedef/uninterpreted — required for uninterpreted when used, optional for typedef (cfg aliases carrier if absent), forbidden for records. Uninterpreted types are spec-only; JAR `compile` errors if a proc reaches one. Typedefs erase to the carrier in procs. Details and examples: [Types and expressions](types-and-expressions.md#delayed-models).
+**Types:** record `type Name { fields }`; typedef `type Name := Carrier`; uninterpreted `type Name`. Delayed models `Name := { lits }` appear only in create-index or leaf-spec bodies — required for uninterpreted when used, optional for typedef (cfg aliases carrier if absent), forbidden for records. Uninterpreted types are spec-only; JAR `compile` errors if a proc reaches one. Typedefs erase to the carrier in procs. Details: [Types and expressions](types-and-expressions.md#delayed-models).
 
 `Guarantee` may be a named invariant, an inline Boolean formula (`true` / `false` included), or `true` meaning no guarantee. Plain `spec := System` equals `<true> System <true>` / `--compile-tla`.
 

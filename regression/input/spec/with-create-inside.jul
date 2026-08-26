@@ -1,5 +1,4 @@
 type Node
-Node := { "n1" }
 
 proc Counter {
     var n : Int := 0
@@ -15,7 +14,9 @@ proc Counter {
 
 // Create-index inside with is illegal.
 spec BadCreateInWith := with (i : Node) {
-    Counter[i : Node]
+    Counter[i : Node] {
+    Node := { "n1" }
+}
 }
 
 compile BadCreateInWith

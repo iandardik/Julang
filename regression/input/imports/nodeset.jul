@@ -1,2 +1,1 @@
 export type NodeSet
-export NodeSet := { "n1", "n2", "n3" }

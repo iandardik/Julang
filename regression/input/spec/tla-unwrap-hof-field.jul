@@ -1,5 +1,4 @@
 type Ids
-Ids := { "a", "b", "c" }
 
 type Node {
     id : Int
@@ -28,6 +27,7 @@ proc Box {
 }
 
 spec UnwrapHofField := Box[i : Ids] {
+    Ids := { "a", "b", "c" }
     const global cluster
     init: cluster.length = Ids.length
     init: forall i : Int, (i >= 1 & i <= cluster.length) => (exists node : Node, node in cluster & node.id = i)

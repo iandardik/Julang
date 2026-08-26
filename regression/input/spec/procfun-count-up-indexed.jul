@@ -1,5 +1,4 @@
 type Idx
-Idx := {"a", "b"}
 
 procfun countUp(n : Int) : Int {
     var steps : Int := 0
@@ -32,6 +31,8 @@ api CountUpApi {
     calls: countUp
 }
 
-spec CountUpIndexed := CountUpApi[k : Idx]
+spec CountUpIndexed := CountUpApi[k : Idx] {
+    Idx := {"a", "b"}
+}
 
 compile CountUpIndexed

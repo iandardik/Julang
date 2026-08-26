@@ -3,7 +3,6 @@ import julay.funlib.length
 import julay.funlib.splice
 
 type Node
-Node := { "n1", "n2" }
 
 type Peer {
     id : Int
@@ -45,6 +44,8 @@ proc Counter {
     }
 }
 
-spec ListHof := Counter[i : Node]
+spec ListHof := Counter[i : Node] {
+    Node := { "n1", "n2" }
+}
 
 compile ListHof

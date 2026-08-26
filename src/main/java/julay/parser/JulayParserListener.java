@@ -188,6 +188,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitSpec(JulayParser.SpecContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#leaf_spec_item}.
+	 * @param ctx the parse tree
+	 */
+	void enterLeaf_spec_item(JulayParser.Leaf_spec_itemContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#leaf_spec_item}.
+	 * @param ctx the parse tree
+	 */
+	void exitLeaf_spec_item(JulayParser.Leaf_spec_itemContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#ag_spec}.
 	 * @param ctx the parse tree
 	 */
