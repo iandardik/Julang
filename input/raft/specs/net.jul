@@ -1,8 +1,7 @@
 import node.lib.Value
 import node.core.RaftProtocol
 import julay.funlib.setOf
-
-export type NodeSet
+import node.lib.NodeSet
 
 type VoteRequestMsg {
     src : NodeSet

@@ -8,6 +8,8 @@ import julay.optional.none
  * Shared Raft types and helpers (RPC encoding, config parsing, log access).
  */
 
+
+export type NodeSet
 export type Value := String
 
 export type Entry {
