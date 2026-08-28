@@ -7,7 +7,7 @@
 # RAFT_NODE_JAR / RAFT_CLIENT_JAR. Optional env:
 #   SMOKE_TIMEOUT_S    overall wall-clock timeout for the whole smoke test (default 120)
 #   LISTEN_TIMEOUT_S   max seconds to wait for all ports (default 40)
-#   ELECTION_WAIT_S    seconds after listen before client ops (default 12)
+#   ELECTION_WAIT_S    seconds after listen before client ops (default 2)
 #   CURL_TIMEOUT_S     curl max-time per request (default 8)
 
 set -euo pipefail
@@ -19,7 +19,7 @@ CONFIG="${1:-$RAFT_DIR/cluster.conf}"
 
 SMOKE_TIMEOUT_S="${SMOKE_TIMEOUT_S:-120}"
 LISTEN_TIMEOUT_S="${LISTEN_TIMEOUT_S:-40}"
-ELECTION_WAIT_S="${ELECTION_WAIT_S:-12}"
+ELECTION_WAIT_S="${ELECTION_WAIT_S:-2}"
 CURL_TIMEOUT_S="${CURL_TIMEOUT_S:-8}"
 
 # Re-exec under an overall wall-clock timeout so a hang cannot run forever.

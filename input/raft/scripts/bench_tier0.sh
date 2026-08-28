@@ -9,7 +9,7 @@
 #   BENCH_MODE          append | get | mix (default append)
 #   BENCH_TIMEOUT_S     per-request HTTP timeout (default 60)
 #   LISTEN_TIMEOUT_S    max seconds to wait for ports (default 40)
-#   ELECTION_WAIT_S     seconds after listen before load (default 12)
+#   ELECTION_WAIT_S     seconds after listen before load (default 2)
 #   KEEP_CLUSTER=1      leave the cluster running after the bench
 #
 # Requires RaftNode.jar (see start_cluster.sh). Numbers are local smoke only —

@@ -1,4 +1,5 @@
 import julay.funlib.length
+import julay.funlib.max
 import julay.funlib.portFromUrl
 import julay.funlib.readFile
 import julay.funlib.split
@@ -85,9 +86,10 @@ proc RaftNodeMain {
             step := "startRpcOut"
     }
 
-    transition startRpcOut() {
+    transition startRpcOut(poolSize : Int) {
         guard:
-            step = "startRpcOut"
+            & step = "startRpcOut"
+            & poolSize = max(2, length(cluster) - 1)
         transit:
             step := "startCore"
     }

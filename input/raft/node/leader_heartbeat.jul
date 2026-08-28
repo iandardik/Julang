@@ -2,11 +2,12 @@ import julay.funlib.length
 import julay.funlib.delayMillis
 import node.lib.Node
 import node.lib.AppendEntriesData
+import node.lib.Entry
 import node.rpc_out.RpcOut
 import julay.funlib.setOf
 
 export api LeaderHeartbeat {
-    proc: LeaderHeartbeatImpl
+    proc: LeaderHeartbeatImpl || AeSendWorker
     calls: startLeaderHeartbeat
 }
 
@@ -20,12 +21,38 @@ procfun startLeaderHeartbeat(self : Node, leaderTerm : Int, theCluster : Set<Nod
     }
 }
 
+/*
+ * Short-lived per-peer sender: awaits RpcOut (pool slot) while LeaderHeartbeatImpl
+ * continues dispatching other followers.
+ */
+proc AeSendWorker {
+    const peer : Node
+    const data : AppendEntriesData
+    var done : Boolean
+
+    constructor startAeSend(peer : Node, data : AppendEntriesData) {
+        transit:
+            peer := peer
+            data := data
+            done := false
+    }
+
+    internal transition send() {
+        guard: ~done
+        transit:
+            let _ : Boolean := RpcOut.outAppendEntriesRPC(peer, data)
+            done := true
+    }
+}
+
 proc LeaderHeartbeatImpl {
     const me : Node
     const leaderTerm : Int
     const cluster : Set<Node>
     var step : String
     var sentThisRound : Set<Node>
+    var pendingPeer : Node
+    var pendingData : AppendEntriesData
 
     constructor startLeaderHeartbeat(me : Node, term : Int, cluster : Set<Node>) {
         transit:
@@ -34,6 +61,16 @@ proc LeaderHeartbeatImpl {
             cluster := cluster
             step := "sleep"
             sentThisRound := setOf(me)
+            pendingPeer := me
+            pendingData := AppendEntriesData {
+                term := 0,
+                leaderId := 0,
+                prevLogIndex := 0,
+                prevLogTerm := 0,
+                entry := Entry { term := 0, value := "" },
+                entriesLen := 0,
+                leaderCommit := 0
+            }
     }
 
     internal transition sleep() {
@@ -42,14 +79,25 @@ proc LeaderHeartbeatImpl {
         after: delayMillis(200)
     }
 
+    // Sync with RaftProtocol only — do not await HTTP here.
     transition appendEntries(target : Node, payload : AppendEntriesData) {
         guard:
             & step = "pickTarget"
             & ~(target in sentThisRound)
         transit:
-            // TODO this should probably be asynchronous
-            let _ : Boolean := RpcOut.outAppendEntriesRPC(target, payload)
-            let newSentThisRound : Set<Node> := sentThisRound + setOf(target)
+            pendingPeer := target
+            pendingData := payload
+            step := "dispatch"
+    }
+
+    // Self-sync + spawn AeSendWorker; mark peer contacted for this round.
+    transition startAeSend(peer : Node, data : AppendEntriesData) {
+        guard:
+            & step = "dispatch"
+            & peer = pendingPeer
+            & data = pendingData
+        transit:
+            let newSentThisRound : Set<Node> := sentThisRound + setOf(peer)
             // Finish the full heartbeat round before sleeping so every follower
             // is contacted within one election-timeout window.
             sentThisRound := if (length(newSentThisRound) = length(cluster)) setOf(me) else newSentThisRound

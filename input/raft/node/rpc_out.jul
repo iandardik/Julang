@@ -116,11 +116,12 @@ procfun outAppendEntriesRPC(peer : Node, data : AppendEntriesData) : Boolean {
 
 
 /*
- * RpcOutCaller code.
-*/
+ * Outbound HTTP pool: N RpcOutWorkers share sendRpcOut / responseRpcOut.
+ * rpcOutClientCaller borrows any idle worker.
+ */
 
 api RpcOutCaller {
-    proc: RpcOutClient
+    proc: RpcOutPool || RpcOutWorker
     calls: rpcOutClientCaller
 }
 
@@ -143,11 +144,34 @@ procfun rpcOutClientCaller(rpcReq : HttpClientRequest) : HttpClientResponse {
     }
 }
 
-proc RpcOutClient {
+proc RpcOutPool {
+    var remaining : Int
+    var step : String
+
+    constructor startRpcOut(poolSize : Int) {
+        transit:
+            remaining := poolSize
+            step := "spawn"
+        error:
+            (poolSize < 1) -> "RpcOut poolSize must be >= 1"
+    }
+
+    // Self-sync + spawn one RpcOutWorker per firing while remaining > 0.
+    transition startRpcOutWorker() {
+        guard:
+            & step = "spawn"
+            & remaining > 0
+        transit:
+            remaining := remaining - 1
+            step := if (remaining = 0) "done" else "spawn"
+    }
+}
+
+proc RpcOutWorker {
     var step : String
     var httpResp : HttpClientResponse
 
-    constructor startRpcOut() {
+    constructor startRpcOutWorker() {
         transit:
             step := "idle"
             httpResp := HttpClientResponse {
