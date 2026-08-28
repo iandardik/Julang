@@ -921,6 +921,17 @@ private fun BinaryOpExprNode.typePassBinaryOp(
             )
             else -> listOf(OneLocCompileError(programLocation(), "Cannot apply \"${op()}\" to map type $lhsType"))
         }
+    } else if (lhsType is ProcFunRefType || rhsType is ProcFunRefType) {
+        when (op()) {
+            "=", "#" -> assertOrCompileError(
+                lhsType is ProcFunRefType && rhsType is ProcFunRefType && procFunRefTypesMatch(lhsType, rhsType),
+                OneLocCompileError(
+                    programLocation(),
+                    "Expected both sides of \"${op()}\" to have the same procfun reference type, got $lhsType and $rhsType",
+                ),
+            )
+            else -> listOf(OneLocCompileError(programLocation(), "Cannot apply \"${op()}\" to procfun reference type"))
+        }
     } else {
         emptyList()
     }
@@ -2061,6 +2072,11 @@ private fun SymbolValueExprNode.typePassSymbol(
                 return emptyList()
             }
         }
+        procFunEnv[symbol]?.let { pf ->
+            val refType = procFunRefTypeFromNode(pf)
+            setInferredType(TypePassType.Inferred(refType))
+            return emptyList()
+        }
         if (typePassInitConstGlobals != null) {
             return listOf(
                 OneLocCompileError(
@@ -3179,3 +3195,20 @@ private fun funRecursionErrors(allFuns: Map<String, FunNode>): List<CompileError
 private fun ExprNode.inferExprType(symbolEnv: Map<String, Type>) {
     setInferredType(TypePassType.Inferred(inferType(symbolEnv)))
 }
+
+internal fun procFunRefTypeFromNode(pf: ProcFunNode): ProcFunRefType {
+    val argTypes = try {
+        pf.procFunArgs().actionArgs().map { it.type }
+    } catch (_: RuntimeException) {
+        emptyList()
+    }
+    val retType = try {
+        pf.returnType
+    } catch (_: RuntimeException) {
+        intType
+    }
+    return procFunRefType(argTypes, retType)
+}
+
+internal fun procFunRefTypesMatch(a: ProcFunRefType, b: ProcFunRefType): Boolean =
+    a.argTypes == b.argTypes && a.returnType == b.returnType

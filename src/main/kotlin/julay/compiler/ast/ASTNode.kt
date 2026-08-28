@@ -2522,6 +2522,14 @@ class SymbolValueExprNode(
 ) : ExprNode(listOf()) {
     override fun programLocation() = loc
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
+        if (symbol !in symbolTypes && symbol !in argSymbols) {
+            try {
+                if (getType() is ProcFunRefType) {
+                    return "ctx.mkString(\"${symbol.escapeKotlinStringLiteral()}\")"
+                }
+            } catch (_: RuntimeException) {
+            }
+        }
         val type = symbolTypes[symbol]?.codegenErasure()
         if (forceString) {
             return when (type) {
@@ -2599,6 +2607,9 @@ class SymbolValueExprNode(
                 else -> throw RuntimeException("Invalid type: $type")
             }
         }
+        if (symbolTypes[symbol] is ProcFunRefType) {
+            return "ctx.mkString(\"${symbol.escapeKotlinStringLiteral()}\")"
+        }
         return when (type) {
             is BoolType -> "ctx.mkBool(${symbol.toKotlinIdent()})"
             is IntType -> "ctx.mkInt(${symbol.toKotlinIdent()})"
@@ -2608,10 +2619,20 @@ class SymbolValueExprNode(
         }
     }
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
+        if (symbol !in symbolTypes) {
+            try {
+                if (getType() is ProcFunRefType) {
+                    return "\"${symbol.escapeKotlinStringLiteral()}\""
+                }
+            } catch (_: RuntimeException) {
+            }
+        }
         val type = symbolTypes.getValue(symbol)
         return if (symbol in argSymbols) {
             val typeStr = type.toCodegenTypeVal()
             "(act.lookup(Variable(\"${symbol.escapeKotlinStringLiteral()}\", $typeStr)).value as ${type.toKotlinTypeString()})"
+        } else if (type is ProcFunRefType) {
+            "\"${symbol.escapeKotlinStringLiteral()}\""
         } else {
             symbol.toKotlinIdent()
         }

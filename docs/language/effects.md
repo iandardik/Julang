@@ -2,8 +2,8 @@
 
 In Julay, side effects are not ambient language primitives. They come from the **standard library** in one of two ways:
 
-1. **Library processes** that perform effects (for example `HttpServer`, `Timer`) — compose them into your system and synchronize on their actions.
-2. **Library functions** that perform effects (for example `println()`, `readln()`, `exitProgram(code)`, `exitProc()`) — import them from `julay.funlib` and call them from action bodies (`before:` / `after:` for void effects; `transit:` RHS for value-returning IO).
+1. **Library processes** that perform effects (for example `HttpServer`, `Timer`) — compose them into your system and synchronize on their actions. `HttpServer` lifecycle (`listen` / `close`) is session sync; per-request work is delegated to a procfun handler (not session actions).
+2. **Library functions** and **stdlib procfuns** that perform effects — for example `println()`, `readln()`, `exitProgram(code)`, `exitProc()`, and blocking HTTP client I/O via `httpRequest` (`import julay.funlib.httpRequest`). Call funlib from action bodies (`before:` / `after:` for void effects; `transit:` RHS for value-returning IO). `httpRequest` is spawn-and-await like any procfun call.
 
 Which procs and functions are effectful is listed in [Standard library](standard-library.md).
 

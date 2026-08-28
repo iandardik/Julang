@@ -1,6 +1,6 @@
 import printer.Printer
 import server.ServerLogic
-import server.IncReqHandler
+import server.incHandler
 
 proc Counter {
     var counter : Int
@@ -22,9 +22,9 @@ proc IncServer := Counter || Printer || ServerLogic
 
 invariant NonNegative := Counter.counter >= 0
 invariant CorrectCounter := forall t1 : Int,
-    (IncReqHandler[t1].step = "C" & forall t2 : Int, IncReqHandler[t2].step ~= "B") => (IncReqHandler[t1].localCounter = Counter.counter)
+    (incHandler[t1].step = "C" & forall t2 : Int, incHandler[t2].step ~= "B") => (incHandler[t1].localCounter = Counter.counter)
 invariant AllInvs := NonNegative & CorrectCounter
-spec HandlerSpec := IncReqHandler[t : Int]
+spec HandlerSpec := incHandler[t : Int]
 spec IncSpec := <true> Counter || HandlerSpec <AllInvs>
 
 compile IncServer, IncSpec

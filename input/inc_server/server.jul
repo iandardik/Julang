@@ -8,30 +8,25 @@ proc ServerStarter {
             started := false
     }
 
-    session transition createHttpServer(port : Int) {
-        guard: ~started & port = 8000
+    session transition listen(
+        port : Int,
+        handler : HttpServerRequest ~> HttpServerResponse
+    ) {
+        guard: ~started & port = 8000 & handler = incHandler
         transit: started := true
     }
 
-    session transition closeHttpServer() {
+    session transition close() {
         guard: false
     }
 }
 
-export proc IncReqHandler {
-    const httpReq : HttpServerRequest
-    var localCounter : Int
-    var step : String
-
-    session constructor receiveRequest(req : HttpServerRequest) {
-        transit:
-            step := "A"
-            httpReq := req
-            localCounter := -1
-    }
+export procfun incHandler(req : HttpServerRequest) : HttpServerResponse {
+    var localCounter : Int := -1
+    var step : String := "A"
 
     client transition increment() {
-        guard:   step = "A"
+        guard: step = "A"
         transit: step := "B"
     }
 
@@ -42,16 +37,13 @@ export proc IncReqHandler {
             step := "C"
     }
 
-    session transition sendResponse(resp : HttpServerResponse) {
-        guard:
-            & step = "C"
-            & resp = HttpServerResponse {
-                body := localCounter + "",
-                code := 200
-            }
-        transit:
-            step := "D"
+    internal transition respond() {
+        guard: step = "C"
+        return: HttpServerResponse {
+            body := localCounter + "",
+            code := 200
+        }
     }
 }
 
-export proc ServerLogic := ServerStarter || IncReqHandler || HttpServer
+export proc ServerLogic := ServerStarter || HttpServer

@@ -93,6 +93,22 @@ sequenceDiagram
   Call->>Caller: resume with result
 ```
 
+## Callable procfun references (`~>`)
+
+Register a procfun as a handler or callback by type `A ~> R` (or `(A, B) ~> R` for multiple arguments). At runtime the value is the procfun name as a `String`; guards compare with `handler = myHandler`.
+
+```jul
+session transition listen(
+    port : Int,
+    handler : HttpServerRequest ~> HttpServerResponse
+) {
+    guard: ~started & port = 8000 & handler = echoHandler
+    transit: started := true
+}
+```
+
+See [Standard library](standard-library.md) for HttpServer + `httpRequest`.
+
 ## Syntax
 
 ```jul
@@ -124,7 +140,7 @@ procfun parseCfg(cfg : String) : Set<Node> {
 | Init XOR | A state name is initialized **either** inline **or** in the procfun's single optional constructor — never both. |
 | Step modifiers | Any of bare / `internal` / `client` / `session`. **`provider` is forbidden.** |
 | Reserved names | User transitions/ctors/vars cannot be named `initially`, `F_call`, `F_ret`, or `retVal`. |
-| Return | `return: expr` on a transition (any allowed modifier). Mutually exclusive with `transit:` / `error:`. Desugars to `retVal := expr` without changing the transition's sync tag. Synthetic `_ret` is the completion edge (alphabet / TLA); runtime still delivers the value when the return-bearing step fires. ≥1 return required. |
+| Return | `return: expr` on a transition (any allowed modifier). Mutually exclusive with `transit:` / `error:` / `after:`. Use `before:` for side effects on return steps (e.g. logging before the value is delivered). Desugars to `retVal := expr` without changing the transition's sync tag. Synthetic `_ret` is the completion edge (alphabet / TLA); runtime still delivers the value when the return-bearing step fires. ≥1 return required. |
 | `exitProc` | **Compile error** inside procfun bodies. Procfuns must finish via `return:`; `exitProc` is only for ordinary procs. Without `return:`, a silent child exit would leave the host with `JulayException("… exited without return")` and TLA `Host_blocking` stuck. |
 | Call sites | Only in **transit RHS** (like value-returning effectful funlib). Not in guards or pure `fun` bodies. |
 | Recursion | Direct/mutual recursion among procfuns is rejected (loop with `internal` transitions instead). |
@@ -239,7 +255,7 @@ When a spec reaches a procfun call:
 3. **Parent index inheritance** — indexed hosts yield indexed occurrences.
 4. **Spawn-and-await split** — host `act_call` starts the child and sets `Host_blocking`; after child `F_ret` sets `returnTo_act`, host `act_ret` writes `retVal` into the assign target and clears blocking.
 5. **`terminated`** — boolean state; `F_ret` sets `terminated' = TRUE`. Further child steps require `~terminated`.
-6. **Liveness** — `<Occ>Terminates == GF(terminated)` (universally quantified when indexed).
+6. **Liveness** — `<Occ>Terminates == constructed ~> terminated` (universally quantified when indexed).
 
 ### Example: coupled `countUp`
 
@@ -303,7 +319,7 @@ initially_ret ==
   /\ returnTo_initially' = FALSE
   /\ UNCHANGED <<countUp_constructed, countUp_terminated, countUp_n, i, result, call_countUp>>
 
-countUpTerminates == GF(countUp_terminated)
+countUpTerminates == countUp_constructed ~> countUp_terminated
 ```
 
 ### Example: havoc (uncomposed)

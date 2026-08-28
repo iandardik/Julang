@@ -160,7 +160,7 @@ private fun RootNode.actionConsistencyErrors(
         val refAction = decls[0]
         val argMismatches = decls.flatMap { act ->
             assertOrCompileError(
-                refAction.action.args == act.action.args,
+                actionArgsCompatible(refAction.action.args, act.action.args),
                 TwoLocsCompileError(
                     refAction.loc,
                     act.loc,
@@ -690,6 +690,7 @@ private fun ProcFunNode.errorPassProcFun(procs: Set<String>, librariesInUse: Set
     val returnClauseErrors = returnTransitions.flatMap { trans ->
         val hasTransit = trans.body().any { it.transits().isNotEmpty() || it is TransitNode }
         val hasError = trans.body().any { it.errors().isNotEmpty() }
+        val hasAfter = trans.body().any { it.afters().isNotEmpty() }
         assertOrCompileError(
             !hasTransit,
             OneLocCompileError(
@@ -701,6 +702,12 @@ private fun ProcFunNode.errorPassProcFun(procs: Set<String>, librariesInUse: Set
             OneLocCompileError(
                 trans.programLocation(),
                 "Return transitions cannot have an error: block",
+            ),
+        ) + assertOrCompileError(
+            !hasAfter,
+            OneLocCompileError(
+                trans.programLocation(),
+                "Return transitions cannot have an after: block; use before: instead",
             ),
         )
     }

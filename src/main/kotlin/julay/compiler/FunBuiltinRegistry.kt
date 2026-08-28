@@ -2,6 +2,7 @@ package julay.compiler
 
 import julay.program.type.ListType
 import julay.program.type.MapType
+import julay.program.type.ObjClassType
 import julay.program.type.SetType
 import julay.program.type.StringType
 import julay.program.type.IntType
@@ -159,6 +160,23 @@ object FunBuiltinRegistry {
         z3Codegen = { args ->
             "ctx.mkPrefixOf(${args[1]} as Expr<SeqSort<CharSort>>, ${args[0]} as Expr<SeqSort<CharSort>>)"
         },
+    )
+
+    private val doHttpRequestBuiltin = FunBuiltin(
+        name = "doHttpRequest",
+        arity = 1,
+        returnType = julay.program.library.httpClientResponseType,
+        checkArgs = { argTypes ->
+            when {
+                argTypes.size != 1 -> "Expected function \"doHttpRequest\" to take 1 argument(s) but got ${argTypes.size}"
+                argTypes[0] !is ObjClassType || (argTypes[0] as ObjClassType).name != "HttpClientRequest" ->
+                    "Expected argument of \"doHttpRequest\" to have type HttpClientRequest but got ${argTypes[0]}"
+                else -> null
+            }
+        },
+        kotlinCodegen = { args -> "julay.program.library.doHttpRequest(${args[0]})" },
+        z3Codegen = { _ -> throw RuntimeException("Function \"doHttpRequest\" cannot be used in guards") },
+        ioHavoc = true,
     )
 
     private val printlnBuiltin = FunBuiltin(
@@ -381,6 +399,7 @@ object FunBuiltinRegistry {
         trimBuiltin.name to trimBuiltin,
         portFromUrlBuiltin.name to portFromUrlBuiltin,
         startsWithBuiltin.name to startsWithBuiltin,
+        doHttpRequestBuiltin.name to doHttpRequestBuiltin,
         printlnBuiltin.name to printlnBuiltin,
         exitProgramBuiltin.name to exitProgramBuiltin,
         exitProcBuiltin.name to exitProcBuiltin,

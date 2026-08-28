@@ -1,4 +1,3 @@
-import julay.proclib.HttpClient
 import julay.funlib.split
 import julay.funlib.parseInt
 import node.lib.Node
@@ -7,9 +6,10 @@ import node.lib.fieldValue
 import node.lib.encodeRequestVote
 import node.lib.encodeAppendEntries
 import node.lib.parseBool
+import julay.funlib.httpRequest
 
 export api RpcOut {
-    proc: RpcOutCaller || HttpClient
+    proc: RpcOutCaller
     calls: outRequestVoteRPC, outAppendEntriesRPC
 }
 
@@ -126,6 +126,7 @@ api RpcOutCaller {
 
 procfun rpcOutClientCaller(rpcReq : HttpClientRequest) : HttpClientResponse {
     var step : String := "send"
+
     transition sendRpcOut(req : HttpClientRequest) {
         guard:
             & step = "send"
@@ -133,6 +134,7 @@ procfun rpcOutClientCaller(rpcReq : HttpClientRequest) : HttpClientResponse {
         transit:
             step := "recv"
     }
+
     transition responseRpcOut(resp : HttpClientResponse) {
         guard:
             step = "recv"
@@ -143,61 +145,28 @@ procfun rpcOutClientCaller(rpcReq : HttpClientRequest) : HttpClientResponse {
 
 proc RpcOutClient {
     var step : String
-    var httpReq : HttpClientRequest
     var httpResp : HttpClientResponse
 
     constructor startRpcOut() {
         transit:
-            step := "createHttpClient"
-            httpReq := HttpClientRequest {
-                url := "",
-                method := "",
-                body := ""
-            }
+            step := "idle"
             httpResp := HttpClientResponse {
                 code := 0,
                 body := ""
             }
     }
 
-    session transition createHttpClient() {
-        guard:
-            step = "createHttpClient"
-        transit:
-            step := "idle"
-    }
-
-    session transition closeHttpClient() {
-        guard: false
-    }
-
     transition sendRpcOut(req : HttpClientRequest) {
         guard:
             step = "idle"
         transit:
-            httpReq := req
-            step := "send"
-    }
-
-    session transition sendRequest(req : HttpClientRequest) {
-        guard:
-            & step = "send"
-            & req = httpReq
-        transit:
+            httpResp := httpRequest(req)
             step := "recv"
-    }
-
-    session transition receiveResponse(resp : HttpClientResponse) {
-        guard:
-            step = "recv"
-        transit:
-            httpResp := resp
-            step := "end"
     }
 
     transition responseRpcOut(resp : HttpClientResponse) {
         guard:
-            & step = "end"
+            & step = "recv"
             & resp = httpResp
         transit:
             step := "idle"

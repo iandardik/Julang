@@ -33,8 +33,9 @@ class Julayc : CliktCommand(name = "julayc") {
                       (after the entry file's directory, any -L paths, and the embedded stdlib).
 
         Stdlib: julay.proclib.Timer is a Julay module shipped in the compiler jar.
-        julay.proclib.HttpServer and julay.proclib.HttpClient remain Kotlin-native libraries
+        julay.proclib.HttpServer remains a Kotlin-native library
         (with builtin HttpServerRequest/Response and HttpClientRequest/Response obj types).
+        Outbound HTTP uses the julay.funlib.httpRequest procfun.
 
         Use `julayc analyze --help` to inspect program structure without codegen.
         Use `julayc check --help` to type-check and emit diagnostics without codegen.

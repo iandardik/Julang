@@ -862,6 +862,7 @@ private fun emitTerminatesProperty(
     stateVarNames: Map<Pair<String, String>, String>,
     pclasses: Map<String, ProcClassNode>,
 ): String {
+    val constructed = stateTlaName(leaf.tlaName, "constructed", stateVarNames)
     val term = stateTlaName(leaf.tlaName, "terminated", stateVarNames)
     val propName = "${leaf.tlaName}Terminates"
     return if (leaf.isParameterized) {
@@ -869,9 +870,9 @@ private fun emitTerminatesProperty(
         val bare = pc?.localDecls()?.filterIsInstance<VarNode>()?.map { it.name }?.toSet().orEmpty()
         val binder = indexBinderName(leaf, bare)
         val domain = typeDomainConstant(leaf.paramType!!) ?: leaf.paramType.toString()
-        "$propName == \\A $binder \\in $domain : GF($term[$binder])"
+        "$propName == \\A $binder \\in $domain : ($constructed[$binder] ~> $term[$binder])"
     } else {
-        "$propName == GF($term)"
+        "$propName == ($constructed ~> $term)"
     }
 }
 
@@ -3178,6 +3179,8 @@ private fun emitInvariantDefs(
 internal fun typeDomainConstant(typeExpr: TypeExpr): String? = when (typeExpr) {
     is TypeExpr.Simple -> typeExpr.name
     is TypeExpr.Parametric -> null
+    is TypeExpr.Tuple -> null
+    is TypeExpr.ProcFunRef -> null
 }
 
 internal fun cfgConstantModel(name: String): String = when (name) {

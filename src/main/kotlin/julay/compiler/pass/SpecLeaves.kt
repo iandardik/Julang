@@ -2,6 +2,7 @@ package julay.compiler.pass
 
 import julay.compiler.TypeExpr
 import julay.compiler.ast.*
+import java.util.ArrayDeque
 
 /**
  * A leaf in a spec system/assume expression.
@@ -541,17 +542,12 @@ internal data class WholeRhsHit(
 )
 
 /**
- * All resolved bare procfun calls appearing anywhere in constructor/transition transit exprs.
+ * Walk transit RHS, `return:` exprs, and guards of every constructor/transition on [pc].
  */
-internal fun collectProcFunCallsInProc(pc: ProcClassNode): List<FunCallExprNode> {
-    val out = mutableListOf<FunCallExprNode>()
-    fun walkExpr(expr: ExprNode) {
-        if (expr is FunCallExprNode && expr.resolvedProcFunOrNull() != null) {
-            out += expr
-        }
-        expr.children.filterIsInstance<ExprNode>().forEach { walkExpr(it) }
-    }
+private fun forEachActionExpr(pc: ProcClassNode, walkExpr: (ExprNode) -> Unit) {
     fun walkDecl(decl: julay.compiler.decl.ActionDecl) {
+        decl.guards.forEach(walkExpr)
+        decl.returnExpr?.let(walkExpr)
         decl.transits.forEach { update ->
             when (update) {
                 is julay.compiler.decl.TransitUpdate.Assign -> walkExpr(update.expr)
@@ -565,6 +561,20 @@ internal fun collectProcFunCallsInProc(pc: ProcClassNode): List<FunCallExprNode>
     }
     pc.localDecls().filterIsInstance<ConstructorNode>().forEach { walkDecl(it.constructors().single()) }
     pc.localDecls().filterIsInstance<TransitionNode>().forEach { walkDecl(it.transitions().single()) }
+}
+
+/**
+ * All resolved bare procfun calls in constructor/transition transit RHS, `return:`, and guards.
+ */
+internal fun collectProcFunCallsInProc(pc: ProcClassNode): List<FunCallExprNode> {
+    val out = mutableListOf<FunCallExprNode>()
+    fun walkExpr(expr: ExprNode) {
+        if (expr is FunCallExprNode && expr.resolvedProcFunOrNull() != null) {
+            out += expr
+        }
+        expr.children.filterIsInstance<ExprNode>().forEach { walkExpr(it) }
+    }
+    forEachActionExpr(pc, ::walkExpr)
     return out
 }
 
@@ -577,21 +587,54 @@ internal fun collectApiQualifiedProcFunCallsInProc(pc: ProcClassNode): List<Meth
         }
         expr.children.filterIsInstance<ExprNode>().forEach { walkExpr(it) }
     }
-    fun walkDecl(decl: julay.compiler.decl.ActionDecl) {
-        decl.transits.forEach { update ->
-            when (update) {
-                is julay.compiler.decl.TransitUpdate.Assign -> walkExpr(update.expr)
-                is julay.compiler.decl.TransitUpdate.IndexPut -> {
-                    walkExpr(update.index)
-                    walkExpr(update.value)
-                }
-                is julay.compiler.decl.TransitUpdate.Let -> walkExpr(update.init)
-            }
-        }
-    }
-    pc.localDecls().filterIsInstance<ConstructorNode>().forEach { walkDecl(it.constructors().single()) }
-    pc.localDecls().filterIsInstance<TransitionNode>().forEach { walkDecl(it.transitions().single()) }
+    forEachActionExpr(pc, ::walkExpr)
     return out
+}
+
+/**
+ * Bare procfun names used as values (e.g. `handler = echoHandler` on a `~>` arg),
+ * not call sites. Used to fold HttpServer-registered handlers into the alphabet.
+ */
+internal fun collectProcFunRefNamesInProc(pc: ProcClassNode, procFunNames: Set<String>): Set<String> {
+    val out = mutableSetOf<String>()
+    fun walkExpr(expr: ExprNode) {
+        if (expr is SymbolValueExprNode && expr.symbol in procFunNames) {
+            out += expr.symbol
+        }
+        expr.children.filterIsInstance<ExprNode>().forEach { walkExpr(it) }
+    }
+    forEachActionExpr(pc, ::walkExpr)
+    return out
+}
+
+/**
+ * Direct procfun callees / refs from [hostName], then the transitive closure through
+ * nested calls inside those procfuns (e.g. `handleRpc` → `inRequestVoteRPC`).
+ */
+internal fun reachableProcFunNamesFromHosts(
+    hostNames: Collection<String>,
+    procFunNames: Set<String>,
+    hostClasses: Map<String, ProcClassNode>,
+    procFunClasses: Map<String, ProcClassNode>,
+): Set<String> {
+    fun directFrom(name: String): Set<String> {
+        val pc = hostClasses[name] ?: procFunClasses[name] ?: return emptySet()
+        val bare = collectProcFunCallsInProc(pc).mapNotNull { it.resolvedProcFunOrNull()?.procFunName() }
+        val qualified = collectApiQualifiedProcFunCallsInProc(pc)
+            .mapNotNull { it.resolvedProcFunOrNull()?.procFunName() }
+        val refs = collectProcFunRefNamesInProc(pc, procFunNames)
+        return (bare + qualified + refs).filter { it in procFunNames }.toSet()
+    }
+
+    val result = linkedSetOf<String>()
+    val work = ArrayDeque<String>()
+    hostNames.forEach { host -> work.addAll(directFrom(host)) }
+    while (work.isNotEmpty()) {
+        val pf = work.removeFirst()
+        if (!result.add(pf)) continue
+        work.addAll(directFrom(pf))
+    }
+    return result
 }
 
 private fun wholeRhsProcFunCall(

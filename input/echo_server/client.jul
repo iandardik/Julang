@@ -1,4 +1,4 @@
-import julay.proclib.HttpClient
+import julay.funlib.httpRequest
 import julay.funlib.length
 import julay.funlib.parseInt
 import julay.funlib.exitProgram
@@ -44,60 +44,36 @@ proc ClientDispatcher {
 
 proc ClientLogic {
     const reqNum : Int
-    var state : String
     var respText : String
+    var done : Boolean
 
     constructor startReq(num : Int) {
         transit:
             reqNum := num
-            state := "createHttp"
             respText := ""
+            done := false
     }
 
-    session transition createHttpClient() {
-        guard: state = "createHttp"
-        transit: state := "A"
-    }
-
-    session transition sendRequest(req : HttpClientRequest) {
-        guard:
-            state = "A" & req = HttpClientRequest {
+    internal transition sendAndReceive() {
+        guard: ~done
+        transit:
+            respText := httpRequest(HttpClientRequest {
                 url := "http://localhost:8000",
                 method := "POST",
                 body := "ReqNum: " + reqNum
-            }
-        transit:
-            state := "B"
-    }
-
-    session transition receiveResponse(resp : HttpClientResponse) {
-        guard:
-            state = "B"
-        transit:
-            respText := resp.body
-            state := "C"
+            }).body
+            done := true
     }
 
     internal transition println(msg : String) {
-        guard:
-            state = "C" & msg = "response: " + respText
-        transit:
-            state := "D"
+        guard: done & msg = "response: " + respText
         after:
             println(msg)
     }
 
-    session transition closeHttpClient() {
-        guard: state = "D"
-        transit: state := "E"
-    }
-
     transition gotResp() {
-        guard:
-            state = "E"
-        transit:
-            state := "F"
+        guard: done
     }
 }
 
-export proc Client := ClientDispatcher || ClientLogic || HttpClient
+export proc Client := ClientDispatcher || ClientLogic

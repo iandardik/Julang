@@ -80,7 +80,7 @@ Operationally, only `proc:` leaves are SyncChannel-started; `calls` participate 
 
 ```jul
 export api RpcOut {
-    proc: RpcOutClient || HttpClient
+    proc: RpcOutClient
     calls: rpcOutClientCaller, outRequestVoteRPC, outAppendEntriesRPC
 }
 ```
@@ -94,7 +94,7 @@ As the api author, treat everything in the api as one parallel composition: the 
 
 ```jul
 export api RpcOut {
-    proc: HttpClient
+    proc: RpcOutClient
     calls: rpcOutClientCaller
 }
 ```
@@ -227,12 +227,12 @@ Examples:
 provider transition increment() { ... }   // API on Counter
 client transition increment() { ... }     // handler uses Counter
 internal transition println(msg : String) { ... }
-session transition createHttpServer(port : Int) { ... }
+session transition listen(port : Int) { ... }
 ```
 
 ## Offering the same action
 
-For ordinary sync, different classes declare the same action name. For a shared API, the hub uses `provider` and callers use `client`. For example, `IncReqHandler` offers `client transition increment()` while `Counter` offers `provider transition increment()` ([inc server](../examples/inc-server.md)).
+For ordinary sync, different classes declare the same action name. For a shared API, the hub uses `provider` and callers use `client`. For example, `incHandler` offers `client transition increment()` while `Counter` offers `provider transition increment()` ([inc server](../examples/inc-server.md)).
 
 ## See also
 

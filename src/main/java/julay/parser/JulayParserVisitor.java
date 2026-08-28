@@ -47,6 +47,18 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitTypeExpr(JulayParser.TypeExprContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#typeDomain}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitTypeDomain(JulayParser.TypeDomainContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#typeAtom}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitTypeAtom(JulayParser.TypeAtomContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#typeArgs}.
 	 * @param ctx the parse tree
 	 * @return the visitor result

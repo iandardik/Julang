@@ -10,7 +10,6 @@ import julay.program.Program
 import julay.program.Proc
 import julay.program.TransitionSystem
 import julay.program.TransitionSystemStaticInfo
-import julay.program.Value
 import julay.program.Variable
 import julay.program.action.ConcreteAction
 import julay.program.action.SymbolicAction
@@ -19,14 +18,13 @@ import julay.program.sync.FastOffer
 import julay.program.sync.BoolExprFast
 import julay.program.sync.SyncStepPlan
 import julay.program.type.intType
+import julay.program.type.stringType
+import kotlinx.coroutines.runBlocking
 import java.net.InetSocketAddress
 
 /**
- * HTTP server library. Request/response and close are [session] actions: sticky pairing uses
- * process-local affinity and SyncChannel sessions (no Julay Channel values).
- *
- * The JDK server is created and started in [finishConstruction] on the child proc, not during
- * the parent's spawn allocation.
+ * HTTP server library. [listen] registers a procfun handler; each JDK request invokes
+ * [Program.invokeProcFun] directly. Lifecycle actions are session syncs (startup pairing).
  */
 class JulHttpServer(
     private val program: Program,
@@ -34,40 +32,24 @@ class JulHttpServer(
     companion object : JulLibrary {
         override val julName = "HttpServer"
         val portArg = Variable("port", intType)
-        val reqArg = Variable("req", httpServerRequestType)
-        val respArg = Variable("resp", httpServerResponseType)
-        val createHttpServerAct = SymbolicAction("createHttpServer", listOf(portArg), isSession = true)
-        val receiveRequestAct = SymbolicAction("receiveRequest", listOf(reqArg), isSession = true)
-        val sendResponseAct = SymbolicAction("sendResponse", listOf(respArg), isSession = true)
-        val closeHttpServerAct = SymbolicAction("closeHttpServer", listOf(), isSession = true)
-        val createHttpServerCtor: Pair<SymbolicAction, suspend (Program, ConcreteAction) -> JulHttpServer> = Pair(
-            createHttpServerAct,
+        // Procfun refs erase to String at runtime; must match Jul codegen SymbolicAction args.
+        val handlerArg = Variable("handler", stringType)
+        val listenAct = SymbolicAction("listen", listOf(portArg, handlerArg), isSession = true)
+        val closeAct = SymbolicAction("close", listOf(), isSession = true)
+        val listenCtor: Pair<SymbolicAction, suspend (Program, ConcreteAction) -> JulHttpServer> = Pair(
+            listenAct,
         ) { prog, _ ->
             JulHttpServer(prog)
         }
         override fun staticInfo() = TransitionSystemStaticInfo(
             "JulHttpServer$",
-            setOf(receiveRequestAct, sendResponseAct, closeHttpServerAct),
-            mapOf(createHttpServerCtor),
+            setOf(closeAct),
+            mapOf(listenCtor),
         )
         override val actionDecls = listOf(
-            ActionDecl(createHttpServerAct, listOf(), emptyList(), TSAction.SyncRole.Default, LibraryLoc(julName)),
+            ActionDecl(listenAct, listOf(), emptyList(), TSAction.SyncRole.Default, LibraryLoc(julName)),
             ActionDecl(
-                receiveRequestAct,
-                listOf(),
-                emptyList(),
-                TSAction.SyncRole.Default,
-                LibraryLoc(julName),
-            ),
-            ActionDecl(
-                sendResponseAct,
-                listOf(),
-                emptyList(),
-                TSAction.SyncRole.Default,
-                LibraryLoc(julName),
-            ),
-            ActionDecl(
-                closeHttpServerAct,
+                closeAct,
                 listOf(),
                 emptyList(),
                 TSAction.SyncRole.Default,
@@ -76,18 +58,13 @@ class JulHttpServer(
         )
     }
 
-    private var port: Int? = null
+    private var handlerName: String? = null
     private var jdkServer: HttpServer? = null
     private var closed = false
-    private lateinit var hostProc: Proc
-
-    override fun bindHostProc(host: Proc) {
-        hostProc = host
-    }
 
     override suspend fun finishConstruction(act: ConcreteAction) {
         val listenPort = act.lookup(portArg).value as Int
-        port = listenPort
+        handlerName = act.lookup(handlerArg).value as String
         val server = HttpServer.create(InetSocketAddress(listenPort), 0)
         server.createContext("/", this)
         server.start()
@@ -99,7 +76,7 @@ class JulHttpServer(
             return emptySet()
         }
         return setOf(
-            TSAction(closeHttpServerAct, ctx.mkTrue(), TSAction.SyncRole.Default, fastGuard = BoolExprFast.True),
+            TSAction(closeAct, ctx.mkTrue(), TSAction.SyncRole.Default, fastGuard = BoolExprFast.True),
         )
     }
 
@@ -108,84 +85,29 @@ class JulHttpServer(
             return SyncStepPlan.FastOnly(emptyList())
         }
         return SyncStepPlan.FastOnly(
-            listOf(FastOffer(closeHttpServerAct, BoolExprFast.True, TSAction.SyncRole.Default)),
+            listOf(FastOffer(closeAct, BoolExprFast.True, TSAction.SyncRole.Default)),
         )
     }
 
     override suspend fun transit(act: ConcreteAction) {
-        if (act.symAction.name == closeHttpServerAct.name) {
+        if (act.symAction.name == closeAct.name) {
             closed = true
             jdkServer?.stop(0)
         }
     }
 
     override fun handle(exchange: HttpExchange?) {
-        val resource = HttpResource(exchange!!, program)
-        // Use this server occurrence's StaticInfo so request/response actions share the
-        // composition-assigned channelKeys already registered on Program.
-        program.spawnProc(resource, hostProc.occurrenceStaticInfo())
-    }
-
-    class HttpResource(
-        private val exchange: HttpExchange,
-        private val program: Program,
-    ) : TransitionSystem {
-        private val request: HttpServerRequest
-        private var initHttpReq = true
-        private var finishHttpReq = true
-        init {
-            val path = httpPathFromUriPath(exchange.requestURI.path ?: "")
-            val body = exchange.requestBody.bufferedReader().use { it.readText() }
-            request = HttpServerRequest(path, body)
+        val name = handlerName
+            ?: throw IllegalStateException("JulHttpServer handle before listen")
+        val path = httpPathFromUriPath(exchange!!.requestURI.path ?: "")
+        val body = exchange.requestBody.bufferedReader().use { it.readText() }
+        val req = HttpServerRequest(path, body)
+        val resp = runBlocking {
+            program.invokeProcFun(name, listOf(req)) as HttpServerResponse
         }
-
-        override suspend fun actions(ctx: Context): Set<TSAction> {
-            if (initHttpReq) {
-                initHttpReq = false
-                return setOf(
-                    TSAction(
-                        receiveRequestAct,
-                        ctx.mkEq(
-                            reqArg.toZ3Expr(ctx),
-                            httpServerRequestType.toZ3Expr(Value(request, httpServerRequestType), ctx),
-                        ),
-                    ),
-                )
-            } else if (finishHttpReq) {
-                finishHttpReq = false
-                return setOf(
-                    TSAction(
-                        sendResponseAct,
-                        ctx.mkTrue(),
-                        fastGuard = BoolExprFast.True,
-                    ),
-                )
-            } else {
-                return setOf()
-            }
-        }
-
-        override fun syncStepPlan(): SyncStepPlan {
-            // receiveRequest embeds an obj value → residual Z3 for that step.
-            if (initHttpReq) {
-                return SyncStepPlan.NeedsZ3
-            }
-            if (finishHttpReq) {
-                finishHttpReq = false
-                return SyncStepPlan.FastOnly(
-                    listOf(FastOffer(sendResponseAct, BoolExprFast.True)),
-                )
-            }
-            return SyncStepPlan.FastOnly(emptyList())
-        }
-        override suspend fun transit(act: ConcreteAction) {
-            if (act.symAction.name == sendResponseAct.name) {
-                val resp = act.lookup(respArg).value as HttpServerResponse
-                exchange.sendResponseHeaders(resp.code, resp.body.length.toLong())
-                exchange.responseBody.writer().use { writer ->
-                    writer.write(resp.body)
-                }
-            }
+        exchange.sendResponseHeaders(resp.code, resp.body.length.toLong())
+        exchange.responseBody.writer().use { writer ->
+            writer.write(resp.body)
         }
     }
 }

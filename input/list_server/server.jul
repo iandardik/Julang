@@ -9,29 +9,23 @@ proc ServerStarter {
             started := false
     }
 
-    session transition createHttpServer(port : Int) {
-        guard: ~started & port = 8000
+    session transition listen(
+        port : Int,
+        handler : HttpServerRequest ~> HttpServerResponse
+    ) {
+        guard: ~started & port = 8000 & handler = listHandler
         transit: started := true
     }
 
-    session transition closeHttpServer() {
+    session transition close() {
         guard: false
     }
 }
 
-proc IncReqHandler {
-    const httpReq : HttpServerRequest
-    const reqBody : String
-    var step : String
-    var list : List<String>
-
-    session constructor receiveRequest(req : HttpServerRequest) {
-        transit:
-            step := "A"
-            httpReq := req
-            reqBody := req.body
-            list := listOf()
-    }
+procfun listHandler(req : HttpServerRequest) : HttpServerResponse {
+    const reqBody : String := req.body
+    var step : String := "A"
+    var list : List<String> := listOf()
 
     client transition getAndAppend(e : String, lst : List<String>) {
         guard:
@@ -41,16 +35,13 @@ proc IncReqHandler {
             list := lst + listOf(reqBody)
     }
 
-    session transition sendResponse(resp : HttpServerResponse) {
-        guard:
-            & step = "B"
-            & resp = HttpServerResponse {
-                body := list + "",
-                code := 200
-            }
-        transit:
-            step := "C"
+    internal transition respond() {
+        guard: step = "B"
+        return: HttpServerResponse {
+            body := list + "",
+            code := 200
+        }
     }
 }
 
-export proc ServerLogic := ServerStarter || IncReqHandler || HttpServer
+export proc ServerLogic := ServerStarter || HttpServer

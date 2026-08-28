@@ -31,9 +31,13 @@ fun RootNode.specTypePass(
     val leafSpecNodes = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<LeafSpecNode>() }
         .associateBy { it.name() }
+    val modulesByPath = unit.modules.associateBy { it.modulePath }
+    val procFunPclasses = unit.modules.flatMap { mod ->
+        callableProcFuns(mod, modulesByPath).values
+    }.associate { it.name() to it.asSyntheticProcClass() }
     val pclassNodes = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<ProcClassNode>() }
-        .associateBy { it.name() } + leafSpecNodes.mapValues { it.value.asProcClass() }
+        .associateBy { it.name() } + leafSpecNodes.mapValues { it.value.asProcClass() } + procFunPclasses
     val procAliases = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<ProcNode>() }
         .associateBy { it.name() }

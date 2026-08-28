@@ -1,14 +1,15 @@
 package julay.compiler.analysis
 
 import julay.compiler.ast.ProcClassNode
+import julay.compiler.ast.ProcFunNode
 import julay.compiler.ast.RootNode
 import julay.compiler.decl.ProcDecl
 import julay.compiler.pass.AlphabetOffer
 import julay.compiler.pass.LeafActionId
-import julay.compiler.pass.collectApiQualifiedProcFunCallsInProc
-import julay.compiler.pass.collectProcFunCallsInProc
+import julay.compiler.pass.asSyntheticProcClass
 import julay.compiler.pass.composeAlphabets
 import julay.compiler.pass.computeCompositionAlphabet
+import julay.compiler.pass.reachableProcFunNamesFromHosts
 
 /**
  * Immediate children of [root] as diagram nodes, with edges for actions that
@@ -152,7 +153,11 @@ fun computeTopLevelSyncGraph(
     }
 
     // Spawn-await call edges only for leaf analyze roots (no action labels; directed).
+    // Includes ~> handler refs and nested calls inside registered handlers.
     val pclasses = ast?.declNodes()?.filterIsInstance<ProcClassNode>()?.associateBy { it.name() }.orEmpty()
+    val procFunClasses = ast?.declNodes()?.filterIsInstance<ProcFunNode>()
+        ?.associate { it.name() to it.asSyntheticProcClass() }
+        .orEmpty()
     val extraProcFunNodes = linkedSetOf<String>()
     val callerToCallees = mutableMapOf<String, MutableSet<String>>()
     val callEdgePairs = mutableListOf<Pair<String, String>>()
@@ -160,10 +165,15 @@ fun computeTopLevelSyncGraph(
         resolvedRoot.components.isEmpty() &&
         ast != null &&
         procFunNames.isNotEmpty() &&
-        pclasses.isNotEmpty()
+        (pclasses.isNotEmpty() || procFunClasses.isNotEmpty())
     ) {
         val callerNode = childNodes.single()
-        val called = calledProcFunNamesInLeaf(callerNode, procFunNames, pclasses)
+        val called = reachableProcFunNamesFromHosts(
+            listOf(callerNode),
+            procFunNames,
+            pclasses,
+            procFunClasses,
+        )
         for (pf in called) {
             if (callerNode != pf) {
                 extraProcFunNodes += pf
@@ -344,18 +354,4 @@ private fun permute(items: List<String>, visit: (List<String>) -> Unit) {
         }
     }
     go(0)
-}
-
-/** Procfun names called directly by leaf host [hostName] (bare and api-qualified). */
-private fun calledProcFunNamesInLeaf(
-    hostName: String,
-    procFunNames: Set<String>,
-    pclasses: Map<String, ProcClassNode>,
-): Set<String> {
-    if (hostName in procFunNames) return emptySet()
-    val pc = pclasses[hostName] ?: return emptySet()
-    val bare = collectProcFunCallsInProc(pc).mapNotNull { it.resolvedProcFunOrNull()?.procFunName() }
-    val qualified = collectApiQualifiedProcFunCallsInProc(pc)
-        .mapNotNull { it.resolvedProcFunOrNull()?.procFunName() }
-    return (bare + qualified).filter { it in procFunNames }.toSet()
 }

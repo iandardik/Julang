@@ -68,6 +68,26 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitTypeExpr(JulayParser.TypeExprContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#typeDomain}.
+	 * @param ctx the parse tree
+	 */
+	void enterTypeDomain(JulayParser.TypeDomainContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#typeDomain}.
+	 * @param ctx the parse tree
+	 */
+	void exitTypeDomain(JulayParser.TypeDomainContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#typeAtom}.
+	 * @param ctx the parse tree
+	 */
+	void enterTypeAtom(JulayParser.TypeAtomContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#typeAtom}.
+	 * @param ctx the parse tree
+	 */
+	void exitTypeAtom(JulayParser.TypeAtomContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#typeArgs}.
 	 * @param ctx the parse tree
 	 */

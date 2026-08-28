@@ -5,7 +5,7 @@
 | File | Role |
 |------|------|
 | [`main.jul`](../../input/inc_server/main.jul) | `Counter`, composition, invariants, specs, `compile` |
-| [`server.jul`](../../input/inc_server/server.jul) | HTTP starter + `IncReqHandler` |
+| [`server.jul`](../../input/inc_server/server.jul) | HTTP starter + `incHandler` procfun |
 | [`printer.jul`](../../input/inc_server/printer.jul) | Periodic read of the counter |
 
 ## Intent
@@ -46,14 +46,16 @@ proc IncServer := Counter || Printer || ServerLogic
 ### HTTP path (`server.jul`)
 
 ```jul
-proc ServerLogic := ServerStarter || IncReqHandler || HttpServer
+procfun incHandler(req : HttpServerRequest) : HttpServerResponse { ... }
+
+proc ServerLogic := ServerStarter || HttpServer
 ```
 
-`IncReqHandler` is constructed per `receiveRequest`. It then:
+`incHandler` is registered at startup (`handler = incHandler` on `listen`). Each request spawns a procfun instance via `Program.invokeProcFun`; the handler then:
 
 1. Syncs on `increment` (with Counter’s provider)
 2. Syncs on `getCounter` to learn `localCounter`
-3. `sendResponse` with that value as the HTTP body
+3. Returns an `HttpServerResponse` with that value as the body
 
 Handler and Counter are **different classes**, so they may sync ([Composition](../language/composition-and-actions.md)).
 
@@ -68,20 +70,20 @@ From [`main.jul`](../../input/inc_server/main.jul):
 ```jul
 invariant NonNegative := Counter.counter >= 0
 invariant CorrectCounter := forall t1 : Int,
-    (IncReqHandler[t1].step = "C" & forall t2 : Int, IncReqHandler[t2].step ~= "B")
-        => (IncReqHandler[t1].localCounter = Counter.counter)
+    (incHandler[t1].step = "C" & forall t2 : Int, incHandler[t2].step ~= "B")
+        => (incHandler[t1].localCounter = Counter.counter)
 invariant AllInvs := NonNegative & CorrectCounter
 
-spec HandlerSpec := IncReqHandler[t : Int]
+spec HandlerSpec := incHandler[t : Int]
 spec IncSpec := <true> Counter || HandlerSpec <AllInvs>
 
-compile IncServer, HandlerSpec, IncSpec
+compile IncServer, IncSpec
 ```
 
 - **`IncServer`** → runnable JAR  
 - **`HandlerSpec` / `IncSpec`** → `.tla` / `.cfg` for TLC  
 
-Indexed `IncReqHandler[t : Int]` models many handler instances. See [Specifications](../language/specifications.md).
+Indexed `incHandler[t : Int]` models many handler instances. See [Specifications](../language/specifications.md).
 
 ## How to run
 
@@ -90,7 +92,7 @@ Indexed `IncReqHandler[t : Int]` models many handler instances. See [Specificati
 java -jar build/libs/julayc.jar input/inc_server/main.jul
 ```
 
-This writes `IncServer.jar` (and `HandlerSpec` / `IncSpec` TLA files) in the current directory. Start the server on port **8000**, then POST with curl:
+This writes `IncServer.jar` (and `IncSpec` TLA files) in the current directory. Start the server on port **8000**, then POST with curl:
 
 ```bash
 java -jar IncServer.jar           # terminal 1
@@ -122,9 +124,9 @@ Spec artifacts appear as `HandlerSpec` / `IncSpec` TLA files in the working dire
 ## Language features showcased
 
 - `provider` actions as a resource API
-- Session HTTP + ordinary sync with Counter
+- Procfun HTTP handler with `client` steps to Counter
 - Modules (`printer`, `server`)
-- Assume-guarantee `spec`, indexed procs, `compile` mixing JAR and TLA targets
+- Assume-guarantee `spec`, indexed procfuns, `compile` mixing JAR and TLA targets
 
 ## See also
 

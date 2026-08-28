@@ -190,6 +190,7 @@ fun Type.toKotlinTypeString(): String = when (this) {
             "type \"$name\" must not reach Kotlin codegen (uninterpreted types are specs/TLA+ only)",
         )
     }
+    is ProcFunRefType -> "String"
     else -> throw RuntimeException("Invalid type: $this")
 }
 
@@ -209,6 +210,7 @@ fun Type.toCodegenTypeVal(): String = when (this) {
             "type \"$name\" must not reach Kotlin codegen (uninterpreted types are specs/TLA+ only)",
         )
     }
+    is ProcFunRefType -> "stringType"
     else -> throw RuntimeException("Invalid type: $this")
 }
 

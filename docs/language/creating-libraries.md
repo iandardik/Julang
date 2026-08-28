@@ -36,7 +36,7 @@ See [`Timer.jul`](../../src/main/resources/stdlib/julay/proclib/Timer.jul): a `p
 
 ## Kotlin-native libraries
 
-Use Kotlin when the implementation needs JDK APIs (HTTP, files outside funlib, etc.). Current examples: `HttpServer`, `HttpClient` in `julay.program.library`.
+Use Kotlin when the implementation needs JDK APIs (HTTP, files outside funlib, etc.). Current examples: `HttpServer` in `julay.program.library`; HTTP **clients** use the stdlib `httpRequest` procfun (`doHttpRequest` Kotlin effect), not a proclib.
 
 ### Checklist
 

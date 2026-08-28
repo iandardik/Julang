@@ -9,37 +9,7 @@ import node.lib.encodeRequestVoteResp
 /*
  * Process that routes incoming RPCs.
 */
-export proc RpcIn := RpcReqHandler || ServerInitializer || HttpServer
-
-/*
- * A RpcReqHandler get created for each incoming request.
-*/
-proc RpcReqHandler {
-    const httpResp : HttpServerResponse
-    var done : Boolean := false
-
-    session constructor receiveRequest(req : HttpServerRequest) {
-        transit:
-            httpResp := when (req.path) {
-                "raft/requestVote" -> inRequestVoteRPC(req)
-                "raft/appendEntries" -> inAppendEntriesRPC(req)
-                "client/append" -> clientAppendRPC(req)
-                "client/get" -> clientGetRPC(req)
-                else -> HttpServerResponse {
-                    body := "NOT_FOUND",
-                    code := 404
-                }
-            }
-    }
-
-    session transition sendResponse(resp : HttpServerResponse) {
-        guard:
-            & ~done
-            & resp = httpResp
-        transit:
-            done := true
-    }
-}
+export proc RpcIn := ServerInitializer || HttpServer
 
 proc ServerInitializer {
     var started : Boolean
@@ -53,17 +23,36 @@ proc ServerInitializer {
             (port <= 0) -> "Invalid port passed to the server"
     }
 
-    session transition createHttpServer(port : Int) {
+    session transition listen(
+        port : Int,
+        handler : HttpServerRequest ~> HttpServerResponse
+    ) {
         guard:
             & ~started
             & listenPort > 0
             & port = listenPort
+            & handler = handleRpc
         transit:
             started := true
     }
 
-    session transition closeHttpServer() {
+    session transition close() {
         guard: false
+    }
+}
+
+procfun handleRpc(req : HttpServerRequest) : HttpServerResponse {
+    internal transition route() {
+        return: when (req.path) {
+            "raft/requestVote" -> inRequestVoteRPC(req)
+            "raft/appendEntries" -> inAppendEntriesRPC(req)
+            "client/append" -> clientAppendRPC(req)
+            "client/get" -> clientGetRPC(req)
+            else -> HttpServerResponse {
+                body := "NOT_FOUND",
+                code := 404
+            }
+        }
     }
 }
 

@@ -112,6 +112,7 @@ fun Type.codegenErasure(): Type = when (this) {
     is ListType -> listType(elementType.codegenErasure())
     is SetType -> setType(elementType.codegenErasure())
     is MapType -> mapType(keyType.codegenErasure(), valueType.codegenErasure())
+    is ProcFunRefType -> stringType
     else -> this
 }
 

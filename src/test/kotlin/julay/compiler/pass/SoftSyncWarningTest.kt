@@ -165,6 +165,67 @@ class SoftSyncWarningTest {
     }
 
     @Test
+    fun providerClientsViaHandlerRefAndNestedReturnFoldDoNotWarnDeadlock() {
+        val dir = Files.createTempDirectory("julay-handler-ref-fold")
+        val file = dir.resolve("http.jul")
+        file.toFile().writeText(
+            """
+            import julay.proclib.HttpServer
+
+            procfun nested() : HttpServerResponse {
+                client transition bump() {
+                    return: HttpServerResponse { body := "ok", code := 200 }
+                }
+            }
+
+            procfun handle(req : HttpServerRequest) : HttpServerResponse {
+                internal transition route() {
+                    return: nested()
+                }
+            }
+
+            proc Starter {
+                var started : Boolean
+                constructor initially(args : List<String>) {
+                    transit: started := false
+                }
+                session transition listen(
+                    port : Int,
+                    handler : HttpServerRequest ~> HttpServerResponse
+                ) {
+                    guard: ~started & port = 8000 & handler = handle
+                    transit: started := true
+                }
+                session transition close() { guard: false }
+            }
+
+            proc Core {
+                constructor initially(args : List<String>) { transit: }
+                provider transition bump() { transit: }
+            }
+
+            proc P := Starter || HttpServer || Core
+            compile P
+            """.trimIndent(),
+        )
+
+        val checked = prepareCheckedCompilation(file)
+        assertNotNull(checked)
+        val program = checked.jarTargets.single()
+        val components = program.allProcNames(checked.procDecls)
+        val warnings = checked.ast.warningPass(
+            components,
+            checked.librariesInUse,
+            program,
+            checked.procDecls,
+        )
+        assertFalse(
+            warnings.any { it.toString().contains("provider with no clients") },
+            "~> handler ref + nested return: calls must fold clients; got: $warnings",
+        )
+    }
+
+    @Test
     fun providerWithNoClientsStillWarnsDeadlock() {
         val dir = Files.createTempDirectory("julay-provider-no-clients")
         val file = dir.resolve("solo.jul")

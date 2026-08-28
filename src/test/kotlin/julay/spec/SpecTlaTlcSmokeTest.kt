@@ -1302,6 +1302,28 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun raftNodeSpecCompilesAndTlcRuns() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-raft-tlc").toFile()
+        try {
+            val source = File("input/raft/sys.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("RaftNodeSpec.tla")
+            val cfg = File("RaftNodeSpec.cfg")
+            assertTrue(tla.exists(), "expected RaftNodeSpec.tla")
+            assertTrue(cfg.exists(), "expected RaftNodeSpec.cfg")
+            tla.copyTo(File(work, "RaftNodeSpec.tla"), overwrite = true)
+            cfg.copyTo(File(work, "RaftNodeSpec.cfg"), overwrite = true)
+            assertTlcHealthyStart(work, "RaftNodeSpec")
+        } finally {
+            work.deleteRecursively()
+            File("RaftNodeSpec.tla").delete()
+            File("RaftNodeSpec.cfg").delete()
+        }
+    }
+
+    @Test
     fun multiLineObjLiteralEmitsOneFieldPerLine() {
         val source = File("regression/input/spec/obj-record-layout.jul")
         assertTrue(source.exists(), "missing ${source.path}")
@@ -2124,8 +2146,8 @@ class SpecTlaTlcSmokeTest {
                 "expected terminated state for procfun;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("Terminates == GF("),
-                "expected Terminates == GF(...);\n$tlaText",
+                tlaText.contains("Terminates ==") && tlaText.contains("~>"),
+                "expected Terminates == (... ~> ...);\n$tlaText",
             )
             assertTrue(
                 cfgText.contains("PROPERTY") && cfgText.contains("Terminates"),
@@ -2177,7 +2199,7 @@ class SpecTlaTlcSmokeTest {
             assertTrue(cfg.exists(), "expected CountUpIndexed.cfg")
             val tlaText = tla.readText()
             assertTrue(
-                tlaText.contains("Terminates ==") && tlaText.contains("GF("),
+                tlaText.contains("Terminates ==") && tlaText.contains("~>"),
                 "expected indexed Terminates property;\n$tlaText",
             )
             assertTrue(

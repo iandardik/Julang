@@ -71,27 +71,17 @@ How affinity, teardown, and these effects appear in generated TLA+ (including wh
 
 ## Session constructors
 
-A **session constructor** creates a new proc instance as part of establishing a session (for example, one HTTP handler per `receiveRequest`). While affinity to a peer of that child class is live, attempting to spawn another of the same kind fails; after the session ends, a later spawn may succeed.
+A **session constructor** creates a new proc instance as part of establishing a session (for example, a `TimerHelper` spawned by `createTimer`). While affinity to a peer of that child class is live, attempting to spawn another of the same kind fails; after the session ends, a later spawn may succeed.
 
-## Typical pattern: HTTP
-
-[`input/echo_server/server.jul`](../../input/echo_server/server.jul) uses session actions with `HttpServer`:
-
-```jul
-session transition createHttpServer(port : Int) { ... }
-
-session constructor receiveRequest(req : HttpServerRequest) { ... }
-
-session transition sendResponse(resp : HttpServerResponse) { ... }
-```
-
-The handler instance is constructed per request and talks to the HTTP library through session actions.
-
-## Timer
+## Typical pattern: Timer
 
 [`julay.proclib.Timer`](../../src/main/resources/stdlib/julay/proclib/Timer.jul) exposes `createTimer`, `startTimer`, `timeout`, and `cancelTimer`. Helper completion uses `exitSession(TimerHelper)` on `timerHelperEnd`; cancel uses `killSessionPeer(TimerHelper)` so the delaying helper can be stopped without blocking the controller.
 
 A restart-after-timeout rebind bug in Timer was caught by `TimerSpec` + TLC; see [Bugs found with Julay](../examples/bugs-found-with-julay.md).
+
+### HTTP (lifecycle only)
+
+[`HttpServer`](standard-library.md#httpserver) still uses **session** actions for `listen` / `close` (pairing `ServerStarter` with the Kotlin library). Per-request handling is **not** session-based: handlers are procfuns invoked via `Program.invokeProcFun`. See [Standard library](standard-library.md) — do not use `receiveRequest` / `sendResponse` (removed).
 
 ## See also
 

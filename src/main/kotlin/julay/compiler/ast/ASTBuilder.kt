@@ -24,14 +24,39 @@ private fun normalizeGuarantee(expr: ExprNode): ExprNode? =
     if (expr is LiteralValueExprNode && expr.isTrueLiteral()) null else expr
 
 private fun parseTypeExpr(ctx: JulayParser.TypeExprContext): TypeExpr {
-    return when {
-        ctx.LPAREN() != null -> parseTypeExpr(ctx.typeExpr())
-        ctx.typeArgs() != null -> {
-            val args = ctx.typeArgs().typeExpr().map { parseTypeExpr(it) }
-            TypeExpr.Parametric(ctx.ID().text, args)
-        }
-        else -> TypeExpr.Simple(ctx.ID().text)
+    if (ctx.PROCFUN_ARROW() != null) {
+        val domainCtx = ctx.typeDomain()
+        val ret = parseTypeExpr(ctx.typeExpr())
+        val args = parseTypeDomainArgs(domainCtx)
+        return TypeExpr.ProcFunRef(args, ret)
     }
+    return parseTypeDomain(ctx.typeDomain())
+}
+
+private fun parseTypeDomain(ctx: JulayParser.TypeDomainContext): TypeExpr {
+    if (ctx.typeAtom() != null) {
+        return parseTypeAtom(ctx.typeAtom())
+    }
+    val elems = ctx.typeExpr().map { parseTypeExpr(it) }
+    return TypeExpr.Tuple(elems)
+}
+
+private fun parseTypeDomainArgs(ctx: JulayParser.TypeDomainContext): List<TypeExpr> {
+    if (ctx.typeAtom() != null) {
+        return listOf(parseTypeAtom(ctx.typeAtom()))
+    }
+    return ctx.typeExpr().map { parseTypeExpr(it) }
+}
+
+private fun parseTypeAtom(ctx: JulayParser.TypeAtomContext): TypeExpr {
+    if (ctx.typeArgs() != null) {
+        val args = ctx.typeArgs().typeExpr().map { parseTypeExpr(it) }
+        return TypeExpr.Parametric(ctx.ID().text, args)
+    }
+    if (ctx.LPAREN() != null) {
+        return parseTypeExpr(ctx.typeExpr())
+    }
+    return TypeExpr.Simple(ctx.ID().text)
 }
 
 private fun parseTypeParams(ctx: JulayParser.TypeParamsContext?): List<String> =

@@ -37,6 +37,16 @@ decl
     ;
 
 typeExpr
+    : typeDomain PROCFUN_ARROW typeExpr
+    | typeDomain
+    ;
+
+typeDomain
+    : LPAREN typeExpr (COMMA typeExpr)+ RPAREN
+    | typeAtom
+    ;
+
+typeAtom
     : ID typeArgs?
     | LPAREN typeExpr RPAREN
     ;

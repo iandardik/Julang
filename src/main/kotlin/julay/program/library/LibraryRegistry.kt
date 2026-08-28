@@ -9,11 +9,10 @@ object LibraryRegistry {
     val julayStdlibNames: Set<String> = setOf("Timer")
 
     /** `.jul` funlib modules under stdlib/julay/funlib/ (may export multiple funs). */
-    val julayFunlibJulModules: Set<String> = setOf("math")
+    val julayFunlibJulModules: Set<String> = setOf("math", "http")
 
     val kotlinLibraries: List<JulLibrary> = listOf(
         JulHttpServer,
-        JulHttpClient,
     )
 
     val kotlinLibraryNames: Set<String> = kotlinLibraries.map { it.julName }.toSet()

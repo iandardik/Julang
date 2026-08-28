@@ -1,9 +1,15 @@
 import julay.proclib.HttpServer
 import julay.funlib.println
 
-type ReqInfo {
-    req : String
-    resp : String
+procfun echoHandler(req : HttpServerRequest) : HttpServerResponse {
+    internal transition respond() {
+        before:
+            println("Req: '" + req.body + "', I responded: '" + req.body + " is a good point!" + "'")
+        return: HttpServerResponse {
+            body := req.body + " is a good point!",
+            code := 200
+        }
+    }
 }
 
 proc ServerStarter {
@@ -14,54 +20,17 @@ proc ServerStarter {
             started := false
     }
 
-    session transition createHttpServer(port : Int) {
-        guard: ~started & port = 8000
+    session transition listen(
+        port : Int,
+        handler : HttpServerRequest ~> HttpServerResponse
+    ) {
+        guard: ~started & port = 8000 & handler = echoHandler
         transit: started := true
     }
 
-    session transition closeHttpServer() {
+    session transition close() {
         guard: false
     }
 }
 
-proc EchoHandler {
-    const info : ReqInfo
-    const httpReq : HttpServerRequest
-    var responded : Boolean
-    var done : Boolean
-
-    session constructor receiveRequest(req : HttpServerRequest) {
-        transit:
-            httpReq := req
-            info := ReqInfo {
-                req := req.body,
-                resp := req.body + " is a good point!"
-            }
-            responded := false
-            done := false
-    }
-
-    session transition sendResponse(resp : HttpServerResponse) {
-        guard:
-            & ~responded
-            & resp = HttpServerResponse {
-                body := info.resp,
-                code := 200
-            }
-        transit:
-            responded := true
-    }
-
-    internal transition println(msg : String) {
-        guard:
-            & responded
-            & ~done
-            & msg = "Req: '" + info.req + "', I responded: '" + info.resp + "'"
-        transit:
-            done := true
-        after:
-            println(msg)
-    }
-}
-
-export proc Server := ServerStarter || EchoHandler || HttpServer
+export proc Server := ServerStarter || HttpServer

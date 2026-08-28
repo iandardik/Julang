@@ -7,7 +7,7 @@ Top-level declarations are **file-private by default**. Mark names that other fi
 ```jul
 export proc Server { ... }
 export api RpcOut {
-    proc: RpcOutClient || HttpClient
+    proc: RpcOutClient
     calls: rpcOutClientCaller
 }
 export fun add(x : Int, y : Int) : Int = x + y

@@ -16,6 +16,7 @@ FALSE : 'false' ;
 AND : '&' ;
 MODELS : '|=' ;
 OR : '|' ;
+PROCFUN_ARROW : '~>' ;
 NOT : '~' ;
 TIMES : '*' ;
 DIV : '/' ;

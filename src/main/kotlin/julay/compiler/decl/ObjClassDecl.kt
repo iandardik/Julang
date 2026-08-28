@@ -90,6 +90,27 @@ internal class ObjClassResolver(
         return when (expr) {
             is TypeExpr.Simple -> resolveSimple(expr.name, typeParamEnv)
             is TypeExpr.Parametric -> resolveParametric(expr, typeParamEnv)
+            is TypeExpr.Tuple ->
+                FieldTypeResolveResult.Failed("Tuple types are only valid on the left of ~>")
+            is TypeExpr.ProcFunRef -> resolveProcFunRef(expr, typeParamEnv)
+        }
+    }
+
+    private fun resolveProcFunRef(
+        expr: TypeExpr.ProcFunRef,
+        typeParamEnv: Map<String, Type>,
+    ): FieldTypeResolveResult {
+        val argTypes = mutableListOf<Type>()
+        for (argExpr in expr.args) {
+            when (val r = resolveTypeExpr(argExpr, typeParamEnv)) {
+                is FieldTypeResolveResult.Success -> argTypes.add(r.type)
+                is FieldTypeResolveResult.Failed -> return r
+            }
+        }
+        return when (val ret = resolveTypeExpr(expr.ret, typeParamEnv)) {
+            is FieldTypeResolveResult.Success ->
+                FieldTypeResolveResult.Success(procFunRefType(argTypes, ret.type))
+            is FieldTypeResolveResult.Failed -> ret
         }
     }
 
@@ -249,6 +270,10 @@ internal class ObjClassResolver(
             "Map",
             listOf(typeToTypeExpr(type.keyType), typeToTypeExpr(type.valueType)),
         )
+        is ProcFunRefType -> {
+            val args = type.argTypes.map { typeToTypeExpr(it) }
+            TypeExpr.ProcFunRef(args, typeToTypeExpr(type.returnType))
+        }
         else -> throw RuntimeException("Cannot convert type $type to TypeExpr")
     }
 
@@ -331,6 +356,10 @@ class ObjClassRegistry private constructor(
                         ?: resolvedTypes[expr.name]?.let { TypeResolveResult.Found(it) }
                         ?: TypeResolveResult.Error("Unknown type \"${expr.name}\"")
                 }
+                is TypeExpr.Tuple ->
+                    TypeResolveResult.Error("Tuple types are only valid on the left of ~>")
+                is TypeExpr.ProcFunRef ->
+                    TypeResolveResult.Error("Procfun reference types require a type registry")
                 is TypeExpr.Parametric -> {
                     when (expr.ctor) {
                         "List" -> {

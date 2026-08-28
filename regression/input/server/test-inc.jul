@@ -1,6 +1,5 @@
 import julay.proclib.HttpServer
 import julay.funlib.delaySeconds
-import julay.funlib.exitProgram
 import julay.funlib.println
 
 proc Counter {
@@ -61,29 +60,23 @@ proc ServerStarter {
             started := false
     }
 
-    session transition createHttpServer(port : Int) {
-        guard: ~started & port = 8000
+    session transition listen(
+        port : Int,
+        handler : HttpServerRequest ~> HttpServerResponse
+    ) {
+        guard: ~started & port = 8000 & handler = incHandler
         transit: started := true
     }
 
-    session transition closeHttpServer() {
+    session transition close() {
         guard: false
     }
 }
 
-proc IncReqHandler {
-    var httpReq : HttpServerRequest
-    var localCounter : Int
-    var step : String
-    var exit : Boolean
-
-    session constructor receiveRequest(req : HttpServerRequest) {
-        transit:
-            httpReq := req
-            localCounter := -1 // TODO the reverse order causes a compiler bug
-            step := "A"
-            exit := (req.body = "exit")
-    }
+procfun incHandler(req : HttpServerRequest) : HttpServerResponse {
+    var localCounter : Int := -1
+    var step : String := "A"
+    var exit : Boolean := (req.body = "exit")
 
     client transition increment() {
         guard:   step = "A"
@@ -97,26 +90,25 @@ proc IncReqHandler {
             step := "C"
     }
 
-    session transition sendResponse(resp : HttpServerResponse) {
-        guard:
-            & step = "C"
-            & resp = HttpServerResponse {
-                body := localCounter + "",
-                code := 200
-            }
-        transit:
-            step := "D"
+    internal transition respond() {
+        guard: step = "C" & ~exit
+        return: HttpServerResponse {
+            body := localCounter + "",
+            code := 200
+        }
     }
 
-    internal transition exitSystem() {
-        guard: exit & (step = "D")
-        after:
-            exitProgram(0)
+    internal transition respondAndExit() {
+        guard: step = "C" & exit
+        return: HttpServerResponse {
+            body := localCounter + "",
+            code := 200
+        }
     }
 }
 
 proc Printer := PeriodicPrint
-proc ServerLogic := ServerStarter || IncReqHandler || HttpServer
+proc ServerLogic := ServerStarter || HttpServer
 proc CounterServerTest := Counter || Printer || ServerLogic
 
 compile CounterServerTest

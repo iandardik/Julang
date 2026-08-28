@@ -1,0 +1,8 @@
+import julay.funlib.doHttpRequest
+
+export procfun httpRequest(req : HttpClientRequest) : HttpClientResponse {
+    internal transition perform(r : HttpClientRequest) {
+        guard: r = req
+        return: doHttpRequest(r)
+    }
+}

@@ -79,26 +79,31 @@ private fun validateProcExprsInNode(
         is ValueProcExprNode -> {
             val bare = if (!node.isQualified()) node.valueProcName() else null
             // Procfuns may not appear in || — use an api's calls: for TLA coupling.
-            if (bare != null && bare in procFunNames) {
-                return listOf(
-                    OneLocCompileError(
-                        node.programLocation(),
-                        "Procfun \"$bare\" cannot appear in parallel composition; " +
-                            "list it in an api's calls: instead",
-                    ),
-                )
+            // Indexed spec leaves (banLeafSpecs = false) may reference procfuns directly.
+            if (banLeafSpecs) {
+                if (bare != null && bare in procFunNames) {
+                    return listOf(
+                        OneLocCompileError(
+                            node.programLocation(),
+                            "Procfun \"$bare\" cannot appear in parallel composition; " +
+                                "list it in an api's calls: instead",
+                        ),
+                    )
+                }
+                val imported = if (bare != null) importTable.shortNames[bare] else null
+                val importedDecl = imported?.let { declFromResolvedSymbol(it) }
+                if (importedDecl is ProcFunNode) {
+                    return listOf(
+                        OneLocCompileError(
+                            node.programLocation(),
+                            "Procfun \"${importedDecl.procFunName()}\" cannot appear in parallel composition; " +
+                                "list it in an api's calls: instead",
+                        ),
+                    )
+                }
             }
             val imported = if (bare != null) importTable.shortNames[bare] else null
             val importedDecl = imported?.let { declFromResolvedSymbol(it) }
-            if (importedDecl is ProcFunNode) {
-                return listOf(
-                    OneLocCompileError(
-                        node.programLocation(),
-                        "Procfun \"${importedDecl.procFunName()}\" cannot appear in parallel composition; " +
-                            "list it in an api's calls: instead",
-                    ),
-                )
-            }
             if (banLeafSpecs) {
                 val leafSpecError = leafSpecInProcAssemblyError(
                     node, bare, importedDecl, leafSpecNames, moduleSymbols,

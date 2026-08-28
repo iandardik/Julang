@@ -246,7 +246,7 @@ Temps / binder `x` may be compiler-internal when using the shorthand. Leaves und
 Multiple instances of a class in a spec use **create-index**:
 
 ```jul
-spec HandlerSpec := IncReqHandler[t : Int]
+spec HandlerSpec := incHandler[t : Int]
 spec IncSpec := <true> Counter || HandlerSpec <AllInvs>
 ```
 

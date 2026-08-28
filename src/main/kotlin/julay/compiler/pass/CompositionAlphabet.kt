@@ -7,6 +7,7 @@ import julay.compiler.OneLocCompileWarning
 import julay.compiler.ProgramLoc
 import julay.compiler.TwoLocsCompileError
 import julay.compiler.ast.ProcClassNode
+import julay.compiler.ast.ProcFunNode
 import julay.compiler.ast.RootNode
 import julay.compiler.decl.ActionDecl
 import julay.compiler.decl.ProcClassDecl
@@ -49,7 +50,7 @@ data class AlphabetOffer(
     val leafId: LeafActionId get() = LeafActionId(pclassKey, occurrenceId, name, isConstructor)
 
     fun signatureCompatible(other: AlphabetOffer): Boolean =
-        args == other.args && isSession == other.isSession &&
+        actionArgsCompatible(args, other.args) && isSession == other.isSession &&
             sourceInternal == other.sourceInternal &&
             // Ordinary/session must agree on modifier; provider↔client may differ.
             (isProvider || other.isProvider || isClient || other.isClient || modifier == other.modifier)
@@ -293,11 +294,14 @@ fun computeCompositionAlphabet(
 
     var allOffers = alphabetOf(root, root.name, root.name)
 
-    // Fold alphabets of procfuns called by hosts, even when not listed in ||.
+    // Fold alphabets of procfuns called by hosts (and ~> handler refs), even when not listed in ||.
+    // Transitive: handleRpc registered on listen also folds inRequestVoteRPC called from its return:.
     if (ast != null && procFunNames.isNotEmpty() && root.name !in procFunNames) {
         val pclasses = ast.declNodes().filterIsInstance<ProcClassNode>().associateBy { it.name() }
+        val procFunClasses = ast.declNodes().filterIsInstance<ProcFunNode>()
+            .associate { it.name() to it.asSyntheticProcClass() }
         val alreadyStamped = leafOccurrences.map { it.pclassName }.toSet()
-        val called = calledProcFunNamesUnder(root, procDecls, procFunNames, pclasses)
+        val called = calledProcFunNamesUnder(root, procDecls, procFunNames, pclasses, procFunClasses)
             .filter { it !in alreadyStamped }
             .sorted()
         for (pf in called) {
@@ -320,21 +324,22 @@ fun computeCompositionAlphabet(
     )
 }
 
-/** Procfun names called by any non-procfun host leaf under [root]. */
+/**
+ * Procfun names reachable from non-procfun host leaves under [root]:
+ * direct call sites, api-qualified calls, `~>` handler refs, and nested calls inside those procfuns.
+ */
 internal fun calledProcFunNamesUnder(
     root: ProcDecl,
     procDecls: List<ProcDecl>,
     procFunNames: Set<String>,
     pclasses: Map<String, ProcClassNode>,
+    procFunClasses: Map<String, ProcClassNode> = emptyMap(),
 ): Set<String> {
     val hosts = collectLeafOccurrences(root, procDecls)
         .map { it.pclassName }
         .filter { it !in procFunNames }
         .distinct()
-    return hosts.flatMap { host ->
-        val pc = pclasses[host] ?: return@flatMap emptyList()
-        collectProcFunCallsInProc(pc).mapNotNull { it.resolvedProcFunOrNull()?.procFunName() }
-    }.filter { it in procFunNames }.toSet()
+    return reachableProcFunNamesFromHosts(hosts, procFunNames, pclasses, procFunClasses)
 }
 
 /**

@@ -5,7 +5,7 @@
 | File | Role |
 |------|------|
 | [`main.jul`](../../input/echo_server/main.jul) | Aliases and `compile` |
-| [`server.jul`](../../input/echo_server/server.jul) | HTTP server + per-request handler |
+| [`server.jul`](../../input/echo_server/server.jul) | HTTP server + procfun handler |
 | [`client.jul`](../../input/echo_server/client.jul) | Client dispatcher + per-request logic |
 
 ## Intent
@@ -24,23 +24,25 @@ compile EchoServer, EchoClient
 ### Server (`server.jul`)
 
 ```jul
-proc Server := ServerStarter || EchoHandler || HttpServer
+procfun echoHandler(req : HttpServerRequest) : HttpServerResponse { ... }
+
+proc Server := ServerStarter || HttpServer
 ```
 
-- **`ServerStarter`** — `initially` then session `createHttpServer(port)` with `port = 8000`.
-- **`EchoHandler`** — **session constructor** `receiveRequest`: one handler instance per incoming request; builds a `ReqInfo` object; session `sendResponse` with HTTP 200; then prints via funlib `println` in an `after:` block.
-- **`HttpServer`** — stdlib ([Standard library](../language/standard-library.md)).
+- **`echoHandler`** — procfun registered at startup via `handler = echoHandler` on `listen`; each request invokes the handler directly (no per-request session proc).
+- **`ServerStarter`** — `initially` then session `listen(port, handler)` with `port = 8000` and `handler = echoHandler`.
+- **`HttpServer`** — Kotlin proclib ([Standard library](../language/standard-library.md)).
 
-This is a good illustration of [sessions](../language/sessions.md): sticky pairwise actions with the HTTP library, and constructing a handler upon `receiveRequest`.
+Lifecycle `listen` / `close` remain **session** actions between `ServerStarter` and `HttpServer` so startup pairs correctly; request handling is procfun-based.
 
 ### Client (`client.jul`)
 
 ```jul
-proc Client := ClientDispatcher || ClientLogic || HttpClient
+proc Client := ClientDispatcher || ClientLogic
 ```
 
 - **`ClientDispatcher`** — `initially` reads an optional count from `args` (`parseInt` / `length` from funlib); offers `startReq` / `gotResp`; exits when all responses arrive.
-- **`ClientLogic`** — constructed on `startReq(num)`; drives `createHttpClient` → `sendRequest` → `receiveResponse` → print (funlib `println`) → `closeHttpClient` → `gotResp`.
+- **`ClientLogic`** — constructed on `startReq(num)`; calls `httpRequest` (stdlib procfun) to POST and print the response body.
 
 Spawning `ClientLogic` via a **named constructor** (`startReq`) after program `initially` shows the “construct upon an action” pattern from [Processes](../language/processes.md).
 
@@ -79,14 +81,16 @@ Request order can interleave differently across runs.
 ## Language features showcased
 
 - Parallel composition and modules (`import server.Server`, …)
-- `session` actions with HttpServer / HttpClient
-- Session constructors for per-request handlers
-- `obj` literals (`ReqInfo`, HTTP request/response types)
+- Procfun handler registration (`HttpServerRequest ~> HttpServerResponse`)
+- Session lifecycle sync with `HttpServer` (`listen` / `close`)
+- `httpRequest` stdlib procfun for the client
+- `obj` literals (HTTP request/response types)
 - Funlib (`length`, `parseInt`, `println`)
 - Multiple `compile` targets in one entry file
 
 ## See also
 
 - [Composition and actions](../language/composition-and-actions.md)
-- [Sessions](../language/sessions.md)
+- [Procfun](../language/procfun.md)
+- [Standard library](../language/standard-library.md) — HttpServer and `httpRequest`
 - Next: [Inc server](inc-server.md)

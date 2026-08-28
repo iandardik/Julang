@@ -179,12 +179,9 @@ class SessionAffinityTest {
     }
 
     @Test
-    fun sessionActionsAreMarkedOnHttpLibrary() {
-        assertTrue(JulHttpServer.receiveRequestAct.isSession)
-        assertTrue(JulHttpServer.sendResponseAct.isSession)
-        assertTrue(JulHttpClient.sendRequestAct.isSession)
-        assertTrue(JulHttpClient.receiveResponseAct.isSession)
-        assertTrue(JulHttpClient.closeHttpClientAct.isSession)
+    fun httpServerLifecycleActionsAreSession() {
+        assertTrue(JulHttpServer.listenAct.isSession)
+        assertTrue(JulHttpServer.closeAct.isSession)
     }
 
     /**

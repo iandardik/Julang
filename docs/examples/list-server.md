@@ -5,7 +5,7 @@
 | File | Role |
 |------|------|
 | [`main.jul`](../../input/list_server/main.jul) | `RunningList`, composition, `compile` |
-| [`server.jul`](../../input/list_server/server.jul) | HTTP starter + per-request handler |
+| [`server.jul`](../../input/list_server/server.jul) | HTTP starter + `listHandler` procfun |
 | [`printer.jul`](../../input/list_server/printer.jul) | Periodic `getList` + print |
 
 ## Intent
@@ -48,11 +48,11 @@ proc ListServer := RunningList || Printer || ServerLogic
 
 ### HTTP handler (`server.jul`)
 
-`IncReqHandler` (name reused from the inc demo) on `receiveRequest`:
+`listHandler` procfun (registered via `handler = listHandler` on `listen`):
 
 1. Stores the request body
 2. Syncs `getAndAppend(e, lst)` with `e = reqBody`
-3. Responds with the updated list stringified in the HTTP body
+3. Returns an `HttpServerResponse` with the updated list stringified in the body
 
 ### Printer (`printer.jul`)
 
@@ -98,7 +98,7 @@ curl -s -X POST -d 'world' http://localhost:8000/
 
 - `List<String>` state and list concatenation in `transit`
 - `provider` interface for a collection resource
-- Same HTTP session + modular layout as echo/inc
+- Procfun HTTP handler + modular layout (same pattern as echo/inc)
 - Printer as a separate `client` of `getList`
 
 ## Compare to inc server

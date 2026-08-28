@@ -1,4 +1,4 @@
-import julay.proclib.HttpClient
+import julay.funlib.httpRequest
 import julay.funlib.length
 import julay.funlib.split
 import julay.funlib.startsWith
@@ -34,29 +34,17 @@ proc RaftClientLogic {
             respBody := ""
             respCode := 0
             retried := false
-            step := "createHttpClient"
+            step := "send"
     }
 
-    session transition createHttpClient() {
-        guard: step = "createHttpClient"
-        transit: step := "send"
-    }
-
-    session transition sendRequest(req : HttpClientRequest) {
-        guard:
-            & step = "send"
-            & req = HttpClientRequest {
+    internal transition doRequest() {
+        guard: step = "send"
+        transit:
+            let resp : HttpClientResponse := httpRequest(HttpClientRequest {
                 url := targetUrl + path,
                 method := "POST",
                 body := reqBody
-            }
-        transit:
-            step := "recv"
-    }
-
-    session transition receiveResponse(resp : HttpClientResponse) {
-        guard: step = "recv"
-        transit:
+            })
             respBody := resp.body
             respCode := resp.code
             step := "print"
@@ -81,18 +69,13 @@ proc RaftClientLogic {
             step := "send"
     }
 
-    session transition closeHttpClient() {
+    internal transition doneOk() {
         guard:
             & step = "afterPrint"
             & (respCode = 200 | retried | respCode = 503 | ~(startsWith(respBody, "LEADER ")))
-        transit: step := "done"
-    }
-
-    internal transition doneOk() {
-        guard: step = "done"
         after:
             exitProgram(0)
     }
 }
 
-export proc Client := RaftClientLogic || HttpClient
+export proc Client := RaftClientLogic
