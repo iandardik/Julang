@@ -68,16 +68,13 @@ proc ElectionTimeoutImpl {
     }
 
     transition resetElectionTimer() {
-        guard:
-            step ~= "done"
         transit:
             step := if (step = "wait") "cancel" else step
     }
 
     transition stopElectionTimeout(t : Int) {
         guard:
-            & t = leaderTerm
-            & step ~= "done"
+            t = leaderTerm
         transit:
             step := "done"
     }

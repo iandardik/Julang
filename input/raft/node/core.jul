@@ -148,6 +148,20 @@ export proc RaftProtocol {
         transit:
             log := log + listOf(Entry { term := currentTerm, value := value })
             lastLogTerm := currentTerm
+            let _ : Boolean := LeaderHeartbeat.eagerReplication()
+    }
+
+    /*
+     * True iff some other node still needs log entries (nextIndex behind tip).
+     * LeaderHeartbeat uses this after each AE round to skip idle waits when dirty.
+     */
+    transition logOutdated(outdated : Boolean) {
+        guard:
+            & state = "Leader"
+            & let (numOutdatedLogIndices : Int :=
+                nextIndex.keys.filter(n -> n ~= self & nextIndex[n] <= length(log)).length) {
+                outdated <=> (numOutdatedLogIndices > 0)
+            }
     }
 
     internal transition advanceCommitIndex(newCommitIndex : Int) {
