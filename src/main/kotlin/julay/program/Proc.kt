@@ -11,6 +11,7 @@ import julay.program.action.SyncPayload
 import julay.program.action.TSAction
 import java.util.*
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
 
@@ -36,6 +37,8 @@ class Proc(
     val program: Program,
     /** When non-null, [TransitionSystem.finishConstruction] runs once before the select loop. */
     private val constructorAct: ConcreteAction? = null,
+    /** When non-null, completed on `return:` for spawn-and-await procfun callers. */
+    private val procFunReturnDeferred: CompletableDeferred<Value>? = null,
 ) {
     val procId: Long = program.allocateProcId()
     val classId: Int = tsInfo.classID()
@@ -330,7 +333,7 @@ class Proc(
             program.spawn(act, parent = this)
         }
         transitionSystem.consumeProcFunReturn()?.let { value ->
-            program.completeProcFunReturn(procId, value)
+            procFunReturnDeferred?.complete(value)
             return false
         }
         return !silentlyKilled.get()

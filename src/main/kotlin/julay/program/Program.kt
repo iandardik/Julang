@@ -20,7 +20,6 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CompletableDeferred
 import java.util.Optional
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -62,7 +61,6 @@ class Program {
      */
     private val sessionActionsByName: Map<String, SymbolicAction>
     private val procFunByName: Map<String, TransitionSystemStaticInfo>
-    private val procFunWaiters = ConcurrentHashMap<Long, CompletableDeferred<Value>>()
 
     constructor(
         componentInfo: Set<TransitionSystemStaticInfo>,
@@ -168,10 +166,6 @@ class Program {
         awaitCancellation()
     }
 
-    fun completeProcFunReturn(procId: Long, value: Value) {
-        procFunWaiters.remove(procId)?.complete(value)
-    }
-
     /**
      * Spawn-and-await a procfun instance: runs until a `return:` transition, then yields the value.
      * The instance participates in SyncChannels so `client` steps can meet providers.
@@ -194,8 +188,14 @@ class Program {
         val ctorAct = ConcreteAction(ctorSym, concreteArgs)
         val ts = factory(this, ctorAct)
         val deferred = CompletableDeferred<Value>()
-        val child = Proc(ts, info, staticChannelTable, this, constructorAct = ctorAct)
-        procFunWaiters[child.procId] = deferred
+        val child = Proc(
+            ts,
+            info,
+            staticChannelTable,
+            this,
+            constructorAct = ctorAct,
+            procFunReturnDeferred = deferred,
+        )
         val job = godScope.launch(start = CoroutineStart.LAZY) {
             child.run()
             if (!deferred.isCompleted) {
