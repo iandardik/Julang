@@ -28,9 +28,14 @@ procfun outRequestVoteRPC(
                 method := "POST",
                 body := encodeRequestVote(payload)
             })
-            step := "updateTerm"
-            responseTerm := parseInt(fieldValue(split(resp.body, "|")[1]))
-            grantedFlag := parseBool(fieldValue(split(resp.body, "|")[2]))
+            step := if (resp.code = 200) "updateTerm" else "rpcFailed"
+            responseTerm := if (resp.code = 200) parseInt(fieldValue(split(resp.body, "|")[1])) else 0
+            grantedFlag := if (resp.code = 200) parseBool(fieldValue(split(resp.body, "|")[2])) else false
+    }
+
+    internal transition rpcFailed() {
+        guard: step = "rpcFailed"
+        return: false
     }
 
     client transition updateTerm(inTerm : Int) {
@@ -74,10 +79,15 @@ procfun outAppendEntriesRPC(peer : Node, data : AppendEntriesData) : Boolean {
                 method := "POST",
                 body := encodeAppendEntries(data)
             })
-            step := "updateTerm"
-            responseTerm := parseInt(fieldValue(split(resp.body, "|")[1]))
-            successFlag := parseBool(fieldValue(split(resp.body, "|")[2]))
-            matchIdxVal := parseInt(fieldValue(split(resp.body, "|")[3]))
+            step := if (resp.code = 200) "updateTerm" else "rpcFailed"
+            responseTerm := if (resp.code = 200) parseInt(fieldValue(split(resp.body, "|")[1])) else 0
+            successFlag := if (resp.code = 200) parseBool(fieldValue(split(resp.body, "|")[2])) else false
+            matchIdxVal := if (resp.code = 200) parseInt(fieldValue(split(resp.body, "|")[3])) else 0
+    }
+
+    internal transition rpcFailed() {
+        guard: step = "rpcFailed"
+        return: false
     }
 
     client transition updateTerm(inTerm : Int) {

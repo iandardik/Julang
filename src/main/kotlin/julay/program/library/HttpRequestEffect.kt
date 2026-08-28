@@ -14,6 +14,12 @@ fun doHttpRequest(request: HttpClientRequest): HttpClientResponse {
         "GET", "HEAD" -> builder.method(method, BodyPublishers.noBody()).build()
         else -> builder.method(method, BodyPublishers.ofString(request.body)).build()
     }
-    val jdkResponse = client.send(jdkRequest, BodyHandlers.ofString())
-    return HttpClientResponse(jdkResponse.body(), jdkResponse.statusCode())
+    return try {
+        val jdkResponse = client.send(jdkRequest, BodyHandlers.ofString())
+        HttpClientResponse(jdkResponse.body(), jdkResponse.statusCode())
+    } catch (_: Exception) {
+        // Raft and other networked procs treat non-200 responses as RPC failure; avoid
+        // killing the caller coroutine on transient connect/refused errors at startup.
+        HttpClientResponse("", 0)
+    }
 }
