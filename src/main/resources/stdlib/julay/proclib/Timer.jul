@@ -1,10 +1,11 @@
-import julay.funlib.delaySeconds
+import julay.funlib.delayMillis
 import julay.funlib.exitSession
 import julay.funlib.killSessionPeer
 
 /*
  * Cancellable timer: public API on TimerController; delay runs on TimerHelper so
  * cancelTimer can killSessionPeer(TimerHelper) without blocking the controller.
+ * startTimer(time) takes milliseconds.
  */
 proc TimerController {
     const LARGE_WRAP_AROUND : Int
@@ -85,7 +86,7 @@ proc TimerHelper {
             timerId := id
             done := false
         after:
-            delaySeconds(time)
+            delayMillis(time)
     }
 
     session transition timerHelperEnd(id : Int) {

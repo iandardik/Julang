@@ -66,7 +66,7 @@ Compose these like any other proc, e.g. `Server || HttpServer` or `Driver || Tim
 
 | Module | Import | Role | Effects? |
 |--------|--------|------|----------|
-| **Timer** | `julay.proclib.Timer` | Cancellable timer (`createTimer`, `startTimer`, `timeout`, `cancelTimer`); uses `delaySeconds`, `exitSession`, `killSessionPeer` | Yes (delay, session teardown) |
+| **Timer** | `julay.proclib.Timer` | Cancellable timer (`createTimer`, `startTimer`, `timeout`, `cancelTimer`); `startTimer` takes milliseconds; uses `delayMillis`, `exitSession`, `killSessionPeer` | Yes (delay, session teardown) |
 | **HttpServer** | `julay.proclib.HttpServer` | Lifecycle only: `listen(port, handler)`, `close` | Yes (network I/O; Kotlin-native) |
 
 These HTTP pieces are the backbone of the [echo](../examples/echo-server.md), [inc](../examples/inc-server.md), and [list](../examples/list-server.md) server examples.
@@ -98,6 +98,7 @@ Import as `julay.funlib.<name>`. Bare names are not available without an import.
 | `exitProgram` | Halt the program with an `Int` return code (void) | **Yes** | **No** |
 | `exitProc` | Cancel the calling proc's coroutine (void); **not allowed in procfuns (compile error)** | **Yes** | **No** |
 | `delaySeconds` | Sleep for N seconds (void) | **Yes** | **No** |
+| `delayMillis` | Sleep for N milliseconds (void) | **Yes** | **No** |
 | `exitSession` | End session with named peer class (void; transition-only) | **Yes** | **No** |
 | `killSessionPeer` | End session and cancel peer (void; transition-only) | **Yes** | **No** |
 

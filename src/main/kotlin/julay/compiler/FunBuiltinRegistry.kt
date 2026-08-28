@@ -251,6 +251,22 @@ object FunBuiltinRegistry {
         z3Codegen = { _ -> throw RuntimeException("Function \"delaySeconds\" cannot be used in guards") },
     )
 
+    private val delayMillisBuiltin = FunBuiltin(
+        name = "delayMillis",
+        arity = 1,
+        returnType = null,
+        checkArgs = { argTypes ->
+            when {
+                argTypes.size != 1 -> "Expected function \"delayMillis\" to take 1 argument(s) but got ${argTypes.size}"
+                argTypes[0] !is IntType ->
+                    "Expected argument of \"delayMillis\" to have an Int type but got ${argTypes[0]}"
+                else -> null
+            }
+        },
+        kotlinCodegen = { args -> "delay(${args[0]}.milliseconds)" },
+        z3Codegen = { _ -> throw RuntimeException("Function \"delayMillis\" cannot be used in guards") },
+    )
+
     private val exitSessionBuiltin = FunBuiltin(
         name = "exitSession",
         arity = 1,
@@ -405,6 +421,7 @@ object FunBuiltinRegistry {
         exitProcBuiltin.name to exitProcBuiltin,
         readlnBuiltin.name to readlnBuiltin,
         delaySecondsBuiltin.name to delaySecondsBuiltin,
+        delayMillisBuiltin.name to delayMillisBuiltin,
         exitSessionBuiltin.name to exitSessionBuiltin,
         killSessionPeerBuiltin.name to killSessionPeerBuiltin,
         mapBuiltin.name to mapBuiltin,
@@ -443,6 +460,7 @@ object FunBuiltinRegistry {
     fun kotlinCodegenImports(): Set<String> = setOf(
         "kotlin.system.exitProcess",
         "kotlin.time.Duration.Companion.seconds",
+        "kotlin.time.Duration.Companion.milliseconds",
         "kotlinx.coroutines.delay",
     )
 }

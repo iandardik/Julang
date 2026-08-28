@@ -25,7 +25,7 @@ from typing import List, Optional, Tuple
 
 LIMITATIONS = """\
 LIMITATIONS (Tier 0 — not comparable to PGo / etcd / YCSB):
-  - Election timeouts are seconds-scale; heartbeats are ~1s.
+  - Election timeouts are ~1–2s (ms timers); heartbeats are ~200ms.
   - AppendEntries carries at most one entry and is sync in the heartbeat loop.
   - Log / term state is in-memory only (no durability).
   - RPC is JDK HTTP with a pipe-delimited text protocol.

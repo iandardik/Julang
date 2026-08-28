@@ -1,5 +1,5 @@
 import julay.funlib.length
-import julay.funlib.delaySeconds
+import julay.funlib.delayMillis
 import node.lib.Node
 import node.lib.AppendEntriesData
 import node.rpc_out.RpcOut
@@ -39,7 +39,7 @@ proc LeaderHeartbeatImpl {
     internal transition sleep() {
         guard: step = "sleep"
         transit: step := "pickTarget"
-        after: delaySeconds(1)
+        after: delayMillis(200)
     }
 
     transition appendEntries(target : Node, payload : AppendEntriesData) {

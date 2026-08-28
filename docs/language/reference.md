@@ -73,7 +73,7 @@ Procfuns cannot appear in `||`. List them in an [api](composition-and-actions.md
 Pure / expression helpers: `length` · `max` · `min` · `parseInt` · `startsWith` · `split` · `trim` · `portFromUrl`  
 (`split` / `trim` / `portFromUrl`: not for guards)
 
-Effectful: `println` · `readln` · `readFile` · `exitProgram(code)` · `exitProc` · `delaySeconds` · `exitSession(Peer)` · `killSessionPeer(Peer)`  
+Effectful: `println` · `readln` · `readFile` · `exitProgram(code)` · `exitProc` · `delaySeconds` · `delayMillis` · `exitSession(Peer)` · `killSessionPeer(Peer)`  
 (`exitSession` / `killSessionPeer`: transitions only; Peer is a leaf proc-class name; no-op if affinity absent)  
 (`exitProc`: ordinary procs / leaf-spec actions only — **compile error inside procfuns**)
 

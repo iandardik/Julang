@@ -39,7 +39,9 @@ proc ElectionTimeoutImpl {
         transit:
             selfNode := me
             leaderTerm := term
-            electTimeout := 6 + (2 * me.id)
+            // Paper recommends 150–300ms; Julay HTTP+sync RPCs need a larger window
+            // so elections can finish before the next timeout. Stagger by node id.
+            electTimeout := 1000 + 500 * (me.id - 1)
             step := "createTimer"
     }
 

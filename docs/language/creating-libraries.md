@@ -32,7 +32,7 @@ Pure or effectful functions in `.jul` are declared with `export fun` under `stdl
 
 ### Example pattern (proclib)
 
-See [`Timer.jul`](../../src/main/resources/stdlib/julay/proclib/Timer.jul): a `proc` with session constructors/transitions, funlib effects (`delaySeconds`, `exitSession`, …), and an optional `spec` for model checking.
+See [`Timer.jul`](../../src/main/resources/stdlib/julay/proclib/Timer.jul): a `proc` with session constructors/transitions, funlib effects (`delayMillis`, `exitSession`, …), and an optional `spec` for model checking.
 
 ## Kotlin-native libraries
 
@@ -65,7 +65,7 @@ Parallel composition is occurrence-based. Composition-hidden syncs use private s
 |------|--------|
 | Protocol logic, sessions, specs/TLC | `.jul` |
 | JDK / OS APIs not in funlib | Kotlin-native |
-| Both (Timer + delaySeconds) | `.jul` calling funlib effects |
+| Both (Timer + delayMillis) | `.jul` calling funlib effects |
 
 ## See also
 
