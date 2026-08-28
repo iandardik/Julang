@@ -91,6 +91,22 @@ proc RaftNodeMain {
             & step = "startRpcOut"
             & poolSize = max(2, length(cluster) - 1)
         transit:
+            step := "startElectionTimeoutDriver"
+    }
+
+    // Construct the long-running ElectionTimeoutImpl (idle); started later via startElectionTimeout.
+    transition startElectionTimeoutDriver() {
+        guard:
+            step = "startElectionTimeoutDriver"
+        transit:
+            step := "startLeaderHeartbeatDriver"
+    }
+
+    // Construct the long-running LeaderHeartbeatImpl (idle); started on becomeLeader.
+    transition startLeaderHeartbeatDriver() {
+        guard:
+            step = "startLeaderHeartbeatDriver"
+        transit:
             step := "startCore"
     }
 

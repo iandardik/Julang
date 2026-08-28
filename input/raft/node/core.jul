@@ -40,6 +40,7 @@ export proc RaftProtocol {
 
     constructor startRaftCore(me : Node, cluster : Set<Node>) {
         transit:
+            // Async start: spawns a worker that syncs startElectionTimeout with ElectionTimeout.
             let _ : Boolean := ElectionTimeout.startElectionTimeout(me, 0)
             self := me
             cluster := cluster
@@ -61,14 +62,17 @@ export proc RaftProtocol {
 
     /*
      * The "Timeout" transition in the Raft protocol.
-    */
+     * Start ElectionTimeout for the new term. Re-start via async startElectionTimeout —
+     * safe mid-sync because it returns without blocking on the election-timer peer.
+     */
     transition electionTimeout() {
         guard:
             state in setOf("Follower", "Candidate")
         transit:
-            let _ : Boolean := ElectionTimeout.startElectionTimeout(self, currentTerm + 1)
+            let newTerm : Int := currentTerm + 1
+            let _ : Boolean := ElectionTimeout.startElectionTimeout(self, newTerm)
             state := "Candidate"
-            currentTerm := currentTerm + 1
+            currentTerm := newTerm
             votedFor := some(self)
             votesGranted := setOf(self)
             votesResponded := setOf(self)
@@ -77,7 +81,7 @@ export proc RaftProtocol {
 
     /*
      * Request a vote from the target node.
-    */
+     */
     transition requestVote(target : Node, payload : VoteRequestData) {
         guard:
             & state = "Candidate"
@@ -132,8 +136,8 @@ export proc RaftProtocol {
             & state = "Candidate"
             & length(votesGranted) * 2 > length(cluster)
         transit:
-            let _ : Boolean := LeaderHeartbeat.startLeaderHeartbeat(self, currentTerm, cluster)
             let _ : Boolean := ElectionTimeout.stopElectionTimeout(currentTerm)
+            let _ : Boolean := LeaderHeartbeat.startLeaderHeartbeat(self, currentTerm, cluster)
             state := "Leader"
             knownLeader := some(self)
             nextIndex := cluster.associateWith(n -> length(log) + 1)
@@ -146,9 +150,9 @@ export proc RaftProtocol {
             & state = "Leader"
             & idx = length(log) + 1
         transit:
+            let _ : Boolean := LeaderHeartbeat.eagerReplication()
             log := log + listOf(Entry { term := currentTerm, value := value })
             lastLogTerm := currentTerm
-            let _ : Boolean := LeaderHeartbeat.eagerReplication()
     }
 
     /*
@@ -331,6 +335,12 @@ export proc RaftProtocol {
     provider transition updateTerm(inTerm : Int) {
         transit:
             let advance : Boolean := inTerm > currentTerm
+            let wasLeader : Boolean := state = "Leader"
+            // Stop heartbeat on leader step-down.
+            let _ : Boolean := if (advance & wasLeader) {
+                LeaderHeartbeat.stopLeaderHeartbeat()
+            } else { true }
+            // Async start of ElectionTimeout (safe mid-provider sync).
             let _ : Boolean := if (advance) {
                 ElectionTimeout.startElectionTimeout(self, inTerm)
             } else { true }

@@ -1,13 +1,20 @@
 import node.lib.Node
 import julay.proclib.Timer
+import julay.funlib.setOf
 
 export api ElectionTimeout {
-    proc: ElectionTimeoutImpl || Timer
+    proc: ElectionTimeoutImpl || Timer || AsyncStartElectionTimeout
     calls: gotHeartbeat, startElectionTimeout, stopElectionTimeout
 }
 
+/*
+ * Starts ElectionTimeout for the given node and term.
+ * Returns without blocking on the election timeout: a short-lived worker
+ * completes the start asynchronously.
+ * Safe to call from inside electionTimeout / updateTerm.
+ */
 procfun startElectionTimeout(self : Node, leaderTerm : Int) : Boolean {
-    transition startElectionTimeout(me : Node, term : Int) {
+    transition asyncStartElectionTimeout(me : Node, term : Int) {
         guard:
             & me = self
             & term = leaderTerm
@@ -16,7 +23,7 @@ procfun startElectionTimeout(self : Node, leaderTerm : Int) : Boolean {
 }
 
 procfun gotHeartbeat() : Boolean {
-    transition resetElectionTimer() {
+    transition resetElectionTimeout() {
         return: true
     }
 }
@@ -29,27 +36,77 @@ procfun stopElectionTimeout(term : Int) : Boolean {
     }
 }
 
+/*
+ * Short-lived worker spawned by startElectionTimeout. Syncs startElectionTimeout with
+ * the single long-running ElectionTimeoutImpl (same pattern as AeSendWorker).
+ */
+proc AsyncStartElectionTimeout {
+    const me : Node
+    const term : Int
+    var done : Boolean
+
+    constructor asyncStartElectionTimeout(me : Node, term : Int) {
+        transit:
+            me := me
+            term := term
+            done := false
+    }
+
+    transition startElectionTimeout(me : Node, term : Int) {
+        guard:
+            & ~done
+            & me = this.me
+            & term = this.term
+        transit:
+            done := true
+    }
+}
+
 proc ElectionTimeoutImpl {
-    const selfNode : Node
-    const leaderTerm : Int
-    const electTimeout : Int
+    var selfNode : Node
+    var leaderTerm : Int
+    var electTimeout : Int
     var step : String
 
-    constructor startElectionTimeout(me : Node, term : Int) {
+    /*
+     * Idle init for the single long-running ElectionTimeoutImpl. Create the Timer
+     * session once; later starts only call startTimer (session createTimer cannot
+     * rebind on the same peer).
+     */
+    constructor startElectionTimeoutDriver() {
+        transit:
+            selfNode := Node { id := 0, url := "" }
+            leaderTerm := 0
+            electTimeout := 0
+            step := "createTimer"
+    }
+
+    transition startElectionTimeout(me : Node, term : Int) {
+        guard:
+            // Include createTimer: startRaftCore may start before the driver session finishes.
+            & step in setOf("done", "wait", "startTimer", "createTimer", "createThenStart")
         transit:
             selfNode := me
             leaderTerm := term
             // Paper recommends 150–300ms; Julay HTTP+sync RPCs need a larger window
             // so elections can finish before the next timeout. Stagger by node id.
             electTimeout := 1000 + 500 * (me.id - 1)
-            step := "createTimer"
+            // Re-start from wait cancels the live delay first; never re-createTimer.
+            step := if (step = "wait") {
+                "cancel"
+            } else if (step in setOf("createTimer", "createThenStart")) {
+                "createThenStart"
+            } else {
+                "startTimer"
+            }
     }
 
     session transition createTimer() {
         guard:
-            step = "createTimer"
+            step in setOf("createTimer", "createThenStart")
         transit:
-            step := "startTimer"
+            // Session established once; start immediately if start raced the driver.
+            step := if (step = "createThenStart") "startTimer" else "done"
     }
 
     session transition startTimer(time : Int) {
@@ -67,38 +124,42 @@ proc ElectionTimeoutImpl {
             step := "doTimeout"
     }
 
-    transition resetElectionTimer() {
+    transition resetElectionTimeout() {
         transit:
             step := if (step = "wait") "cancel" else step
     }
 
     transition stopElectionTimeout(t : Int) {
         guard:
-            t = leaderTerm
+            // Allow stop when already stopped (any term) so becomeLeader cannot
+            // wait on a stale leaderTerm while an async start is still in flight.
+            (step = "done") | (t = leaderTerm)
         transit:
-            step := "done"
+            // Cancel a live wait so the Timer delay is torn down; otherwise stop.
+            step := if (step = "wait") "cancelStop" else "done"
     }
 
     session transition cancelTimer() {
         guard:
-            step = "cancel"
+            step in setOf("cancel", "cancelStop")
         transit:
-            step := "startTimer"
+            step := if (step = "cancelStop") "done" else "startTimer"
     }
 
+    // Fire once, then stop (RaftProtocol re-starts via startElectionTimeout after term bump).
     transition electionTimeout() {
         guard:
             step = "doTimeout"
         transit:
-            step := "startTimer"
+            step := "done"
     }
 
-    // terminate this proc once we detect a stale term
+    // Backstop: terminate enablement when RaftProtocol's term has moved on.
     client transition staleTerm(term : Int) {
         guard:
             & term = leaderTerm
             & step ~= "done"
         transit:
-            step := "done"
+            step := if (step = "wait") "cancelStop" else "done"
     }
 }

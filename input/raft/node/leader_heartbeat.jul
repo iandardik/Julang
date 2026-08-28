@@ -8,11 +8,11 @@ import julay.proclib.Timer
 
 export api LeaderHeartbeat {
     proc: LeaderHeartbeatImpl || AeSendWorker || Timer
-    calls: startLeaderHeartbeat, eagerReplication
+    calls: startLeaderHeartbeat, eagerReplication, stopLeaderHeartbeat
 }
 
 procfun startLeaderHeartbeat(self : Node, leaderTerm : Int, theCluster : Set<Node>) : Boolean {
-    transition startLeaderHeartbeat(me : Node, term : Int, cluster : Set<Node>) {
+    transition startHeartbeat(me : Node, term : Int, cluster : Set<Node>) {
         guard:
             & me = self
             & term = leaderTerm
@@ -27,6 +27,12 @@ procfun startLeaderHeartbeat(self : Node, leaderTerm : Int, theCluster : Set<Nod
  */
 procfun eagerReplication() : Boolean {
     transition wakeForReplication() {
+        return: true
+    }
+}
+
+procfun stopLeaderHeartbeat() : Boolean {
+    transition stopHeartbeat() {
         return: true
     }
 }
@@ -56,24 +62,29 @@ proc AeSendWorker {
 }
 
 proc LeaderHeartbeatImpl {
-    const me : Node
-    const leaderTerm : Int
-    const cluster : Set<Node>
-    const heartbeatMs : Int
+    var me : Node
+    var leaderTerm : Int
+    var cluster : Set<Node>
+    var heartbeatMs : Int
     var step : String
     var sentThisRound : Set<Node>
     var pendingPeer : Node
     var pendingData : AppendEntriesData
 
-    constructor startLeaderHeartbeat(me : Node, term : Int, cluster : Set<Node>) {
+    /*
+     * Idle init for the single long-running LeaderHeartbeatImpl. Create the Timer
+     * session once; startHeartbeat never re-invokes createTimer (session
+     * constructors cannot rebind).
+     */
+    constructor startLeaderHeartbeatDriver() {
         transit:
-            me := me
-            leaderTerm := term
-            cluster := cluster
+            me := Node { id := 0, url := "" }
+            leaderTerm := 0
+            cluster := setOf()
             heartbeatMs := 200
             step := "createTimer"
-            sentThisRound := setOf(me)
-            pendingPeer := me
+            sentThisRound := setOf()
+            pendingPeer := Node { id := 0, url := "" }
             pendingData := AppendEntriesData {
                 term := 0,
                 leaderId := 0,
@@ -85,12 +96,47 @@ proc LeaderHeartbeatImpl {
             }
     }
 
+    transition startHeartbeat(me : Node, term : Int, cluster : Set<Node>) {
+        guard:
+            // Include createTimer: becomeLeader may race the driver session.
+            step in setOf("done", "wait", "createTimer", "createThenStart")
+        transit:
+            me := me
+            leaderTerm := term
+            cluster := cluster
+            heartbeatMs := 200
+            sentThisRound := setOf(me)
+            pendingPeer := me
+            pendingData := AppendEntriesData {
+                term := 0,
+                leaderId := 0,
+                prevLogIndex := 0,
+                prevLogTerm := 0,
+                entry := Entry { term := 0, value := "" },
+                entriesLen := 0,
+                leaderCommit := 0
+            }
+            // Re-start from wait cancels the delay first; never re-createTimer.
+            step := if (step = "wait") {
+                "cancelRestart"
+            } else if (step in setOf("createTimer", "createThenStart")) {
+                "createThenStart"
+            } else {
+                "pickTarget"
+            }
+    }
+
+    transition stopHeartbeat() {
+        transit:
+            step := if (step = "wait") "cancelStop" else "done"
+    }
+
     session transition createTimer() {
         guard:
-            step = "createTimer"
+            step in setOf("createTimer", "createThenStart")
         transit:
-            // Timer ready; begin first round immediately (no initial idle wait).
-            step := "pickTarget"
+            // Session established once; start immediately if becomeLeader raced the driver.
+            step := if (step = "createThenStart") "pickTarget" else "done"
     }
 
     session transition startTimer(time : Int) {
@@ -115,9 +161,15 @@ proc LeaderHeartbeatImpl {
 
     session transition cancelTimer() {
         guard:
-            step = "cancel"
+            step in setOf("cancel", "cancelStop", "cancelRestart")
         transit:
-            step := "pickTarget"
+            step := if (step = "cancelStop") {
+                "done"
+            } else if (step = "cancelRestart") {
+                "pickTarget"
+            } else {
+                "pickTarget"
+            }
     }
 
     // Sync with RaftProtocol only — do not await HTTP here.
@@ -151,12 +203,12 @@ proc LeaderHeartbeatImpl {
             step := if (outdated) "pickTarget" else "startTimer"
     }
 
-    // terminate this proc once we detect a stale term
+    // Backstop when RaftProtocol's term has moved on.
     client transition staleTerm(term : Int) {
         guard:
             & term = leaderTerm
             & step ~= "done"
         transit:
-            step := "done"
+            step := if (step = "wait") "cancelStop" else "done"
     }
 }
