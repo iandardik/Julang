@@ -269,14 +269,16 @@ export proc RaftProtocol {
                 )
             )
         transit:
-            // Reset only on accepted AE; avoids blocking gotHeartbeat when leader has stopped its timer.
-            let _ : Boolean := if (success) {
+            // Any AE for our current term is from the leader for this term (paper §5.2);
+            // reset election timeout on conflict as well as success so catch-up cannot
+            // race a local electionTimeout.
+            let _ : Boolean := if (inTerm = currentTerm) {
                 ElectionTimeout.gotHeartbeat()
             } else true
             let index : Int := prevLogIndex + 1
             let alreadyDone : Boolean :=
                 success & entriesLen = 1 & length(log) >= index & entryTermAt(log, index) = entryTerm
-            knownLeader := if (success) some(nodeById(cluster, leaderId)) else knownLeader
+            knownLeader := if (inTerm = currentTerm) some(nodeById(cluster, leaderId)) else knownLeader
             // Matching-term AE: Candidate -> Follower, accept or reject.
             state := if (inTerm = currentTerm) "Follower" else state
             // accept paths, one-shot for sync RPC: already-done | conflict truncate+append | append.
