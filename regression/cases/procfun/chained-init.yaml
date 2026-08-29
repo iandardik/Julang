@@ -1,0 +1,6 @@
+source: regression/input/procfun/chained-init.jul
+programs:
+  - name: Main
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/procfun-chained-init.stdout

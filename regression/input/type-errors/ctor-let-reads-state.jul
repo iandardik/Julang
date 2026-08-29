@@ -1,0 +1,15 @@
+proc S {
+    var x : Int
+    var y : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            let t : Int := x + 1
+            y := t
+            x := 0
+    }
+}
+
+proc P := S
+
+compile P

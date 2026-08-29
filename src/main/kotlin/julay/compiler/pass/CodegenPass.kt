@@ -89,6 +89,7 @@ fun codegenPass(
         "import julay.tools.mkSeqLengthAny\n" +
         "import julay.tools.mkSeqNthAny\n" +
         "import julay.tools.mkSeqConcatAny\n" +
+        "import julay.tools.mkSeqExtractAny\n" +
         "import julay.tools.mkListMemberAny\n" +
         "import julay.tools.mkSetMemberAny\n" +
         "import julay.tools.mkSetUnionAny\n" +
@@ -500,15 +501,16 @@ private fun ProcClassDecl.kotlinClassString(
     channelKeys: Map<LeafActionId, String>,
 ): String {
     val stateVarTypes = stateVars.associate { Pair(it.name, it.type) }
-    // Nullable backing fields start as null; property accessors throw until finishConstruction.
+    // Nullable backing fields start as null; getters throw JulayException until set.
     // Synthetic F_ret is TLA/alphabet-only; runtime completes on return: via returnExpr.
     val runtimeTransitions = transitions.filterNot { it.action.name == procFunRetAction(name) }
     val stateFieldsStr = stateVars.joinToString("\n") {
         val ident = it.name.toKotlinIdent()
         val ty = it.type.toKotlinTypeString()
+        val unreadMsg = "State variable \\\"${it.name.escapeKotlinStringLiteral()}\\\" read before it was initialized"
         "private var _$ident: $ty? = null\n" +
             "private var $ident: $ty\n" +
-            "    get() = _$ident!!\n" +
+            "    get() = _$ident ?: throw JulayException(\"$unreadMsg\")\n" +
             "    set(value) { _$ident = value }"
     }
     val registerTypes = ""
@@ -526,12 +528,14 @@ private fun ProcClassDecl.kotlinClassString(
         "\nelse -> throw RuntimeException(\"Action is outside my alphabet: \${act.symAction}\")".prependIndent().prependIndent() +
         "\n}".prependIndent() +
         "\n}"
+    // Constructors apply field inits + ctor transit sequentially so `var y := x` after
+    // `var x := …` matches the documented init order (not simultaneous transition assigns).
     val finishConstructionBody = if (constructors.isEmpty()) {
         ""
     } else {
         constructors.joinToString("") { ctor ->
             "\n\"${ctor.action.name}\" -> {" +
-                "\n${ctor.kotlinTransitString(stateVarTypes)}".prependIndent() +
+                "\n${ctor.kotlinTransitString(stateVarTypes, sequentialAssigns = true)}".prependIndent() +
                 "\n}"
         }
     }
@@ -742,7 +746,10 @@ ${offerBlocks.prependIndent()}
 """.trimIndent()
 }
 
-private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): String {
+private fun ActionDecl.kotlinTransitString(
+    stateVarTypes: Map<String, Type>,
+    sequentialAssigns: Boolean = false,
+): String {
     val symbolTypes = stateVarTypes + actionArgEnv(action.args)
     val argSymbols = actionArgSymbols(action.args)
     // Error checks run before before/transit/after so they see pre-state variables
@@ -762,12 +769,12 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
             .plus(afterLines)
             .joinToString("\n")
     }
-    // Simultaneous assignment: evaluate every RHS against the pre-transit state, then
-    // apply updates. Later lines must not observe earlier assignments in the same block
-    // (e.g. `peersLeft := peersLeft - 1` then `step := if (peersLeft - 1 = 0) ...`).
-    // Transit lets are evaluated in order against pre-state (+ earlier lets) and are in
-    // scope for assignment RHSs textually below them. Temps are explicitly typed so
-    // untyped builders like emptyList() still compile.
+    // Default (transitions): simultaneous assignment — evaluate every RHS against the
+    // pre-transit state, then apply updates. Later lines must not observe earlier
+    // assignments in the same block.
+    // Constructors (sequentialAssigns): evaluate and apply each assign in order so
+    // inline `var y := x` can observe an earlier `var x := …` (documented init order).
+    // Transit lets are always evaluated in order against the visible state (+ earlier lets).
     var transitSymbolTypes = symbolTypes
     var transitArgSymbols = argSymbols
     var letReplacements = emptyMap<String, ExprNode>()
@@ -781,6 +788,7 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
 
     val transitEvalSnapshots = mutableListOf<String>()
     val transitApplyLines = mutableListOf<String>()
+    val transitSequentialLines = mutableListOf<String>()
     var assignIndex = 0
     var discardIndex = 0
     for (update in transits) {
@@ -795,8 +803,12 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
                 }
                 val init = substTransitLets(update.init)
                 val initStr = init.toTransitString(transitSymbolTypes, transitArgSymbols)
-                transitEvalSnapshots +=
-                    "val $localBind: ${update.type.toKotlinTypeString()} = $initStr"
+                val letLine = "val $localBind: ${update.type.toKotlinTypeString()} = $initStr"
+                if (sequentialAssigns) {
+                    transitSequentialLines += letLine
+                } else {
+                    transitEvalSnapshots += letLine
+                }
                 transitSymbolTypes = transitSymbolTypes + (localBind to update.type)
                 if (!update.name.isDiscardBinding()) {
                     val replacement = SymbolValueExprNode(localBind, update.init.programLocation()).also {
@@ -813,8 +825,15 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
                 val rhsType = transitAssignRhsType(rootType, fieldPath)
                 val temp = "__transitRhs_$assignIndex"
                 val rhs = substTransitLets(update.expr).toTransitString(transitSymbolTypes, transitArgSymbols)
-                transitEvalSnapshots += "val $temp: ${rhsType.toKotlinTypeString()} = $rhs"
-                transitApplyLines += copyAssignmentString(rootVar, rootType, fieldPath, temp)
+                val evalLine = "val $temp: ${rhsType.toKotlinTypeString()} = $rhs"
+                val applyLine = copyAssignmentString(rootVar, rootType, fieldPath, temp)
+                if (sequentialAssigns) {
+                    transitSequentialLines += evalLine
+                    transitSequentialLines += applyLine
+                } else {
+                    transitEvalSnapshots += evalLine
+                    transitApplyLines += applyLine
+                }
                 assignIndex++
             }
             is TransitUpdate.IndexPut -> {
@@ -822,43 +841,46 @@ private fun ActionDecl.kotlinTransitString(stateVarTypes: Map<String, Type>): St
                 val collectionType = stateVarTypes.getValue(update.collectionVar)
                 val idxTemp = "__transitRhs_${assignIndex}_key"
                 val valTemp = "__transitRhs_${assignIndex}_val"
-                when (collectionType) {
+                val putLines = when (collectionType) {
                     is MapType -> {
-                        transitEvalSnapshots +=
-                            "val $idxTemp: ${collectionType.keyType.toKotlinTypeString()} = ${substTransitLets(update.index).toTransitString(transitSymbolTypes, transitArgSymbols)}"
-                        transitEvalSnapshots +=
-                            "val $valTemp: ${collectionType.valueType.toKotlinTypeString()} = ${substTransitLets(update.value).toTransitString(transitSymbolTypes, transitArgSymbols)}"
-                        // Index/value are pre-state; applying puts in order composes multiple updates
-                        // to the same map (TLA+-style EXCEPT with several fields).
-                        transitApplyLines += "$collectionVar = $collectionVar + ($idxTemp to $valTemp)"
+                        listOf(
+                            "val $idxTemp: ${collectionType.keyType.toKotlinTypeString()} = ${substTransitLets(update.index).toTransitString(transitSymbolTypes, transitArgSymbols)}",
+                            "val $valTemp: ${collectionType.valueType.toKotlinTypeString()} = ${substTransitLets(update.value).toTransitString(transitSymbolTypes, transitArgSymbols)}",
+                            "$collectionVar = $collectionVar + ($idxTemp to $valTemp)",
+                        )
                     }
                     is ListType -> {
-                        transitEvalSnapshots +=
-                            "val $idxTemp: Int = ${substTransitLets(update.index).toTransitString(transitSymbolTypes, transitArgSymbols)}"
-                        transitEvalSnapshots +=
-                            "val $valTemp: ${collectionType.elementType.toKotlinTypeString()} = ${substTransitLets(update.value).toTransitString(transitSymbolTypes, transitArgSymbols)}"
-                        // Index/value are pre-state; applying sets in order composes multiple updates
-                        // to the same list (TLA+-style EXCEPT with several fields).
-                        // Julay lists are 1-based; Kotlin List is 0-based.
-                        transitApplyLines +=
-                            "$collectionVar = $collectionVar.toMutableList().also { it[($idxTemp) - 1] = $valTemp }"
+                        listOf(
+                            "val $idxTemp: Int = ${substTransitLets(update.index).toTransitString(transitSymbolTypes, transitArgSymbols)}",
+                            "val $valTemp: ${collectionType.elementType.toKotlinTypeString()} = ${substTransitLets(update.value).toTransitString(transitSymbolTypes, transitArgSymbols)}",
+                            // Julay lists are 1-based; Kotlin List is 0-based.
+                            "$collectionVar = $collectionVar.toMutableList().also { it[($idxTemp) - 1] = $valTemp }",
+                        )
                     }
                     else -> throw RuntimeException(
                         "IndexPut expected map or list state var but \"${update.collectionVar}\" has type $collectionType",
                     )
+                }
+                if (sequentialAssigns) {
+                    transitSequentialLines += putLines
+                } else {
+                    // Index/value are pre-state; applying puts in order composes multiple updates
+                    // to the same map/list (TLA+-style EXCEPT with several fields).
+                    transitEvalSnapshots += putLines.dropLast(1)
+                    transitApplyLines += putLines.last()
                 }
                 assignIndex++
             }
         }
     }
     // Snapshot all after args from the pre-transit state (same as historical effect args).
+    // For sequential constructors, after still sees post-assign state (init is complete).
     val (afterArgSnapshots, afterLines) = kotlinCallStmtsString(afters, stateVarTypes, "__afterArg")
     return listOfNotNull(errorStr.takeIf { it.isNotEmpty() })
         .plus(beforeArgSnapshots)
         .plus(beforeLines)
         .plus(afterArgSnapshots)
-        .plus(transitEvalSnapshots)
-        .plus(transitApplyLines)
+        .plus(if (sequentialAssigns) transitSequentialLines else transitEvalSnapshots + transitApplyLines)
         .plus(afterLines)
         .joinToString("\n")
 }

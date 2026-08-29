@@ -605,6 +605,16 @@ private fun ProcClassNode.errorPassProcClass(procs: Set<String>, librariesInUse:
         localDecls.flatMap { it.constructors() }.isNotEmpty(),
         OneLocCompileError(programLocation(), "Expected \"${procClassNodeName()}\" to have at least one constructor"),
     )
+    val userStateVarNames = localDecls.filterIsInstance<VarNode>().map { it.name }.toSet()
+    val constructorBeforeErrors = localDecls.filterIsInstance<ConstructorNode>().flatMap { ctor ->
+        constructorBeforeBlockErrors(ctor)
+    }
+    val stateInAssignErrors =
+        inlineInitStateRefErrors(localDecls.filterIsInstance<VarNode>(), userStateVarNames, emptySet()) +
+            localDecls.filterIsInstance<ConstructorNode>().flatMap { ctor ->
+                val argNames = ctor.actionArgs().map { it.name }.toSet()
+                actionBodyConstructorStateInAssignErrors(ctor.body(), userStateVarNames, argNames)
+            }
     val constructorActions = localDecls.flatMap { it.constructors() }
     val transitionActions = localDecls.flatMap { it.transitions() }
     val ctorTransActionNotMutexErrors = constructorActions.flatMap { ctorAct ->
@@ -621,7 +631,8 @@ private fun ProcClassNode.errorPassProcClass(procs: Set<String>, librariesInUse:
     }
     return children.flatMap { it.errorPass(procs, librariesInUse) } + sessionPeerNameErrors +
         repeatStateVarNameErrors + ctorsCompleteAssgnErrors +
-        constAssignInTransitionErrors + returnInProcErrors + atLeastOneConstructorErrors + ctorTransActionNotMutexErrors
+        constAssignInTransitionErrors + returnInProcErrors + atLeastOneConstructorErrors +
+        constructorBeforeErrors + stateInAssignErrors + ctorTransActionNotMutexErrors
 }
 
 private fun ProcFunNode.errorPassProcFun(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
@@ -750,9 +761,18 @@ private fun ProcFunNode.errorPassProcFun(procs: Set<String>, librariesInUse: Set
     val constVarNames = varNodes.filter { it.isConst }.map { it.name }.toSet() + argNames
     val constAssignErrors = transitions.flatMap { constAssignmentErrors(it, constVarNames) }
     val returnInOrdinaryProc = emptyList<CompileError>()
+    val userStateVarNames = varNodes.map { it.name }.toSet()
+    val constructorBeforeErrors = ctors.flatMap { constructorBeforeBlockErrors(it) }
+    val stateInAssignErrors =
+        inlineInitStateRefErrors(varNodes, userStateVarNames, argNames) +
+            ctors.flatMap { ctor ->
+                val ctorArgNames = ctor.actionArgs().map { it.name }.toSet() + argNames
+                actionBodyConstructorStateInAssignErrors(ctor.body(), userStateVarNames, ctorArgNames)
+            }
     return children.flatMap { it.errorPass(procs, librariesInUse) } + redeclArgErrors +
         repeatStateVarNameErrors + reservedNameClash + needReturn + modifierErrors + returnClauseErrors +
-        ctorErrors + noCtorMissing + constAssignErrors + returnOutsideProcFunOnOrdinary + returnInOrdinaryProc
+        ctorErrors + noCtorMissing + constAssignErrors + returnOutsideProcFunOnOrdinary + returnInOrdinaryProc +
+        constructorBeforeErrors + stateInAssignErrors
 }
 
 private fun sessionPeerClassNameErrors(
@@ -839,6 +859,133 @@ private fun ObjClassNode.errorPassObjClass(procs: Set<String>, librariesInUse: S
             )
         }
     return children.flatMap { it.errorPass(procs, librariesInUse) } + dupTypeParamErrors + repeatFieldErrors
+}
+
+private fun constructorBeforeBlockErrors(ctor: ConstructorNode): List<CompileError> {
+    val befores = ctor.body().flatMap { it.befores() }
+    if (befores.isEmpty()) return emptyList()
+    return listOf(
+        OneLocCompileError(
+            befores.first().programLocation(),
+            "Constructors cannot have a before: block",
+        ),
+    )
+}
+
+/**
+ * Inline `var`/`const` inits are folded into the constructor. An init RHS must not
+ * reference any user state variable (args and pure expressions are fine).
+ */
+private fun inlineInitStateRefErrors(
+    varNodes: List<VarNode>,
+    stateVars: Set<String>,
+    argNames: Set<String>,
+): List<CompileError> =
+    varNodes.mapNotNull { vn ->
+        val init = vn.initExpr ?: return@mapNotNull null
+        val refs = stateVarRefsInExpr(init, stateVars, argNames)
+        if (refs.isEmpty()) null
+        else OneLocCompileError(
+            vn.programLocation(),
+            "Inline initializer for \"${vn.name}\" cannot reference state variable(s) ${refs.sorted()}; " +
+                "bind them with a transit let in a constructor first",
+        )
+    }
+
+/**
+ * Constructor transit only: let initializers and assignment / index-put RHSs must not
+ * mention any user state variable (including self-updates). Action args and earlier
+ * transit lets may appear. Ordinary transitions are unchecked.
+ */
+private fun actionBodyConstructorStateInAssignErrors(
+    body: List<ActionBodyNode>,
+    stateVars: Set<String>,
+    argNames: Set<String>,
+): List<CompileError> {
+    if (stateVars.isEmpty()) return emptyList()
+    val transitNodes = transitAssignmentNodes(body)
+    val seenLets = mutableSetOf<String>()
+    val errors = mutableListOf<CompileError>()
+    for (node in transitNodes) {
+        when (node) {
+            is LetTransitNode -> {
+                val refs = stateVarRefsInExpr(node.letInitExpr(), stateVars, seenLets + argNames)
+                if (refs.isNotEmpty()) {
+                    errors += OneLocCompileError(
+                        node.programLocation(),
+                        "Constructor let \"${node.letName()}\" cannot reference state variable(s) ${refs.sorted()}; " +
+                            "use constructor args or earlier lets that do not read state",
+                    )
+                }
+                seenLets += node.letName()
+            }
+            is VarTransitNode -> {
+                val refs = stateVarRefsInExpr(node.transitExpr(), stateVars, seenLets + argNames)
+                if (refs.isNotEmpty()) {
+                    errors += OneLocCompileError(
+                        node.programLocation(),
+                        "Constructor assignment to \"${node.transitKey()}\" cannot reference state variable(s) ${refs.sorted()}; " +
+                            "bind them with a transit let first",
+                    )
+                }
+            }
+            is IndexTransitNode -> {
+                val refs = stateVarRefsInExpr(node.value, stateVars, seenLets + argNames) +
+                    stateVarRefsInExpr(node.index, stateVars, seenLets + argNames)
+                if (refs.isNotEmpty()) {
+                    errors += OneLocCompileError(
+                        node.programLocation(),
+                        "Constructor assignment to \"${node.collectionVar}[...]\" cannot reference state variable(s) ${refs.sorted()}; " +
+                            "bind them with a transit let first",
+                    )
+                }
+            }
+            else -> {}
+        }
+    }
+    return errors
+}
+
+/**
+ * Free user-state names in [expr]. [bound] includes transit/expression lets, lambda binders,
+ * and constructor/procfun args (which shadow state of the same name).
+ */
+private fun stateVarRefsInExpr(
+    expr: ExprNode,
+    stateVars: Set<String>,
+    bound: Set<String> = emptySet(),
+): Set<String> {
+    val found = mutableSetOf<String>()
+    fun walk(e: ExprNode, boundNow: Set<String>) {
+        when (e) {
+            is SymbolValueExprNode -> {
+                val s = e.symbol
+                if (s in stateVars && s !in boundNow) found += s
+            }
+            is ThisAccessExprNode -> {
+                val s = e.stateVarName()
+                if (s in stateVars && s !in boundNow) found += s
+            }
+            is QuantifiedExprNode -> walk(e.quantifiedBody(), boundNow + e.binderName())
+            is LetExprNode -> {
+                walk(e.letInitExpr(), boundNow)
+                walk(e.bodyExpr(), boundNow + e.letName())
+            }
+            is LambdaExprNode -> walk(e.body, boundNow + e.params.toSet())
+            is MethodCallExprNode -> {
+                walk(e.baseExpr, boundNow)
+                e.args.forEach { walk(it, boundNow) }
+                val hofBody = e.hofBodyOrNull()
+                val hofNames = e.hofParamNamesOrNull()
+                if (hofBody != null && hofNames != null) {
+                    walk(hofBody, boundNow + hofNames.toSet())
+                }
+            }
+            else -> e.children.filterIsInstance<ExprNode>().forEach { walk(it, boundNow) }
+        }
+    }
+    walk(expr, bound)
+    return found
 }
 
 private fun duplicateAssignmentErrors(

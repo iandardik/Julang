@@ -1,0 +1,5 @@
+source: regression/input/type-errors/ctor-before.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Constructors cannot have a before: block"
+  - "Found errors while compiling \"P\"; exiting."

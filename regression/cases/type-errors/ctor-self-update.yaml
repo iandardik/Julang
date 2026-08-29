@@ -1,0 +1,5 @@
+source: regression/input/type-errors/ctor-self-update.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Constructor assignment to \"x\" cannot reference state variable(s) [x]"
+  - "Found errors while compiling \"P\"; exiting."

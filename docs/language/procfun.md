@@ -136,7 +136,7 @@ procfun parseCfg(cfg : String) : Set<Node> {
 | Rule | Detail |
 |------|--------|
 | Args | Each parameter is an implicit `const`. Do not redeclare it as `var`/`const`. |
-| Inline init | `var x : T := expr` / `const c : T := expr` is allowed. Init may use args and earlier inline-inited names. |
+| Inline init | `var x : T := expr` / `const c : T := expr` is allowed. Init may use args and pure expressions, but **not** state variables (use a constructor + transit `let` instead). |
 | Init XOR | A state name is initialized **either** inline **or** in the procfun's single optional constructor — never both. |
 | Step modifiers | Any of bare / `internal` / `client` / `session`. **`provider` is forbidden.** |
 | Reserved names | User transitions/ctors/vars cannot be named `initially`, `F_call`, `F_ret`, or `retVal`. |

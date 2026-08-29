@@ -63,7 +63,7 @@ A **transition** body may include:
 | `error:` | Pre-state checks: at runtime, if a condition holds, throw `JulayException` with the message (no transit / `after:`). In TLA+, each condition is negated and emitted as an enabling assumption (guard). |
 | `after:` | Calls after state updates (IO allowed; no assignments)—see [Before/after and IO](effects.md) |
 
-**Constructors cannot have `guard:`.** A constructor body may only use `before:`, `transit:`, `error:`, and `after:`. Spawning is gated by peers’ transition guards (and session rebind rules), not by a guard on the constructor itself.
+**Constructors cannot have `guard:` or `before:`.** A constructor body may only use `transit:`, `error:`, and `after:`. Spawning is gated by peers’ transition guards (and session rebind rules), not by a guard on the constructor itself. Put setup IO in `after:` (after state is assigned) or in a following transition. Constructor transit `let` initializers and assignment RHSs must not reference any state variable (including self-updates); use args or earlier lets that do not read state — see [Effects](effects.md).
 
 Example (from [`regression/input/basic/test1.jul`](../../regression/input/basic/test1.jul)):
 

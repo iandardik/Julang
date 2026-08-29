@@ -12,8 +12,8 @@ Which procs and functions are effectful is listed in [Standard library](standard
 Effectful **functions** (and any other callable) may appear in action clauses as follows. Execution order after a successful sync is:
 
 1. `error:` checks (pre-state)
-2. **`before:`** calls
-3. **`transit:`** (statement `let`s top-to-bottom against pre-state, then assignment RHSs against pre-state + in-scope lets, then simultaneous apply)
+2. **`before:`** calls (transitions only — constructors cannot have `before:`)
+3. **`transit:`** (statement `let`s top-to-bottom against pre-state, then assignment RHSs against pre-state + in-scope lets, then simultaneous apply). In **constructors**, neither let initializers nor assignment RHSs may reference any state variable (including self-updates) — use args / pure exprs, or earlier lets that do not read state.
 4. **`after:`** calls
 
 You must import the function first, e.g. `import julay.funlib.println`.
@@ -73,9 +73,21 @@ transit:
 
 Semantics:
 
-1. Each `let` initializer is evaluated top-to-bottom against **pre-transit** state, plus earlier lets in this block.
+1. Each `let` initializer is evaluated top-to-bottom against **pre-transit** state, plus earlier lets in this block. In **transitions**, lets **may** read state variables; in **constructors**, they must not (state is still undefined).
 2. Every assignment RHS is evaluated against pre-transit state plus lets textually **above** it.
 3. All assignments are then applied **simultaneously** (later lines do not observe earlier assigns).
+4. **In constructors only:** neither a let initializer nor an assignment RHS may reference any state variable (including self-updates — no `x := x + 1` or `let t := x`). Use constructor/procfun args, pure expressions, or earlier lets that do not read state. Inline `var`/`const` initializers likewise must not reference state.
+
+```jul
+constructor initially(args : List<String>) {
+    transit:
+        let n : Int := 0
+        x := n
+        y := n + 1
+}
+```
+
+Ordinary **transitions** may still read any state in assign RHSs (`log := log + …`).
 
 Rules:
 

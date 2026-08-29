@@ -1,0 +1,12 @@
+proc S {
+    var x : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            x := x + 1
+    }
+}
+
+proc P := S
+
+compile P

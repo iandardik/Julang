@@ -1,0 +1,16 @@
+import julay.funlib.println
+
+proc S {
+    var x : Int
+
+    constructor initially(args : List<String>) {
+        before:
+            println("nope")
+        transit:
+            x := 0
+    }
+}
+
+proc P := S
+
+compile P

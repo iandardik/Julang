@@ -1,0 +1,45 @@
+import julay.funlib.exitProgram
+import julay.funlib.println
+
+/*
+ * Read state (and args) in transit lets, then assign — assign RHSs must not mention state.
+ */
+procfun chainedInit(n : Int) : Int {
+    var base : Int
+    var next : Int
+
+    constructor setup() {
+        transit:
+            let b : Int := n
+            base := b
+            next := b + 1
+    }
+
+    internal transition done() {
+        return: next
+    }
+}
+
+proc Main {
+    var out : Int
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            let v : Int := chainedInit(3)
+            out := v
+            done := false
+    }
+
+    internal transition finish() {
+        guard: ~done
+        transit:
+            let d : Boolean := true
+            done := d
+        after:
+            println(out + "")
+            exitProgram(0)
+    }
+}
+
+compile Main

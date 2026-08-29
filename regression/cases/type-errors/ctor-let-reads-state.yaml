@@ -1,0 +1,5 @@
+source: regression/input/type-errors/ctor-let-reads-state.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Constructor let \"t\" cannot reference state variable(s) [x]"
+  - "Found errors while compiling \"P\"; exiting."

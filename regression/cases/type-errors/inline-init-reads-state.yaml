@@ -1,0 +1,5 @@
+source: regression/input/type-errors/inline-init-reads-state.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Inline initializer for \"next\" cannot reference state variable(s) [base]"
+  - "Found errors while compiling \"P\"; exiting."

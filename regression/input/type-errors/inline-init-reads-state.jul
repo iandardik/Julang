@@ -1,0 +1,21 @@
+procfun bad(n : Int) : Int {
+    var base : Int := n
+    var next : Int := base + 1
+
+    internal transition done() {
+        return: next
+    }
+}
+
+proc Main {
+    var out : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            out := bad(3)
+    }
+}
+
+proc P := Main
+
+compile P
