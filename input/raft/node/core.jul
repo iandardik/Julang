@@ -10,6 +10,12 @@ import node.lib.entryValueAt
 import node.lib.entryTermAt
 import node.lib.noneNode
 import node.lib.nodeById
+import node.lib.batchForPeer
+import node.lib.maxBatchEntries
+import node.lib.applyAppendEntries
+import node.lib.aeConflictIndex
+import node.lib.aeConflictTerm
+import node.lib.commitJumpTo
 import node.rpc_in.RpcIn
 import node.rpc_out.RpcOut
 import node.vote_requester.VoteRequester
@@ -101,30 +107,28 @@ export proc RaftProtocol {
             & target ~= self
             & state = "Leader"
             & payload = if (nextIndex[target] <= length(log)) {
-                // if there's at least one entry to send
                 let (nextLogIndex : Int := nextIndex[target])
-                // prevLogIndex is the previous entry's index, or 0 if none
                 let (prevLogIndex : Int := nextLogIndex - 1)
                 let (prevLogTerm : Int := if (prevLogIndex > 0) entryTermAt(log, prevLogIndex) else 0)
+                let (batch : List<Entry> := batchForPeer(log, nextLogIndex, maxBatchEntries())) {
                     AppendEntriesData {
                         term := currentTerm,
                         leaderId := self.id,
                         prevLogIndex := prevLogIndex,
                         prevLogTerm := prevLogTerm,
-                        entry := log[nextLogIndex],
-                        entriesLen := 1,
+                        entries := batch,
+                        entriesLen := length(batch),
                         leaderCommit := commitIndex
                     }
+                }
             }
             else {
-                // The log is caught up so send a heartbeat. prevLogIndex = last log index, or 0 if empty.
-                // TODO make a fun for a heartbeat AE
                 AppendEntriesData {
                     term := currentTerm,
                     leaderId := self.id,
                     prevLogIndex := length(log),
                     prevLogTerm := lastLogTerm,
-                    entry := Entry { term := 0, value := "" },
+                    entries := listOf<Entry>(),
                     entriesLen := 0,
                     leaderCommit := commitIndex
                 }
@@ -157,7 +161,7 @@ export proc RaftProtocol {
 
     /*
      * True iff some other node still needs log entries (nextIndex behind tip).
-     * LeaderHeartbeat uses this after each AE round to skip idle waits when dirty.
+     * LeaderHeartbeat uses this after each AE round to choose catch-up vs idle wait.
      */
     transition logOutdated(outdated : Boolean) {
         guard:
@@ -168,16 +172,15 @@ export proc RaftProtocol {
             }
     }
 
+    // B1 backup: step +1 when a response jump did not cover contiguous commit.
+    // Primary jump is in handleAppendEntriesResponse via commitJumpTo.
+    // Quorum filter uses commitIndex (state), not newCommitIndex (symbolic arg).
     internal transition advanceCommitIndex(newCommitIndex : Int) {
         guard:
             & state = "Leader"
             & newCommitIndex = commitIndex + 1
             & newCommitIndex <= length(log)
             & entryTermAt(log, newCommitIndex) = currentTerm
-            // matchIndex[self] stays 0 (leader never AEs itself), so count the leader
-            // with +1. Filter uses commitIndex (state), not newCommitIndex (action arg),
-            // so the HOF stays a fast guard; stepping by 1 makes i > commitIndex
-            // equivalent to i >= newCommitIndex. Zeros therefore do not count.
             & let (numAgree : Int := 1 + matchIndex.keys.filter(k -> matchIndex[k] > commitIndex).length) {
                 numAgree * 2 > length(cluster)
             }
@@ -219,24 +222,26 @@ export proc RaftProtocol {
         leaderId : Int,
         prevLogIndex : Int,
         prevLogTerm : Int,
-        entriesLen : Int,
-        entryTerm : Int,
-        entryValue : Value,
+        entries : List<Entry>,
         leaderCommit : Int,
         outTerm : Int,
         success : Boolean,
-        matchIdx : Int
+        matchIdx : Int,
+        conflictTerm : Int
     ) {
         guard:
             & inTerm <= currentTerm
             & outTerm = currentTerm
-            & (entriesLen in setOf(0, 1))
+            & length(entries) <= maxBatchEntries()
             & (
                 | (
                     & ~success
-                    & matchIdx = 0
                     & (
-                        | (inTerm < currentTerm)
+                        | (
+                            & inTerm < currentTerm
+                            & matchIdx = 0
+                            & conflictTerm = 0
+                        )
                         | (
                             & inTerm = currentTerm
                             & (
@@ -247,12 +252,16 @@ export proc RaftProtocol {
                                     & entryTermAt(log, prevLogIndex) ~= prevLogTerm
                                 )
                             )
+                            & matchIdx = aeConflictIndex(log, prevLogIndex)
+                            & conflictTerm = aeConflictTerm(log, prevLogIndex)
                         )
                     )
                 )
                 | (
                     & success
                     & inTerm = currentTerm
+                    & conflictTerm = 0
+                    & matchIdx = prevLogIndex + length(entries)
                     & (
                         | (prevLogIndex = 0)
                         | (
@@ -260,11 +269,6 @@ export proc RaftProtocol {
                             & prevLogIndex <= length(log)
                             & entryTermAt(log, prevLogIndex) = prevLogTerm
                         )
-                    )
-                    // matchIdx = last replicated index (paper: prevLogIndex + len(entries))
-                    & (
-                        | (entriesLen = 0 & matchIdx = prevLogIndex)
-                        | (entriesLen = 1 & matchIdx = prevLogIndex + 1)
                     )
                 )
             )
@@ -275,37 +279,24 @@ export proc RaftProtocol {
             let _ : Boolean := if (inTerm = currentTerm) {
                 ElectionTimeout.gotHeartbeat()
             } else true
-            let index : Int := prevLogIndex + 1
-            let alreadyDone : Boolean :=
-                success & entriesLen = 1 & length(log) >= index & entryTermAt(log, index) = entryTerm
-            knownLeader := if (inTerm = currentTerm) some(nodeById(cluster, leaderId)) else knownLeader
-            // Matching-term AE: Candidate -> Follower, accept or reject.
-            state := if (inTerm = currentTerm) "Follower" else state
-            // accept paths, one-shot for sync RPC: already-done | conflict truncate+append | append.
-            log := if (success & entriesLen = 1) {
-                if (alreadyDone) {
-                    log
-                } else if (length(log) >= index) {
-                    if (prevLogIndex = 0) {
-                        listOf(Entry { term := entryTerm, value := entryValue })
-                    } else {
-                        splice(log, 1, prevLogIndex)
-                            + listOf(Entry { term := entryTerm, value := entryValue })
-                    }
-                } else {
-                    log + listOf(Entry { term := entryTerm, value := entryValue })
-                }
+            let applied : List<Entry> := if (success & length(entries) > 0) {
+                applyAppendEntries(log, prevLogIndex, entries)
             } else {
                 log
             }
-            lastLogTerm := if (success & entriesLen = 1 & ~alreadyDone) {
-                entryTerm
+            knownLeader := if (inTerm = currentTerm) some(nodeById(cluster, leaderId)) else knownLeader
+            state := if (inTerm = currentTerm) "Follower" else state
+            log := applied
+            lastLogTerm := if (success & length(entries) > 0) {
+                entryTermAt(applied, prevLogIndex + length(entries))
             } else {
                 lastLogTerm
             }
             commitIndex := if (success & leaderCommit > commitIndex) {
-                let (lastNew : Int := if (entriesLen = 1) prevLogIndex + 1 else length(log)) {
-                    if (leaderCommit < lastNew) leaderCommit else lastNew
+                let (lastNew : Int := prevLogIndex + length(entries)) {
+                    let (bound : Int := if (length(entries) = 0) length(applied) else lastNew) {
+                        if (leaderCommit < bound) leaderCommit else bound
+                    }
                 }
             } else {
                 commitIndex
@@ -316,18 +307,33 @@ export proc RaftProtocol {
         peer : Node,
         inTerm : Int,
         success : Boolean,
-        matchIdx : Int
+        matchIdx : Int,
+        conflictTerm : Int
     ) {
         guard:
             & state = "Leader"
             & inTerm = currentTerm
         transit:
-            nextIndex[peer] := if (success) {
-                max(matchIdx + 1, nextIndex[peer]) // ensure that nextIndex increases monotonically
-            } else { max(nextIndex[peer] - 1, 1) }
-            matchIndex[peer] := if (success) {
-                max(matchIdx, matchIndex[peer]) // ensure that matchIndex increases monotonically
-            } else { matchIndex[peer] }
+            let advNext : Int := if (success) {
+                max(matchIdx + 1, nextIndex[peer])
+            } else {
+                // B2: jump to conflict index (matchIdx); fall back to -1 if no hint.
+                max(1, if (matchIdx > 0) matchIdx else max(nextIndex[peer] - 1, 1))
+            }
+            let newMatch : Int := if (success) {
+                max(matchIdx, matchIndex[peer])
+            } else {
+                matchIndex[peer]
+            }
+            let updatedMatch : Map<Node, Int> := matchIndex.keys.associateWith(
+                k -> if (k = peer) newMatch else matchIndex[k]
+            )
+            nextIndex[peer] := advNext
+            matchIndex[peer] := newMatch
+            // B1: jump commit toward the peer's new match index when quorum allows.
+            commitIndex := commitJumpTo(
+                commitIndex, log, currentTerm, updatedMatch, length(cluster), newMatch
+            )
     }
 
     /*

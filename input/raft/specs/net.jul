@@ -1,7 +1,10 @@
 import node.lib.Value
 import node.core.RaftProtocol
 import julay.funlib.setOf
+import julay.funlib.length
 import node.lib.NodeSet
+import node.lib.Entry
+import node.lib.AppendEntriesData
 
 type VoteRequestMsg {
     src : NodeSet
@@ -27,6 +30,7 @@ type AppendEntriesResponseMsg {
     term : Int
     success : Boolean
     matchIdx : Int
+    conflictTerm : Int
 }
 
 export spec Net[n : NodeSet] {
@@ -122,13 +126,12 @@ export spec Net[n : NodeSet] {
         leaderId : Int,
         prevLogIndex : Int,
         prevLogTerm : Int,
-        entriesLen : Int,
-        entryTerm : Int,
-        entryValue : Value,
+        entries : List<Entry>,
         leaderCommit : Int,
         outTerm : Int,
         success : Boolean,
-        matchIdx : Int
+        matchIdx : Int,
+        conflictTerm : Int
     ) also (m : NodeSet) {
         guard:
             AppendEntriesRequestMsg {
@@ -139,11 +142,8 @@ export spec Net[n : NodeSet] {
                     leaderId := leaderId,
                     prevLogIndex := prevLogIndex,
                     prevLogTerm := prevLogTerm,
-                    entry := Entry {
-                        term := entryTerm,
-                        value := entryValue
-                    },
-                    entriesLen := entriesLen,
+                    entries := entries,
+                    entriesLen := length(entries),
                     leaderCommit := leaderCommit
                 }
             } in appendEntriesRequestMsgs
@@ -156,11 +156,8 @@ export spec Net[n : NodeSet] {
                     leaderId := leaderId,
                     prevLogIndex := prevLogIndex,
                     prevLogTerm := prevLogTerm,
-                    entry := Entry {
-                        term := entryTerm,
-                        value := entryValue
-                    },
-                    entriesLen := entriesLen,
+                    entries := entries,
+                    entriesLen := length(entries),
                     leaderCommit := leaderCommit
                 }
             })
@@ -170,7 +167,8 @@ export spec Net[n : NodeSet] {
                 node := RaftProtocol[n].self,
                 term := outTerm,
                 success := success,
-                matchIdx := matchIdx
+                matchIdx := matchIdx,
+                conflictTerm := conflictTerm
             })
     }
 
@@ -178,7 +176,8 @@ export spec Net[n : NodeSet] {
         peer : Node,
         inTerm : Int,
         success : Boolean,
-        matchIdx : Int
+        matchIdx : Int,
+        conflictTerm : Int
     ) also (m : NodeSet) {
         guard:
             AppendEntriesResponseMsg {
@@ -187,7 +186,8 @@ export spec Net[n : NodeSet] {
                 node := peer,
                 term := inTerm,
                 success := success,
-                matchIdx := matchIdx
+                matchIdx := matchIdx,
+                conflictTerm := conflictTerm
             } in appendEntriesResponseMsgs
         transit:
             appendEntriesResponseMsgs := appendEntriesResponseMsgs - setOf(AppendEntriesResponseMsg {
@@ -196,7 +196,8 @@ export spec Net[n : NodeSet] {
                 node := peer,
                 term := inTerm,
                 success := success,
-                matchIdx := matchIdx
+                matchIdx := matchIdx,
+                conflictTerm := conflictTerm
             })
     }
 

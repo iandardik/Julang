@@ -7,7 +7,8 @@
 # RAFT_NODE_JAR / RAFT_CLIENT_JAR. Optional env:
 #   SMOKE_TIMEOUT_S    overall wall-clock timeout for the whole smoke test (default 120)
 #   LISTEN_TIMEOUT_S   max seconds to wait for all ports (default 40)
-#   ELECTION_WAIT_S    seconds after listen before client ops (default 2)
+#   ELECTION_WAIT_S    seconds after listen before client ops (default 3)
+#   APPEND_WAIT_S      seconds to poll append until leader (default CLIENT_STEP_TIMEOUT_S)
 #   CURL_TIMEOUT_S     curl max-time per request (default 8)
 
 set -euo pipefail
@@ -19,7 +20,7 @@ CONFIG="${1:-$RAFT_DIR/cluster.conf}"
 
 SMOKE_TIMEOUT_S="${SMOKE_TIMEOUT_S:-120}"
 LISTEN_TIMEOUT_S="${LISTEN_TIMEOUT_S:-40}"
-ELECTION_WAIT_S="${ELECTION_WAIT_S:-2}"
+ELECTION_WAIT_S="${ELECTION_WAIT_S:-3}"
 CURL_TIMEOUT_S="${CURL_TIMEOUT_S:-8}"
 
 # Re-exec under an overall wall-clock timeout so a hang cannot run forever.
@@ -169,28 +170,43 @@ for idx in "${!URLS[@]}"; do
 done
 
 # Enter via first URL; RaftClient follows 303 LEADER redirects for append.
+# Poll: early 503 NO_LEADER is common before the first election finishes (client does not retry 503).
 follower_url="${URLS[0]}"
 VALUE="smoke-$(date +%s)"
 CLIENT_STEP_TIMEOUT_S="${CLIENT_STEP_TIMEOUT_S:-30}"
-echo "=== RaftClient append via $follower_url (≤${CLIENT_STEP_TIMEOUT_S}s) ==="
-set +e
-if command -v perl >/dev/null 2>&1; then
-  append_out="$(perl -e 'alarm shift; exec @ARGV' "$CLIENT_STEP_TIMEOUT_S" "$JAVA" -jar "$CLIENT_JAR" "$follower_url" append "$VALUE" 2>&1)"
-  append_rc=$?
-else
-  append_out="$("$JAVA" -jar "$CLIENT_JAR" "$follower_url" append "$VALUE" 2>&1)"
-  append_rc=$?
-fi
-set -e
-echo "$append_out"
-if [[ "$append_rc" -ne 0 ]]; then
-  echo "error: append timed out or failed (rc=$append_rc)" >&2
+APPEND_WAIT_S="${APPEND_WAIT_S:-$CLIENT_STEP_TIMEOUT_S}"
+echo "=== RaftClient append via $follower_url (poll ≤${APPEND_WAIT_S}s) ==="
+append_out=""
+append_ok=0
+for ((t=0; t<APPEND_WAIT_S; t++)); do
+  set +e
+  if command -v perl >/dev/null 2>&1; then
+    append_out="$(perl -e 'alarm shift; exec @ARGV' "$CLIENT_STEP_TIMEOUT_S" "$JAVA" -jar "$CLIENT_JAR" "$follower_url" append "$VALUE" 2>&1)"
+    append_rc=$?
+  else
+    append_out="$("$JAVA" -jar "$CLIENT_JAR" "$follower_url" append "$VALUE" 2>&1)"
+    append_rc=$?
+  fi
+  set -e
+  if [[ "$append_rc" -eq 0 ]] && grep -q '200 OK' <<<"$append_out"; then
+    append_ok=1
+    echo "$append_out"
+    if [[ "$t" -gt 0 ]]; then
+      echo "(leader ready after ${t}s)"
+    fi
+    break
+  fi
+  sleep 1
+done
+if [[ "$append_ok" -ne 1 ]]; then
+  echo "$append_out"
+  if [[ "${append_rc:-1}" -ne 0 ]]; then
+    echo "error: append timed out or failed (rc=${append_rc:-1})" >&2
+  else
+    echo "error: append did not report 200 OK within ${APPEND_WAIT_S}s" >&2
+  fi
   exit 1
 fi
-echo "$append_out" | grep -q '200 OK' || {
-  echo "error: append did not report 200 OK" >&2
-  exit 1
-}
 
 # client/get reads the contacted node's local committed SM (no leader redirect).
 # After append-via-follower → leader commit, the entry node may briefly lag; poll.

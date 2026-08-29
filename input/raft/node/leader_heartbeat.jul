@@ -1,4 +1,5 @@
 import julay.funlib.length
+import julay.funlib.listOf
 import node.lib.Node
 import node.lib.AppendEntriesData
 import node.lib.Entry
@@ -66,6 +67,8 @@ proc LeaderHeartbeatImpl {
     var leaderTerm : Int
     var cluster : Set<Node>
     var heartbeatMs : Int
+    var catchupMs : Int
+    var timerMs : Int
     var step : String
     var sentThisRound : Set<Node>
     var pendingPeer : Node
@@ -82,6 +85,8 @@ proc LeaderHeartbeatImpl {
             leaderTerm := 0
             cluster := setOf()
             heartbeatMs := 200
+            catchupMs := 25
+            timerMs := 200
             step := "createTimer"
             sentThisRound := setOf()
             pendingPeer := Node { id := 0, url := "" }
@@ -90,7 +95,7 @@ proc LeaderHeartbeatImpl {
                 leaderId := 0,
                 prevLogIndex := 0,
                 prevLogTerm := 0,
-                entry := Entry { term := 0, value := "" },
+                entries := listOf<Entry>(),
                 entriesLen := 0,
                 leaderCommit := 0
             }
@@ -105,6 +110,8 @@ proc LeaderHeartbeatImpl {
             leaderTerm := term
             cluster := cluster
             heartbeatMs := 200
+            catchupMs := 25
+            timerMs := 200
             sentThisRound := setOf(me)
             pendingPeer := me
             pendingData := AppendEntriesData {
@@ -112,7 +119,7 @@ proc LeaderHeartbeatImpl {
                 leaderId := 0,
                 prevLogIndex := 0,
                 prevLogTerm := 0,
-                entry := Entry { term := 0, value := "" },
+                entries := listOf<Entry>(),
                 entriesLen := 0,
                 leaderCommit := 0
             }
@@ -142,7 +149,7 @@ proc LeaderHeartbeatImpl {
     session transition startTimer(time : Int) {
         guard:
             & step = "startTimer"
-            & time = heartbeatMs
+            & time = timerMs
         transit:
             step := "wait"
     }
@@ -196,11 +203,14 @@ proc LeaderHeartbeatImpl {
     }
 
     // Ask RaftProtocol whether any follower is still behind the log.
+    // Always arm a timer: catch-up uses a short delay so a dead peer cannot
+    // busy-loop AE forever (nextIndex stays behind until the peer returns).
     transition logOutdated(outdated : Boolean) {
         guard:
             step = "checkLogOutdated"
         transit:
-            step := if (outdated) "pickTarget" else "startTimer"
+            timerMs := if (outdated) catchupMs else heartbeatMs
+            step := "startTimer"
     }
 
     // Backstop when RaftProtocol's term has moved on.

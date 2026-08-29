@@ -2,9 +2,11 @@ import julay.proclib.HttpServer
 import julay.funlib.parseInt
 import julay.funlib.split
 import node.lib.Value
+import node.lib.Entry
 import node.lib.fieldValue
 import node.lib.encodeAppendEntriesResp
 import node.lib.encodeRequestVoteResp
+import node.lib.parseEntriesBlob
 
 /*
  * Process that routes incoming RPCs.
@@ -100,10 +102,11 @@ procfun inAppendEntriesRPC(req :  HttpServerRequest) : HttpServerResponse {
     var aeLeaderId : Int := parseInt(fieldValue(split(req.body, "|")[2]))
     var aePrevIdx : Int := parseInt(fieldValue(split(req.body, "|")[3]))
     var aePrevTerm : Int := parseInt(fieldValue(split(req.body, "|")[4]))
-    var aeEntriesLen : Int := parseInt(fieldValue(split(req.body, "|")[5]))
-    var aeEntryTerm : Int := parseInt(fieldValue(split(req.body, "|")[6]))
-    var aeEntryValue : String := fieldValue(split(req.body, "|")[7])
-    var aeLeaderCommit : Int := parseInt(fieldValue(split(req.body, "|")[8]))
+    var aeEntries : List<Entry> := parseEntriesBlob(
+        fieldValue(split(req.body, "|")[6]),
+        parseInt(fieldValue(split(req.body, "|")[5]))
+    )
+    var aeLeaderCommit : Int := parseInt(fieldValue(split(req.body, "|")[7]))
 
     client transition updateTerm(inTerm : Int) {
         guard:
@@ -115,18 +118,17 @@ procfun inAppendEntriesRPC(req :  HttpServerRequest) : HttpServerResponse {
 
     client transition handleAppendEntriesRequest(
         inTerm : Int, leaderId : Int, prevLogIndex : Int, prevLogTerm : Int,
-        entriesLen : Int, entryTerm : Int, entryValue : Value, leaderCommit : Int,
-        outTerm : Int, success : Boolean, matchIdx : Int
+        entries : List<Entry>, leaderCommit : Int,
+        outTerm : Int, success : Boolean, matchIdx : Int, conflictTerm : Int
     ) {
         guard:
             & step = "handle"
             & inTerm = aeTerm & leaderId = aeLeaderId
             & prevLogIndex = aePrevIdx & prevLogTerm = aePrevTerm
-            & entriesLen = aeEntriesLen & entryTerm = aeEntryTerm
-            & entryValue = aeEntryValue & leaderCommit = aeLeaderCommit
+            & entries = aeEntries & leaderCommit = aeLeaderCommit
         return:
             HttpServerResponse {
-                body := encodeAppendEntriesResp(outTerm, success, matchIdx),
+                body := encodeAppendEntriesResp(outTerm, success, matchIdx, conflictTerm),
                 code := 200
             }
     }

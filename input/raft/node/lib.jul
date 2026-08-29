@@ -1,6 +1,11 @@
 import julay.funlib.length
 import julay.funlib.split
 import julay.funlib.startsWith
+import julay.funlib.min
+import julay.funlib.max
+import julay.funlib.listOf
+import julay.funlib.parseInt
+import julay.funlib.splice
 import julay.optional.Optional
 import julay.optional.none
 
@@ -36,19 +41,20 @@ export type VoteRequestData {
 }
 
 /*
- * AppendEntries payload. entriesLen is 0 (heartbeat) or 1 (single entry).
- * Multi-entry batches can be added later; one-at-a-time replication is enough
- * for followers to build their logs.
+ * AppendEntries payload. entriesLen is 0 (heartbeat) or 1..maxBatchEntries (batch).
+ * Values must not contain ':' or ';' (wire delimiters).
  */
 export type AppendEntriesData {
     term : Int
     leaderId : Int
     prevLogIndex : Int
     prevLogTerm : Int
-    entry : Entry
+    entries : List<Entry>
     entriesLen : Int
     leaderCommit : Int
 }
+
+export fun maxBatchEntries() : Int = 32
 
 export fun entryValueAt(log : List<Entry>, idx : Int) : Value =
     let (e : Entry := log[idx]) e.value
@@ -68,20 +74,124 @@ export fun encodeRequestVote(data : VoteRequestData) : String =
 export fun encodeRequestVoteResp(term : Int, voteGranted : Boolean) : String =
     "term=" + term + "|voteGranted=" + if (voteGranted) "true" else "false"
 
+type EncodeAcc {
+    s : String
+    first : Boolean
+}
+
+export fun encodeEntries(entries : List<Entry>) : String =
+    let (acc : EncodeAcc := entries.fold(
+        EncodeAcc { s := "", first := true },
+        (a, e) -> EncodeAcc {
+            s := if (a.first) {
+                ("" + e.term) + ":" + e.value
+            } else {
+                a.s + ";" + ("" + e.term) + ":" + e.value
+            },
+            first := false
+        }
+    )) {
+        acc.s
+    }
+
 export fun encodeAppendEntries(data : AppendEntriesData) : String =
     "term=" + data.term
         + "|leaderId=" + data.leaderId
         + "|prevLogIndex=" + data.prevLogIndex
         + "|prevLogTerm=" + data.prevLogTerm
         + "|entriesLen=" + data.entriesLen
-        + "|entryTerm=" + data.entry.term
-        + "|entryValue=" + data.entry.value
+        + "|entries=" + encodeEntries(data.entries)
         + "|leaderCommit=" + data.leaderCommit
 
-export fun encodeAppendEntriesResp(term : Int, success : Boolean, matchIndex : Int) : String =
+export fun encodeAppendEntriesResp(
+    term : Int,
+    success : Boolean,
+    matchIndex : Int,
+    conflictTerm : Int
+) : String =
     "term=" + term
         + "|success=" + (if (success) "true" else "false")
         + "|matchIndex=" + matchIndex
+        + "|conflictTerm=" + conflictTerm
+
+export fun parseEntryPair(pair : String) : Entry =
+    Entry {
+        term := parseInt(split(pair, ":")[1]),
+        value := split(pair, ":")[2]
+    }
+
+export fun parseEntriesBlob(blob : String, n : Int) : List<Entry> =
+    if (n <= 0) {
+        listOf<Entry>()
+    } else if (blob = "") {
+        listOf<Entry>()
+    } else {
+        splice(split(blob, ";"), 1, n).map(parseEntryPair)
+    }
+
+export fun batchForPeer(log : List<Entry>, nextIdx : Int, maxBatch : Int) : List<Entry> =
+    let (last : Int := min(nextIdx + maxBatch - 1, length(log))) {
+        if (nextIdx > length(log)) {
+            listOf<Entry>()
+        } else {
+            splice(log, nextIdx, last)
+        }
+    }
+
+/*
+ * After prevLogIndex/prevLogTerm match, replace the suffix with the batch
+ * (Raft §5.3 truncate+append). Matching prefixes are rewritten identically.
+ */
+export fun applyAppendEntries(
+    log : List<Entry>,
+    prevLogIndex : Int,
+    entries : List<Entry>
+) : List<Entry> =
+    if (length(entries) = 0) {
+        log
+    } else {
+        splice(log, 1, prevLogIndex) + entries
+    }
+
+export fun aeConflictIndex(log : List<Entry>, prevLogIndex : Int) : Int =
+    if (prevLogIndex > length(log)) {
+        length(log) + 1
+    } else {
+        prevLogIndex
+    }
+
+export fun aeConflictTerm(log : List<Entry>, prevLogIndex : Int) : Int =
+    if (prevLogIndex > length(log) | prevLogIndex < 1) {
+        0
+    } else {
+        entryTermAt(log, prevLogIndex)
+    }
+
+export fun agreesAt(matchIndex : Map<Node, Int>, clusterSize : Int, index : Int) : Boolean =
+    (1 + matchIndex.keys.filter(k -> matchIndex[k] >= index).length) * 2 > clusterSize
+
+/*
+ * If index is a current-term entry with quorum agreement, return it; else keep
+ * prior commitIndex. Used on AE response to jump (B1) without .fold in guards.
+ */
+export fun commitJumpTo(
+    commitIndex : Int,
+    log : List<Entry>,
+    currentTerm : Int,
+    matchIndex : Map<Node, Int>,
+    clusterSize : Int,
+    index : Int
+) : Int =
+    if (
+        index > commitIndex
+        & index <= length(log)
+        & entryTermAt(log, index) = currentTerm
+        & agreesAt(matchIndex, clusterSize, index)
+    ) {
+        index
+    } else {
+        commitIndex
+    }
 
 export fun isBlankOrComment(line : String) : Boolean =
     line = "" | startsWith(line, "#")

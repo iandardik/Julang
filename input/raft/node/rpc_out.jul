@@ -71,6 +71,7 @@ procfun outAppendEntriesRPC(peer : Node, data : AppendEntriesData) : Boolean {
     var responseTerm : Int
     var successFlag : Boolean
     var matchIdxVal : Int
+    var conflictTermVal : Int
 
     constructor sendRpc() {
         transit:
@@ -83,6 +84,7 @@ procfun outAppendEntriesRPC(peer : Node, data : AppendEntriesData) : Boolean {
             responseTerm := if (resp.code = 200) parseInt(fieldValue(split(resp.body, "|")[1])) else 0
             successFlag := if (resp.code = 200) parseBool(fieldValue(split(resp.body, "|")[2])) else false
             matchIdxVal := if (resp.code = 200) parseInt(fieldValue(split(resp.body, "|")[3])) else 0
+            conflictTermVal := if (resp.code = 200) parseInt(fieldValue(split(resp.body, "|")[4])) else 0
     }
 
     internal transition rpcFailed() {
@@ -102,7 +104,8 @@ procfun outAppendEntriesRPC(peer : Node, data : AppendEntriesData) : Boolean {
         peer : Node,
         inTerm : Int,
         success : Boolean,
-        matchIdx : Int
+        matchIdx : Int,
+        conflictTerm : Int
     ) {
         guard:
             & step = "handleResponse"
@@ -110,6 +113,7 @@ procfun outAppendEntriesRPC(peer : Node, data : AppendEntriesData) : Boolean {
             & inTerm = responseTerm
             & success = successFlag
             & matchIdx = matchIdxVal
+            & conflictTerm = conflictTermVal
         return:
             successFlag
     }

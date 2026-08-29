@@ -26,9 +26,10 @@ from typing import List, Optional, Tuple
 LIMITATIONS = """\
 LIMITATIONS (Tier 0 — not comparable to PGo / etcd / YCSB):
   - Election timeouts are ~1–2s (ms timers); empty-heartbeat interval ~200ms (skipped while log outdated).
-  - AppendEntries carries at most one entry; AE fan-out uses an outbound RPC pool.
+  - AppendEntries batches up to 32 entries; AE fan-out uses an outbound RPC pool.
+  - Commit can jump on AE response (plus +1 backup); AE rejects carry conflictIndex hints.
   - Log / term state is in-memory only (no durability).
-  - RPC is JDK HTTP with a pipe-delimited text protocol.
+  - RPC is JDK HTTP with a pipe-delimited text protocol (entry values must not contain ':' or ';').
   - This harness reports rough RPS and latency only; no YCSB, no baselines.
 """
 
