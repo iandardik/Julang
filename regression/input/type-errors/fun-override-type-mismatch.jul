@@ -1,0 +1,15 @@
+type Idx
+
+fun flag() : Boolean = true
+
+proc Box {
+    var n : Int
+    constructor start() { transit: n := 0 }
+}
+
+spec S := Box[i : Idx] {
+    Idx := { "a" }
+    flag := 1
+}
+
+compile S

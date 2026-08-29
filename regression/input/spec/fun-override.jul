@@ -1,0 +1,25 @@
+import julay.funlib.listOf
+
+type Idx
+
+export fun bigConst() : Int = 99
+
+proc Box {
+    var n : Int
+
+    constructor start() {
+        transit: n := bigConst()
+    }
+
+    transition bump() {
+        guard: n = 1
+        transit: n := n + 1
+    }
+}
+
+spec S := Box[i : Idx] {
+    Idx := { "a" }
+    bigConst := 1
+}
+
+compile S

@@ -1,0 +1,5 @@
+source: regression/input/type-errors/fun-override-unknown.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Unknown function \"missingFun\" for fun override"
+  - "Found type errors; exiting."

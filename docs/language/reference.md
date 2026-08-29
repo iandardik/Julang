@@ -60,7 +60,7 @@ System atoms: `Name[v : T]` **creates** an index (lifts state); `{ const global 
 
 Leaf-spec actions: `transition name(args) also (aux : T) { … }` (leaf specs only). Bodies may read peer state `P.var` / `P[idx].var` (compile checks composition + indexing).
 
-**Types:** record `type Name { fields }`; typedef `type Name := Carrier`; uninterpreted `type Name`. Delayed models `Name := { lits }` appear only in create-index or leaf-spec bodies — required for uninterpreted when used, optional for typedef (cfg aliases carrier if absent), forbidden for records. Uninterpreted types are spec-only; JAR `compile` errors if a proc reaches one. Typedefs erase to the carrier in procs. Details: [Types and expressions](types-and-expressions.md#delayed-models).
+**Types:** record `type Name { fields }`; typedef `type Name := Carrier`; uninterpreted `type Name`. Delayed models `Name := { lits }` appear only in create-index or leaf-spec bodies — required for uninterpreted when used, optional for typedef (cfg aliases carrier if absent), forbidden for records. Nullary fun overrides `name := expr` in those same places rewrite the TLA operator only (JAR unchanged). Uninterpreted types are spec-only; JAR `compile` errors if a proc reaches one. Typedefs erase to the carrier in procs. Details: [Types and expressions](types-and-expressions.md#delayed-models), [Specifications — Fun overrides](specifications.md#fun-overrides).
 
 `Guarantee` may be a named invariant, an inline Boolean formula (`true` / `false` included), or `true` meaning no guarantee. Plain `spec := System` equals `<true> System <true>` / `--compile-tla`.
 

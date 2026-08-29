@@ -154,6 +154,15 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         return TypeModelNode(name, elements, sourceLocation(ctx))
     }
 
+    override fun visitFun_model(ctx: JulayParser.Fun_modelContext?): ASTNode {
+        val name = ctx!!.ID().text
+        val expr = visit(ctx.expr())
+        if (expr !is ExprNode) {
+            throw RuntimeException("Expected ExprNode for fun override but got $expr")
+        }
+        return FunModelNode(name, expr, sourceLocation(ctx))
+    }
+
     override fun visitFun_decl(ctx: JulayParser.Fun_declContext?): ASTNode {
         val name = ctx!!.ID().text
         val typeParams = parseTypeParams(ctx.typeParams())
@@ -283,6 +292,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         if (ctx.LCURLY() != null) {
             val localDecls = mutableListOf<ProcClassDeclNode>()
             val typeModels = mutableListOf<TypeModelNode>()
+            val funModels = mutableListOf<FunModelNode>()
             ctx.leaf_spec_item().forEach { item ->
                 when {
                     item.proc_body() != null -> {
@@ -299,11 +309,20 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                         }
                         typeModels += node
                     }
+                    item.fun_model() != null -> {
+                        val node = visit(item.fun_model())
+                        if (node !is FunModelNode) {
+                            throw RuntimeException("Expected FunModelNode but got $node")
+                        }
+                        funModels += node
+                    }
                 }
             }
             val paramName = if (ctx.LBRACK() != null) ctx.ID(1).text else null
             val paramType = if (ctx.LBRACK() != null) parseTypeExpr(ctx.typeExpr()) else null
-            return LeafSpecNode(name, paramName, paramType, localDecls, sourceLocation(ctx), typeModels)
+            return LeafSpecNode(
+                name, paramName, paramType, localDecls, sourceLocation(ctx), typeModels, funModels,
+            )
         }
         val value = when {
             ctx.ag_spec() != null -> visit(ctx.ag_spec())
@@ -369,6 +388,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 val globalDecls = mutableListOf<GlobalDeclNames>()
                 val initExprs = mutableListOf<ExprNode>()
                 val typeModels = mutableListOf<TypeModelNode>()
+                val funModels = mutableListOf<FunModelNode>()
                 ctx.create_index_item().forEach { item ->
                     val decl = item.global_decl()
                     if (decl != null) {
@@ -386,18 +406,28 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                             }
                             typeModels += node
                         } else {
-                            val init = item.init_clause()
-                                ?: return@forEach
-                            val expr = visit(init.expr())
-                            if (expr !is ExprNode) {
-                                throw RuntimeException("Expected init: clause to be an expression")
+                            val funModel = item.fun_model()
+                            if (funModel != null) {
+                                val node = visit(funModel)
+                                if (node !is FunModelNode) {
+                                    throw RuntimeException("Expected FunModelNode but got $node")
+                                }
+                                funModels += node
+                            } else {
+                                val init = item.init_clause()
+                                    ?: return@forEach
+                                val expr = visit(init.expr())
+                                if (expr !is ExprNode) {
+                                    throw RuntimeException("Expected init: clause to be an expression")
+                                }
+                                initExprs += expr
                             }
-                            initExprs += expr
                         }
                     }
                 }
                 ParamProcExprNode(
-                    primary, paramName, paramType, sourceLocation(ctx), globalDecls, initExprs, typeModels,
+                    primary, paramName, paramType, sourceLocation(ctx),
+                    globalDecls, initExprs, typeModels, funModels,
                 )
             }
             ctx.LBRACK() != null -> {

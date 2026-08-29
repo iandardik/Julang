@@ -93,6 +93,36 @@ fun ASTNode.collectNestedTypeModels(): List<TypeModelNode> = when (this) {
     else -> children.flatMap { it.collectNestedTypeModels() }
 }
 
+/** Collect spec-only fun overrides from create-index blocks and leaf-spec bodies. */
+fun ASTNode.collectNestedFunModels(): List<FunModelNode> = when (this) {
+    is FunModelNode -> listOf(this)
+    is LeafSpecNode -> funModels() + localDecls().flatMap { it.collectNestedFunModels() }
+    else -> children.flatMap { it.collectNestedFunModels() }
+}
+
+/**
+ * Merge fun overrides by name. Conflicting exprs for the same name are errors.
+ * Returns the surviving model per name (first wins when equal by string).
+ */
+fun mergeFunModels(
+    models: List<FunModelNode>,
+): Pair<Map<String, FunModelNode>, List<CompileError>> {
+    val out = linkedMapOf<String, FunModelNode>()
+    val errors = mutableListOf<CompileError>()
+    models.forEach { model ->
+        val prev = out[model.name()]
+        if (prev != null && prev.overrideExpr.toString() != model.overrideExpr.toString()) {
+            errors += OneLocCompileError(
+                model.programLocation(),
+                "Conflicting fun overrides for \"${model.name()}\"",
+            )
+        } else if (prev == null) {
+            out[model.name()] = model
+        }
+    }
+    return out to errors
+}
+
 sealed interface DomainModelBuildResult {
     data class Ok(val type: DomainType) : DomainModelBuildResult
     data class Failed(val errors: List<CompileError>) : DomainModelBuildResult

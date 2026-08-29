@@ -17,6 +17,57 @@ data class TypePassResult(
     val warnings: List<CompileWarning> = emptyList(),
 )
 
+/**
+ * Validate create-index / leaf-spec `name := expr` fun overrides: known nullary user fun,
+ * return-type match, no conflicting definitions.
+ */
+fun validateSpecFunModels(
+    models: List<FunModelNode>,
+    funEnv: Map<String, FunNode>,
+    registry: ObjClassRegistry,
+    funBuiltinEnv: Map<String, FunBuiltin> = emptyMap(),
+    procFunEnv: Map<String, ProcFunNode> = emptyMap(),
+): List<CompileError> {
+    val (merged, conflictErrors) = mergeFunModels(models)
+    val errors = conflictErrors.toMutableList()
+    merged.values.forEach { model ->
+        val name = model.name()
+        val funNode = funEnv[name]
+        if (funNode == null) {
+            errors += OneLocCompileError(
+                model.programLocation(),
+                "Unknown function \"$name\" for fun override",
+            )
+            return@forEach
+        }
+        if (funNode.funArgs().actionArgs().isNotEmpty()) {
+            errors += OneLocCompileError(
+                model.programLocation(),
+                "Fun override \"$name\" is only allowed for nullary functions",
+            )
+            return@forEach
+        }
+        val exprErrors = model.overrideExpr.typePass(
+            emptyMap(), registry, funEnv, emptyMap(), funBuiltinEnv, procFunEnv,
+        )
+        errors += exprErrors
+        if (exprErrors.isEmpty()) {
+            try {
+                val got = model.overrideExpr.getType()
+                val expected = funNode.returnType
+                if (got != expected) {
+                    errors += OneLocCompileError(
+                        model.programLocation(),
+                        "Fun override \"$name\" has type $got but function returns $expected",
+                    )
+                }
+            } catch (_: RuntimeException) {
+            }
+        }
+    }
+    return errors
+}
+
 /** Set for the duration of [RootNode.typePass] — api-qualified procfun resolution. */
 private var typePassApiEnv: Map<String, ApiNode> = emptyMap()
 /** procfun name → api that lists it in calls: (first wins if overlapping). */
@@ -235,6 +286,11 @@ fun RootNode.typePass(
                 funNode.typePassFunBody(callable, built, builtins, procFuns)
             }
         }
+        val funModelErrors = validateSpecFunModels(
+            unit.modules.flatMap { it.root.collectNestedFunModels() },
+            allFuns,
+            built,
+        )
         // Typecheck each module with that module's imports so julay.funlib.* (and imported
         // user funs) resolve in dependency modules, not only in the entry file.
         // Api.fn(...) only resolves for local/imported apis (not every transitively loaded api).
@@ -266,7 +322,8 @@ fun RootNode.typePass(
         }
         val specResult = unit.root.specTypePass(unit, allowUnindexedSpec)
         return TypePassResult(
-            errors = built.errors + signatureErrors + procFunSigErrors + recursionErrors + funBodyErrors + otherErrors + specResult.errors,
+            errors = built.errors + signatureErrors + procFunSigErrors + recursionErrors +
+                funBodyErrors + funModelErrors + otherErrors + specResult.errors,
             warnings = specResult.warnings,
         )
     } finally {

@@ -1,0 +1,13 @@
+type Idx
+
+proc Box {
+    var n : Int
+    constructor start() { transit: n := 0 }
+}
+
+spec S := Box[i : Idx] {
+    Idx := { "a" }
+    missingFun := 1
+}
+
+compile S

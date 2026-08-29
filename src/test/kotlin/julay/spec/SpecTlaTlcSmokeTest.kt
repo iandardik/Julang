@@ -1177,6 +1177,15 @@ class SpecTlaTlcSmokeTest {
             "cfg Int should pad through MaxListLen so node id 3 is in the universe;\n$cfgText",
         )
         assertTrue(
+            Regex("""(?m)^maxBatchEntries == 2\s*$""").containsMatchIn(tlaText) &&
+                !tlaText.contains("maxBatchEntries == 32"),
+            "ClusterSpec fun override should emit maxBatchEntries == 2 (not 32);\n${tlaText.take(2500)}",
+        )
+        assertTrue(
+            !cfgText.contains("32"),
+            "fun override should keep 32 out of cfg Int;\n$cfgText",
+        )
+        assertTrue(
             cfgText.contains("INVARIANT OneLeaderPerTerm") &&
                 cfgText.contains("INVARIANT StateMachineSafety") &&
                 !cfgText.contains("INVARIANT AllInvariants"),
@@ -2825,6 +2834,25 @@ class SpecTlaTlcSmokeTest {
                     text.contains(invariantName) &&
                     text.contains("violated", ignoreCase = true)),
             "expected TLC to report violation of $invariantName.\n$text",
+        )
+    }
+
+    @Test
+    fun funOverrideRewritesNullaryTlaBodyAndCfgInt() {
+        val source = File("regression/input/spec/fun-override.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        val emit = compileSpecEmit(source, "S")
+        assertTrue(
+            Regex("""(?m)^bigConst == 1\s*$""").containsMatchIn(emit.tlaText),
+            "override should emit bigConst == 1;\n${emit.tlaText}",
+        )
+        assertTrue(
+            !emit.tlaText.contains("bigConst == 99") && !emit.cfgText.contains("99"),
+            "original body literal 99 must not appear in TLA/cfg;\n${emit.tlaText}\n${emit.cfgText}",
+        )
+        assertTrue(
+            emit.cfgText.contains("CONSTANT Int = {0, 1, 2, 3}"),
+            "cfg Int should be MaxListLen-sized, not inflated by 99;\n${emit.cfgText}",
         )
     }
 

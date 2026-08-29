@@ -1,0 +1,5 @@
+source: regression/input/type-errors/fun-override-non-nullary.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Fun override \"needsArg\" is only allowed for nullary functions"
+  - "Found type errors; exiting."

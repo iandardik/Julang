@@ -1,0 +1,5 @@
+source: regression/input/type-errors/fun-override-type-mismatch.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Fun override \"flag\" has type Int but function returns Boolean"
+  - "Found type errors; exiting."

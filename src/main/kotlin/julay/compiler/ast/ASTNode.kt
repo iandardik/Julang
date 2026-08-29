@@ -214,7 +214,9 @@ class LeafSpecNode(
     private val loc: ProgramLoc,
     /** Delayed models (`Name := { … }`) in the leaf-spec body. */
     private val typeModels: List<TypeModelNode> = emptyList(),
-) : DeclNode(localDecls + typeModels) {
+    /** Spec-only nullary fun overrides (`name := expr`) in the leaf-spec body. */
+    private val funModels: List<FunModelNode> = emptyList(),
+) : DeclNode(localDecls + typeModels + funModels) {
     override fun programLocation() = loc
     override fun name() = name
     internal fun leafSpecName() = name
@@ -222,12 +224,13 @@ class LeafSpecNode(
     internal fun leafSpecParamType() = paramType
     internal fun localDecls(): List<ProcClassDeclNode> = localDecls
     internal fun typeModels(): List<TypeModelNode> = typeModels
+    internal fun funModels(): List<FunModelNode> = funModels
     internal fun isParameterized(): Boolean = paramName != null
     /** View as a [ProcClassNode] for TLA / alphabet reuse. */
     internal fun asProcClass(): ProcClassNode =
         ProcClassNode(name, localDecls, loc).also { it.visibility = this.visibility }
     override fun toString(): String {
-        val body = (typeModels + localDecls).joinToString("\n") { "$it".prependIndent() }
+        val body = (typeModels + funModels + localDecls).joinToString("\n") { "$it".prependIndent() }
         val export = if (isExported) "export " else ""
         val params = if (paramName != null && paramType != null) "[$paramName : $paramType]" else ""
         return "${export}spec $name$params {\n$body\n}"
@@ -284,7 +287,9 @@ class ParamProcExprNode(
     private val initExprs: List<ExprNode> = emptyList(),
     /** Create-index delayed domain models (`Name := { … }`). */
     private val typeModels: List<TypeModelNode> = emptyList(),
-) : ASTNode(listOf(body) + initExprs + typeModels) {
+    /** Create-index spec-only nullary fun overrides (`name := expr`). */
+    private val funModels: List<FunModelNode> = emptyList(),
+) : ASTNode(listOf(body) + initExprs + typeModels + funModels) {
     override fun programLocation() = loc
     internal fun paramBody() = body
     internal fun paramName() = paramName
@@ -296,14 +301,18 @@ class ParamProcExprNode(
         globalDecls.filter { it.isConst }.flatMap { it.names }
     internal fun initExprs(): List<ExprNode> = initExprs
     internal fun typeModels(): List<TypeModelNode> = typeModels
+    internal fun funModels(): List<FunModelNode> = funModels
     override fun toString(): String {
         val index = if (paramType == null) "$body[$paramName]" else "$body[$paramName : $paramType]"
-        if (globalDecls.isEmpty() && initExprs.isEmpty() && typeModels.isEmpty()) return index
+        if (globalDecls.isEmpty() && initExprs.isEmpty() && typeModels.isEmpty() && funModels.isEmpty()) {
+            return index
+        }
         val lines = globalDecls.map { decl ->
             val names = decl.names.joinToString(", ")
             val kw = if (decl.isConst) "const global" else "global"
             "  $kw $names"
         } + typeModels.map { it.toString().prependIndent("  ") } +
+            funModels.map { it.toString().prependIndent("  ") } +
             initExprs.map { expr ->
                 "  init: $expr"
             }
@@ -374,6 +383,20 @@ class TypeModelNode(
     override fun toString(): String = "$name := {${elements.joinToString(", ")}}"
 }
 
+/**
+ * Spec-only nullary fun override `name := expr` (create-index / leaf-spec body).
+ * Rewrites the TLA operator body; JAR codegen keeps the original fun definition.
+ */
+class FunModelNode(
+    private val name: String,
+    val overrideExpr: ExprNode,
+    private val loc: ProgramLoc,
+) : ASTNode(listOf(overrideExpr)) {
+    override fun programLocation() = loc
+    fun name(): String = name
+    override fun toString(): String = "$name := $overrideExpr"
+}
+
 class FieldNode(
     val fieldName: String,
     val typeExpr: TypeExpr,
@@ -409,6 +432,16 @@ class FunNode(
     internal fun funReturnTypeExpr(): TypeExpr = returnTypeExpr
     internal fun funReturnTypeName(): String = returnTypeExpr.toString()
     internal fun funBody(): ExprNode = body
+    /** Copy with a new body (used for spec-only TLA fun overrides). */
+    internal fun withBody(newBody: ExprNode): FunNode {
+        val copy = FunNode(name, typeParams, args, returnTypeExpr, newBody, loc)
+        when (val resolution = returnTypeResolution) {
+            is TypeNameResolution.Resolved -> copy.resolveReturnType(resolution.type)
+            is TypeNameResolution.Unresolved -> {}
+        }
+        copy.visibility = visibility
+        return copy
+    }
     internal fun resolveReturnType(type: Type) {
         returnTypeResolution = TypeNameResolution.Resolved(type)
     }

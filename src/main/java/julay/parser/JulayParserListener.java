@@ -188,6 +188,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitType_model(JulayParser.Type_modelContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#fun_model}.
+	 * @param ctx the parse tree
+	 */
+	void enterFun_model(JulayParser.Fun_modelContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#fun_model}.
+	 * @param ctx the parse tree
+	 */
+	void exitFun_model(JulayParser.Fun_modelContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#compile_decl}.
 	 * @param ctx the parse tree
 	 */

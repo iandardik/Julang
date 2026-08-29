@@ -74,6 +74,8 @@ spec Net[n : NodeSet] {
 
 Models are collected from the **spec you `compile`** (create-index items and leaf-spec bodies in that system, including aliased specs). Two disagreeing models for one name → error.
 
+The same create-index / leaf-spec blocks may also contain **fun overrides** `name := expr` for nullary user funs (TLA body only; see [Specifications — Fun overrides](specifications.md#fun-overrides)).
+
 **Rules (any violation is a compile error):**
 
 #### 1. Uninterpreted — delayed model **required**

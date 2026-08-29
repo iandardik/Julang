@@ -119,6 +119,12 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitType_model(JulayParser.Type_modelContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#fun_model}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitFun_model(JulayParser.Fun_modelContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#compile_decl}.
 	 * @param ctx the parse tree
 	 * @return the visitor result

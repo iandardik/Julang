@@ -40,6 +40,8 @@ data class SpecLeaf(
     val initExprs: List<ExprNode> = emptyList(),
     /** Create-index delayed domain models (`Name := { … }`). */
     val typeModels: List<TypeModelNode> = emptyList(),
+    /** Create-index / leaf-spec nullary fun overrides (`name := expr`); TLA-only. */
+    val funModels: List<FunModelNode> = emptyList(),
 ) {
     val isParameterized: Boolean get() = paramName != null && paramType != null
     /** True when this leaf is create-indexed and [varName] is not a `global` model var. */
@@ -103,8 +105,9 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
                 val constGlobals = n.globalConstVarNames().toSet()
                 val inits = n.initExprs()
                 val typeModels = n.typeModels()
+                val funModels = n.funModels()
                 fun withGlobals(child: SpecLeaf): SpecLeaf =
-                    if (globals.isEmpty() && inits.isEmpty() && typeModels.isEmpty()) {
+                    if (globals.isEmpty() && inits.isEmpty() && typeModels.isEmpty() && funModels.isEmpty()) {
                         child
                     } else {
                         child.copy(
@@ -112,6 +115,7 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
                             globalConstVars = child.globalConstVars + constGlobals,
                             initExprs = child.initExprs + inits,
                             typeModels = child.typeModels + typeModels,
+                            funModels = child.funModels + funModels,
                         )
                     }
                 when {

@@ -1,0 +1,5 @@
+source: regression/input/type-errors/fun-override-conflict.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Conflicting fun overrides for \"cap\""
+  - "Found type errors; exiting."

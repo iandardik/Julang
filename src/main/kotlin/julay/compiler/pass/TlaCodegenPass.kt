@@ -197,8 +197,20 @@ fun tlaCodegenPass(
         extraExprs = invClosure.map { it.invariantFormula() },
     )
     val (funlibFuns, userFuns) = usedFunOpsAll.partition { isJulayFunlibFun(it) }
+    val allFunModels = leaves.flatMap { it.funModels } +
+        leafSpecNodes.values.flatMap { it.funModels() }
+    val (funOverrideByName, funModelMergeErrors) = mergeFunModels(allFunModels)
+    if (funModelMergeErrors.isNotEmpty()) {
+        val msg = funModelMergeErrors.joinToString("\n") {
+            (it as? OneLocCompileError)?.msg ?: it.toString()
+        }
+        throw RuntimeException(msg)
+    }
+    val rewrittenUserFuns = userFuns.map { fn ->
+        funOverrideByName[fn.name()]?.let { fn.withBody(it.overrideExpr) } ?: fn
+    }
     val usedFunlibOps = orderFunsForTlaEmit(funlibFuns.toSet())
-    val usedUserFunOps = orderFunsForTlaEmit(userFuns.toSet())
+    val usedUserFunOps = orderFunsForTlaEmit(rewrittenUserFuns.toSet())
     val usedFunOps = usedFunlibOps + usedUserFunOps
     val relevantFields = when {
         tlaOptConfig.unusedFields ->

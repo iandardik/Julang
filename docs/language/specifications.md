@@ -225,6 +225,21 @@ spec Bad := P[n : Int] {
 
 Models are merged from the compile target’s system AST (create-index items and leaf-spec bodies, including aliased specs). Two different sets for the same name in one compile → error.
 
+### Fun overrides
+
+Spec-only overrides rewrite a **nullary** user `fun`’s TLA operator body (and cfg literal collection). JAR codegen keeps the original definition. Syntax is bare `name := expr` in a create-index block or leaf-spec body (same places as delayed models).
+
+```jul
+export fun maxBatchEntries() : Int = 32   // runtime / JAR
+
+spec ClusterSpec := RaftProtocol[n : NodeSet] {
+    NodeSet := { "n1", "n2", "n3" }
+    maxBatchEntries := 2                  // TLA: maxBatchEntries == 2; shrinks cfg Int
+}
+```
+
+**Rules:** name must be a user `fun` in the compilation unit; must be nullary; override expr must match the return type; conflicting overrides for the same name are errors. Executable JARs are unchanged.
+
 **Shorthand** `(A || B)[n : T]` means the same as create-temps + `with` + applies:
 
 ```jul

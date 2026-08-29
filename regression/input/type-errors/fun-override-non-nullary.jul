@@ -1,0 +1,15 @@
+type Idx
+
+fun needsArg(x : Int) : Int = x + 1
+
+proc Box {
+    var n : Int
+    constructor start() { transit: n := 0 }
+}
+
+spec S := Box[i : Idx] {
+    Idx := { "a" }
+    needsArg := 1
+}
+
+compile S

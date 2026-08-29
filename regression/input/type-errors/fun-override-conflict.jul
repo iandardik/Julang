@@ -1,0 +1,13 @@
+type Idx
+
+fun cap() : Int = 9
+
+spec Leaf[i : Idx] {
+    Idx := { "a" }
+    cap := 1
+    cap := 2
+    var n : Int
+    constructor start() { transit: n := 0 }
+}
+
+compile Leaf

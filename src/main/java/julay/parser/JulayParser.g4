@@ -96,6 +96,11 @@ type_model
     : ID ASGN_EQ LCURLY literal (COMMA literal)* RCURLY
     ;
 
+/* Spec-only nullary fun override: `maxBatchEntries := 2` (TLA body rewrite; JAR unchanged). */
+fun_model
+    : ID ASGN_EQ expr
+    ;
+
 compile_decl
     : COMPILE ID (COMMA ID)*
     ;
@@ -111,6 +116,7 @@ spec
 leaf_spec_item
     : proc_body
     | type_model
+    | fun_model
     ;
 
 ag_spec
@@ -142,6 +148,7 @@ create_index_item
     : global_decl
     | init_clause
     | type_model
+    | fun_model
     ;
 
 global_decl
