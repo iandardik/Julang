@@ -2965,6 +2965,14 @@ private fun emitFoldedCtorAssumptions(
     }
     val argAssigns = ctorArgStateAssigns(offer)
     val argTypes = offer.decl.action.args.associate { it.name to it.type }
+    val takenNames = (
+        stateVarsByLeaf +
+            constants +
+            stateVarNames.values +
+            overrides.keys +
+            overrides.values.map { it.substringBefore('[') }
+        ).toMutableSet()
+    if (binder != null) takenNames += binder
     offer.decl.errors.forEach { arm ->
         val assumed = negateErrorCondition(arm.condExpr())
         val quantifiedIndexed = binder != null && domain != null && argAssigns.any { (arg, varName) ->
@@ -2976,6 +2984,13 @@ private fun emitFoldedCtorAssumptions(
         existsArgs.forEach { arg ->
             argTypes[arg]?.let { collectDomainModelNames(it, cfgOverrides) }
         }
+        // Freshen `\E` binders that collide with VARIABLES / CONSTANTS / overrides.
+        val existsArgTla = linkedMapOf<String, String>()
+        existsArgs.forEach { arg ->
+            val tlaArg = firstFreeParamTlaName(arg, takenNames)
+            existsArgTla[arg] = tlaArg
+            takenNames += tlaArg
+        }
         val body = exprToTla(
             assumed,
             leafCtx = leafCtx,
@@ -2984,13 +2999,14 @@ private fun emitFoldedCtorAssumptions(
             bareStateVars = stateVarsByLeaf,
             reservedNames = constants,
             stateVarNames = stateVarNames,
-            symbolOverrides = overrides,
+            symbolOverrides = overrides + existsArgTla,
             linePrefix = "/\\ ",
             globalByLeaf = globalVarsByLeaf(leaves),
         )
         val existsWrap = existsArgs.reversed().fold(body) { inner, arg ->
             val ty = argTypes[arg]?.let { typeToTlaDomain(it) } ?: "Int"
-            "\\E $arg \\in $ty : $inner"
+            val tlaArg = existsArgTla[arg] ?: arg
+            "\\E $tlaArg \\in $ty : $inner"
         }
         val formula = if (quantifiedIndexed) {
             "\\A $binder \\in $domain : $existsWrap"

@@ -8,8 +8,9 @@ proc AssociateWithDemo {
 
     constructor initially(args : List<String>) {
         transit:
-            s := setOf(1, 2)
-            mp := s.associateWith(x -> x + 10)
+            let base : Set<Int> := setOf(1, 2)
+            s := base
+            mp := base.associateWith(x -> x + 10)
             steps := 0
     }
 

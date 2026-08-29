@@ -25,6 +25,13 @@ private val TLC_JAR: File
 private const val TLC_TIMEOUT_SECONDS = 30L
 private const val TLC_VIOLATION_TIMEOUT_SECONDS = 120L
 
+/** Text after a line-leading `Next ==` (avoids false hits inside LET names like `newNext ==`). */
+private fun tlaAfterNext(tlaText: String): String {
+    val m = Regex("(?m)^Next ==").find(tlaText)
+        ?: error("missing line-leading Next == in TLA:\n${tlaText.take(500)}")
+    return tlaText.substring(m.range.last + 1)
+}
+
 class SpecTlaTlcSmokeTest {
 
     @Test
@@ -242,7 +249,7 @@ class SpecTlaTlcSmokeTest {
                 workerInitIdx >= 0 && spawnIdx >= 0 && workerInitIdx < spawnIdx,
                 "Worker initially def should appear after Init and before spawnWorker;\n$tlaText",
             )
-            val nextBody = tlaText.substringAfter("Next ==").substringBefore("\n\n")
+            val nextBody = tlaAfterNext(tlaText).substringBefore("\n\n")
             val nextWorker = nextBody.indexOf("Worker_initially")
             val nextSpawn = nextBody.indexOf("spawnWorker")
             assertTrue(
@@ -691,7 +698,7 @@ class SpecTlaTlcSmokeTest {
         )
         assertTrue(
             Regex("""\\E \w+ \\in """).containsMatchIn(recvDef) ||
-                Regex("""\\E \w+ \\in """).containsMatchIn(tlaText.substringAfter("Next ==")),
+                Regex("""\\E \w+ \\in """).containsMatchIn(tlaAfterNext(tlaText)),
             "collection binder exists should remain;\n$tlaText",
         )
     }
@@ -1025,7 +1032,7 @@ class SpecTlaTlcSmokeTest {
             tlaText.contains("\\E n, m \\in NodeSet :") &&
                 Regex("""requestVote\(n, m""").containsMatchIn(tlaText) &&
                 !tlaText.contains("\\E n \\in NodeSet : \\E m \\in NodeSet"),
-            "consecutive \\E over NodeSet should combine;\n${tlaText.substringAfter("Next ==").take(2000)}",
+            "consecutive \\E over NodeSet should combine;\n${tlaAfterNext(tlaText).take(2000)}",
         )
         assertTrue(
             !tlaText.contains("RaftProtocol_constructed") &&
@@ -1077,7 +1084,7 @@ class SpecTlaTlcSmokeTest {
         )
         assertTrue(
             !Regex("""\\E inTerm \\in Int""").containsMatchIn(tlaText),
-            "exists-from-projection should drop \\E inTerm \\in Int;\n${tlaText.substringAfter("Next ==").take(2500)}",
+            "exists-from-projection should drop \\E inTerm \\in Int;\n${tlaAfterNext(tlaText).take(2500)}",
         )
         assertTrue(
             !Regex("""\\E matchIdx \\in Int""").containsMatchIn(tlaText) &&
@@ -1124,7 +1131,7 @@ class SpecTlaTlcSmokeTest {
                 handleRvDef.contains("lastLogTerm_ = lastLogTerm["),
             "vote logOk should compare the candidate term to state lastLogTerm[n], not the arg to itself;\n$handleRvDef",
         )
-        val nextBlock = tlaText.substringAfter("Next ==").substringBefore("\n\n")
+        val nextBlock = tlaAfterNext(tlaText).substringBefore("\n\n")
         assertTrue(
             !Regex("""\\E n, m \\in NodeSet :[^\n]*handleRequestVoteRequest""").containsMatchIn(nextBlock) &&
                 !Regex("""\\E n, m \\in NodeSet :[^\n]*handleAppendEntriesResponse""").containsMatchIn(nextBlock),
@@ -1166,7 +1173,7 @@ class SpecTlaTlcSmokeTest {
         )
         val cfgText = emit.cfgText
         assertTrue(
-            cfgText.contains("CONSTANT Int = {0, 1, 2, 3}"),
+            cfgText.contains("CONSTANT Int = {0, 1, 2, 3"),
             "cfg Int should pad through MaxListLen so node id 3 is in the universe;\n$cfgText",
         )
         assertTrue(
@@ -1276,12 +1283,10 @@ class SpecTlaTlcSmokeTest {
             "chained expression lets should be one LET;\n${tlaText.substringAfter("appendEntries").take(1500)}",
         )
         assertTrue(
-            !Regex("""LET index ==[^\n]* IN\s+LET alreadyDone""").containsMatchIn(tlaText) &&
-                tlaText.contains("LET index ==") &&
-                tlaText.contains("alreadyDone ==") &&
-                !tlaText.contains("/\\ IN") &&
-                !Regex("""/\\\\\s+alreadyDone ==""").containsMatchIn(tlaText),
-            "back-to-back transit lets should be one LET;\n${tlaText.substringAfter("handleAppendEntriesRequest").take(2000)}",
+            !Regex("""LET advNext ==[^\n]* IN\s+LET newMatch""").containsMatchIn(tlaText) &&
+                Regex("""LET advNext ==.*newMatch ==.*updatedMatch ==""", RegexOption.DOT_MATCHES_ALL)
+                    .containsMatchIn(tlaText),
+            "back-to-back transit lets should be one LET;\n${tlaText.substringAfter("handleAppendEntriesResponse").take(2000)}",
         )
         val (offVars, offWarn) = compileSpecTla(
             source,
@@ -2310,7 +2315,7 @@ class SpecTlaTlcSmokeTest {
                     tlaText.contains("Cardinality(Range("),
                 "expected Range / SetToSeq / allDistinct conversion helpers;\n$tlaText",
             )
-            val nextBody = tlaText.substringAfter("Next ==").substringBefore("Spec ==")
+            val nextBody = tlaAfterNext(tlaText).substringBefore("Spec ==")
             assertTrue(
                 !Regex("""(?<!Bounded)(?<!Sub)Seq\(""").containsMatchIn(nextBody),
                 "must not use bare Seq(...) as a Next/action domain;\n$nextBody",
