@@ -6,7 +6,7 @@ Julay is a verification-aware language for building distributed systems correctl
 
 1. [Getting started](getting-started.md) — build `julayc`, compile, and run
 2. [Language guide](language/README.md) — concepts, syntax, and semantics
-3. [Examples](examples/README.md) — walkthroughs of `echo_server`, `inc_server`, and `list_server`
+3. [Examples](examples/README.md) — walkthroughs of `echo_server`, `inc_server`, `list_server`, and `rpc_server`
 4. [Bugs found with Julay](examples/bugs-found-with-julay.md) — real bugs caught by specs + TLC
 
 ## Tooling

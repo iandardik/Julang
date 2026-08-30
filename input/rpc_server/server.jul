@@ -1,0 +1,108 @@
+import julay.proclib.HttpServer
+import julay.funlib.parseInt
+import julay.funlib.split
+import lib.fieldValue
+
+/*
+ * Inbound HTTP → RPC router (same shape as Raft RpcIn / handleRpc).
+ */
+export proc RpcIn := ServerInitializer || HttpServer
+
+proc ServerInitializer {
+    var started : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            started := false
+    }
+
+    session transition listen(
+        port : Int,
+        handler : HttpServerRequest ~> HttpServerResponse
+    ) {
+        guard: ~started & port = 8000 & handler = handleRpc
+        transit: started := true
+    }
+
+    session transition close() {
+        guard: false
+    }
+}
+
+procfun handleRpc(req : HttpServerRequest) : HttpServerResponse {
+    internal transition route() {
+        return: when (req.path) {
+            "rpc/increment" -> inIncrementRPC(req)
+            "rpc/get" -> inGetRPC(req)
+            "rpc/add" -> inAddRPC(req)
+            else -> HttpServerResponse {
+                body := "NOT_FOUND",
+                code := 404
+            }
+        }
+    }
+}
+
+procfun inIncrementRPC(req : HttpServerRequest) : HttpServerResponse {
+    var step : String := "call"
+    var result : Int := -1
+
+    client transition increment(newVal : Int) {
+        guard: step = "call"
+        transit:
+            step := "respond"
+            result := newVal
+    }
+
+    internal transition respond() {
+        guard: step = "respond"
+        return: HttpServerResponse {
+            body := "v=" + result,
+            code := 200
+        }
+    }
+}
+
+procfun inGetRPC(req : HttpServerRequest) : HttpServerResponse {
+    var step : String := "call"
+    var result : Int := -1
+
+    client transition getCounter(counterVal : Int) {
+        guard: step = "call"
+        transit:
+            step := "respond"
+            result := counterVal
+    }
+
+    internal transition respond() {
+        guard: step = "respond"
+        return: HttpServerResponse {
+            body := "v=" + result,
+            code := 200
+        }
+    }
+}
+
+procfun inAddRPC(req : HttpServerRequest) : HttpServerResponse {
+    // Body: delta=<int>  (pipe-delimited like Raft; single field for now)
+    const deltaVal : Int := parseInt(fieldValue(split(req.body, "|")[1]))
+    var step : String := "call"
+    var result : Int := -1
+
+    client transition add(delta : Int, newVal : Int) {
+        guard:
+            & step = "call"
+            & delta = deltaVal
+        transit:
+            step := "respond"
+            result := newVal
+    }
+
+    internal transition respond() {
+        guard: step = "respond"
+        return: HttpServerResponse {
+            body := "v=" + result,
+            code := 200
+        }
+    }
+}

@@ -1,0 +1,26 @@
+/*
+ * Core "protocol" state machine: a counter exposed only via provider RPCs.
+ * Handlers parse HTTP and sync into these actions — they never touch counter
+ * memory directly.
+ */
+export proc Protocol {
+    var counter : Int
+
+    constructor initially(args : List<String>) {
+        transit: counter := 0
+    }
+
+    provider transition increment(newVal : Int) {
+        guard: newVal = counter + 1
+        transit: counter := counter + 1
+    }
+
+    provider transition add(delta : Int, newVal : Int) {
+        guard: newVal = counter + delta
+        transit: counter := counter + delta
+    }
+
+    provider transition getCounter(counterVal : Int) {
+        guard: counterVal = counter
+    }
+}

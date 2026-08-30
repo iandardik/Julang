@@ -75,5 +75,5 @@ java -jar build/libs/julayc.jar -L input/echo_server input/echo_server/main.jul
 ## Next steps
 
 - [Language guide](language/README.md)
-- [Examples](examples/README.md) — echo, inc, and list HTTP servers
+- [Examples](examples/README.md) — echo, inc, list, and rpc HTTP servers
 - [Tooling](tooling.md) — `julayc analyze` and more flags

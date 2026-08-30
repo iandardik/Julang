@@ -19,8 +19,8 @@ import julay.program.sync.BoolExprFast
 import julay.program.sync.SyncStepPlan
 import julay.program.type.intType
 import julay.program.type.stringType
-import kotlinx.coroutines.runBlocking
 import java.net.InetSocketAddress
+import java.nio.charset.StandardCharsets.UTF_8
 
 /**
  * HTTP server library. [listen] registers a procfun handler; each JDK request invokes
@@ -100,14 +100,11 @@ class JulHttpServer(
         val name = handlerName
             ?: throw IllegalStateException("JulHttpServer handle before listen")
         val path = httpPathFromUriPath(exchange!!.requestURI.path ?: "")
-        val body = exchange.requestBody.bufferedReader().use { it.readText() }
+        val body = String(exchange.requestBody.readAllBytes(), UTF_8)
         val req = HttpServerRequest(path, body)
-        val resp = runBlocking {
-            program.invokeProcFun(name, listOf(req)) as HttpServerResponse
-        }
-        exchange.sendResponseHeaders(resp.code, resp.body.length.toLong())
-        exchange.responseBody.writer().use { writer ->
-            writer.write(resp.body)
-        }
+        val resp = program.invokeProcFunBlocking(name, listOf(req)) as HttpServerResponse
+        val respBytes = resp.body.toByteArray(UTF_8)
+        exchange.sendResponseHeaders(resp.code, respBytes.size.toLong())
+        exchange.responseBody.use { it.write(respBytes) }
     }
 }

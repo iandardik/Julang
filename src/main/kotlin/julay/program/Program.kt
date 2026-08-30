@@ -20,6 +20,8 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CompletableDeferred
 import java.util.Optional
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -207,6 +209,26 @@ class Program {
         child.bindRunJob(job)
         job.start()
         return deferred.await().value
+    }
+
+    /**
+     * Blocking entry for non-coroutine callers (e.g. JDK [com.sun.net.httpserver.HttpHandler]).
+     * Runs [invokeProcFun] on [godScope] and waits on the calling thread without [runBlocking].
+     */
+    fun invokeProcFunBlocking(name: String, argValues: List<Any>): Any {
+        val future = CompletableFuture<Any>()
+        godScope.launch {
+            try {
+                future.complete(invokeProcFun(name, argValues))
+            } catch (e: Throwable) {
+                future.completeExceptionally(e)
+            }
+        }
+        return try {
+            future.get()
+        } catch (e: ExecutionException) {
+            throw e.cause ?: e
+        }
     }
 
     private fun constraintsSatisfiable(constraints: Set<Constraint>): Boolean {

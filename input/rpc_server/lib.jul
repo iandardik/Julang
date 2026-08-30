@@ -1,0 +1,5 @@
+import julay.funlib.split
+
+/* Pipe-delimited `key=value` field helper (same shape as Raft's fieldValue). */
+export fun fieldValue(line : String) : String =
+    split(line, "=")[2]

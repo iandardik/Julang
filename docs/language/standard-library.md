@@ -69,7 +69,7 @@ Compose these like any other proc, e.g. `Server || HttpServer` or `Driver || Tim
 | **Timer** | `julay.proclib.Timer` | Cancellable timer (`createTimer`, `startTimer`, `timeout`, `cancelTimer`); `startTimer` takes milliseconds; uses `delayMillis`, `exitSession`, `killSessionPeer` | Yes (delay, session teardown) |
 | **HttpServer** | `julay.proclib.HttpServer` | Lifecycle only: `listen(port, handler)`, `close` | Yes (network I/O; Kotlin-native) |
 
-These HTTP pieces are the backbone of the [echo](../examples/echo-server.md), [inc](../examples/inc-server.md), and [list](../examples/list-server.md) server examples.
+These HTTP pieces are the backbone of the [echo](../examples/echo-server.md), [inc](../examples/inc-server.md), [list](../examples/list-server.md), and [rpc](../examples/rpc-server.md) server examples.
 
 ## Funlib
 

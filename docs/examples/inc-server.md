@@ -132,4 +132,4 @@ Spec artifacts appear as `HandlerSpec` / `IncSpec` TLA files in the working dire
 
 - [Specifications](../language/specifications.md)
 - [Effects](../language/effects.md) — `delaySeconds` in the printer
-- Previous: [Echo server](echo-server.md) · Next: [List server](list-server.md)
+- Previous: [Echo server](echo-server.md) · Next: [List server](list-server.md) · [RPC server](rpc-server.md)

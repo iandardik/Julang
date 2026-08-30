@@ -1,0 +1,6 @@
+import protocol.Protocol
+import server.RpcIn
+
+proc RpcServer := Protocol || RpcIn
+
+compile RpcServer

@@ -115,3 +115,4 @@ curl -s -X POST -d 'world' http://localhost:8000/
 - [Types and expressions](../language/types-and-expressions.md) — lists
 - [Inc server](inc-server.md) — verification-aware sibling
 - [Echo server](echo-server.md) — client/server split
+- [RPC server](rpc-server.md) — parse/route churn on a counter core

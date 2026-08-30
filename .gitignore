@@ -16,3 +16,5 @@ build
 *.bin
 states
 *.log
+input/rpc_server/scripts/profile-out/
+tools/async-profiler/

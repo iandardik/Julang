@@ -5,6 +5,7 @@ Walkthroughs of the HTTP demos under [`input/`](../../input/). Suggested order:
 1. [Echo server](echo-server.md) — separate server and client compile targets; HTTP session flow
 2. [Inc server](inc-server.md) — counter as a provider interface **plus** TLA+ specs
 3. [List server](list-server.md) — list state behind `getAndAppend` / `getList`
+4. [RPC server](rpc-server.md) — inc-like core with Raft-style path route + body parse
 
 Each page points at the real `.jul` sources. Build `julayc` first ([Getting started](../getting-started.md)).
 
