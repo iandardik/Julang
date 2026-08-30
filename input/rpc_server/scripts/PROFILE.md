@@ -93,7 +93,7 @@ Collapsed alloc stacks no longer show `runBlocking`, `BlockingCoroutine`, `Event
 | HTTP / JulHttpServer / bridge | ~20% | ~21% |
 | JDK HttpServer / NIO | ~39% | ~41% |
 
-Collapsed stacks show `runOneStepFast → syncFast → sync` on client/internal steps. Plan target ≤18% not fully met: **`Protocol` still offers all three provider actions every step → `Select.run` with 3 arms** (BufferedChannel + cancel losers) remains the bulk of the SyncChannel bucket.
+Collapsed stacks show `runOneStepFast → syncFast → sync` on client/internal steps. Plan target ≤18% not fully met: **`Protocol` still offers all three provider actions every step → `Select.run` with 3 cases** (BufferedChannel + cancel losers) remains the bulk of the SyncChannel bucket.
 
 **`bench_toys.sh --targets rpc,rpc-native --ops 200 --clients 4`:** Julay ~2360 RPS, native ~5370 (~2.3×). Sustained profile load ~4850 RPS.
 
@@ -133,7 +133,7 @@ Alloc makes the Julay tax even clearer: per-request **procfun invoke + SyncChann
 Native is faster because each request is “parse → mutex → respond” on the HTTP thread. Julay still pays:
 
 1. `Program.invokeProcFun` (spawn a Proc per request, often **two** — `handleRpc` + `in*RPC`) — **Phase 3**
-2. SyncChannel / Select — improved in Phase 2; residual dominated by Protocol’s 3-arm Select
+2. SyncChannel / Select — improved in Phase 2; residual dominated by Protocol’s 3-case Select
 3. SyncResolveFast (small once opts are on)
 
 ## Next optimization candidate

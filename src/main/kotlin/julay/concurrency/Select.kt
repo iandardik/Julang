@@ -1,13 +1,18 @@
 package julay.concurrency
 
 import julay.tools.assert
+import kotlinx.coroutines.CompletableDeferred
 import java.lang.RuntimeException
 import java.util.*
 
 class Select(private vararg val cases : Case) {
+    private val race = SelectRace()
     private val winnerMutex = StratifiedMutex()
-    var winner = Optional.empty<Int>() // TODO make private
-    /** Set when a SyncCase's SyncChannel closes; Select exits without waiting for other arms. */
+    private val confirmedSignal = CompletableDeferred<Unit>()
+    /** Mirror of [SelectRace] for tests / callbacks; set when race commits. */
+    var winner = Optional.empty<Int>()
+        private set
+
     @Volatile
     internal var exitDueToChannelClose = false
 
@@ -17,57 +22,88 @@ class Select(private vararg val cases : Case) {
         if (numCases != numChannels) {
             throw RuntimeException("Each Case in a Select must use a unique channel")
         }
-
         cases.forEach {
             if (it.hasSelect()) {
                 throw RuntimeException("A Case must only be associated with a single Select")
             }
         }
-
         cases.forEach { it.setSelect(this) }
     }
 
     fun getWinnerMutex() = winnerMutex
-    fun canCommit(chanHash : Int) : Boolean {
-        return winner.isEmpty || winner.get() == chanHash
-    }
-    fun doCommit(chanHash : Int) {
-        julay.tools.assert(canCommit(chanHash))
-        winner = Optional.of(chanHash)
+
+    fun canCommit(chanHash: Int): Boolean {
+        val w = race.winnerHash()
+        return w == null || w == chanHash
     }
 
-    /** Called when a SyncCase's channel closes so Select can exit remaining arms promptly. */
+    fun doCommit(chanHash: Int) {
+        julay.tools.assert(tryRaceWin(chanHash))
+    }
+
+    /** CAS EMPTY→COMMITTED; true if this channel owns the select (provisional until confirm). */
+    fun tryRaceWin(channelHash: Int): Boolean {
+        val ok = race.tryRaceWin(channelHash)
+        if (ok) {
+            winner = Optional.of(channelHash)
+        }
+        return ok
+    }
+
+    fun rollbackRaceWin(channelHash: Int) {
+        race.rollbackRaceWin(channelHash)
+        if (race.winnerHash() == null) {
+            winner = Optional.empty()
+        }
+    }
+
+    fun confirmRaceWin() {
+        race.confirm()
+        confirmedSignal.complete(Unit)
+    }
+
+    /** Provisional or confirmed race occupancy (for conflict detection). */
+    fun hasRaceWinner(): Boolean = race.hasWinner()
+
+    /** True only after a committed rendezvous flush. */
+    fun isRaceConfirmed(): Boolean = race.isConfirmed()
+
+    fun winnerHash(): Int? = race.winnerHash()
+
+    /** Completed when this Select confirms a winner — losing cases abort WAIT/FOLLOW. */
+    fun confirmedSignal(): CompletableDeferred<Unit> = confirmedSignal
+
     fun noteChannelClosed() {
         exitDueToChannelClose = true
     }
 
     /**
-     * Registers all arms on their channels from one coroutine ([SelectCoordinator]), waits once
-     * for a winner or close, then unregisters losers.
+     * Scramble / park-once / single-await via [SelectCoordinator].
      *
-     * **Z3 / shared-Context invariant:** If a case's constraint type [C] embeds live Z3 ASTs,
-     * clone each case's constraints into a Case-local ephemeral Context *before* constructing
-     * [SyncCase] / calling [run]. Julay does this in [julay.program.Proc.runOneStep].
+     * **Z3 / shared-Context invariant:** clone each case's constraints into a Case-local
+     * ephemeral Context *before* constructing [SyncCase] / calling [run].
      */
     suspend fun run() {
-        if (winner.isPresent) {
+        if (isRaceConfirmed()) {
             throw RuntimeException("Select run multiple times")
         }
         if (cases.isEmpty()) {
             return
         }
-
-        val arms = cases.map { case ->
+        val caseOffers = cases.map { case ->
             when (case) {
                 is SyncCase<*, *> -> {
                     @Suppress("UNCHECKED_CAST")
                     val sc = case as SyncCase<Any, Any>
-                    SelectArm(
+                    SelectCaseOffer(
                         channel = sc.getChannel(),
                         constraint = sc.getConstraint(),
                         anticonstraint = sc.getAnticonstraint(),
                         callback = { value ->
-                            assert(winner.get() == sc.getChannelHash(), "Expected winning case to have the winning channel")
+                            assert(
+                                winner.get() == sc.getChannelHash(),
+                                "Expected winning case to have the winning channel",
+                            )
                             sc.invokeCallback(value)
                         },
                     )
@@ -76,32 +112,33 @@ class Select(private vararg val cases : Case) {
             }
         }
         @Suppress("UNCHECKED_CAST")
-        SelectCoordinator.run(this, arms as List<SelectArm<Any, Any>>)
+        SelectCoordinator.run(this, caseOffers as List<SelectCaseOffer<Any, Any>>)
     }
-
 
     interface Case {
-        fun setSelect(s : Select)
-        fun hasSelect() : Boolean
-        fun getChannelHash() : Int
+        fun setSelect(s: Select)
+        fun hasSelect(): Boolean
+        fun getChannelHash(): Int
         suspend fun run()
     }
-    /**
-     * One Select arm on [chan]. For Z3-backed [C], pass constraints already cloned into a
-     * Case-local Context (see [Select.run]); do not share one Context across multiple cases.
-     */
+
     class SyncCase<V : Any, C : Any>(
-        private val chan : SyncChannel<C, V>,
-        private val constraint : Optional<C> = Optional.empty(),
-        private val anticonstraint : Optional<C> = Optional.empty(),
-        private val callback : (V)->Unit = {}
+        private val chan: SyncChannel<C, V>,
+        private val constraint: Optional<C> = Optional.empty(),
+        private val anticonstraint: Optional<C> = Optional.empty(),
+        private val callback: (V) -> Unit = {},
     ) : Case {
         private var selectRef = Optional.empty<Select>()
-        constructor(chan : SyncChannel<C, V>, callback : (V)->Unit = {})
-            : this(chan, Optional.empty(), Optional.empty(), callback) {}
-        constructor(chan : SyncChannel<C, V>, constraint : C, anticonstraint : C, callback : (V)->Unit = {})
-                : this(chan, Optional.of(constraint), Optional.of(anticonstraint), callback) {}
-        override fun setSelect(s : Select) {
+        constructor(chan: SyncChannel<C, V>, callback: (V) -> Unit = {})
+            : this(chan, Optional.empty(), Optional.empty(), callback)
+        constructor(
+            chan: SyncChannel<C, V>,
+            constraint: C,
+            anticonstraint: C,
+            callback: (V) -> Unit = {},
+        ) : this(chan, Optional.of(constraint), Optional.of(anticonstraint), callback)
+
+        override fun setSelect(s: Select) {
             selectRef = Optional.of(s)
         }
         override fun hasSelect() = selectRef.isPresent
@@ -112,11 +149,6 @@ class Select(private vararg val cases : Case) {
         internal fun getAnticonstraint() = anticonstraint
         internal fun invokeCallback(value: V) = callback.invoke(value)
 
-        /**
-         * Direct sync without a [Select] (single-offer Proc steps). Uses [SyncChannel.syncFast]
-         * when both constraints are present; otherwise falls back to empty-Select [SyncChannel.sync].
-         * Does not require [setSelect].
-         */
         suspend fun syncDirect(onSat: (V) -> Unit = callback) {
             val ret = if (constraint.isPresent && anticonstraint.isPresent) {
                 chan.syncFast(constraint.get(), anticonstraint.get())

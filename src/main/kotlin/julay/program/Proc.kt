@@ -23,7 +23,7 @@ import kotlinx.coroutines.CancellationException
  * Peer-exit / session lifetime:
  * - An exiting proc closes every dedicated session SyncChannel in [clearAffinityAndCloseSessions].
  * - Both peers hold the same SyncChannel reference, so close immediately wakes any waiter and
- *   causes that Select arm to abort; Select then exits (see [Select]) so other arms do not hang.
+ *   causes that Select case to abort; Select then exits (see [Select]) so other cases do not hang.
  * - The surviving peer lazily removes closed session entries and the corresponding affinity in
  *   [scrubClosedSessionsAndAffinity] at the start of its next transition step, then rebuilds
  *   Select so session actions fall back to the global first-contact channel.

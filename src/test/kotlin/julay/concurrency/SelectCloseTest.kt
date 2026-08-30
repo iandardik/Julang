@@ -21,7 +21,7 @@ import kotlin.time.Duration.Companion.seconds
 class SelectCloseTest {
 
     @Test
-    fun closeWhileWaitingMultiArmExitsSelectWithoutHanging() = runBlocking {
+    fun closeWhileWaitingMultiCaseExitsSelectWithoutHanging() = runBlocking {
         withContext(Dispatchers.Default) {
             val c1 = SyncChannel<Int, Int>(2) { Optional.of(1) }
             val c2 = SyncChannel<Int, Int>(2) { Optional.of(2) }
@@ -43,7 +43,7 @@ class SelectCloseTest {
     }
 
     @Test
-    fun closeWhileWaitingSingleArmExitsSelect() = runBlocking {
+    fun closeWhileWaitingSingleCaseExitsSelect() = runBlocking {
         withContext(Dispatchers.Default) {
             val chan = SyncChannel<Int, Int>(2) { Optional.of(1) }
             val fired = AtomicBoolean(false)
@@ -59,7 +59,7 @@ class SelectCloseTest {
     }
 
     @Test
-    fun offerOnAlreadyClosedChannelExitsSelectWithOpenOtherArm() = runBlocking {
+    fun offerOnAlreadyClosedChannelExitsSelectWithOpenOtherCase() = runBlocking {
         withContext(Dispatchers.Default) {
             val closed = SyncChannel<Int, Int>(2) { Optional.of(1) }
             closed.close()

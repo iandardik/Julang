@@ -19,18 +19,18 @@ import java.util.concurrent.atomic.AtomicBoolean
  * - [syncSize] **2** (main): pairwise rendezvous. Under the mutex we filter peers (anti /
  *   [rejectedPeers]), reserve a pair (`pairing` + shared `pairGate`), snapshot constraints, then
  *   **unlock**. The leader runs [compute] outside the lock; on success we relock, revalidate,
- *   run Select 2PL, remove the pair, and the leader resumes the follower's [Participant.valueCont].
+ *   run Select race (CAS), remove the pair, and the leader resumes the follower's [Participant.valueCont].
  * - [syncSize] **1** (special): self-commit with the same compute-outside pattern (no peer).
  *
  * Callers that cannot form a group [WAIT] on [wakeWaiters] until registration/pairing/close
  * signals them. A peer reserved by a leader [FOLLOW]s: it awaits `pairGate`, then receives [V]
  * (or retries if the reservation was released without a value).
  *
- * Lock order when Select is involved: channel [mutex] outer, Select [StratifiedMutex]es inner
- * (sorted). Never hold the channel mutex across [compute].
+ * Never hold the channel mutex across [compute]. Select commitment uses lock-free race CAS,
+ * not StratifiedMutex 2PL.
  *
  * [syncFast] is the no-Select entry used by single-offer Proc steps; it shares the participant
- * table with [sync] so Select arms and syncFast callers can rendezvous.
+ * table with [sync] so Select cases and syncFast callers can rendezvous.
  *
  * @param antisCompatible When both peers have anticonstraints, return true if they may sync
  *   on the anti dimension. Julay wires SyncAnti equality. Empty anticonstraint = no exclusivity.
@@ -63,7 +63,7 @@ class SyncChannel<C : Any, V : Any>(
         )
     }
 
-    private suspend inline fun <T> withChannelLock(block: () -> T): T {
+    private suspend inline fun <T> withChannelLock(block: suspend () -> T): T {
         val batch = mutableListOf<() -> Unit>()
         val result = mutex.withLock {
             wakeFlushBatch = batch
@@ -143,9 +143,16 @@ class SyncChannel<C : Any, V : Any>(
                                 if (closed || me !in participants || me.followerValue.get() || me.pairing) {
                                     return@withChannelLock null
                                 }
+                                if (me.select.isPresent && !me.select.get().canCommit(hashCode())) {
+                                    return@withChannelLock null
+                                }
                                 val w = CompletableDeferred<Unit>()
                                 wakeWaiters.add(w)
                                 if (closed || me.followerValue.get() || me.pairing) {
+                                    wakeWaiters.remove(w)
+                                    return@withChannelLock null
+                                }
+                                if (me.select.isPresent && !me.select.get().canCommit(hashCode())) {
                                     wakeWaiters.remove(w)
                                     return@withChannelLock null
                                 }
@@ -153,7 +160,7 @@ class SyncChannel<C : Any, V : Any>(
                             }
                         }
                         if (wake == null) {
-                            if (closed) {
+                            if (closed || (me.select.isPresent && !me.select.get().canCommit(hashCode()))) {
                                 removeSelfAfterAbort(me)
                                 return SyncChannelResult.abort()
                             }
@@ -163,7 +170,20 @@ class SyncChannel<C : Any, V : Any>(
                             continue
                         }
                         try {
-                            wake.await()
+                            val sel = me.select.orElse(null)
+                            if (sel != null) {
+                                var lost = false
+                                kotlinx.coroutines.selects.select {
+                                    wake.onAwait { }
+                                    sel.confirmedSignal().onAwait { lost = true }
+                                }
+                                if (lost || !sel.canCommit(hashCode())) {
+                                    removeSelfAfterAbort(me)
+                                    return SyncChannelResult.abort()
+                                }
+                            } else {
+                                wake.await()
+                            }
                         } catch (_: CancellationException) {
                             withContext(NonCancellable) {
                                 withChannelLock { wakeWaiters.remove(wake) }
@@ -281,6 +301,11 @@ class SyncChannel<C : Any, V : Any>(
             out.setFollow(me.pairGate ?: completedGate())
             return
         }
+        val myHash = hashCode()
+        if (me.select.isPresent && !me.select.get().canCommit(myHash)) {
+            out.setAbort()
+            return
+        }
         if (syncSize == 1) {
             me.pairing = true
             me.pairGate = CompletableDeferred()
@@ -294,6 +319,8 @@ class SyncChannel<C : Any, V : Any>(
             if (peer.pairing || peer.followerValue.get()) continue
             if (me.isRejected(peer)) continue
             if (!antiOk(me, peer)) continue
+            // Skip Selects already committed on another channel (replaces StratifiedMutex wait).
+            if (peer.select.isPresent && !peer.select.get().canCommit(myHash)) continue
             me.pairing = true
             peer.pairing = true
             val gate = CompletableDeferred<Unit>()
@@ -384,8 +411,14 @@ class SyncChannel<C : Any, V : Any>(
         enqueueFlush { gates.forEach { it.complete(Unit) } }
         signalWaitersLocked()
         out.setSat(syncValue.get(), group)
-        for (p in group) {
-            p.selectGroup?.tryCompleteWinner(syncValue.get())
+        // Defer SelectGroup wake until after channel unlock — completing under the lock
+        // deadlocks if the coordinator resumes and unregisterSelectCase re-enters the mutex.
+        val value = syncValue.get()
+        val groupsToComplete = group.mapNotNull { it.selectGroup }
+        enqueueFlush {
+            for (g in groupsToComplete) {
+                g.tryCompleteWinner(value)
+            }
         }
     }
 
@@ -399,10 +432,16 @@ class SyncChannel<C : Any, V : Any>(
     }
 
     private fun signalWaitersLocked() {
-        if (wakeWaiters.isEmpty()) return
-        val copy = wakeWaiters.toList()
-        wakeWaiters.clear()
-        enqueueFlush { copy.forEach { it.complete(Unit) } }
+        if (wakeWaiters.isNotEmpty()) {
+            val copy = wakeWaiters.toList()
+            wakeWaiters.clear()
+            enqueueFlush { copy.forEach { it.complete(Unit) } }
+        }
+        // Wake SelectCoordinators parked in awaitCompletionOrNudge so they can tryLeadParked.
+        val toNudge = participants.mapNotNull { it.selectGroup }.toSet()
+        if (toNudge.isNotEmpty()) {
+            enqueueFlush { toNudge.forEach { it.nudge() } }
+        }
     }
 
     private fun constraintsOf(a: Participant<V, C>, b: Participant<V, C>?): Set<C> {
@@ -441,26 +480,43 @@ class SyncChannel<C : Any, V : Any>(
         return satisfiable?.invoke(constraints) ?: compute.invoke(constraints).isPresent
     }
 
+    /**
+     * Select commitment: lock-free race when ≤1 Select is in the pair; StratifiedMutex 2PL
+     * when two Selects meet (CAS-only livelocks under multi-channel Select-vs-Select load).
+     */
     private suspend fun selectsCommit(group: Set<Participant<V, C>>): Boolean {
         val myHash = hashCode()
-        val selectGroup = group.filter { p -> p.select.isPresent }
-        if (selectGroup.isEmpty()) return true
-        val allMutexes = selectGroup.map { p -> p.select.get().getWinnerMutex() }.sorted()
+        val withSelect = group.filter { it.select.isPresent }
+            .sortedBy { System.identityHashCode(it.select.get()) }
+        if (withSelect.isEmpty()) return true
+        if (withSelect.size == 1) {
+            val select = withSelect[0].select.get()
+            if (!select.tryRaceWin(myHash)) {
+                withSelect[0].selectIsWon = true
+                return false
+            }
+            withSelect[0].selectIsWon = false
+            select.confirmRaceWin()
+            return true
+        }
+        val allMutexes = withSelect.map { it.select.get().getWinnerMutex() }.sorted()
         var lockedMutexes = emptyList<StratifiedMutex>()
         try {
             lockedMutexes = allMutexes.map {
                 it.mutex.lock()
                 it
             }
-            assert(lockedMutexes == allMutexes, "Expected all locked mutexes")
-            val allCanCommit = selectGroup.all { p ->
-                val select = p.select.get()
-                val selectCanCommit = select.canCommit(myHash)
+            val allCanCommit = withSelect.all { p ->
+                val selectCanCommit = p.select.get().canCommit(myHash)
                 p.selectIsWon = !selectCanCommit
                 selectCanCommit
             }
             if (allCanCommit) {
-                selectGroup.forEach { it.select.get().doCommit(myHash) }
+                for (p in withSelect) {
+                    val select = p.select.get()
+                    select.doCommit(myHash)
+                    select.confirmRaceWin()
+                }
             }
             return allCanCommit
         } finally {
@@ -468,21 +524,51 @@ class SyncChannel<C : Any, V : Any>(
         }
     }
 
+    private fun selectsRace(group: Set<Participant<V, C>>): Boolean {
+        // retained for tests / single-path callers; prefer [selectsCommit].
+        val myHash = hashCode()
+        val withSelect = group.filter { it.select.isPresent }
+            .sortedBy { System.identityHashCode(it.select.get()) }
+        if (withSelect.isEmpty()) return true
+        val won = mutableListOf<Select>()
+        for (p in withSelect) {
+            val select = p.select.get()
+            if (select.tryRaceWin(myHash)) {
+                won.add(select)
+            } else {
+                for (s in won) {
+                    s.rollbackRaceWin(myHash)
+                }
+                return false
+            }
+        }
+        for (s in won) {
+            s.confirmRaceWin()
+        }
+        return true
+    }
+
     suspend fun close() {
         withChannelLock {
             if (!closed) {
                 closed = true
+                val groupsToClose = mutableListOf<SelectGroup<V>>()
                 participants.forEach {
                     if (!it.followerValue.get()) {
                         it.cancelValue()
                     }
-                    it.selectGroup?.signalChannelClosed()
+                    it.selectGroup?.let { g -> groupsToClose.add(g) }
                     it.pairGate?.complete(Unit)
                     it.pairGate = null
                     it.pairing = false
                 }
                 removeParticipants(participants.toSet())
                 signalWaitersLocked()
+                enqueueFlush {
+                    for (g in groupsToClose) {
+                        g.signalChannelClosed()
+                    }
+                }
             }
         }
     }
@@ -504,30 +590,175 @@ class SyncChannel<C : Any, V : Any>(
     internal val internalSyncSize: Int get() = syncSize
 
     /**
-     * Passive Select arm on a size-2 channel: registers a waiter without an active [sync] loop.
-     * Returns null when the channel is already closed.
+     * Go-style select offer: register under the channel lock.
+     *
+     * @param parkOnly when true (size-2), only register — do not reserve a peer. The coordinator
+     *   leads via [tryLeadParked] one case at a time so a Select cannot NeedCompute on two
+     *   channels at once (avoids dual-channel mutual race livelock).
      */
-    internal suspend fun registerSelectArm(
+    internal suspend fun selectOffer(
         constraint: Optional<C>,
         anticonstraint: Optional<C>,
         select: Select,
         group: SelectGroup<V>,
-    ): SelectArmHandle<V, C>? {
-        val me = Participant(constraint, anticonstraint, Optional.of(select), group)
-        val ok = withChannelLock {
-            if (closed) {
-                false
-            } else {
-                me.everRegistered = true
-                participants.add(me)
-                signalWaitersLocked()
-                true
-            }
+        parkOnly: Boolean = false,
+    ): SelectOfferResult<V, C> {
+        return withChannelLock {
+            selectOfferLocked(constraint, anticonstraint, select, group, parkOnly)
         }
-        return if (ok) SelectArmHandle(this, me) else null
     }
 
-    internal suspend fun unregisterSelectArm(handle: SelectArmHandle<V, C>) {
+    private fun selectOfferLocked(
+        constraint: Optional<C>,
+        anticonstraint: Optional<C>,
+        select: Select,
+        group: SelectGroup<V>,
+        parkOnly: Boolean,
+    ): SelectOfferResult<V, C> {
+        if (closed) {
+            return SelectOfferResult.Closed()
+        }
+        val me = Participant(constraint, anticonstraint, Optional.of(select), group)
+        me.everRegistered = true
+        participants.add(me)
+        signalWaitersLocked()
+        if (syncSize == 1) {
+            me.pairing = true
+            me.pairGate = CompletableDeferred()
+            val raw = constraintsOf(me, null)
+            val (constraints, cleanup) = snapshotForCompute?.invoke(raw) ?: (raw to {})
+            return SelectOfferResult.NeedCompute(me, setOf(me), constraints, cleanup)
+        }
+        if (parkOnly) {
+            return SelectOfferResult.Parked(SelectCaseHandle(this, me))
+        }
+        val myHash = hashCode()
+        if (me.select.isPresent && !me.select.get().canCommit(myHash)) {
+            removeParticipants(setOf(me))
+            return SelectOfferResult.Closed() // treat as done-elsewhere; coordinator checks race
+        }
+        for (peer in participants) {
+            if (peer === me) continue
+            if (peer.pairing || peer.followerValue.get()) continue
+            if (me.isRejected(peer)) continue
+            if (!antiOk(me, peer)) continue
+            if (peer.select.isPresent && !peer.select.get().canCommit(myHash)) continue
+            me.pairing = true
+            peer.pairing = true
+            val gate = CompletableDeferred<Unit>()
+            me.pairGate = gate
+            peer.pairGate = gate
+            signalWaitersLocked()
+            val raw = constraintsOf(me, peer)
+            val (constraints, cleanup) = snapshotForCompute?.invoke(raw) ?: (raw to {})
+            return SelectOfferResult.NeedCompute(me, setOf(me, peer), constraints, cleanup)
+        }
+        return SelectOfferResult.Parked(SelectCaseHandle(this, me))
+    }
+
+    /**
+     * After [selectOffer] returned [SelectOfferResult.NeedCompute]: run [compute] outside the
+     * lock, then finish (Select race + deliver).
+     */
+    internal suspend fun runSelectCompute(
+        offer: SelectOfferResult.NeedCompute<V, C>,
+    ): SyncChannelResult<V> {
+        val syncValue = try {
+            compute.invoke(offer.constraints)
+        } catch (e: CancellationException) {
+            offer.computeCleanup()
+            withContext(NonCancellable) {
+                withChannelLock { releasePairingLocked(offer.group) }
+            }
+            removeSelfAfterAbort(offer.me)
+            throw e
+        } catch (e: Throwable) {
+            offer.computeCleanup()
+            throw e
+        }
+        offer.computeCleanup()
+        val decision = DecisionBuf<V, C>()
+        withContext(NonCancellable) {
+            withChannelLock {
+                finishAfterComputeLocked(offer.me, offer.group, syncValue, decision)
+            }
+        }
+        return when (decision.kind) {
+            DecisionKind.SAT -> {
+                val value = decision.value!!
+                for (p in decision.group) {
+                    if (p !== offer.me) {
+                        p.completeValue(value)
+                    }
+                }
+                SyncChannelResult.sat(value)
+            }
+            DecisionKind.ABORT -> {
+                removeSelfAfterAbort(offer.me)
+                SyncChannelResult.abort()
+            }
+            DecisionKind.FOLLOW -> {
+                val gate = offer.me.pairGate
+                if (gate != null && !gate.isCompleted) {
+                    try { gate.await() } catch (_: CancellationException) {}
+                }
+                waitForLeaderOrAbort(offer.me)
+            }
+            DecisionKind.RETRY -> {
+                // Still registered; caller treats as parked.
+                SyncChannelResult.abort()
+            }
+            else -> error("unreachable finish kind: ${decision.kind}")
+        }
+    }
+
+    /**
+     * If [handle]'s participant is still free and an eligible peer exists, reserve a pair
+     * (or size-1 self) and return [SelectOfferResult.NeedCompute]; else null.
+     */
+    internal suspend fun tryLeadParked(
+        handle: SelectCaseHandle<V, C>,
+    ): SelectOfferResult.NeedCompute<V, C>? {
+        return withChannelLock {
+            val me = handle.participant
+            if (closed || me !in participants || me.pairing || me.followerValue.get()) {
+                return@withChannelLock null
+            }
+            val myHash = hashCode()
+            if (me.select.isPresent && !me.select.get().canCommit(myHash)) {
+                return@withChannelLock null
+            }
+            if (syncSize == 1) {
+                me.pairing = true
+                me.pairGate = CompletableDeferred()
+                val raw = constraintsOf(me, null)
+                val (constraints, cleanup) = snapshotForCompute?.invoke(raw) ?: (raw to {})
+                return@withChannelLock SelectOfferResult.NeedCompute(me, setOf(me), constraints, cleanup)
+            }
+            for (peer in participants) {
+                if (peer === me) continue
+                if (peer.pairing || peer.followerValue.get()) continue
+                if (me.isRejected(peer)) continue
+                if (!antiOk(me, peer)) continue
+                if (peer.select.isPresent && !peer.select.get().canCommit(myHash)) continue
+                me.pairing = true
+                peer.pairing = true
+                val gate = CompletableDeferred<Unit>()
+                me.pairGate = gate
+                peer.pairGate = gate
+                signalWaitersLocked()
+                val raw = constraintsOf(me, peer)
+                val (constraints, cleanup) = snapshotForCompute?.invoke(raw) ?: (raw to {})
+                return@withChannelLock SelectOfferResult.NeedCompute(me, setOf(me, peer), constraints, cleanup)
+            }
+            null
+        }
+    }
+
+    internal suspend fun isSelectCaseRegistered(handle: SelectCaseHandle<V, C>): Boolean =
+        withChannelLock { handle.participant in participants }
+
+    internal suspend fun unregisterSelectCase(handle: SelectCaseHandle<V, C>) {
         withContext(NonCancellable) {
             handle.participant.cancelValue()
             withChannelLock {
@@ -540,7 +771,18 @@ class SyncChannel<C : Any, V : Any>(
         }
     }
 
-    internal class SelectArmHandle<V : Any, C : Any>(
+    internal sealed class SelectOfferResult<V : Any, C : Any> {
+        class Closed<V : Any, C : Any> : SelectOfferResult<V, C>()
+        class Parked<V : Any, C : Any>(val handle: SelectCaseHandle<V, C>) : SelectOfferResult<V, C>()
+        class NeedCompute<V : Any, C : Any>(
+            val me: Participant<V, C>,
+            val group: Set<Participant<V, C>>,
+            val constraints: Set<C>,
+            val computeCleanup: () -> Unit,
+        ) : SelectOfferResult<V, C>()
+    }
+
+    internal class SelectCaseHandle<V : Any, C : Any>(
         val channel: SyncChannel<C, V>,
         val participant: Participant<V, C>,
     )

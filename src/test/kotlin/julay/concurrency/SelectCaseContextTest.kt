@@ -23,8 +23,8 @@ import kotlin.test.assertTrue
  * the JVM. Julay clones each case into a Case-local Context before Select (see
  * [julay.program.Proc] and [Select.run]). Omitting that clone reintroduces the race.
  *
- * Select picks one winning arm; the other is cancelled. Peers on both channels still race
- * pairwise [translate] while both arms are registered — that is the bug window.
+ * Select picks one winning case; the other is cancelled. Peers on both channels still race
+ * pairwise [translate] while both cases are registered — that is the bug window.
  */
 class SelectCaseContextTest {
     private fun translateCompute(): (Set<Constraint>) -> Optional<Int> = { constraints ->
@@ -109,7 +109,7 @@ class SelectCaseContextTest {
                     ).run()
                 }
                 selectJob.join()
-                // Cancel peers before closing Case Contexts — a cancelled Select arm may leave
+                // Cancel peers before closing Case Contexts — a cancelled Select case may leave
                 // a peer still translating Case-local exprs until scrubbed/cancelled.
                 p1.cancelAndJoin()
                 p2.cancelAndJoin()
@@ -118,7 +118,7 @@ class SelectCaseContextTest {
                 caseCtx1.close()
                 caseCtx2.close()
             }
-            // Exactly one Select arm wins per round.
+            // Exactly one Select case wins per round.
             assertEquals(rounds, wins.get())
             assertTrue(wins.get() > 0)
         }

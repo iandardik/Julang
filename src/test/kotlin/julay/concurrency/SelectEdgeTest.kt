@@ -21,7 +21,7 @@ class SelectEdgeTest {
     @Test
     fun selectWinnerDuringSlowPeerCompute() = runBlocking {
         withContext(Dispatchers.Default) {
-            // Size-2 arm never commits (empty compute); size-1 self-commits and wins Select.
+            // Size-2 case never commits (empty compute); size-1 self-commits and wins Select.
             val slow = SyncChannel<Int, Int>(2) { Optional.empty() }
             val fast = SyncChannel<Int, Int>(1) { Optional.of(42) }
             val got = AtomicInteger(-1)
@@ -40,7 +40,7 @@ class SelectEdgeTest {
     }
 
     @Test
-    fun selectAllArmsAbortWithoutWinner() = runBlocking {
+    fun selectAllCasesAbortWithoutWinner() = runBlocking {
         withContext(Dispatchers.Default) {
             val c1 = SyncChannel<Int, Int>(2) { Optional.of(1) }
             val c2 = SyncChannel<Int, Int>(2) { Optional.of(2) }
@@ -65,9 +65,9 @@ class SelectEdgeTest {
         withContext(Dispatchers.Default) {
             // Mirrors Timer cancel-restart: Controller Select(cancel, end); Helper syncDirect(end)
             // then closes the session channel in finally. Select must keep the committed end winner
-            // even if close races the non-winning arm.
+            // even if close races the non-winning case.
             val endChan = SyncChannel<Int, Int>(2) { Optional.of(99) }
-            // Idle arm: peer present but compute never sat — cannot win Select.
+            // Idle case: peer present but compute never sat — cannot win Select.
             val cancelChan = SyncChannel<Int, Int>(2) { Optional.empty() }
             val got = AtomicInteger(-1)
             val cancelPeer = launch { cancelChan.sync() }
@@ -111,10 +111,10 @@ class SelectEdgeTest {
     }
 
     @Test
-    fun selectSize1ArmWinsSize2LoserScrubs() = runBlocking {
+    fun selectSize1CaseWinsSize2LoserScrubs() = runBlocking {
         withContext(Dispatchers.Default) {
             val size1 = SyncChannel<Int, Int>(1) { Optional.of(1) }
-            // Empty compute so the size-2 arm cannot beat size-1 via peer rendezvous.
+            // Empty compute so the size-2 case cannot beat size-1 via peer rendezvous.
             val size2 = SyncChannel<Int, Int>(2) { Optional.empty() }
             val got = AtomicInteger(-1)
             val peer = launch { size2.sync() }
