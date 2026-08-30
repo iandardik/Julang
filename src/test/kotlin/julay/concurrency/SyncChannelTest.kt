@@ -211,4 +211,47 @@ class SyncChannelTest {
             }
         }
     }
+
+    @Test
+    fun syncFastSize2Rendezvous() = runBlocking {
+        withContext(Dispatchers.Default) {
+            // antisCompatible always true: Int anticonstraints are role tags in Julay, not formulas.
+            val chan = SyncChannel<Int, Int>(
+                2,
+                antisCompatible = { _, _ -> true },
+            ) { cs -> Optional.of(cs.sum()) }
+            val a = async { chan.syncFast(3, 10) }
+            val b = async { chan.syncFast(7, 20) }
+            withTimeout(5.seconds) {
+                assertEquals(10, a.await().result.get())
+                assertEquals(10, b.await().result.get())
+            }
+            assertEquals(0, chan.participantCountForTests())
+        }
+    }
+
+    @Test
+    fun syncFastInteropsWithSync() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val chan = SyncChannel<Int, Int>(2) { Optional.of(99) }
+            val viaSync = async { chan.sync(1) }
+            val viaFast = async { chan.syncFast(2, 3) }
+            withTimeout(5.seconds) {
+                assertEquals(99, viaSync.await().result.get())
+                assertEquals(99, viaFast.await().result.get())
+            }
+            assertEquals(0, chan.participantCountForTests())
+        }
+    }
+
+    @Test
+    fun syncFastSize1SelfCommit() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val chan = SyncChannel<Int, Int>(1) { Optional.of(7) }
+            val r = chan.syncFast(1, 2)
+            assertTrue(r.isPresent)
+            assertEquals(7, r.result.get())
+            assertEquals(0, chan.participantCountForTests())
+        }
+    }
 }

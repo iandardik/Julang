@@ -73,7 +73,31 @@ Collapsed alloc stacks no longer show `runBlocking`, `BlockingCoroutine`, `Event
 
 `EnablementFalse` / `fillInStackTrace` **gone** from hot alloc stacks. Remaining SyncResolveFast samples are legitimate grounding (`evalTermLocals`, `BoolExprFast.Eq`).
 
-**Next:** Phase 2 — lighter size-2 FastOnly rendezvous (`SyncChannel` / `Select` bucket).
+## Phase 2 — SyncChannel / syncFast (2026-08-30)
+
+**Changes:**
+
+1. **`SyncChannel.syncFast(constraint, anticonstraint)`** — no-Select entry for single-offer FastOnly steps; wired from `Proc.runOneStepFast` (size==1) and `Select.SyncCase.syncDirect`.
+2. **`Participant.valueGate`** — `CompletableDeferred` replaces capacity-1 `Channel` for follower delivery (less BufferedChannel alloc).
+3. **`DecisionBuf`** — reuse one decision buffer per `sync` call instead of allocating `SyncDecision` every pick/finish.
+4. **Lazy `rejectedPeers`** — allocate the set only on first empty-compute rejection.
+5. **`runOneStepFast` single-offer path** — calls `syncFast` directly (no `Select.SyncCase` list/map).
+6. **NonCancellable** — kept on pick/finish/cleanup (required: cancel mid-`selectsCommit` leaked `pairing=true` and deadlocked); removed only from SAT value delivery (now non-suspending `complete`).
+
+**Allocation (`profile_rpc.sh --variant julay --mode alloc --duration 12 --clients 4`)**
+
+| Area | After Phase 1 | After Phase 2 |
+|------|--------------:|--------------:|
+| SyncChannel / Select | ~28% | **~24%** |
+| invokeProcFun / Proc | ~10% | ~11% |
+| HTTP / JulHttpServer / bridge | ~20% | ~21% |
+| JDK HttpServer / NIO | ~39% | ~41% |
+
+Collapsed stacks show `runOneStepFast → syncFast → sync` on client/internal steps. Plan target ≤18% not fully met: **`Protocol` still offers all three provider actions every step → `Select.run` with 3 arms** (BufferedChannel + cancel losers) remains the bulk of the SyncChannel bucket.
+
+**`bench_toys.sh --targets rpc,rpc-native --ops 200 --clients 4`:** Julay ~2360 RPS, native ~5370 (~2.3×). Sustained profile load ~4850 RPS.
+
+**Next:** Phase 3 — cut double procfun spawn (`handleRpc` → `in*RPC`); optionally shrink Protocol’s always-on multi-offer Select.
 
 ## Baseline — before bridge fix (2026-08-29)
 
@@ -108,17 +132,13 @@ Alloc makes the Julay tax even clearer: per-request **procfun invoke + SyncChann
 
 Native is faster because each request is “parse → mutex → respond” on the HTTP thread. Julay still pays:
 
-1. `Program.invokeProcFun` (spawn a Proc per request) — **next optimization target**
-2. SyncChannel / Select rendezvous with `Protocol` — **next optimization target**
+1. `Program.invokeProcFun` (spawn a Proc per request, often **two** — `handleRpc` + `in*RPC`) — **Phase 3**
+2. SyncChannel / Select — improved in Phase 2; residual dominated by Protocol’s 3-arm Select
 3. SyncResolveFast (small once opts are on)
-
-The HTTP bridge (`runBlocking` per request) was removed 2026-08-30; see **After HTTP bridge fix** above.
-
-Named sync opts already removed Z3 from this workload; further wins are **procfun lifecycle / IPC**, not the solver.
 
 ## Next optimization candidate
 
-**Reduce per-request `invokeProcFun` + SyncChannel cost** (lighter procfun spawn, reuse, or a Channel-style fast path for clear client/provider pairs — see [compiler-optimizations.md](../../../docs/language/compiler-optimizations.md) “Kotlin Channel rewrites … not implemented yet”). Do **not** prioritize residual Z3 for `rpc_server` opts-on until that gap shrinks.
+**Phase 3: eliminate double procfun spawn** for `handleRpc → in*RPC` (tail-call or compile-time fuse). That is the largest remaining Julay-specific lever before compiler Channel rewrites ([compiler-optimizations.md](../../../docs/language/compiler-optimizations.md)).
 
 ## Flamegraph index (this machine)
 

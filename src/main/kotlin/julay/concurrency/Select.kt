@@ -134,11 +134,16 @@ class Select(private vararg val cases : Case) {
         override fun getChannelHash() = chan.hashCode()
 
         /**
-         * Direct sync without a [Select] (single-offer Proc steps). Uses empty Select so
-         * SyncChannel skips 2PL. Does not require [setSelect].
+         * Direct sync without a [Select] (single-offer Proc steps). Uses [SyncChannel.syncFast]
+         * when both constraints are present; otherwise falls back to empty-Select [SyncChannel.sync].
+         * Does not require [setSelect].
          */
         suspend fun syncDirect(onSat: (V) -> Unit = callback) {
-            val ret = chan.sync(constraint, anticonstraint, Optional.empty())
+            val ret = if (constraint.isPresent && anticonstraint.isPresent) {
+                chan.syncFast(constraint.get(), anticonstraint.get())
+            } else {
+                chan.sync(constraint, anticonstraint, Optional.empty())
+            }
             if (ret.isPresent) {
                 onSat.invoke(ret.result.get())
             }

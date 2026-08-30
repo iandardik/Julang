@@ -215,8 +215,9 @@ class Proc(
         if (offers.isEmpty()) {
             return false
         }
-        var nextPayload = Optional.empty<SyncPayload>()
-        val cases = offers.map { offer ->
+        // Single offer: syncFast directly — no Select.SyncCase list/map/callback churn.
+        if (offers.size == 1) {
+            val offer = offers[0]
             val syncChannel = resolveSyncChannel(offer)
             val constraint = Constraint(
                 fast = offer.guard,
@@ -230,9 +231,34 @@ class Proc(
                 classId = classId,
                 proc = this,
             )
-            Select.SyncCase(syncChannel, constraint, anticonstraint) { payload: SyncPayload ->
-                nextPayload = Optional.of(payload)
+            val ret = syncChannel.syncFast(constraint, anticonstraint)
+            if (ret.isEmpty) {
+                scrubClosedSessionsAndAffinity()
+                return true
             }
+            return applySyncPayload(ret.result.get())
+        }
+        var nextPayload = Optional.empty<SyncPayload>()
+        val cases = ArrayList<Select.SyncCase<SyncPayload, Constraint>>(offers.size)
+        for (offer in offers) {
+            val syncChannel = resolveSyncChannel(offer)
+            val constraint = Constraint(
+                fast = offer.guard,
+                procId = procId,
+                classId = classId,
+                proc = this,
+            )
+            val anticonstraint = Constraint(
+                anti = julay.program.sync.SyncAnti.fromRole(offer.syncRole, tsInfo.classID()),
+                procId = procId,
+                classId = classId,
+                proc = this,
+            )
+            cases.add(
+                Select.SyncCase(syncChannel, constraint, anticonstraint) { payload: SyncPayload ->
+                    nextPayload = Optional.of(payload)
+                },
+            )
         }
         runSyncCases(cases) { payload -> nextPayload = Optional.of(payload) }
 
