@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * - [syncSize] **2** (main): pairwise rendezvous. Under the mutex we filter peers (anti /
  *   [rejectedPeers]), reserve a pair (`pairing` + shared `pairGate`), snapshot constraints, then
  *   **unlock**. The leader runs [compute] outside the lock; on success we relock, revalidate,
- *   run Select 2PL, remove the pair, and the leader completes the follower's [Participant.valueGate].
+ *   run Select 2PL, remove the pair, and the leader resumes the follower's [Participant.valueCont].
  * - [syncSize] **1** (special): self-commit with the same compute-outside pattern (no peer).
  *
  * Callers that cannot form a group [WAIT] on [wakeWaiters] until registration/pairing/close
@@ -53,7 +53,7 @@ class SyncChannel<C : Any, V : Any>(
     /** Waiters blocked in [DecisionKind.WAIT]; completed after unlock via [wakeFlushBatch]. */
     private val wakeWaiters = mutableListOf<CompletableDeferred<Unit>>()
     /** Completions deferred until after [withChannelLock] releases [mutex] (avoid lock re-entry). */
-    private var wakeFlushBatch: MutableList<CompletableDeferred<Unit>>? = null
+    private var wakeFlushBatch: MutableList<() -> Unit>? = null
     private var closed = false
 
     init {
@@ -64,7 +64,7 @@ class SyncChannel<C : Any, V : Any>(
     }
 
     private suspend inline fun <T> withChannelLock(block: () -> T): T {
-        val batch = mutableListOf<CompletableDeferred<Unit>>()
+        val batch = mutableListOf<() -> Unit>()
         val result = mutex.withLock {
             wakeFlushBatch = batch
             try {
@@ -73,7 +73,7 @@ class SyncChannel<C : Any, V : Any>(
                 wakeFlushBatch = null
             }
         }
-        batch.forEach { it.complete(Unit) }
+        batch.forEach { it.invoke() }
         return result
     }
 
@@ -106,15 +106,12 @@ class SyncChannel<C : Any, V : Any>(
         select: Optional<Select> = Optional.empty(),
     ): SyncChannelResult<V> {
         val me = Participant<V, C>(constraint, anticonstraint, select)
-        // Reused across loop iterations to avoid SyncDecision allocations on the hot path.
         val decision = DecisionBuf<V, C>()
         try {
             while (true) {
-                // Another leader already committed us as follower while we were unlocked.
                 if (me.followerValue.get()) {
                     return waitForLeaderOrAbort(me)
                 }
-                // Pick under NonCancellable so we never leave pairing=true half-updated.
                 withContext(NonCancellable) {
                     withChannelLock { pickCandidateLocked(me, decision) }
                 }
@@ -141,7 +138,6 @@ class SyncChannel<C : Any, V : Any>(
                         continue
                     }
                     DecisionKind.WAIT -> {
-                        // Re-check under lock before awaiting to avoid lost wakeups.
                         val wake = withContext(NonCancellable) {
                             withChannelLock {
                                 if (closed || me !in participants || me.followerValue.get() || me.pairing) {
@@ -196,8 +192,6 @@ class SyncChannel<C : Any, V : Any>(
                             throw e
                         }
                         computeCleanup()
-                        // NonCancellable: must finish revalidate/Select 2PL or release pairing;
-                        // cancel mid-selectsCommit would leak pairing=true (deadlock).
                         withContext(NonCancellable) {
                             withChannelLock {
                                 finishAfterComputeLocked(me, group, syncValue, decision)
@@ -221,10 +215,9 @@ class SyncChannel<C : Any, V : Any>(
                             }
                             DecisionKind.SAT -> {
                                 val value = decision.value!!
-                                // valueGate.complete is non-suspending — no NonCancellable needed.
                                 for (p in decision.group) {
                                     if (p !== me) {
-                                        p.valueGate.complete(value)
+                                        p.completeValue(value)
                                     }
                                 }
                                 return SyncChannelResult.sat(value)
@@ -245,7 +238,7 @@ class SyncChannel<C : Any, V : Any>(
 
     private suspend fun waitForLeaderOrAbort(me: Participant<V, C>): SyncChannelResult<V> {
         try {
-            return SyncChannelResult.sat(me.valueGate.await())
+            return SyncChannelResult.sat(me.awaitValue())
         } catch (_: CancellationException) {
         } catch (_: Exception) {
         }
@@ -255,7 +248,7 @@ class SyncChannel<C : Any, V : Any>(
 
     private suspend fun removeSelfAfterAbort(me: Participant<V, C>) {
         withContext(NonCancellable) {
-            me.valueGate.cancel()
+            me.cancelValue()
             withChannelLock {
                 if (!closed) {
                     releasePairingLocked(setOf(me))
@@ -266,9 +259,6 @@ class SyncChannel<C : Any, V : Any>(
         }
     }
 
-    /**
-     * Under [mutex]: register [me] if needed, then fill [out] with the next decision.
-     */
     private fun pickCandidateLocked(me: Participant<V, C>, out: DecisionBuf<V, C>) {
         if (me.followerValue.get()) {
             out.setFollow(me.pairGate ?: completedGate())
@@ -328,12 +318,7 @@ class SyncChannel<C : Any, V : Any>(
             p.pairGate?.let { gates.add(it) }
             p.pairGate = null
         }
-        val batch = wakeFlushBatch
-        if (batch != null) {
-            batch.addAll(gates)
-        } else {
-            gates.forEach { it.complete(Unit) }
-        }
+        enqueueFlush { gates.forEach { it.complete(Unit) } }
         signalWaitersLocked()
     }
 
@@ -380,7 +365,7 @@ class SyncChannel<C : Any, V : Any>(
             val stale = participants.filter { it.selectIsWon }.toSet()
             releasePairingLocked(group)
             for (p in stale) {
-                p.valueGate.cancel()
+                p.cancelValue()
             }
             removeParticipants(stale)
             signalWaitersLocked()
@@ -396,26 +381,28 @@ class SyncChannel<C : Any, V : Any>(
             p.pairing = false
         }
         removeParticipants(group)
-        val batch = wakeFlushBatch
-        if (batch != null) {
-            batch.addAll(gates)
-        } else {
-            gates.forEach { it.complete(Unit) }
-        }
+        enqueueFlush { gates.forEach { it.complete(Unit) } }
         signalWaitersLocked()
         out.setSat(syncValue.get(), group)
+        for (p in group) {
+            p.selectGroup?.tryCompleteWinner(syncValue.get())
+        }
+    }
+
+    private fun enqueueFlush(action: () -> Unit) {
+        val batch = wakeFlushBatch
+        if (batch != null) {
+            batch.add(action)
+        } else {
+            action()
+        }
     }
 
     private fun signalWaitersLocked() {
         if (wakeWaiters.isEmpty()) return
         val copy = wakeWaiters.toList()
         wakeWaiters.clear()
-        val batch = wakeFlushBatch
-        if (batch != null) {
-            batch.addAll(copy)
-        } else {
-            copy.forEach { it.complete(Unit) }
-        }
+        enqueueFlush { copy.forEach { it.complete(Unit) } }
     }
 
     private fun constraintsOf(a: Participant<V, C>, b: Participant<V, C>?): Set<C> {
@@ -487,8 +474,9 @@ class SyncChannel<C : Any, V : Any>(
                 closed = true
                 participants.forEach {
                     if (!it.followerValue.get()) {
-                        it.valueGate.cancel()
+                        it.cancelValue()
                     }
+                    it.selectGroup?.signalChannelClosed()
                     it.pairGate?.complete(Unit)
                     it.pairGate = null
                     it.pairing = false
@@ -510,14 +498,98 @@ class SyncChannel<C : Any, V : Any>(
 
     internal fun mutexAvailableForTests(): Boolean = !mutex.isLocked
 
-    private class Participant<V : Any, C : Any>(
+    /** Stable id for cross-channel lock ordering in [SelectCoordinator]. */
+    internal val channelId: Long = nextChannelId.getAndIncrement()
+
+    internal val internalSyncSize: Int get() = syncSize
+
+    /**
+     * Passive Select arm on a size-2 channel: registers a waiter without an active [sync] loop.
+     * Returns null when the channel is already closed.
+     */
+    internal suspend fun registerSelectArm(
+        constraint: Optional<C>,
+        anticonstraint: Optional<C>,
+        select: Select,
+        group: SelectGroup<V>,
+    ): SelectArmHandle<V, C>? {
+        val me = Participant(constraint, anticonstraint, Optional.of(select), group)
+        val ok = withChannelLock {
+            if (closed) {
+                false
+            } else {
+                me.everRegistered = true
+                participants.add(me)
+                signalWaitersLocked()
+                true
+            }
+        }
+        return if (ok) SelectArmHandle(this, me) else null
+    }
+
+    internal suspend fun unregisterSelectArm(handle: SelectArmHandle<V, C>) {
+        withContext(NonCancellable) {
+            handle.participant.cancelValue()
+            withChannelLock {
+                if (!closed && handle.participant in participants) {
+                    releasePairingLocked(setOf(handle.participant))
+                    removeParticipants(setOf(handle.participant))
+                    signalWaitersLocked()
+                }
+            }
+        }
+    }
+
+    internal class SelectArmHandle<V : Any, C : Any>(
+        val channel: SyncChannel<C, V>,
+        val participant: Participant<V, C>,
+    )
+
+    internal class Participant<V : Any, C : Any>(
         val constraint: Optional<C>,
         val anticonstraint: Optional<C>,
         val select: Optional<Select>,
+        val selectGroup: SelectGroup<V>? = null,
     ) {
-        /** Leader completes this for followers; capacity-1 Channel replaced to cut alloc. */
-        val valueGate = CompletableDeferred<V>()
-        /** Peers for which this participant already saw empty [compute] (avoid livelock). */
+        @Volatile
+        private var pendingValue: V? = null
+        @Volatile
+        private var valueCont: CancellableContinuation<V>? = null
+
+        suspend fun awaitValue(): V {
+            pendingValue?.let {
+                pendingValue = null
+                return it
+            }
+            return suspendCancellableCoroutine { cont ->
+                val pending = pendingValue
+                if (pending != null) {
+                    pendingValue = null
+                    cont.resumeWith(Result.success(pending))
+                    return@suspendCancellableCoroutine
+                }
+                valueCont = cont
+                cont.invokeOnCancellation { valueCont = null }
+            }
+        }
+
+        fun completeValue(value: V) {
+            val cont = valueCont
+            if (cont != null) {
+                valueCont = null
+                cont.resumeWith(Result.success(value))
+            } else {
+                pendingValue = value
+            }
+        }
+
+        fun cancelValue() {
+            pendingValue = null
+            val cont = valueCont
+            valueCont = null
+            cont?.cancel(CancellationException())
+        }
+
         private var rejectedPeers: MutableSet<Participant<V, C>>? = null
         var selectIsWon = false
         var pairing = false
@@ -551,7 +623,6 @@ class SyncChannel<C : Any, V : Any>(
         ABORT, WAIT, TRY, RETRY, SAT, FOLLOW,
     }
 
-    /** Mutable decision buffer reused across pick/finish within one [sync] call. */
     private class DecisionBuf<V : Any, C : Any> {
         var kind: DecisionKind = DecisionKind.WAIT
         var constraints: Set<C> = emptySet()
@@ -614,6 +685,10 @@ class SyncChannel<C : Any, V : Any>(
             pairGate = null
             computeCleanup = {}
         }
+    }
+
+    companion object {
+        private val nextChannelId = java.util.concurrent.atomic.AtomicLong(0)
     }
 }
 

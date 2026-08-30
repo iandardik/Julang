@@ -52,6 +52,9 @@ class Proc(
     /** (peerProcId, actionName) → dedicated session SyncChannel. */
     private val sessionChannelTable = mutableMapOf<Pair<Long, String>, SyncChannel<Constraint, SyncPayload>>()
 
+    /** Reused across select steps to avoid per-step [ArrayList] / [Select.SyncCase] churn. */
+    private val stepSyncCases = ArrayList<Select.SyncCase<SyncPayload, Constraint>>(8)
+
     private val silentlyKilled = AtomicBoolean(false)
     @Volatile
     private var runJob: Job? = null
@@ -239,7 +242,7 @@ class Proc(
             return applySyncPayload(ret.result.get())
         }
         var nextPayload = Optional.empty<SyncPayload>()
-        val cases = ArrayList<Select.SyncCase<SyncPayload, Constraint>>(offers.size)
+        stepSyncCases.clear()
         for (offer in offers) {
             val syncChannel = resolveSyncChannel(offer)
             val constraint = Constraint(
@@ -254,13 +257,13 @@ class Proc(
                 classId = classId,
                 proc = this,
             )
-            cases.add(
+            stepSyncCases.add(
                 Select.SyncCase(syncChannel, constraint, anticonstraint) { payload: SyncPayload ->
                     nextPayload = Optional.of(payload)
                 },
             )
         }
-        runSyncCases(cases) { payload -> nextPayload = Optional.of(payload) }
+        runSyncCases(stepSyncCases) { payload -> nextPayload = Optional.of(payload) }
 
         if (nextPayload.isEmpty) {
             scrubClosedSessionsAndAffinity()
@@ -292,7 +295,8 @@ class Proc(
         }
         val caseCtxs = mutableListOf<Context>()
         try {
-            val cases = enabledActions.map { act ->
+            stepSyncCases.clear()
+            for (act in enabledActions) {
                 val syncChannel = resolveSyncChannel(act)
                 val caseCtx = Context().also { caseCtxs.add(it) }
                 val constraint = Constraint(
@@ -302,20 +306,19 @@ class Proc(
                     classId = classId,
                     proc = this,
                 ).cloneInto(caseCtx)
-                // Affinity exclusivity is enforced by routing onto the dedicated session SyncChannel
-                // once affinity exists (see resolveSyncChannel). First contact may use the static channel.
-                // Anticonstraints are SyncAnti only (no Z3 BoolExpr).
                 val anticonstraint = Constraint(
                     anti = julay.program.sync.SyncAnti.fromRole(act.syncRole, tsInfo.classID()),
                     procId = procId,
                     classId = classId,
                     proc = this,
                 )
-                Select.SyncCase(syncChannel, constraint, anticonstraint) { payload: SyncPayload ->
-                    nextPayload = Optional.of(payload)
-                }
+                stepSyncCases.add(
+                    Select.SyncCase(syncChannel, constraint, anticonstraint) { payload: SyncPayload ->
+                        nextPayload = Optional.of(payload)
+                    },
+                )
             }
-            runSyncCases(cases) { payload -> nextPayload = Optional.of(payload) }
+            runSyncCases(stepSyncCases) { payload -> nextPayload = Optional.of(payload) }
         } finally {
             caseCtxs.forEach { caseCtx ->
                 ContextLocalCache.dropContext(caseCtx)

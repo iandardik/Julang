@@ -1,34 +1,23 @@
 package julay.concurrency
 
 import julay.tools.assert
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.ClosedReceiveChannelException
-import kotlinx.coroutines.channels.ClosedSendChannelException
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.withLock
 import java.lang.RuntimeException
 import java.util.*
 
 class Select(private vararg val cases : Case) {
-    private val caseDoneChan = Channel<Case>()
     private val winnerMutex = StratifiedMutex()
     var winner = Optional.empty<Int>() // TODO make private
     /** Set when a SyncCase's SyncChannel closes; Select exits without waiting for other arms. */
     @Volatile
-    private var exitDueToChannelClose = false
+    internal var exitDueToChannelClose = false
 
     init {
-        // check to make sure no two cases use the same channel
         val numCases = cases.size
         val numChannels = cases.map { it.getChannelHash() }.toSet().size
         if (numCases != numChannels) {
             throw RuntimeException("Each Case in a Select must use a unique channel")
         }
 
-        // make sure that each cases isn't already associated with a select
         cases.forEach {
             if (it.hasSelect()) {
                 throw RuntimeException("A Case must only be associated with a single Select")
@@ -47,25 +36,20 @@ class Select(private vararg val cases : Case) {
         winner = Optional.of(chanHash)
     }
 
-    /** Called by [SyncCase] when its channel closes so Select cancels remaining arms promptly. */
+    /** Called when a SyncCase's channel closes so Select can exit remaining arms promptly. */
     fun noteChannelClosed() {
         exitDueToChannelClose = true
     }
 
     /**
-     * Runs all [cases] concurrently (one coroutine per case).
+     * Registers all arms on their channels from one coroutine ([SelectCoordinator]), waits once
+     * for a winner or close, then unregisters losers.
      *
-     * **Z3 / shared-Context invariant:** If a case's constraint type [C] embeds live Z3 ASTs
-     * (e.g. Julay [julay.program.Constraint] with a [com.microsoft.z3.BoolExpr]), those ASTs must
-     * **not** share one Context across multiple cases. [run] launches cases on different
-     * [SyncChannel]s in parallel; each channel may [com.microsoft.z3.Expr.translate] peer
-     * constraints into a scratch Context. Concurrent translates from the same source Context
-     * race on Z3 native state and can crash the JVM. Callers must clone each case's constraints
-     * into a Case-local ephemeral Context *before* constructing [SyncCase] / calling [run].
-     * Julay does this in [julay.program.Proc.runOneStep].
+     * **Z3 / shared-Context invariant:** If a case's constraint type [C] embeds live Z3 ASTs,
+     * clone each case's constraints into a Case-local ephemeral Context *before* constructing
+     * [SyncCase] / calling [run]. Julay does this in [julay.program.Proc.runOneStep].
      */
     suspend fun run() {
-        // make sure that run() is only ever run once
         if (winner.isPresent) {
             throw RuntimeException("Select run multiple times")
         }
@@ -73,36 +57,26 @@ class Select(private vararg val cases : Case) {
             return
         }
 
-        // launch a coroutine for each case and listen on the channel. each routine attempts to "win" the select statement
-        // by communicating with its channel first.
-        coroutineScope {
-            val jobs = cases.map { launch { it.run() } }
-            val allCases = cases.toSet()
-            val doneCases = mutableSetOf<Case>()
-            var winnerCopy = Optional.empty<Int>()
-            var winnerDone = false
-            while (!winnerDone && doneCases != allCases) {
-                // Peer exit may close a non-winning arm's channel. Do not abandon Select while a
-                // different arm has already committed (winner set) but not yet reported caseDone —
-                // that race drops the payload and deadlocks the proc (e.g. Timer cancel-restart).
-                if (exitDueToChannelClose) {
-                    winnerMutex.mutex.withLock { winnerCopy = winner }
-                    if (winnerCopy.isEmpty) break
+        val arms = cases.map { case ->
+            when (case) {
+                is SyncCase<*, *> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val sc = case as SyncCase<Any, Any>
+                    SelectArm(
+                        channel = sc.getChannel(),
+                        constraint = sc.getConstraint(),
+                        anticonstraint = sc.getAnticonstraint(),
+                        callback = { value ->
+                            assert(winner.get() == sc.getChannelHash(), "Expected winning case to have the winning channel")
+                            sc.invokeCallback(value)
+                        },
+                    )
                 }
-                val case = caseDoneChan.receive()
-                doneCases.add(case)
-                if (winnerCopy.isEmpty) {
-                    winnerMutex.mutex.withLock { winnerCopy = winner }
-                }
-                winnerDone = winnerCopy.isPresent && winnerCopy.get() == case.getChannelHash()
+                else -> error("Unsupported Select case type: ${case::class}")
             }
-            // No winner is OK when a case's SyncChannel closed (exitDueToChannelClose) or all
-            // arms aborted. Callers (e.g. Proc) rebuild Select after scrubbing closed sessions.
-            // Cancel remaining arms, then join so SyncChannel participant cleanup finishes before
-            // callers (e.g. Proc) close Z3 Contexts that own those constraints.
-            jobs.forEach { it.cancelAndJoin() }
-            caseDoneChan.close()
         }
+        @Suppress("UNCHECKED_CAST")
+        SelectCoordinator.run(this, arms as List<SelectArm<Any, Any>>)
     }
 
 
@@ -133,6 +107,11 @@ class Select(private vararg val cases : Case) {
         override fun hasSelect() = selectRef.isPresent
         override fun getChannelHash() = chan.hashCode()
 
+        internal fun getChannel() = chan
+        internal fun getConstraint() = constraint
+        internal fun getAnticonstraint() = anticonstraint
+        internal fun invokeCallback(value: V) = callback.invoke(value)
+
         /**
          * Direct sync without a [Select] (single-offer Proc steps). Uses [SyncChannel.syncFast]
          * when both constraints are present; otherwise falls back to empty-Select [SyncChannel.sync].
@@ -149,6 +128,7 @@ class Select(private vararg val cases : Case) {
             }
         }
 
+        @Deprecated("Use SelectCoordinator via Select.run", level = DeprecationLevel.HIDDEN)
         override suspend fun run() {
             val select = selectRef.get()
             val ret = chan.sync(constraint, anticonstraint, selectRef)
@@ -156,17 +136,8 @@ class Select(private vararg val cases : Case) {
                 assert(select.winner.get() == chan.hashCode(), "Expected winning case to have the winning channel")
                 callback.invoke(ret.result.get())
             } else if (chan.isClosed()) {
-                // Exit the whole Select so callers can rebuild cases (e.g. fall back to a
-                // global session channel after a peer dies). Do not leave other arms waiting.
                 select.noteChannelClosed()
             }
-            try {
-                select.caseDoneChan.send(this)
-            }
-            catch (_ : CancellationException) {}
-            catch (_ : ClosedReceiveChannelException) {}
-            catch (_ : ClosedSendChannelException) {}
         }
     }
 }
-
