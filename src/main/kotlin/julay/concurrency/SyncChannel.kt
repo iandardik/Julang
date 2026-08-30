@@ -87,8 +87,8 @@ class SyncChannel<C : Any, V : Any>(
 
     /**
      * No-Select rendezvous for single-offer Proc steps ([Select.SyncCase.syncDirect] /
-     * [julay.program.Proc] FastOnly). Same participant table as [sync]; skips Select 2PL and
-     * avoids allocating empty [Optional] Select wrappers on the hot path.
+     * [julay.program.Proc] FastOnly). Same participant table as [sync]; avoids allocating empty
+     * [Optional] Select wrappers on the hot path.
      */
     suspend fun syncFast(constraint: C, anticonstraint: C): SyncChannelResult<V> {
         return sync(Optional.of(constraint), Optional.of(anticonstraint), Optional.empty())
@@ -302,11 +302,14 @@ class SyncChannel<C : Any, V : Any>(
             return
         }
         val myHash = hashCode()
-        if (me.select.isPresent && !me.select.get().canCommit(myHash)) {
-            out.setAbort()
-            return
-        }
-        if (syncSize == 1) {
+            if (me.select.isPresent) {
+                val sel = me.select.get()
+                if (!sel.canCommit(myHash) || sel.isComputeInFlight()) {
+                    out.setAbort()
+                    return
+                }
+            }
+            if (syncSize == 1) {
             me.pairing = true
             me.pairGate = CompletableDeferred()
             val raw = constraintsOf(me, null)
@@ -319,8 +322,11 @@ class SyncChannel<C : Any, V : Any>(
             if (peer.pairing || peer.followerValue.get()) continue
             if (me.isRejected(peer)) continue
             if (!antiOk(me, peer)) continue
-            // Skip Selects already committed on another channel (replaces StratifiedMutex wait).
-            if (peer.select.isPresent && !peer.select.get().canCommit(myHash)) continue
+            // Skip Selects already committed on another channel or mid-compute elsewhere.
+            if (peer.select.isPresent) {
+                val sel = peer.select.get()
+                if (!sel.canCommit(myHash) || sel.isComputeInFlight()) continue
+            }
             me.pairing = true
             peer.pairing = true
             val gate = CompletableDeferred<Unit>()
@@ -481,61 +487,25 @@ class SyncChannel<C : Any, V : Any>(
     }
 
     /**
-     * Select commitment: lock-free race when ≤1 Select is in the pair; StratifiedMutex 2PL
-     * when two Selects meet (CAS-only livelocks under multi-channel Select-vs-Select load).
+     * Select commitment via ordered lock-free race (CAS EMPTY→channel hash, then confirm).
+     * On conflict: rollback provisional winners; mark [Participant.selectIsWon] only for Selects
+     * that already hold a *different* channel (won elsewhere) so finish can scrub them without
+     * aborting plain sync peers or Selects that merely lost a dual-CAS after rollback.
      */
-    private suspend fun selectsCommit(group: Set<Participant<V, C>>): Boolean {
-        val myHash = hashCode()
-        val withSelect = group.filter { it.select.isPresent }
-            .sortedBy { System.identityHashCode(it.select.get()) }
-        if (withSelect.isEmpty()) return true
-        if (withSelect.size == 1) {
-            val select = withSelect[0].select.get()
-            if (!select.tryRaceWin(myHash)) {
-                withSelect[0].selectIsWon = true
-                return false
-            }
-            withSelect[0].selectIsWon = false
-            select.confirmRaceWin()
-            return true
-        }
-        val allMutexes = withSelect.map { it.select.get().getWinnerMutex() }.sorted()
-        var lockedMutexes = emptyList<StratifiedMutex>()
-        try {
-            lockedMutexes = allMutexes.map {
-                it.mutex.lock()
-                it
-            }
-            val allCanCommit = withSelect.all { p ->
-                val selectCanCommit = p.select.get().canCommit(myHash)
-                p.selectIsWon = !selectCanCommit
-                selectCanCommit
-            }
-            if (allCanCommit) {
-                for (p in withSelect) {
-                    val select = p.select.get()
-                    select.doCommit(myHash)
-                    select.confirmRaceWin()
-                }
-            }
-            return allCanCommit
-        } finally {
-            lockedMutexes.forEach { it.mutex.unlock() }
-        }
-    }
-
-    private fun selectsRace(group: Set<Participant<V, C>>): Boolean {
-        // retained for tests / single-path callers; prefer [selectsCommit].
+    private fun selectsCommit(group: Set<Participant<V, C>>): Boolean {
         val myHash = hashCode()
         val withSelect = group.filter { it.select.isPresent }
             .sortedBy { System.identityHashCode(it.select.get()) }
         if (withSelect.isEmpty()) return true
         val won = mutableListOf<Select>()
         for (p in withSelect) {
+            p.selectIsWon = false
             val select = p.select.get()
             if (select.tryRaceWin(myHash)) {
                 won.add(select)
             } else {
+                // tryRaceWin fails only when this Select already owns another channel.
+                p.selectIsWon = !select.canCommit(myHash)
                 for (s in won) {
                     s.rollbackRaceWin(myHash)
                 }
@@ -642,7 +612,10 @@ class SyncChannel<C : Any, V : Any>(
             if (peer.pairing || peer.followerValue.get()) continue
             if (me.isRejected(peer)) continue
             if (!antiOk(me, peer)) continue
-            if (peer.select.isPresent && !peer.select.get().canCommit(myHash)) continue
+            if (peer.select.isPresent) {
+                val sel = peer.select.get()
+                if (!sel.canCommit(myHash) || sel.isComputeInFlight()) continue
+            }
             me.pairing = true
             peer.pairing = true
             val gate = CompletableDeferred<Unit>()
@@ -725,8 +698,11 @@ class SyncChannel<C : Any, V : Any>(
                 return@withChannelLock null
             }
             val myHash = hashCode()
-            if (me.select.isPresent && !me.select.get().canCommit(myHash)) {
-                return@withChannelLock null
+            if (me.select.isPresent) {
+                val sel = me.select.get()
+                if (!sel.canCommit(myHash) || sel.isComputeInFlight()) {
+                    return@withChannelLock null
+                }
             }
             if (syncSize == 1) {
                 me.pairing = true
@@ -740,7 +716,10 @@ class SyncChannel<C : Any, V : Any>(
                 if (peer.pairing || peer.followerValue.get()) continue
                 if (me.isRejected(peer)) continue
                 if (!antiOk(me, peer)) continue
-                if (peer.select.isPresent && !peer.select.get().canCommit(myHash)) continue
+                if (peer.select.isPresent) {
+                    val sel = peer.select.get()
+                    if (!sel.canCommit(myHash) || sel.isComputeInFlight()) continue
+                }
                 me.pairing = true
                 peer.pairing = true
                 val gate = CompletableDeferred<Unit>()

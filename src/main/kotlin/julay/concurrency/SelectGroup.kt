@@ -5,7 +5,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Shared state for one [Select] invocation: race/2PL winner + park-once completion.
+ * Shared state for one [Select] invocation: race winner + park-once completion.
  */
 class SelectGroup<V : Any>(
     private val select: Select,
@@ -79,7 +79,7 @@ class SelectGroup<V : Any>(
 
 /**
  * Go-style select race: CAS EMPTY → hash (provisional) until [confirm].
- * Used for single-Select commit; Select-vs-Select still uses StratifiedMutex 2PL.
+ * Used for all Select commits (including Select-vs-Select); never treat provisional as done.
  */
 class SelectRace {
     private val state = AtomicReference<Int?>(null)

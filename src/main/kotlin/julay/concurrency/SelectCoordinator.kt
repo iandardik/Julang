@@ -6,7 +6,10 @@ import java.util.concurrent.ThreadLocalRandom
 /**
  * Go-style Select: scramble case order, park-once [SyncChannel.selectOffer], at most one
  * [tryLeadParked] / [SyncChannel.runSelectCompute] per wake, then [SelectGroup.awaitCompletionOrNudge].
- * No per-case coroutines. Select-vs-Select commit stays StratifiedMutex 2PL inside SyncChannel.
+ * No per-case coroutines. Commit is lock-free [SelectRace] inside SyncChannel (never provisional-complete).
+ *
+ * While computing, other cases are unregistered and [Select.isComputeInFlight] is set so peers cannot
+ * reserve this Select on another channel (avoids dual-channel race conflicts).
  */
 object SelectCoordinator {
     suspend fun <V : Any, C : Any> run(
@@ -37,17 +40,25 @@ object SelectCoordinator {
                 if (group.isDone()) break
 
                 pruneDeadHandles(handles)
+                // Peer reserved one of our cases — wait for commit or release; do not lead elsewhere.
+                if (handles.any { it.participant.pairing || it.participant.followerValue.get() }) {
+                    group.awaitCompletionOrNudge()
+                    continue
+                }
+
                 var computed = false
                 for (handle in scramble(handles.toList())) {
                     if (group.isDone()) break
                     if (select.hasRaceWinner() && !select.canCommit(handle.channel.hashCode())) {
+                        // Won elsewhere (provisional or confirmed) — leave so peers are not blocked.
+                        // After rollbackRaceWin, hasRaceWinner clears and repark can re-offer.
                         handle.channel.unregisterSelectCase(handle)
                         handles.removeAll { it.participant === handle.participant }
                         continue
                     }
                     val lead = handle.channel.tryLeadParked(handle) ?: continue
                     computed = true
-                    val ret = handle.channel.runSelectCompute(lead)
+                    val ret = runComputeExclusive(select, handles, handle, lead)
                     if (ret.isPresent || group.isDone()) break
                     if (!handle.channel.isSelectCaseRegistered(handle)) {
                         handles.removeAll { it.participant === handle.participant }
@@ -62,6 +73,7 @@ object SelectCoordinator {
                     continue
                 }
                 if (computed) {
+                    // Back off after race-fail RETRY / empty compute so peers can re-lead.
                     kotlinx.coroutines.yield()
                     if (group.isDone()) break
                 }
@@ -74,6 +86,28 @@ object SelectCoordinator {
             if (!group.isDone() && !select.isRaceConfirmed()) {
                 group.signalNoWinner()
             }
+        }
+    }
+
+    /**
+     * Run compute with other cases unregistered so this Select cannot be matched on two channels.
+     */
+    private suspend fun <V : Any, C : Any> runComputeExclusive(
+        select: Select,
+        handles: MutableList<SyncChannel.SelectCaseHandle<V, C>>,
+        active: SyncChannel.SelectCaseHandle<V, C>,
+        lead: SyncChannel.SelectOfferResult.NeedCompute<V, C>,
+    ): SyncChannelResult<V> {
+        select.beginCompute()
+        try {
+            val others = handles.filter { it !== active }.sortedBy { it.channel.channelId }
+            for (h in others) {
+                h.channel.unregisterSelectCase(h)
+            }
+            handles.removeAll { it !== active }
+            return active.channel.runSelectCompute(lead)
+        } finally {
+            select.endCompute()
         }
     }
 
@@ -127,8 +161,18 @@ object SelectCoordinator {
                 handles.add(offer.handle)
             }
             is SyncChannel.SelectOfferResult.NeedCompute -> {
-                // Size-1 self-commit (or non-park lead).
-                val ret = caseOffer.channel.runSelectCompute(offer)
+                // Size-1 self-commit (or non-park lead): drop other parks for exclusive compute.
+                select.beginCompute()
+                val ret = try {
+                    val others = handles.toList().sortedBy { it.channel.channelId }
+                    for (h in others) {
+                        h.channel.unregisterSelectCase(h)
+                    }
+                    handles.clear()
+                    caseOffer.channel.runSelectCompute(offer)
+                } finally {
+                    select.endCompute()
+                }
                 if (ret.isPresent || group.isDone()) return
                 val h = SyncChannel.SelectCaseHandle(caseOffer.channel, offer.me)
                 if (caseOffer.channel.isSelectCaseRegistered(h)) {

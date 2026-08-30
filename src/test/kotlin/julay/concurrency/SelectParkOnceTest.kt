@@ -3,11 +3,13 @@ package julay.concurrency
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import org.junit.Test
 import java.util.Optional
 import java.util.concurrent.atomic.AtomicInteger
@@ -92,6 +94,95 @@ class SelectParkOnceTest {
             assertEquals(0, fired.get())
             assertEquals(0, c1.participantCountForTests())
             assertEquals(0, c2.participantCountForTests())
+        }
+    }
+
+    @Test
+    fun dualChannelBothParkedThenComplete() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val c1 = SyncChannel<Int, Int>(2) { Optional.of(1) }
+            val c2 = SyncChannel<Int, Int>(2) { Optional.of(1) }
+            val got = AtomicInteger(0)
+            val a = async {
+                Select(
+                    Select.SyncCase(c1) { got.incrementAndGet() },
+                    Select.SyncCase(c2) { got.incrementAndGet() },
+                ).run()
+            }
+            val b = async {
+                Select(
+                    Select.SyncCase(c1) { got.incrementAndGet() },
+                    Select.SyncCase(c2) { got.incrementAndGet() },
+                ).run()
+            }
+            withTimeout(8.seconds) {
+                // Prefer observing full park on both channels; if they already committed, proceed.
+                while (got.get() < 2) {
+                    if (c1.participantCountForTests() == 2 && c2.participantCountForTests() == 2) break
+                    yield()
+                }
+                a.await()
+                b.await()
+            }
+            assertEquals(2, got.get())
+            assertEquals(0, c1.participantCountForTests())
+            assertEquals(0, c2.participantCountForTests())
+            assertTrue(c1.mutexAvailableForTests())
+            assertTrue(c2.mutexAvailableForTests())
+        }
+    }
+
+    @Test
+    fun raceFailDoesNotAbortPlainSyncPeer() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val size1 = SyncChannel<Int, Int>(1) { Optional.of(1) }
+            val size2 = SyncChannel<Int, Int>(2) { Optional.of(2) }
+            val selectFired = AtomicInteger(0)
+            val syncGot = AtomicInteger(-1)
+            // Plain sync parks first; Select will scrub its size-2 case after winning size-1.
+            val syncJob = async {
+                val ret = size2.sync()
+                if (ret.isPresent) syncGot.set(ret.result.get())
+            }
+            awaitParticipantCount(size2, 1)
+            withTimeout(5.seconds) {
+                Select(
+                    Select.SyncCase(size1) { selectFired.incrementAndGet() },
+                    Select.SyncCase(size2) { selectFired.incrementAndGet() },
+                ).run()
+            }
+            assertEquals(1, selectFired.get())
+            // Sync peer must still be able to finish with a replacement waiter (not empty abort).
+            val helper = async { size2.sync() }
+            withTimeout(5.seconds) {
+                syncJob.await()
+                helper.await()
+            }
+            assertEquals(2, syncGot.get())
+            assertEquals(0, size2.participantCountForTests())
+            assertTrue(size2.mutexAvailableForTests())
+        }
+    }
+
+    @Test
+    fun provisionalRaceIsNotCompletion_size1WinsExactlyOnce() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val size1 = SyncChannel<Int, Int>(1) { Optional.of(1) }
+            // Empty compute: size-2 case cannot sat; Select must win only via size-1 confirm.
+            val size2 = SyncChannel<Int, Int>(2) { Optional.empty() }
+            val fired = AtomicInteger(0)
+            val peer = launch { size2.sync() }
+            awaitParticipantCount(size2, 1)
+            val select = Select(
+                Select.SyncCase(size1) { fired.incrementAndGet() },
+                Select.SyncCase(size2) { fired.incrementAndGet() },
+            )
+            withTimeout(5.seconds) { select.run() }
+            assertEquals(1, fired.get())
+            assertTrue(select.isRaceConfirmed())
+            assertEquals(size1.hashCode(), select.winnerHash())
+            withTimeout(5.seconds) { peer.cancelAndJoin() }
+            assertEquals(0, size2.participantCountForTests())
         }
     }
 

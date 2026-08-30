@@ -4,11 +4,13 @@ import julay.tools.assert
 import kotlinx.coroutines.CompletableDeferred
 import java.lang.RuntimeException
 import java.util.*
+import java.util.concurrent.atomic.AtomicBoolean
 
 class Select(private vararg val cases : Case) {
     private val race = SelectRace()
-    private val winnerMutex = StratifiedMutex()
     private val confirmedSignal = CompletableDeferred<Unit>()
+    /** True while this Select runs [SyncChannel.runSelectCompute] — peers must not match other cases. */
+    private val computeInFlight = AtomicBoolean(false)
     /** Mirror of [SelectRace] for tests / callbacks; set when race commits. */
     var winner = Optional.empty<Int>()
         private set
@@ -30,15 +32,9 @@ class Select(private vararg val cases : Case) {
         cases.forEach { it.setSelect(this) }
     }
 
-    fun getWinnerMutex() = winnerMutex
-
     fun canCommit(chanHash: Int): Boolean {
         val w = race.winnerHash()
         return w == null || w == chanHash
-    }
-
-    fun doCommit(chanHash: Int) {
-        julay.tools.assert(tryRaceWin(chanHash))
     }
 
     /** CAS EMPTY→COMMITTED; true if this channel owns the select (provisional until confirm). */
@@ -69,6 +65,16 @@ class Select(private vararg val cases : Case) {
     fun isRaceConfirmed(): Boolean = race.isConfirmed()
 
     fun winnerHash(): Int? = race.winnerHash()
+
+    fun beginCompute() {
+        computeInFlight.set(true)
+    }
+
+    fun endCompute() {
+        computeInFlight.set(false)
+    }
+
+    fun isComputeInFlight(): Boolean = computeInFlight.get()
 
     /** Completed when this Select confirms a winner — losing cases abort WAIT/FOLLOW. */
     fun confirmedSignal(): CompletableDeferred<Unit> = confirmedSignal
