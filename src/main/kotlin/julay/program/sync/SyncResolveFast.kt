@@ -104,8 +104,6 @@ object SyncResolveFast {
     ): BoolExprFast? {
         return try {
             groundGuard(guard, locals)
-        } catch (_: EnablementFalse) {
-            null
         } catch (_: UnsupportedFast) {
             null
         }
@@ -141,7 +139,6 @@ object SyncResolveFast {
     }
 
     private class UnsupportedFast : Exception()
-    private class EnablementFalse : Exception()
 
     private fun unify(guards: List<BoolExprFast>, config: SyncResolveConfig): FastUnify {
         val eqs = mutableListOf<Pair<SyncTerm, SyncTerm>>()
@@ -340,42 +337,44 @@ object SyncResolveFast {
         }
     }
 
-    private fun groundGuard(guard: BoolExprFast, locals: Map<String, Any?>): BoolExprFast = when (guard) {
-        is BoolExprFast.True -> BoolExprFast.True
-        is BoolExprFast.And -> {
-            val parts = guard.parts.mapNotNull { p ->
-                when (val g = groundGuard(p, locals)) {
-                    is BoolExprFast.True -> null
-                    else -> g
+    private fun groundGuard(guard: BoolExprFast, locals: Map<String, Any?>): BoolExprFast? {
+        return when (guard) {
+            is BoolExprFast.True -> BoolExprFast.True
+            is BoolExprFast.And -> {
+                val parts = mutableListOf<BoolExprFast>()
+                for (p in guard.parts) {
+                    when (val g = groundGuard(p, locals)) {
+                        null -> return null
+                        is BoolExprFast.True -> Unit
+                        else -> parts.add(g)
+                    }
+                }
+                when {
+                    parts.isEmpty() -> BoolExprFast.True
+                    parts.size == 1 -> parts[0]
+                    else -> BoolExprFast.And(parts)
                 }
             }
-            when {
-                parts.isEmpty() -> BoolExprFast.True
-                parts.size == 1 -> parts[0]
-                else -> BoolExprFast.And(parts)
+            is BoolExprFast.NotLocalBool -> {
+                val v = locals[guard.name] as? Boolean ?: throw UnsupportedFast()
+                if (v) null else BoolExprFast.True
             }
-        }
-        is BoolExprFast.NotLocalBool -> {
-            val v = locals[guard.name] as? Boolean ?: throw UnsupportedFast()
-            if (v) throw EnablementFalse()
-            BoolExprFast.True
-        }
-        is BoolExprFast.LocalBool -> {
-            val v = locals[guard.name] as? Boolean ?: throw UnsupportedFast()
-            if (!v) throw EnablementFalse()
-            BoolExprFast.True
-        }
-        is BoolExprFast.Eq -> {
-            val l = evalTermLocals(guard.left, locals)
-            val r = evalTermLocals(guard.right, locals)
-            when {
-                l is SyncTerm.Ground && r is SyncTerm.Ground ->
-                    if (l.value == r.value) BoolExprFast.True else throw EnablementFalse()
-                l is SyncTerm.Arg || r is SyncTerm.Arg ||
-                    l is SyncTerm.IntArith || r is SyncTerm.IntArith ||
-                    l is SyncTerm.ToString || r is SyncTerm.ToString ->
-                    BoolExprFast.Eq(l, r)
-                else -> throw UnsupportedFast()
+            is BoolExprFast.LocalBool -> {
+                val v = locals[guard.name] as? Boolean ?: throw UnsupportedFast()
+                if (!v) null else BoolExprFast.True
+            }
+            is BoolExprFast.Eq -> {
+                val l = evalTermLocals(guard.left, locals)
+                val r = evalTermLocals(guard.right, locals)
+                when {
+                    l is SyncTerm.Ground && r is SyncTerm.Ground ->
+                        if (l.value == r.value) BoolExprFast.True else null
+                    l is SyncTerm.Arg || r is SyncTerm.Arg ||
+                        l is SyncTerm.IntArith || r is SyncTerm.IntArith ||
+                        l is SyncTerm.ToString || r is SyncTerm.ToString ->
+                        BoolExprFast.Eq(l, r)
+                    else -> throw UnsupportedFast()
+                }
             }
         }
     }

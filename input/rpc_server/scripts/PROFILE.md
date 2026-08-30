@@ -59,6 +59,22 @@ Collapsed alloc stacks no longer show `runBlocking`, `BlockingCoroutine`, `Event
 
 **Next target:** per-request **`invokeProcFun` + SyncChannel / Select`** (~38% alloc combined), not residual bridge overhead.
 
+## Phase 1 — EnablementBool (2026-08-30)
+
+**Change:** `SyncResolveFast.groundGuard` returns `null` for disabled enablement instead of throwing `EnablementFalse` (which allocated exception + stack trace on every disabled offer in generated `syncStepPlan`). Codegen already skipped null grounded guards; no `.jul` or codegen change required.
+
+**Allocation (`profile_rpc.sh --variant julay --mode alloc --duration 12 --clients 4`)**
+
+| Area | Post-bridge | After Phase 1 |
+|------|------------:|--------------:|
+| SyncResolveFast | ~4% | **~2%** |
+| SyncChannel / Select | ~28% | ~28% |
+| invokeProcFun / Proc | ~10% | ~10% |
+
+`EnablementFalse` / `fillInStackTrace` **gone** from hot alloc stacks. Remaining SyncResolveFast samples are legitimate grounding (`evalTermLocals`, `BoolExprFast.Eq`).
+
+**Next:** Phase 2 — lighter size-2 FastOnly rendezvous (`SyncChannel` / `Select` bucket).
+
 ## Baseline — before bridge fix (2026-08-29)
 
 ### Busy-only CPU (`-e cpu`)

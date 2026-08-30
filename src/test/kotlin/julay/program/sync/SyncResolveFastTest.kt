@@ -169,6 +169,44 @@ class SyncResolveFastTest {
     }
 
     @Test
+    fun groundForOfferLocalBoolFalseReturnsNull() {
+        assertNull(
+            SyncResolveFast.groundForOffer(
+                BoolExprFast.LocalBool("ready"),
+                mapOf("ready" to false),
+            ),
+        )
+    }
+
+    @Test
+    fun groundForOfferGroundEqMismatchReturnsNull() {
+        assertNull(
+            SyncResolveFast.groundForOffer(
+                BoolExprFast.Eq(
+                    SyncTerm.Local("step"),
+                    SyncTerm.Ground(SyncGround.StringVal("call")),
+                ),
+                mapOf("step" to "respond"),
+            ),
+        )
+    }
+
+    @Test
+    fun groundForOfferAndShortCircuitsOnDisabledPart() {
+        val guard = BoolExprFast.And(
+            listOf(
+                BoolExprFast.Eq(SyncTerm.Local("step"), SyncTerm.Ground(SyncGround.StringVal("call"))),
+                BoolExprFast.Eq(SyncTerm.Arg("x"), SyncTerm.Local("k")),
+            ),
+        )
+        assertNull(SyncResolveFast.groundForOffer(guard, mapOf("step" to "respond", "k" to 7)))
+        assertEquals(
+            BoolExprFast.Eq(SyncTerm.Arg("x"), SyncTerm.Ground(SyncGround.IntVal(7))),
+            SyncResolveFast.groundForOffer(guard, mapOf("step" to "call", "k" to 7)),
+        )
+    }
+
+    @Test
     fun disableAllSkipsFastPath() {
         val c1 = Constraint(
             fast = BoolExprFast.Eq(SyncTerm.Arg("x"), SyncTerm.Ground(SyncGround.IntVal(7))),

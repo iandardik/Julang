@@ -9,8 +9,11 @@ import julay.program.action.SyncPayload
 import julay.program.action.TSAction
 import julay.program.sync.FastOffer
 import julay.program.sync.BoolExprFast
+import julay.program.sync.SyncGround
 import julay.program.sync.SyncResolveConfig
+import julay.program.sync.SyncResolveFast
 import julay.program.sync.SyncStepPlan
+import julay.program.sync.SyncTerm
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -100,6 +103,18 @@ class ProcFastPathTest {
             assertTrue(before >= 0)
         }
     }
+
+    @Test
+    fun syncStepPlanSkipsDisabledOffersWithoutThrowing() = runBlocking {
+        val handoff = SymbolicAction("handoff", emptyList())
+        val info = TransitionSystemStaticInfo("A", setOf(handoff), emptyMap())
+        val prog = Program(setOf(info), emptyList())
+        val ts = MultiOfferIrTs(handoff, step = "call")
+        val plan = ts.syncStepPlan()
+        assertTrue(plan is SyncStepPlan.FastOnly)
+        assertEquals(1, (plan as SyncStepPlan.FastOnly).offers.size)
+        assertEquals(handoff, plan.offers[0].symAction)
+    }
 }
 
 private class PureIrTs(
@@ -121,4 +136,37 @@ private class PureIrTs(
     override suspend fun transit(act: ConcreteAction) {
         transited = true
     }
+}
+
+/** Mirrors generated syncStepPlan: ground each offer; skip disabled guards (no exceptions). */
+private class MultiOfferIrTs(
+    private val enabledAct: SymbolicAction,
+    private val step: String,
+) : TransitionSystem {
+    private val disabledAct = SymbolicAction("other", emptyList())
+
+    override suspend fun actions(ctx: Context): Set<TSAction> =
+        error("Z3 actions should not be called on FastOnly path")
+
+    override fun syncStepPlan(): SyncStepPlan {
+        val locals = mapOf("step" to step)
+        val offers = mutableListOf<FastOffer>()
+        val enabledGuard = BoolExprFast.Eq(
+            SyncTerm.Local("step"),
+            SyncTerm.Ground(SyncGround.StringVal("call")),
+        )
+        val disabledGuard = BoolExprFast.Eq(
+            SyncTerm.Local("step"),
+            SyncTerm.Ground(SyncGround.StringVal("respond")),
+        )
+        SyncResolveFast.groundForOffer(enabledGuard, locals)?.let {
+            offers.add(FastOffer(enabledAct, it, TSAction.SyncRole.Default))
+        }
+        SyncResolveFast.groundForOffer(disabledGuard, locals)?.let {
+            offers.add(FastOffer(disabledAct, it, TSAction.SyncRole.Default))
+        }
+        return SyncStepPlan.FastOnly(offers)
+    }
+
+    override suspend fun transit(act: ConcreteAction) {}
 }
