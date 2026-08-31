@@ -206,6 +206,28 @@ Top-level per-request Proc spawn removed from HTTP path; remaining gap is SyncCh
 
 Modest alloc/shape win; sustained RPS band unchanged. Remaining Julay tax is still SyncChannel rendezvous + handler/bridge work vs native’s mutex.
 
+## Phase 7a — Select shell + SelectGroup reuse (Action 1, 2026-08-31)
+
+**Change (no `.jul`):** Each `Proc` owns one long-lived `Select.forCoordinator()` + `SelectGroup`. FastOnly multi-offer steps reset race/deferreds then call `SelectCoordinator.run(reusedSelect, offers, reusedGroup)`. `runOffers()` still allocates a fresh shell for tests.
+
+**Sustained (`bench_toys.sh --targets rpc,rpc-native --ops 5000 --clients 4 --warmup 40`):** Julay **~4820** vs native **~5740** RPS (~1.19×) — same band as Phase 6.
+
+**Allocation fine (among SyncChannel/Select):**
+
+| Sub-stage | Phase 6 | After Action 1 |
+|-----------|--------:|---------------:|
+| Select setup | ~29% | **~25%** |
+| syncFast path | ~18% | ~19% |
+| Compute / payload | ~15% | ~17% |
+| Select lead / wake | ~13% | ~14% |
+| Select park / offer | ~13% | ~10% |
+
+**`select3` microbench** (now uses reused shell like Proc): Select setup **~26%** (was ~29%). Residual setup cost is mostly fresh `CompletableDeferred`s on each reset + coordinator list churn.
+
+**Keyword shares (rpc alloc):** `SelectCoordinator` ~10%, `syncFast` ~10%; `runOffers` no longer a hot keyword on the Proc path.
+
+Clear but modest Select-setup drop; sustained RPS unchanged. Remaining Action 1 residual: deferred recreation on reset. Next: Action 2 (syncFast / Participant) or further Select deferred pooling.
+
 ## Baseline — before bridge fix (2026-08-29)
 
 ### Busy-only CPU (`-e cpu`)
@@ -241,23 +263,23 @@ Goal: split the opaque **SyncChannel / Select** alloc bucket into sub-stages so 
 
 Harness: [`bucket_collapsed.py`](bucket_collapsed.py) (`--fine --keywords`), [`profile_rendezvous.sh`](profile_rendezvous.sh) (`syncfast` / `select3`), and `profile_rpc.sh` (now writes `*-buckets-fine.txt`).
 
-### rpc_server alloc — among SyncChannel/Select (~21% of all samples)
+### rpc_server alloc — among SyncChannel/Select (~20% of all samples)
 
-Fine named share **~95%** (almost no “other”).
+Fine named share **~94%**.
 
-| Sub-stage | Share of SyncChannel/Select |
-|-----------|----------------------------:|
-| Select setup (`runOffers` / `SelectCoordinator` / `SelectGroup`) | **~29%** |
+| Sub-stage | Share of SyncChannel/Select (Phase 6 → Action 1) |
+|-----------|--------------------------------------------------:|
+| Select setup (`SelectCoordinator` / `SelectGroup` / reset deferreds) | **~29% → ~25%** |
 | syncFast path | **~18%** |
-| Compute / payload (`runSelectCompute`, `SyncPayload`, …) | **~15%** |
-| Select park / offer | **~13%** |
-| Select lead / wake | **~13%** |
-| Match under lock (`pickCandidateLocked`, …) | **~7%** |
-| Participant / wait + other | ~5% |
+| Compute / payload (`runSelectCompute`, `SyncPayload`, …) | **~15–17%** |
+| Select park / offer | **~10–13%** |
+| Select lead / wake | **~13–14%** |
+| Match under lock (`pickCandidateLocked`, …) | **~7–9%** |
+| Participant / wait + other | ~5–6% |
 
-Keyword hits (all samples): `SelectCoordinator` ~12%, `syncFast` ~10%, `runOffers` ~9%, `SyncPayload` ~4%, `parkPass` ~3%, `pickCandidateLocked` ~1.5%.
+Keyword hits (all samples, after Action 1): `syncFast` ~10%, `SelectCoordinator` ~10%, `SyncPayload` ~5%, `parkPass` ~2%, `pickCandidateLocked` ~2%.
 
-**Read:** under real Protocol Select + handler syncFast, cost is **spread**: residual Select shell (~29%), handler syncFast (~18%), payload/compute (~15%), and park+lead together (~26%).
+**Read:** under real Protocol Select + handler syncFast, cost is **spread**: residual Select shell/deferreds (~25%), handler syncFast (~19%), payload/compute (~17%), and park+lead together (~24%). Action 1 shrank setup; it did not remove it.
 
 ### No-HTTP microbench alloc (rendezvous dominates samples)
 
@@ -270,13 +292,13 @@ Keyword hits (all samples): `SelectCoordinator` ~12%, `syncFast` ~10%, `runOffer
 | Compute / payload | **~16%** |
 | Participant / wait | ~3% |
 
-**`select3`** (3-case `runOffers` vs one sync peer):
+**`select3`** (3-case reused Select shell vs one sync peer; Action 1 microbench path):
 
 | Sub-stage | Share of SyncChannel/Select |
 |-----------|----------------------------:|
-| Select setup | **~29%** |
-| Select park / offer | **~24%** |
-| Select lead / wake | **~20%** |
+| Select setup | **~26%** (was ~29% with fresh shell) |
+| Select park / offer | **~25%** |
+| Select lead / wake | **~21%** |
 | SyncChannel other | ~17% |
 | Compute / payload | ~5% |
 | Match under lock | ~4% |
@@ -289,10 +311,10 @@ Raw rpc **cpu** is still mostly `thread park / wait` + JDK NIO. Among the small 
 
 No single bucket is “the” problem. Concrete code levers suggested by the breakdown:
 
-1. **Select setup alloc** (~29% of SC on rpc + select3) — `SelectGroup` / `CompletableDeferred` nudge machinery, scramble/handle lists still allocated per Select even after Phase 6 offer reuse. Shrink or recycle Select shell objects.
-2. **syncFast + match-under-lock** (~58%+20% on syncfast microbench; ~18%+7% on rpc SC) — `Participant` construction, `pickCandidateLocked` peer scan, Optional/constraint wrappers on the single-offer path. This is the handler half of every RPC.
-3. **Compute / payload** (~15–16%) — `SyncPayload` / extract path after SAT; worth auditing for per-rendezvous object churn once (1)/(2) move.
-4. **Select park + lead/wake** (~26% rpc SC, ~44% select3) — coordinator parkPass / tryLeadParked / awaitCompletionOrNudge loop for Protocol’s always-on 3-offer wait. Complementary to (1); same Select lifecycle.
+1. **Select setup alloc** (~25% of SC on rpc + select3 after Action 1) — residual is mostly fresh `CompletableDeferred`s on each shell reset + coordinator scramble/handle lists. Action 1 recycled `Select`/`SelectGroup`; further deferred pooling is optional.
+2. **syncFast + match-under-lock** (~58%+20% on syncfast microbench; ~19%+9% on rpc SC) — `Participant` construction, `pickCandidateLocked` peer scan, Optional/constraint wrappers on the single-offer path. This is the handler half of every RPC.
+3. **Compute / payload** (~15–17%) — `SyncPayload` / extract path after SAT; worth auditing for per-rendezvous object churn once (1)/(2) move.
+4. **Select park + lead/wake** (~24% rpc SC, ~46% select3) — coordinator parkPass / tryLeadParked / awaitCompletionOrNudge loop for Protocol’s always-on 3-offer wait. Complementary to (1); same Select lifecycle.
 
 ## Interpretation vs RPS gap
 
@@ -304,7 +326,7 @@ Native is faster because each request is “parse → mutex → respond” on th
 
 ## Next optimization candidate
 
-**Phase 7 — attack several rendezvous factors**, starting with whichever is easiest to land safely: Select shell/`SelectGroup` reuse (setup), then `syncFast`/`Participant`/`pickCandidateLocked` alloc, then park/lead wake overhead. Re-run `profile_rpc.sh` alloc + `profile_rendezvous.sh` after each change; expect SyncChannel/Select coarse share and the fine sub-tables to move together.
+**Phase 7 — continue multi-factor rendezvous work:** Action 1 (Select shell reuse) landed. Next: Action 2 (`syncFast`/`Participant`/`pickCandidateLocked`), then park/lead (Action 5) or payload (Action 3). Re-run `profile_rpc.sh` alloc + `profile_rendezvous.sh` after each change.
 
 
 ## Flamegraph index (this machine)

@@ -115,6 +115,41 @@ class ProcFastPathTest {
         assertEquals(1, (plan as SyncStepPlan.FastOnly).offers.size)
         assertEquals(handoff, plan.offers[0].symAction)
     }
+
+    /** Protocol-shaped FastOnly path: Proc reuses Select shell across 3-offer multi-offer steps. */
+    @Test
+    fun multiOfferFastOnlyProcReusesSelectShell() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val act1 = SymbolicAction("offer1", emptyList())
+            val act2 = SymbolicAction("offer2", emptyList())
+            val act3 = SymbolicAction("offer3", emptyList())
+            val serverInfo = TransitionSystemStaticInfo(
+                "Server",
+                setOf(act1, act2, act3),
+                emptyMap(),
+            )
+            val clientInfo = TransitionSystemStaticInfo("Client", setOf(act1), emptyMap())
+            val prog = Program(setOf(serverInfo, clientInfo))
+            val table = prog.staticChannelTable
+            ContextAllocationCounter.reset()
+            val rounds = 25
+            val server = ThreeOfferServerTs(act1, act2, act3, act1, maxRounds = rounds)
+            val client = SingleOfferClientTs(act1, maxRounds = rounds)
+            val start = ContextAllocationCounter.get()
+            val procServer = Proc(server, serverInfo, table, prog)
+            val procClient = Proc(client, clientInfo, table, prog)
+            withTimeout(15_000) {
+                val js = async { procServer.run() }
+                val jc = async { procClient.run() }
+                js.await()
+                jc.await()
+            }
+            val allocated = ContextAllocationCounter.get() - start
+            assertEquals(0L, allocated, "expected no ephemeral Context allocations, got $allocated")
+            assertEquals(rounds, server.transits)
+            assertEquals(rounds, client.transits)
+        }
+    }
 }
 
 private class PureIrTs(
@@ -169,4 +204,58 @@ private class MultiOfferIrTs(
     }
 
     override suspend fun transit(act: ConcreteAction) {}
+}
+
+/** Server TS: three always-enabled FastOnly offers (Protocol-shaped idle loop). */
+private class ThreeOfferServerTs(
+    private val act1: SymbolicAction,
+    private val act2: SymbolicAction,
+    private val act3: SymbolicAction,
+    /** Client offer synced against this action's channel. */
+    private val clientAct: SymbolicAction,
+    private val maxRounds: Int,
+) : TransitionSystem {
+    var transits = 0
+
+    override suspend fun actions(ctx: Context): Set<TSAction> =
+        error("Z3 actions should not be called on FastOnly path")
+
+    override fun syncStepPlan(): SyncStepPlan {
+        if (transits >= maxRounds) {
+            return SyncStepPlan.FastOnly(emptyList())
+        }
+        return SyncStepPlan.FastOnly(
+            listOf(
+                FastOffer(act1, BoolExprFast.True),
+                FastOffer(act2, BoolExprFast.True),
+                FastOffer(act3, BoolExprFast.True),
+            ),
+        )
+    }
+
+    override suspend fun transit(act: ConcreteAction) {
+        assertEquals(clientAct, act.symAction)
+        transits++
+    }
+}
+
+private class SingleOfferClientTs(
+    private val act: SymbolicAction,
+    private val maxRounds: Int,
+) : TransitionSystem {
+    var transits = 0
+
+    override suspend fun actions(ctx: Context): Set<TSAction> =
+        error("Z3 actions should not be called on FastOnly path")
+
+    override fun syncStepPlan(): SyncStepPlan {
+        if (transits >= maxRounds) {
+            return SyncStepPlan.FastOnly(emptyList())
+        }
+        return SyncStepPlan.FastOnly(listOf(FastOffer(act, BoolExprFast.True)))
+    }
+
+    override suspend fun transit(act: ConcreteAction) {
+        transits++
+    }
 }

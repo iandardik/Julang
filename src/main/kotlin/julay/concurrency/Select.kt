@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class Select(private vararg val cases: Case) {
     private val race = SelectRace()
-    private val confirmedSignal = CompletableDeferred<Unit>()
+    private var confirmedSignal = CompletableDeferred<Unit>()
     /** True while this Select runs [SyncChannel.runSelectCompute] — peers must not match other cases. */
     private val computeInFlight = AtomicBoolean(false)
     /** Mirror of [SelectRace] for tests / callbacks; set when race commits. */
@@ -91,6 +91,15 @@ class Select(private vararg val cases: Case) {
 
     fun noteChannelClosed() {
         exitDueToChannelClose = true
+    }
+
+    /** Reset an empty coordinator shell ([forCoordinator]) for reuse across Proc steps. */
+    fun resetForCoordinatorReuse() {
+        race.reset()
+        winner = Optional.empty()
+        computeInFlight.set(false)
+        exitDueToChannelClose = false
+        confirmedSignal = CompletableDeferred()
     }
 
     /**

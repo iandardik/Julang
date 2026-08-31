@@ -403,7 +403,7 @@ class SelectTest {
         }
     }
 
-    /** Recycled [SelectCaseOffer] slots across successive runOffers calls. */
+    /** Recycled [SelectCaseOffer] slots and Select shell across successive coordinator runs. */
     @Test
     fun recycledSelectCaseOffersAcrossRuns() = runBlocking {
         withContext(Dispatchers.Default) {
@@ -413,16 +413,151 @@ class SelectTest {
                 SelectCaseOffer(),
             )
             val other = SyncChannel<Int, Int>(2) { Optional.of(8) }
+            val select = Select.forCoordinator()
+            val group = SelectGroup<Int>(select)
             var wins = 0
             repeat(40) {
-                slots[0].fill(chan, Optional.empty(), Optional.empty()) { wins++ }
+                slots[0].fill(chan, Optional.empty(), Optional.empty()) {}
                 slots[1].fill(other, Optional.empty(), Optional.empty()) {}
                 val peer = launch { chan.sync() }
                 awaitParticipantCount(chan, 1)
-                SelectCoordinator.runOffers(slots)
+                select.resetForCoordinatorReuse()
+                group.reset(select) { wins++ }
+                SelectCoordinator.run(select, slots, group)
                 withTimeout(5.seconds) { peer.join() }
             }
             assertEquals(40, wins)
+        }
+    }
+
+    @Test
+    fun resetClearsConfirmedStateAfterWin() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val chan = SyncChannel<Int, Int>(2) { Optional.of(7) }
+            val select = Select.forCoordinator()
+            val group = SelectGroup<Int>(select)
+            var got: Int? = null
+            val peer = launch { chan.sync() }
+            awaitParticipantCount(chan, 1)
+            select.resetForCoordinatorReuse()
+            group.reset(select) { got = it }
+            SelectCoordinator.run(
+                select,
+                listOf(SelectCaseOffer(chan, Optional.empty(), Optional.empty()) {}),
+                group,
+            )
+            withTimeout(5.seconds) { peer.join() }
+            assertEquals(7, got)
+            assertTrue(select.isRaceConfirmed())
+            select.resetForCoordinatorReuse()
+            assertTrue(!select.isRaceConfirmed())
+        }
+    }
+
+    @Test
+    fun doubleRunWithoutResetThrows() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val chan = SyncChannel<Int, Int>(2) { Optional.of(1) }
+            val select = Select.forCoordinator()
+            val group = SelectGroup<Int>(select)
+            val peer = launch { chan.sync() }
+            awaitParticipantCount(chan, 1)
+            select.resetForCoordinatorReuse()
+            group.reset(select) {}
+            SelectCoordinator.run(
+                select,
+                listOf(SelectCaseOffer(chan, Optional.empty(), Optional.empty()) {}),
+                group,
+            )
+            withTimeout(5.seconds) { peer.join() }
+            assertTrue(select.isRaceConfirmed())
+            try {
+                SelectCoordinator.run(
+                    select,
+                    listOf(SelectCaseOffer(chan, Optional.empty(), Optional.empty()) {}),
+                    group,
+                )
+                fail("expected RuntimeException for confirmed Select re-run without reset")
+            } catch (_: RuntimeException) {
+            }
+        }
+    }
+
+    @Test
+    fun noWinnerThenWinOnReusedShell() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val c1 = SyncChannel<Int, Int>(2) { Optional.of(1) }
+            val c2 = SyncChannel<Int, Int>(2) { Optional.of(2) }
+            val select = Select.forCoordinator()
+            val group = SelectGroup<Int>(select)
+            val slots = listOf(
+                SelectCaseOffer(c1, Optional.empty(), Optional.empty()) {},
+                SelectCaseOffer(c2, Optional.empty(), Optional.empty()) {},
+            )
+            val selectJob = launch {
+                select.resetForCoordinatorReuse()
+                group.reset(select) {}
+                SelectCoordinator.run(select, slots, group)
+            }
+            awaitParticipantCount(c1, 1)
+            awaitParticipantCount(c2, 1)
+            c1.close()
+            withTimeout(5.seconds) { selectJob.join() }
+            assertTrue(!select.isRaceConfirmed())
+
+            val hot = SyncChannel<Int, Int>(2) { Optional.of(99) }
+            val cold = SyncChannel<Int, Int>(2) { Optional.of(8) }
+            var got: Int? = null
+            val winSlots = listOf(
+                SelectCaseOffer(hot, Optional.empty(), Optional.empty()) { got = it },
+                SelectCaseOffer(cold, Optional.empty(), Optional.empty()) {},
+            )
+            select.resetForCoordinatorReuse()
+            group.reset(select) { got = it }
+            val peer = launch { hot.sync() }
+            awaitParticipantCount(hot, 1)
+            SelectCoordinator.run(select, winSlots, group)
+            withTimeout(5.seconds) { peer.join() }
+            assertEquals(99, got)
+            assertTrue(select.isRaceConfirmed())
+        }
+    }
+
+    @Test
+    fun variableOfferCountOnReusedShell() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val c1 = SyncChannel<Int, Int>(2) { Optional.of(1) }
+            val c2 = SyncChannel<Int, Int>(2) { Optional.of(2) }
+            val c3 = SyncChannel<Int, Int>(2) { Optional.of(3) }
+            val select = Select.forCoordinator()
+            val group = SelectGroup<Int>(select)
+            val slots = listOf(
+                SelectCaseOffer<Int, Int>(),
+                SelectCaseOffer(),
+                SelectCaseOffer(),
+            )
+            var wins = 0
+            repeat(15) {
+                slots[0].fill(c1, Optional.empty(), Optional.empty()) {}
+                slots[1].fill(c2, Optional.empty(), Optional.empty()) {}
+                slots[2].fill(c3, Optional.empty(), Optional.empty()) {}
+                val peer = launch { c2.sync() }
+                awaitParticipantCount(c2, 1)
+                select.resetForCoordinatorReuse()
+                group.reset(select) { wins++ }
+                SelectCoordinator.run(select, slots.subList(0, 3), group)
+                withTimeout(5.seconds) { peer.join() }
+
+                slots[0].fill(c1, Optional.empty(), Optional.empty()) {}
+                slots[1].fill(c2, Optional.empty(), Optional.empty()) {}
+                val peer2 = launch { c2.sync() }
+                awaitParticipantCount(c2, 1)
+                select.resetForCoordinatorReuse()
+                group.reset(select) { wins++ }
+                SelectCoordinator.run(select, slots.subList(0, 2), group)
+                withTimeout(5.seconds) { peer2.join() }
+            }
+            assertEquals(30, wins)
         }
     }
 

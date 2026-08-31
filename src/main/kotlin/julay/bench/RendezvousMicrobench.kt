@@ -1,7 +1,9 @@
 package julay.bench
 
+import julay.concurrency.Select
 import julay.concurrency.SelectCaseOffer
 import julay.concurrency.SelectCoordinator
+import julay.concurrency.SelectGroup
 import julay.concurrency.SyncChannel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -16,7 +18,7 @@ import kotlin.system.exitProcess
  *
  * Modes:
  *   syncfast — two coroutines rendezvous on one size-2 channel via [SyncChannel.syncFast]
- *   select3  — Protocol-shaped: [SelectCoordinator.runOffers] on 3 size-2 channels vs one sync peer
+ *   select3  — Protocol-shaped: reused Select shell + [SelectCoordinator.run] on 3 size-2 channels
  *
  * Usage:
  *   ./gradlew -q rendezvousMicrobench --args='--mode syncfast --seconds 30'
@@ -101,11 +103,15 @@ private fun runSelect3(seconds: Int) {
                     SelectCaseOffer(),
                     SelectCaseOffer(),
                 )
+                val select = Select.forCoordinator()
+                val group = SelectGroup<Int>(select)
                 while (System.nanoTime() < deadline) {
                     slots[0].fill(c1, Optional.empty(), Optional.empty()) {}
                     slots[1].fill(c2, Optional.empty(), Optional.empty()) {}
                     slots[2].fill(c3, Optional.empty(), Optional.empty()) {}
-                    SelectCoordinator.runOffers(slots)
+                    select.resetForCoordinatorReuse()
+                    group.reset(select) {}
+                    SelectCoordinator.run(select, slots, group)
                     ops.incrementAndGet()
                 }
             }

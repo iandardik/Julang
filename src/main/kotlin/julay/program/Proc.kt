@@ -5,6 +5,7 @@ import com.microsoft.z3.Context
 import julay.concurrency.Select
 import julay.concurrency.SelectCaseOffer
 import julay.concurrency.SelectCoordinator
+import julay.concurrency.SelectGroup
 import julay.concurrency.SyncChannel
 import julay.program.action.ConcreteAction
 import julay.program.action.ProgramAction
@@ -58,8 +59,13 @@ class Proc(
     /** Reused across select steps to avoid per-step [ArrayList] / [Select.SyncCase] churn. */
     private val stepSyncCases = ArrayList<Select.SyncCase<SyncPayload, Constraint>>(8)
 
-    /** Recycled FastOnly multi-offer slots for [SelectCoordinator.runOffers] (no SyncCase wrappers). */
+    /** Recycled FastOnly multi-offer slots for [SelectCoordinator.run] (no SyncCase wrappers). */
     private val stepCaseOffers = ArrayList<SelectCaseOffer<SyncPayload, Constraint>>(8)
+
+    /** Long-lived Select shell for FastOnly multi-offer steps (reset before each run). */
+    private val stepSelect = Select.forCoordinator()
+
+    private val stepSelectGroup = SelectGroup<SyncPayload>(stepSelect)
 
     private val silentlyKilled = AtomicBoolean(false)
     @Volatile
@@ -370,7 +376,9 @@ class Proc(
                 onWin,
             )
         }
-        SelectCoordinator.runOffers(stepCaseOffers.subList(0, offers.size))
+        stepSelect.resetForCoordinatorReuse()
+        stepSelectGroup.reset(stepSelect) { payload -> nextPayload = Optional.of(payload) }
+        SelectCoordinator.run(stepSelect, stepCaseOffers.subList(0, offers.size), stepSelectGroup)
 
         if (nextPayload.isEmpty) {
             scrubClosedSessionsAndAffinity()

@@ -18,12 +18,13 @@ object SelectCoordinator {
      */
     suspend fun <V : Any, C : Any> runOffers(caseOffers: List<SelectCaseOffer<V, C>>) {
         if (caseOffers.isEmpty()) return
-        run(Select.forCoordinator(), caseOffers)
+        run(Select.forCoordinator(), caseOffers, group = null)
     }
 
     suspend fun <V : Any, C : Any> run(
         select: Select,
         caseOffers: List<SelectCaseOffer<V, C>>,
+        group: SelectGroup<V>? = null,
     ) {
         if (select.isRaceConfirmed()) {
             throw RuntimeException("Select run multiple times")
@@ -38,7 +39,7 @@ object SelectCoordinator {
             }
         }
 
-        val group = SelectGroup<V>(select) { value ->
+        val activeGroup = group ?: SelectGroup(select) { value ->
             val hash = select.winner.get()
             caseOffers.first { it.channel.hashCode() == hash }.callback(value)
         }
@@ -48,17 +49,17 @@ object SelectCoordinator {
         scrambleInPlace(order)
 
         try {
-            parkPass(order, select, group, handles)
+            parkPass(order, select, activeGroup, handles)
 
-            while (!group.isDone()) {
+            while (!activeGroup.isDone()) {
                 pruneDeadHandlesInPlace(handles)
-                reparkMissing(order, select, group, handles)
-                if (group.isDone()) break
+                reparkMissing(order, select, activeGroup, handles)
+                if (activeGroup.isDone()) break
 
                 pruneDeadHandlesInPlace(handles)
                 // Peer reserved one of our cases — wait for commit or release; do not lead elsewhere.
                 if (handles.any { it.participant.pairing || it.participant.followerValue.get() }) {
-                    group.awaitCompletionOrNudge()
+                    activeGroup.awaitCompletionOrNudge()
                     continue
                 }
 
@@ -67,7 +68,7 @@ object SelectCoordinator {
                 val leadOrder = ArrayList(handles)
                 scrambleInPlace(leadOrder)
                 for (handle in leadOrder) {
-                    if (group.isDone()) break
+                    if (activeGroup.isDone()) break
                     if (select.hasRaceWinner() && !select.canCommit(handle.channel.hashCode())) {
                         // Won elsewhere (provisional or confirmed) — leave so peers are not blocked.
                         // After rollbackRaceWin, hasRaceWinner clears and repark can re-offer.
@@ -78,13 +79,13 @@ object SelectCoordinator {
                     val lead = handle.channel.tryLeadParked(handle) ?: continue
                     computed = true
                     val ret = runComputeExclusive(select, handles, handle, lead)
-                    if (ret.isPresent || group.isDone()) break
+                    if (ret.isPresent || activeGroup.isDone()) break
                     if (!handle.channel.isSelectCaseRegistered(handle)) {
                         handles.removeAll { it.participant === handle.participant }
                     }
                     break // at most one compute per wake
                 }
-                if (group.isDone()) break
+                if (activeGroup.isDone()) break
 
                 pruneDeadHandlesInPlace(handles)
                 if (handles.isEmpty()) {
@@ -94,16 +95,16 @@ object SelectCoordinator {
                 if (computed) {
                     // Back off after race-fail RETRY / empty compute so peers can re-lead.
                     kotlinx.coroutines.yield()
-                    if (group.isDone()) break
+                    if (activeGroup.isDone()) break
                 }
-                group.awaitCompletionOrNudge()
+                activeGroup.awaitCompletionOrNudge()
             }
         } finally {
             for (handle in handles.sortedBy { it.channel.channelId }) {
                 handle.channel.unregisterSelectCase(handle)
             }
-            if (!group.isDone() && !select.isRaceConfirmed()) {
-                group.signalNoWinner()
+            if (!activeGroup.isDone() && !select.isRaceConfirmed()) {
+                activeGroup.signalNoWinner()
             }
         }
     }

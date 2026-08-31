@@ -8,10 +8,11 @@ import java.util.concurrent.atomic.AtomicReference
  * Shared state for one [Select] invocation: race winner + park-once completion.
  */
 class SelectGroup<V : Any>(
-    private val select: Select,
-    private val onWin: (V) -> Unit,
+    private var select: Select,
+    onWin: (V) -> Unit = {},
 ) {
-    private val completed = CompletableDeferred<Completion>()
+    private var onWin: (V) -> Unit = onWin
+    private var completed = CompletableDeferred<Completion>()
     private val closedNoted = AtomicBoolean(false)
     /** Signaled when a channel may have a new peer for parked cases (re-promote). */
     @Volatile
@@ -75,6 +76,15 @@ class SelectGroup<V : Any>(
     }
 
     fun isDone(): Boolean = completed.isCompleted
+
+    /** Prepare for another [SelectCoordinator.run] on the same long-lived shell. */
+    fun reset(select: Select, onWin: (V) -> Unit) {
+        this.select = select
+        this.onWin = onWin
+        closedNoted.set(false)
+        completed = CompletableDeferred()
+        nudge = CompletableDeferred()
+    }
 }
 
 /**
@@ -112,4 +122,9 @@ class SelectRace {
     fun hasWinner(): Boolean = state.get() != null
 
     fun winnerHash(): Int? = state.get()
+
+    fun reset() {
+        state.set(null)
+        confirmed.set(false)
+    }
 }
