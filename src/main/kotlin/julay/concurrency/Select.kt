@@ -6,7 +6,7 @@ import java.lang.RuntimeException
 import java.util.*
 import java.util.concurrent.atomic.AtomicBoolean
 
-class Select(private vararg val cases : Case) {
+class Select(private vararg val cases: Case) {
     private val race = SelectRace()
     private val confirmedSignal = CompletableDeferred<Unit>()
     /** True while this Select runs [SyncChannel.runSelectCompute] — peers must not match other cases. */
@@ -19,17 +19,27 @@ class Select(private vararg val cases : Case) {
     internal var exitDueToChannelClose = false
 
     init {
-        val numCases = cases.size
-        val numChannels = cases.map { it.getChannelHash() }.toSet().size
-        if (numCases != numChannels) {
-            throw RuntimeException("Each Case in a Select must use a unique channel")
-        }
-        cases.forEach {
-            if (it.hasSelect()) {
-                throw RuntimeException("A Case must only be associated with a single Select")
+        if (cases.isNotEmpty()) {
+            val numCases = cases.size
+            val numChannels = cases.map { it.getChannelHash() }.toSet().size
+            if (numCases != numChannels) {
+                throw RuntimeException("Each Case in a Select must use a unique channel")
             }
+            cases.forEach {
+                if (it.hasSelect()) {
+                    throw RuntimeException("A Case must only be associated with a single Select")
+                }
+            }
+            cases.forEach { it.setSelect(this) }
         }
-        cases.forEach { it.setSelect(this) }
+    }
+
+    companion object {
+        /**
+         * Empty Select shell for [SelectCoordinator.runOffers] / [SelectCoordinator.run] when cases
+         * are supplied as [SelectCaseOffer]s (no [SyncCase] wrappers).
+         */
+        fun forCoordinator(): Select = Select()
     }
 
     fun canCommit(chanHash: Int): Boolean {

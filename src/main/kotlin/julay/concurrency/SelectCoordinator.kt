@@ -12,6 +12,15 @@ import java.util.concurrent.ThreadLocalRandom
  * reserve this Select on another channel (avoids dual-channel race conflicts).
  */
 object SelectCoordinator {
+    /**
+     * Run a multi-offer select using a fresh [Select.forCoordinator] shell (no [Select.SyncCase]
+     * wrappers). Prefer this from [julay.program.Proc] FastOnly multi-offer steps.
+     */
+    suspend fun <V : Any, C : Any> runOffers(caseOffers: List<SelectCaseOffer<V, C>>) {
+        if (caseOffers.isEmpty()) return
+        run(Select.forCoordinator(), caseOffers)
+    }
+
     suspend fun <V : Any, C : Any> run(
         select: Select,
         caseOffers: List<SelectCaseOffer<V, C>>,
@@ -22,24 +31,31 @@ object SelectCoordinator {
         if (caseOffers.isEmpty()) {
             return
         }
+        val channelHashes = HashSet<Int>(caseOffers.size)
+        for (offer in caseOffers) {
+            if (!channelHashes.add(offer.channel.hashCode())) {
+                throw RuntimeException("Each Case in a Select must use a unique channel")
+            }
+        }
 
         val group = SelectGroup<V>(select) { value ->
             val hash = select.winner.get()
             caseOffers.first { it.channel.hashCode() == hash }.callback(value)
         }
 
-        val handles = mutableListOf<SyncChannel.SelectCaseHandle<V, C>>()
-        val order = scramble(caseOffers)
+        val handles = ArrayList<SyncChannel.SelectCaseHandle<V, C>>(caseOffers.size)
+        val order = ArrayList(caseOffers)
+        scrambleInPlace(order)
 
         try {
             parkPass(order, select, group, handles)
 
             while (!group.isDone()) {
-                pruneDeadHandles(handles)
+                pruneDeadHandlesInPlace(handles)
                 reparkMissing(order, select, group, handles)
                 if (group.isDone()) break
 
-                pruneDeadHandles(handles)
+                pruneDeadHandlesInPlace(handles)
                 // Peer reserved one of our cases — wait for commit or release; do not lead elsewhere.
                 if (handles.any { it.participant.pairing || it.participant.followerValue.get() }) {
                     group.awaitCompletionOrNudge()
@@ -47,7 +63,10 @@ object SelectCoordinator {
                 }
 
                 var computed = false
-                for (handle in scramble(handles.toList())) {
+                // Iterate a scrambled copy so removeAll on [handles] is safe.
+                val leadOrder = ArrayList(handles)
+                scrambleInPlace(leadOrder)
+                for (handle in leadOrder) {
                     if (group.isDone()) break
                     if (select.hasRaceWinner() && !select.canCommit(handle.channel.hashCode())) {
                         // Won elsewhere (provisional or confirmed) — leave so peers are not blocked.
@@ -67,7 +86,7 @@ object SelectCoordinator {
                 }
                 if (group.isDone()) break
 
-                pruneDeadHandles(handles)
+                pruneDeadHandlesInPlace(handles)
                 if (handles.isEmpty()) {
                     kotlinx.coroutines.yield()
                     continue
@@ -111,16 +130,35 @@ object SelectCoordinator {
         }
     }
 
+    /**
+     * First scrambled size-2 case uses [parkOnly]=false so an already-waiting peer can yield
+     * [NeedCompute] immediately; remaining size-2 cases stay park-only (dual-channel safety).
+     * Size-1 channels always try lead (unchanged).
+     *
+     * Opportunistic lead applies only when **every** case is size-2 (e.g. Protocol’s three RPC
+     * channels). Mixed size-1 + size-2 Selects keep park-only on size-2 so size-1 self-commit
+     * during parkPass is not starved by an accidental size-2 rendezvous.
+     */
     private suspend fun <V : Any, C : Any> parkPass(
         order: List<SelectCaseOffer<V, C>>,
         select: Select,
         group: SelectGroup<V>,
         handles: MutableList<SyncChannel.SelectCaseHandle<V, C>>,
     ) {
+        val allSize2 = order.all { it.channel.internalSyncSize != 1 }
+        var triedOpportunisticLead = false
         for (caseOffer in order) {
             if (group.isDone()) break
             if (handles.any { it.channel === caseOffer.channel }) continue
-            offerOne(caseOffer, select, group, handles, parkOnly = caseOffer.channel.internalSyncSize != 1)
+            val parkOnly = when {
+                caseOffer.channel.internalSyncSize == 1 -> false
+                allSize2 && !triedOpportunisticLead -> {
+                    triedOpportunisticLead = true
+                    false
+                }
+                else -> true
+            }
+            offerOne(caseOffer, select, group, handles, parkOnly = parkOnly)
         }
     }
 
@@ -182,36 +220,72 @@ object SelectCoordinator {
         }
     }
 
-    private suspend fun <V : Any, C : Any> pruneDeadHandles(
+    private suspend fun <V : Any, C : Any> pruneDeadHandlesInPlace(
         handles: MutableList<SyncChannel.SelectCaseHandle<V, C>>,
     ) {
-        val live = ArrayList<SyncChannel.SelectCaseHandle<V, C>>(handles.size)
-        for (h in handles) {
+        var w = 0
+        for (i in handles.indices) {
+            val h = handles[i]
             if (h.channel.isSelectCaseRegistered(h)) {
-                live.add(h)
+                if (w != i) {
+                    handles[w] = h
+                }
+                w++
             }
         }
-        handles.clear()
-        handles.addAll(live)
+        while (handles.size > w) {
+            handles.removeAt(handles.lastIndex)
+        }
     }
 
-    private fun <T> scramble(items: List<T>): List<T> {
-        if (items.size <= 1) return items
-        val copy = items.toMutableList()
+    private fun <T> scrambleInPlace(items: MutableList<T>) {
+        if (items.size <= 1) return
         val rnd = ThreadLocalRandom.current()
-        for (i in copy.lastIndex downTo 1) {
+        for (i in items.lastIndex downTo 1) {
             val j = rnd.nextInt(i + 1)
-            val tmp = copy[i]
-            copy[i] = copy[j]
-            copy[j] = tmp
+            val tmp = items[i]
+            items[i] = items[j]
+            items[j] = tmp
         }
-        return copy
     }
 }
 
-data class SelectCaseOffer<V : Any, C : Any>(
-    val channel: SyncChannel<C, V>,
-    val constraint: Optional<C>,
-    val anticonstraint: Optional<C>,
-    val callback: (V) -> Unit = {},
-)
+/**
+ * One select case for [SelectCoordinator]. Mutable so a long-lived [julay.program.Proc] can
+ * recycle slots across FastOnly multi-offer steps instead of allocating wrappers each time.
+ */
+class SelectCaseOffer<V : Any, C : Any> {
+    private var channelRef: SyncChannel<C, V>? = null
+    var constraint: Optional<C> = Optional.empty()
+        private set
+    var anticonstraint: Optional<C> = Optional.empty()
+        private set
+    var callback: (V) -> Unit = {}
+        private set
+
+    val channel: SyncChannel<C, V>
+        get() = channelRef ?: error("SelectCaseOffer used before fill")
+
+    constructor()
+
+    constructor(
+        channel: SyncChannel<C, V>,
+        constraint: Optional<C>,
+        anticonstraint: Optional<C>,
+        callback: (V) -> Unit = {},
+    ) {
+        fill(channel, constraint, anticonstraint, callback)
+    }
+
+    fun fill(
+        channel: SyncChannel<C, V>,
+        constraint: Optional<C>,
+        anticonstraint: Optional<C>,
+        callback: (V) -> Unit,
+    ) {
+        this.channelRef = channel
+        this.constraint = constraint
+        this.anticonstraint = anticonstraint
+        this.callback = callback
+    }
+}

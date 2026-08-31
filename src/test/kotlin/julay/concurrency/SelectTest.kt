@@ -337,6 +337,110 @@ class SelectTest {
         }
     }
 
+    /** FastOnly-style path: [SelectCoordinator.runOffers] without SyncCase wrappers. */
+    @Test
+    fun runOffersThreeChannelsRendezvous() = runBlocking {
+        val results = ConcurrentHashMap<Int, Int>()
+        withContext(Dispatchers.Default) {
+            val c1 = SyncChannel<Int, Int>(2) { Optional.of(1) }
+            val c2 = SyncChannel<Int, Int>(2) { Optional.of(2) }
+            val c3 = SyncChannel<Int, Int>(2) { Optional.of(3) }
+            val n = 600
+            for (i in 1..n) {
+                launch {
+                    SelectCoordinator.runOffers(
+                        listOf(
+                            SelectCaseOffer(c1, Optional.empty(), Optional.empty()) { v ->
+                                results.compute(v, chmResultUpdate)
+                            },
+                            SelectCaseOffer(c2, Optional.empty(), Optional.empty()) { v ->
+                                results.compute(v, chmResultUpdate)
+                            },
+                            SelectCaseOffer(c3, Optional.empty(), Optional.empty()) { v ->
+                                results.compute(v, chmResultUpdate)
+                            },
+                        ),
+                    )
+                }
+                launch {
+                    // Peer on one of the three channels (round-robin).
+                    when (i % 3) {
+                        0 -> c1.sync()
+                        1 -> c2.sync()
+                        else -> c3.sync()
+                    }
+                }
+            }
+        }
+        assertEquals(600, results.values.sum())
+    }
+
+    /**
+     * Peer already waiting on a size-2 channel: opportunistic first-case lead should
+     * NeedCompute during parkPass instead of only after a later wake.
+     */
+    @Test
+    fun opportunisticLeadWhenPeerAlreadyWaiting() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val chanHot = SyncChannel<Int, Int>(2) { Optional.of(42) }
+            val chanCold = SyncChannel<Int, Int>(2) { Optional.of(99) }
+            var got: Int? = null
+            val peer = launch {
+                val r = chanHot.sync()
+                assertTrue(r.isPresent)
+            }
+            awaitParticipantCount(chanHot, 1)
+            SelectCoordinator.runOffers(
+                listOf(
+                    SelectCaseOffer(chanHot, Optional.empty(), Optional.empty()) { v -> got = v },
+                    SelectCaseOffer(chanCold, Optional.empty(), Optional.empty()) {},
+                ),
+            )
+            withTimeout(5.seconds) { peer.join() }
+            assertEquals(42, got)
+            assertEquals(0, chanHot.participantCountForTests())
+            assertEquals(0, chanCold.participantCountForTests())
+        }
+    }
+
+    /** Recycled [SelectCaseOffer] slots across successive runOffers calls. */
+    @Test
+    fun recycledSelectCaseOffersAcrossRuns() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val chan = SyncChannel<Int, Int>(2) { Optional.of(7) }
+            val slots = listOf(
+                SelectCaseOffer<Int, Int>(),
+                SelectCaseOffer(),
+            )
+            val other = SyncChannel<Int, Int>(2) { Optional.of(8) }
+            var wins = 0
+            repeat(40) {
+                slots[0].fill(chan, Optional.empty(), Optional.empty()) { wins++ }
+                slots[1].fill(other, Optional.empty(), Optional.empty()) {}
+                val peer = launch { chan.sync() }
+                awaitParticipantCount(chan, 1)
+                SelectCoordinator.runOffers(slots)
+                withTimeout(5.seconds) { peer.join() }
+            }
+            assertEquals(40, wins)
+        }
+    }
+
+    @Test
+    fun runOffersRejectsDuplicateChannels() = runBlocking {
+        val chan = SyncChannel<Int, Int>(2) { Optional.of(1) }
+        try {
+            SelectCoordinator.runOffers(
+                listOf(
+                    SelectCaseOffer(chan, Optional.empty(), Optional.empty()) {},
+                    SelectCaseOffer(chan, Optional.empty(), Optional.empty()) {},
+                ),
+            )
+            fail("expected duplicate-channel RuntimeException")
+        } catch (_: RuntimeException) {
+        }
+    }
+
     private val chmResultUpdate : (Int, Int?)->Int? = {
             _, curVal ->
         if (curVal == null) {

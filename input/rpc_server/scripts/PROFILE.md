@@ -172,6 +172,32 @@ Top-level per-request Proc spawn removed from HTTP path; remaining gap is SyncCh
 
 **Keyword shares (all samples):** `runHttpHandlerLoop` ~17%, `SelectCoordinator` ~11%, `syncFast` ~10%, `readAllBytes` ~10%, `finishConstruction` / TS factory ~0.3%.
 
+## Phase 6 — multi-offer Select setup reuse + opportunistic lead (2026-08-31)
+
+**Change (no `.jul`):** FastOnly multi-offer steps call `SelectCoordinator.runOffers` with recycled `SelectCaseOffer` slots on the `Proc` (no per-step `Select.SyncCase` / `toTypedArray` remapping). `SelectCoordinator` prunes/scrambles with less list churn. For all-size-2 Selects (Protocol), the first scrambled case uses `parkOnly=false` so an already-waiting client can `NeedCompute` during `parkPass`.
+
+**`bench_toys.sh --targets rpc,rpc-native --ops 200 --clients 4 --warmup 40`**
+
+| | Julay | Kotlin native | Ratio |
+|--|------:|--------------:|------:|
+| RPS | ~3120 | ~4870 | ~1.56× (short-bench noise; Phase 5 was ~1.45×) |
+
+**Sustained (`--ops 5000`, same clients/warmup):** Julay **~4910** vs native **~5830** RPS (~1.19×).
+
+**Allocation (`profile_rpc.sh --variant julay --mode alloc --duration 12 --clients 4`)** — profile load ≈ **5060 RPS** Julay vs **5840 RPS** native (~1.15×).
+
+| Area | After Phase 5 | After Phase 6 |
+|------|--------------:|--------------:|
+| JDK HttpServer / NIO | ~43% | **~42%** |
+| HTTP / JulHttpServer / bridge | ~21% | **~23%** |
+| SyncChannel / Select | ~21% | **~20%** |
+| invokeProcFun / Proc | ~11% | **~11%** |
+| SyncResolveFast | ~3% | **~3%** |
+
+**Keyword shares:** `SelectCoordinator` ~10% (was ~11%), `syncFast` ~11%, `runOffers` ~8% (new FastOnly entry; SyncCase remapping gone from this path).
+
+Modest alloc/shape win; sustained RPS band unchanged. Remaining Julay tax is still SyncChannel rendezvous + handler/bridge work vs native’s mutex.
+
 ## Baseline — before bridge fix (2026-08-29)
 
 ### Busy-only CPU (`-e cpu`)
@@ -211,13 +237,7 @@ Native is faster because each request is “parse → mutex → respond” on th
 
 ## Next optimization candidate
 
-**Phase 6 — prefer Select / Protocol over TS reuse.** Post–Phase 5 alloc shows:
-
-1. **Highest Julay-only tax:** SyncChannel / Select (~21%), especially `SelectCoordinator` + `syncFast` on Protocol’s always-on multi-offer plan.
-2. **HTTP bridge (~21%)** is partly real body I/O (`readAllBytes` ~10%) plus `handle` / pool dispatch; native folds the same JDK path into the NIO bucket, so treat this as secondary.
-3. **Proc (~11%)** is mostly legitimate pooled `runHttpHandlerLoop` / `runOneStep`. Per-request TS `finishConstruction` is only ~0.3% of alloc — codegen `resetForNextRequest` is unlikely to move RPS much until Select shrinks.
-
-So Phase 6 should target **shrinking Protocol’s multi-offer Select** (park-once / single-winner / fewer live offers), not TS reuse, as the next RPS lever toward the native ~1.0–1.1× band.
+**Phase 7 — deeper SyncChannel / Protocol shape.** Phase 6 cut Select *setup* churn; bucket shares barely moved because rendezvous itself (participants, `syncFast`, Protocol’s 3-channel wait) still dominates. Next levers (still no `.jul` preferred): cheaper size-2 `syncFast` participant path; optional codegen/channel multiplex only if profiles prove setup is no longer the issue.
 
 ## Flamegraph index (this machine)
 

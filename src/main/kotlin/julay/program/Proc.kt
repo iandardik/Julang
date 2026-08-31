@@ -3,6 +3,8 @@ package julay.program
 import com.microsoft.z3.Status
 import com.microsoft.z3.Context
 import julay.concurrency.Select
+import julay.concurrency.SelectCaseOffer
+import julay.concurrency.SelectCoordinator
 import julay.concurrency.SyncChannel
 import julay.program.action.ConcreteAction
 import julay.program.action.ProgramAction
@@ -55,6 +57,9 @@ class Proc(
 
     /** Reused across select steps to avoid per-step [ArrayList] / [Select.SyncCase] churn. */
     private val stepSyncCases = ArrayList<Select.SyncCase<SyncPayload, Constraint>>(8)
+
+    /** Recycled FastOnly multi-offer slots for [SelectCoordinator.runOffers] (no SyncCase wrappers). */
+    private val stepCaseOffers = ArrayList<SelectCaseOffer<SyncPayload, Constraint>>(8)
 
     private val silentlyKilled = AtomicBoolean(false)
     @Volatile
@@ -341,8 +346,10 @@ class Proc(
             return applySyncPayload(ret.result.get())
         }
         var nextPayload = Optional.empty<SyncPayload>()
-        stepSyncCases.clear()
-        for (offer in offers) {
+        val onWin: (SyncPayload) -> Unit = { payload -> nextPayload = Optional.of(payload) }
+        ensureStepCaseOffers(offers.size)
+        for (i in offers.indices) {
+            val offer = offers[i]
             val syncChannel = resolveSyncChannel(offer)
             val constraint = Constraint(
                 fast = offer.guard,
@@ -356,13 +363,14 @@ class Proc(
                 classId = classId,
                 proc = this,
             )
-            stepSyncCases.add(
-                Select.SyncCase(syncChannel, constraint, anticonstraint) { payload: SyncPayload ->
-                    nextPayload = Optional.of(payload)
-                },
+            stepCaseOffers[i].fill(
+                syncChannel,
+                Optional.of(constraint),
+                Optional.of(anticonstraint),
+                onWin,
             )
         }
-        runSyncCases(stepSyncCases) { payload -> nextPayload = Optional.of(payload) }
+        SelectCoordinator.runOffers(stepCaseOffers.subList(0, offers.size))
 
         if (nextPayload.isEmpty) {
             scrubClosedSessionsAndAffinity()
@@ -370,6 +378,12 @@ class Proc(
         }
 
         return applySyncPayload(nextPayload.get())
+    }
+
+    private fun ensureStepCaseOffers(n: Int) {
+        while (stepCaseOffers.size < n) {
+            stepCaseOffers.add(SelectCaseOffer())
+        }
     }
 
     /**

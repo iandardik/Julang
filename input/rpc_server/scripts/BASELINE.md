@@ -28,12 +28,12 @@ Same wire API and JDK `HttpServer`; native uses a mutex instead of SyncChannel
 
 | Implementation | ok RPS | p50 latency |
 |----------------|--------|-------------|
-| Julay rpc (opts on) | ~3550 | ~1.4 ms |
-| Kotlin native       | ~5140 | ~0.9 ms |
+| Julay rpc (opts on) | ~3120 | ~1.1 ms |
+| Kotlin native       | ~4870 | ~0.8 ms |
 
-Julay is about **~1.45×** lower throughput on this short bench (down from **~2.3×** before Phase 4, **~1.6×** after Phase 4). Sustained load (`--ops 5000`, same clients/warmup): Julay **~4910** vs native **~5870** RPS (**~1.19×**). With `--warmup 0`: Julay **~2990** vs native **~4400** RPS (**~1.47×**).
+Julay is about **~1.56×** lower throughput on this short bench (noisy; Phase 5 was ~1.45×). Sustained load (`--ops 5000`, same clients/warmup): Julay **~4910** vs native **~5830** RPS (**~1.19×**). Phase 5 cold was Jul~2990** vs **~4400** (~1.47×).
 
-Phase 5 pooled handler procs removed top-level per-request Proc spawn; remaining gap is SyncChannel + per-request TS factory (see [`PROFILE.md`](PROFILE.md) Phase 5).
+Phase 6 reused multi-offer Select setup + opportunistic all-size-2 lead; sustained band unchanged (see [`PROFILE.md`](PROFILE.md) Phase 6). Remaining gap is SyncChannel rendezvous vs native mutex.
 
 CPU/alloc flamegraphs and a bucketed hotspot table: [`PROFILE.md`](PROFILE.md).
 
@@ -43,7 +43,7 @@ Already landed and validated: named sync FastOnly path (huge win vs Z3-only).
 
 Still open (do **not** need a new distributed system yet):
 
-1. Close the remaining **~1.2–1.5×** Julay vs Kotlin-native gap on `rpc_server` — SyncChannel/Select + per-request TS factory on the pooled path ([`PROFILE.md`](PROFILE.md) Phase 5–6).
+1. Close the remaining **~1.2–1.5×** Julay vs Kotlin-native gap on `rpc_server` — SyncChannel rendezvous depth after Phase 6 setup reuse ([`PROFILE.md`](PROFILE.md) Phase 6–7).
 2. Residual Z3 on opaque session `listen` shapes (startup only today for rpc).
 3. Quieter echo (harness log redirect — done in `bench_toys.sh`) so the HTTP floor is not println-bound when watching a TTY.
 
