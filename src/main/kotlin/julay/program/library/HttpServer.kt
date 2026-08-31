@@ -21,6 +21,8 @@ import julay.program.type.intType
 import julay.program.type.stringType
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets.UTF_8
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * HTTP server library. [listen] registers a procfun handler; each JDK request invokes
@@ -60,14 +62,18 @@ class JulHttpServer(
 
     private var handlerName: String? = null
     private var jdkServer: HttpServer? = null
+    private var requestExecutor: ExecutorService? = null
     private var closed = false
 
     override suspend fun finishConstruction(act: ConcreteAction) {
         val listenPort = act.lookup(portArg).value as Int
         handlerName = act.lookup(handlerArg).value as String
+        val executor = Executors.newCachedThreadPool()
         val server = HttpServer.create(InetSocketAddress(listenPort), 0)
+        server.executor = executor
         server.createContext("/", this)
         server.start()
+        requestExecutor = executor
         jdkServer = server
     }
 
@@ -93,6 +99,9 @@ class JulHttpServer(
         if (act.symAction.name == closeAct.name) {
             closed = true
             jdkServer?.stop(0)
+            jdkServer = null
+            requestExecutor?.shutdown()
+            requestExecutor = null
         }
     }
 

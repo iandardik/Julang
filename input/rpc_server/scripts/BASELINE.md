@@ -28,12 +28,12 @@ Same wire API and JDK `HttpServer`; native uses a mutex instead of SyncChannel
 
 | Implementation | ok RPS | p50 latency |
 |----------------|--------|-------------|
-| Julay rpc (opts on) | ~2320 | ~1.6 ms |
-| Kotlin native       | ~5320 | ~0.7 ms |
+| Julay rpc (opts on) | ~2525 | ~1.4 ms |
+| Kotlin native       | ~3975 | ~0.9 ms |
 
-Julay is about **~2.3×** lower throughput and **~2×** higher median latency than the
-hand-written twin on this machine/load. That gap is the current runtime floor target
-for `rpc_server` work (close toward 1×, or at least within ~2× as a soft bar).
+Julay is about **~1.6×** lower throughput on this short bench (down from **~2.3×** before the HttpServer thread-pool fix). Sustained load (`--ops 5000`, same clients/warmup): Julay **~4544** vs native **~5454** RPS (**~1.2×**). With `--warmup 0`: Julay **~2266** vs native **~4077** RPS (**~1.8×**).
+
+The remaining gap is Julay per-request Proc spawn + SyncChannel (see [`PROFILE.md`](PROFILE.md) Phase 4–5).
 
 CPU/alloc flamegraphs and a bucketed hotspot table: [`PROFILE.md`](PROFILE.md).
 
@@ -43,7 +43,7 @@ Already landed and validated: named sync FastOnly path (huge win vs Z3-only).
 
 Still open (do **not** need a new distributed system yet):
 
-1. Close the **~2×** Julay vs Kotlin-native gap on `rpc_server` — profiling points at **procfun spawn (`invokeProcFun`) + SyncChannel**, not Z3 ([`PROFILE.md`](PROFILE.md)).
+1. Close the remaining **~1.2–1.6×** Julay vs Kotlin-native gap on `rpc_server` — profiling points at **top-level procfun spawn (`invokeProcFun`) + SyncChannel**, not Z3 ([`PROFILE.md`](PROFILE.md) Phase 5 design).
 2. Residual Z3 on opaque session `listen` shapes (startup only today for rpc).
 3. Quieter echo (harness log redirect — done in `bench_toys.sh`) so the HTTP floor is not println-bound when watching a TTY.
 

@@ -8,7 +8,7 @@ Side effects in Julang come only from this catalog: **proclib processes**, **pro
 
 ### HttpServer (Kotlin-native proclib — JAR only, not in TLA specs)
 
-Compose as `ServerStarter || HttpServer`. The user proc registers a **procfun handler** at startup; the library invokes it per request via `invokeProcFun` (no session pairing per request).
+Compose as `ServerStarter || HttpServer`. The user proc registers a **procfun handler** at startup; the library invokes it per request via `invokeProcFun` (no session pairing per request). `listen` installs a cached thread pool on the JDK `HttpServer` so concurrent requests run in parallel (default JDK behavior serializes handlers on one thread).
 
 | Action | Role |
 |--------|------|
