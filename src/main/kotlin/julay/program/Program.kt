@@ -231,6 +231,24 @@ class Program {
         }
     }
 
+    fun resolveProcFunHandler(name: String): ProcFunHandlerSpec {
+        val info = procFunByName[name]
+            ?: throw JulayException("Unknown procfun \"$name\"")
+        val ctorEntry = info.constructors.entries.singleOrNull()
+            ?: throw JulayException("Procfun \"$name\" must have exactly one constructor")
+        return ProcFunHandlerSpec(
+            name = name,
+            info = info,
+            ctorSym = ctorEntry.key,
+            factory = ctorEntry.value,
+        )
+    }
+
+    fun startProcFunHandlerPool(
+        name: String,
+        poolSize: Int = defaultHandlerPoolSize(),
+    ): ProcFunHandlerPool = ProcFunHandlerPool.create(this, name, poolSize)
+
     private fun constraintsSatisfiable(constraints: Set<Constraint>): Boolean {
         if (syncResolveConfig.anyEnabled()) {
             when (val fast = julay.program.sync.SyncResolveFast.trySatisfiable(constraints, syncResolveConfig)) {

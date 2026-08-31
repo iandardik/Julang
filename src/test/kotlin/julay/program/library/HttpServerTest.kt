@@ -16,8 +16,14 @@ import julay.program.type.intType
 import julay.program.type.stringType
 import kotlinx.coroutines.runBlocking
 import java.net.ServerSocket
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class HttpServerTest {
     private val reqVar = Variable("req", httpServerRequestType)
@@ -48,8 +54,111 @@ class HttpServerTest {
     }
 
     @Test
-    fun handleRoundTripViaEmbeddedServer() = runBlocking {
+    fun sequentialMultiRequestViaEmbeddedServer() = runBlocking {
         val program = echoProgram()
+        val (port, server) = startEmbeddedServer(program)
+        try {
+            repeat(10) { i ->
+                val req = HttpClientRequest("http://127.0.0.1:$port/ping", "POST", "msg$i")
+                val resp = doHttpRequest(req)
+                assertEquals(200, resp.code, "request $i")
+                assertEquals("echo:msg$i", resp.body, "request $i")
+            }
+        } finally {
+            server.transit(ConcreteAction(JulHttpServer.closeAct, emptyMap()))
+        }
+    }
+
+    @Test
+    fun concurrentRequestsViaEmbeddedServer() {
+        val program = echoProgram()
+        val (port, server) = runBlocking { startEmbeddedServer(program) }
+        val threads = 8
+        val perThread = 20
+        val pool = Executors.newFixedThreadPool(threads)
+        val failures = AtomicInteger(0)
+        val latch = CountDownLatch(threads)
+        try {
+            repeat(threads) { t ->
+                pool.submit {
+                    try {
+                        repeat(perThread) { i ->
+                            val req = HttpClientRequest(
+                                "http://127.0.0.1:$port/ping",
+                                "POST",
+                                "t${t}_$i",
+                            )
+                            val resp = doHttpRequest(req)
+                            if (resp.code != 200 || resp.body != "echo:t${t}_$i") {
+                                failures.incrementAndGet()
+                            }
+                        }
+                    } finally {
+                        latch.countDown()
+                    }
+                }
+            }
+            assertTrue(latch.await(60, TimeUnit.SECONDS), "timed out waiting for clients")
+            assertEquals(0, failures.get(), "some concurrent requests failed")
+        } finally {
+            pool.shutdownNow()
+            runBlocking {
+                server.transit(ConcreteAction(JulHttpServer.closeAct, emptyMap()))
+            }
+        }
+    }
+
+    @Test
+    fun closeShutsDownHandlerPool() = runBlocking {
+        val program = echoProgram()
+        val (port, server) = startEmbeddedServer(program)
+        server.transit(ConcreteAction(JulHttpServer.closeAct, emptyMap()))
+        val req = HttpClientRequest("http://127.0.0.1:$port/ping", "POST", "after-close")
+        val resp = doHttpRequest(req)
+        assertEquals(0, resp.code)
+    }
+
+    @Test
+    fun handlerFailureThenRecoveryViaPool() = runBlocking {
+        val throwOnce = AtomicBoolean(true)
+        val reqVar = Variable("req", httpServerRequestType)
+        val echoCtor = SymbolicAction("flakyHandler", listOf(reqVar))
+        val respondAct = SymbolicAction("respond", emptyList(), isInternal = true)
+        val info = TransitionSystemStaticInfo(
+            "flakyHandler",
+            setOf(respondAct),
+            mapOf(
+                echoCtor to { _, _ ->
+                    if (throwOnce.compareAndSet(true, false)) {
+                        ThrowingEchoHandlerTs()
+                    } else {
+                        EchoHandlerTs()
+                    }
+                },
+            ),
+        )
+        val program = Program(
+            setOf(JulHttpServer.staticInfo()),
+            procFunInfo = setOf(info),
+        )
+        val (port, server) = startEmbeddedServer(program, handlerName = "flakyHandler")
+        try {
+            val failReq = HttpClientRequest("http://127.0.0.1:$port/ping", "POST", "boom")
+            val failResp = doHttpRequest(failReq)
+            assertTrue(failResp.code != 200, "expected handler failure response")
+            val okReq = HttpClientRequest("http://127.0.0.1:$port/ping", "POST", "ok")
+            val resp = doHttpRequest(okReq)
+            assertEquals(200, resp.code)
+            assertEquals("echo:ok", resp.body)
+        } finally {
+            server.transit(ConcreteAction(JulHttpServer.closeAct, emptyMap()))
+        }
+    }
+
+    private suspend fun startEmbeddedServer(
+        program: Program,
+        handlerName: String = "echoHandler",
+    ): Pair<Int, JulHttpServer> {
         val server = JulHttpServer(program)
         val port = ServerSocket(0).use { it.localPort }
         server.finishConstruction(
@@ -57,18 +166,23 @@ class HttpServerTest {
                 JulHttpServer.listenAct,
                 mapOf(
                     JulHttpServer.portArg to Value(port, intType),
-                    JulHttpServer.handlerArg to Value("echoHandler", stringType),
+                    JulHttpServer.handlerArg to Value(handlerName, stringType),
                 ),
             ),
         )
-        try {
-            val req = HttpClientRequest("http://127.0.0.1:$port/ping", "POST", "ping")
-            val resp = doHttpRequest(req)
-            assertEquals(200, resp.code)
-            assertEquals("echo:ping", resp.body)
-        } finally {
-            server.transit(ConcreteAction(JulHttpServer.closeAct, emptyMap()))
+        return port to server
+    }
+
+    private class ThrowingEchoHandlerTs : TransitionSystem {
+        override suspend fun finishConstruction(act: ConcreteAction) {
+            throw RuntimeException("simulated handler failure")
         }
+
+        override suspend fun actions(ctx: Context): Set<TSAction> = emptySet()
+
+        override suspend fun transit(act: ConcreteAction) {}
+
+        override fun syncStepPlan(): SyncStepPlan = SyncStepPlan.FastOnly(emptyList())
     }
 
     private class EchoHandlerTs : TransitionSystem {

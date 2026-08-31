@@ -14,6 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.ReceiveChannel
 
 /**
  * Process wrapper around a [TransitionSystem]. Owns process-local session affinity and dedicated
@@ -31,7 +32,7 @@ import kotlinx.coroutines.CancellationException
  *   both take a peer proc-class name and are no-ops when that affinity is absent.
  */
 class Proc(
-    private val transitionSystem: TransitionSystem,
+    transitionSystem: TransitionSystem,
     private val tsInfo: TransitionSystemStaticInfo,
     private val staticChannelTable: Map<SymbolicAction, ProgramAction>,
     val program: Program,
@@ -59,8 +60,19 @@ class Proc(
     @Volatile
     private var runJob: Job? = null
 
+    private var transitionSystem: TransitionSystem = transitionSystem
+
+    /** Set while a pooled HTTP worker serves one request; completes instead of [procFunReturnDeferred]. */
+    @Volatile
+    private var activeWorkReturn: CompletableDeferred<Value>? = null
+
     init {
-        transitionSystem.bindHostProc(this)
+        this.transitionSystem.bindHostProc(this)
+    }
+
+    fun replaceTransitionSystem(ts: TransitionSystem) {
+        transitionSystem = ts
+        ts.bindHostProc(this)
     }
 
     fun bindRunJob(job: Job) {
@@ -154,6 +166,93 @@ class Proc(
             }
         } finally {
             clearAffinityAndCloseSessions()
+        }
+    }
+
+    /**
+     * Long-lived pooled HTTP handler loop: receive work, mint a fresh TS per request, run until
+     * `return:`, complete [HandlerWork.returnDeferred], repeat.
+     */
+    suspend fun runHttpHandlerLoop(
+        work: ReceiveChannel<HandlerWork>,
+        factory: suspend (Program, ConcreteAction) -> TransitionSystem,
+        ctorSym: SymbolicAction,
+    ) {
+        try {
+            for (item in work) {
+                serveOneHandlerRequest(item, factory, ctorSym)
+            }
+        } catch (e: CancellationException) {
+            if (!silentlyKilled.get()) {
+                throw e
+            }
+        } finally {
+            clearAffinityAndCloseSessions()
+        }
+    }
+
+    private suspend fun serveOneHandlerRequest(
+        item: HandlerWork,
+        factory: suspend (Program, ConcreteAction) -> TransitionSystem,
+        ctorSym: SymbolicAction,
+    ) {
+        if (ctorSym.args.size != item.argValues.size) {
+            item.returnDeferred.completeExceptionally(
+                JulayException(
+                    "Procfun \"${tsInfo.name}\" expects ${ctorSym.args.size} argument(s) " +
+                        "but got ${item.argValues.size}",
+                ),
+            )
+            return
+        }
+        try {
+            val concreteArgs = ctorSym.args.zip(item.argValues).associate { (v, arg) ->
+                v to Value(arg, v.type)
+            }
+            val ctorAct = ConcreteAction(ctorSym, concreteArgs)
+            val ts = factory(program, ctorAct)
+            replaceTransitionSystem(ts)
+            activeWorkReturn = item.returnDeferred
+            withSessionPeer(null) {
+                transitionSystem.finishConstruction(ctorAct)
+            }
+            while (true) {
+                if (silentlyKilled.get()) {
+                    if (!item.returnDeferred.isCompleted) {
+                        item.returnDeferred.completeExceptionally(
+                            JulayException("Pooled handler proc $procId silently killed"),
+                        )
+                    }
+                    return
+                }
+                scrubClosedSessionsAndAffinity()
+                val cont = when {
+                    program.syncResolveConfig.anyEnabled() -> {
+                        when (val plan = transitionSystem.syncStepPlan()) {
+                            is julay.program.sync.SyncStepPlan.FastOnly ->
+                                runOneStepFast(plan.offers)
+                            is julay.program.sync.SyncStepPlan.NeedsZ3 ->
+                                withEphemeralContextSuspend { ctx -> runOneStep(ctx) }
+                        }
+                    }
+                    else -> withEphemeralContextSuspend { ctx -> runOneStep(ctx) }
+                }
+                if (!cont) {
+                    if (!item.returnDeferred.isCompleted) {
+                        item.returnDeferred.completeExceptionally(
+                            JulayException("Procfun \"${tsInfo.name}\" exited without return"),
+                        )
+                    }
+                    return
+                }
+            }
+        } catch (e: Throwable) {
+            if (!item.returnDeferred.isCompleted) {
+                item.returnDeferred.completeExceptionally(e)
+            }
+            throw e
+        } finally {
+            activeWorkReturn = null
         }
     }
 
@@ -362,7 +461,12 @@ class Proc(
             program.spawn(act, parent = this)
         }
         transitionSystem.consumeProcFunReturn()?.let { value ->
-            procFunReturnDeferred?.complete(value)
+            val workDeferred = activeWorkReturn
+            if (workDeferred != null) {
+                workDeferred.complete(value)
+            } else {
+                procFunReturnDeferred?.complete(value)
+            }
             return false
         }
         return !silentlyKilled.get()

@@ -135,26 +135,21 @@ Collapsed stacks: **`handleRpc.transit → invokeProcFun` for nested `in*RPC` is
 
 Serial handler was a major amplifier on multi-client short benches. Remaining gap is top-level per-request Proc spawn + SyncChannel + JVM JIT on Julay’s deeper stack.
 
-## Phase 5 (proposed) — pooled HTTP handler proc
+## Phase 5 — pooled HTTP handler proc (2026-08-31)
 
-**Problem:** Every request still calls `invokeProcFunBlocking(handlerName, …)`, which allocates a new `Proc`, launches a coroutine, and runs the fused `handleRpc` select loop until `return:`. procfun-fuse removed nested `in*RPC` spawns but not the top-level HTTP spawn (~10–13% alloc in prior profiles).
+**Change:** `JulHttpServer` starts a `ProcFunHandlerPool` at `listen` (default size `max(2, availableProcessors())`). Long-lived handler worker procs loop on `HandlerWork`: fresh TS via procfun factory + `finishConstruction` per request, then existing select/transit until `return:`. `invokeProcFunBlocking` remains for non-HTTP callers.
 
-**Goal:** Keep procfun semantics for user code but avoid per-request Proc construction on the HTTP hot path.
+**`bench_toys.sh --targets rpc,rpc-native --ops 200 --clients 4 --warmup 40`**
 
-**Design (sketch):**
+| | Julay | Kotlin native | Ratio |
+|--|------:|--------------:|------:|
+| RPS | ~3550 | ~5140 | ~1.45× (was ~1.6× post Phase 4) |
 
-1. At `listen`, register the handler procfun name and spawn **one long-lived “HTTP dispatcher” Proc** (or a small fixed pool) bound to that handler’s `TransitionSystemStaticInfo`.
-2. `JulHttpServer.handle` enqueues `(HttpServerRequest, CompletableFuture<HttpServerResponse>)` on a lock-free queue (or `SyncChannel` internal action) instead of `invokeProcFunBlocking`.
-3. The dispatcher Proc loop: dequeue request → bind args into its fused `handleRpc` state (or call an internal “serve one request” transition) → sync with `Protocol` as today → complete the future → reset/reuse the same Proc for the next request.
-4. Pool size defaults to `availableProcessors()` (configurable later); overflow blocks the HTTP worker thread (same as today’s back-pressure model).
+**Sustained (`--ops 5000`, same clients/warmup):** Julay **~4910** vs native **~5870** RPS (~1.19×).
 
-**Trade-offs:**
+**Cold (`--warmup 0`, ops=200):** Julay **~2990** vs native **~4400** RPS (~1.47×).
 
-- Reuses Proc, step buffers, and affinity tables across requests (cuts alloc + JIT surface per request).
-- Requires runtime support for “reset procfun instance for next call” without full respawn; may need a new `Proc.reenterProcFun(args)` hook or generated `__julayServeRequest` internal transition.
-- Error isolation: a poisoned handler state may require discarding and respawning one pool slot (same as respawning today per request).
-
-**Next step:** prototype `Proc.reenterProcFun` + single-slot pool in `JulHttpServer` behind a flag; re-profile alloc bucket for `invokeProcFun / Proc` and re-run short/sustained benches.
+Top-level per-request Proc spawn removed from HTTP path; remaining gap is SyncChannel/Select + fresh TS factory per request.
 
 ## Baseline — before bridge fix (2026-08-29)
 
@@ -195,7 +190,7 @@ Native is faster because each request is “parse → mutex → respond” on th
 
 ## Next optimization candidate
 
-**Phase 5: pooled HTTP handler proc** — eliminate **top-level** per-request `invokeProcFun` spawn (see Phase 5 design above). procfun-fuse already removed nested `handleRpc → in*RPC` spawns (Phase 3).
+**Phase 6 (optional):** reduce per-request TS factory/allocation on the pooled path (codegen `resetForNextRequest` or TS reuse); shrink Protocol’s always-on multi-offer Select. Re-profile alloc after Phase 5 to confirm `invokeProcFun / Proc` bucket drop.
 
 ## Flamegraph index (this machine)
 

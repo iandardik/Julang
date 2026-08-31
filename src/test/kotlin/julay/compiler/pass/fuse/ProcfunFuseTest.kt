@@ -356,9 +356,41 @@ class ProcfunFuseTest {
                 .redirectErrorStream(true)
                 .start()
             waitForPort(8000, timeoutMs = 20_000)
+            repeat(5) { i ->
+                assertEquals(200 to "v=${i + 1}", httpPost("http://127.0.0.1:8000/rpc/increment", ""))
+            }
+            assertEquals(200 to "v=5", httpPost("http://127.0.0.1:8000/rpc/get", ""))
+            assertEquals(200 to "v=9", httpPost("http://127.0.0.1:8000/rpc/add", "delta=4"))
+        } finally {
+            proc?.destroyForcibly()
+            proc?.waitFor(5, TimeUnit.SECONDS)
+            jar.delete()
+            buildDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun rpcServerHttpFuseOff() {
+        val cwd = File(".").absoluteFile
+        val jar = File(cwd, "RpcServer.jar")
+        val buildDir = File(cwd, "RpcServer-jul-build")
+        jar.delete()
+        buildDir.deleteRecursively()
+        var proc: Process? = null
+        try {
+            compileJulFile(
+                File("input/rpc_server/main.jul").toPath(),
+                keepBuild = true,
+                compilerOptConfig = CompilerOptConfig.fromDisableOptFlag("procfun-fuse"),
+            )
+            assertTrue(jar.exists(), "expected RpcServer.jar")
+            proc = ProcessBuilder("java", "-jar", jar.absolutePath)
+                .directory(cwd)
+                .redirectErrorStream(true)
+                .start()
+            waitForPort(8000, timeoutMs = 20_000)
             assertEquals(200 to "v=1", httpPost("http://127.0.0.1:8000/rpc/increment", ""))
             assertEquals(200 to "v=1", httpPost("http://127.0.0.1:8000/rpc/get", ""))
-            assertEquals(200 to "v=4", httpPost("http://127.0.0.1:8000/rpc/add", "delta=3"))
         } finally {
             proc?.destroyForcibly()
             proc?.waitFor(5, TimeUnit.SECONDS)

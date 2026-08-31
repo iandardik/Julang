@@ -7,7 +7,7 @@ import com.sun.net.httpserver.HttpServer
 import julay.compiler.LibraryLoc
 import julay.compiler.decl.ActionDecl
 import julay.program.Program
-import julay.program.Proc
+import julay.program.ProcFunHandlerPool
 import julay.program.TransitionSystem
 import julay.program.TransitionSystemStaticInfo
 import julay.program.Variable
@@ -25,8 +25,9 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /**
- * HTTP server library. [listen] registers a procfun handler; each JDK request invokes
- * [Program.invokeProcFun] directly. Lifecycle actions are session syncs (startup pairing).
+ * HTTP server library. [listen] registers a procfun handler and starts a pooled worker dispatch
+ * path ([ProcFunHandlerPool]) so requests reuse long-lived handler procs. Lifecycle actions are
+ * session syncs (startup pairing).
  */
 class JulHttpServer(
     private val program: Program,
@@ -61,13 +62,16 @@ class JulHttpServer(
     }
 
     private var handlerName: String? = null
+    private var handlerPool: ProcFunHandlerPool? = null
     private var jdkServer: HttpServer? = null
     private var requestExecutor: ExecutorService? = null
     private var closed = false
 
     override suspend fun finishConstruction(act: ConcreteAction) {
         val listenPort = act.lookup(portArg).value as Int
-        handlerName = act.lookup(handlerArg).value as String
+        val handler = act.lookup(handlerArg).value as String
+        handlerName = handler
+        handlerPool = program.startProcFunHandlerPool(handler)
         val executor = Executors.newCachedThreadPool()
         val server = HttpServer.create(InetSocketAddress(listenPort), 0)
         server.executor = executor
@@ -98,6 +102,8 @@ class JulHttpServer(
     override suspend fun transit(act: ConcreteAction) {
         if (act.symAction.name == closeAct.name) {
             closed = true
+            handlerPool?.shutdown()
+            handlerPool = null
             jdkServer?.stop(0)
             jdkServer = null
             requestExecutor?.shutdown()
@@ -106,12 +112,12 @@ class JulHttpServer(
     }
 
     override fun handle(exchange: HttpExchange?) {
-        val name = handlerName
+        val pool = handlerPool
             ?: throw IllegalStateException("JulHttpServer handle before listen")
         val path = httpPathFromUriPath(exchange!!.requestURI.path ?: "")
         val body = String(exchange.requestBody.readAllBytes(), UTF_8)
         val req = HttpServerRequest(path, body)
-        val resp = program.invokeProcFunBlocking(name, listOf(req)) as HttpServerResponse
+        val resp = pool.serveBlocking(listOf(req)) as HttpServerResponse
         val respBytes = resp.body.toByteArray(UTF_8)
         exchange.sendResponseHeaders(resp.code, respBytes.size.toLong())
         exchange.responseBody.use { it.write(respBytes) }

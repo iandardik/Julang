@@ -321,6 +321,7 @@ BENCH_OUT="$OUT_DIR/${LABEL}-${MODE}-bench.txt"
 SUMMARY_OUT="$OUT_DIR/${LABEL}-${MODE}-buckets.txt"
 
 echo "== warmup ($WARMUP_OPS ops × $CLIENTS clients) via $LEADER_URL =="
+# Warmup may hit transient NO_LEADER under Tier-0 timers; do not abort the profile.
 python3 "$BENCH" \
   --url "$LEADER_URL" \
   --ops "$WARMUP_OPS" \
@@ -328,7 +329,7 @@ python3 "$BENCH" \
   --mode "$BENCH_MODE" \
   --timeout "$TIMEOUT" \
   --skip-leader-wait \
-  --value-prefix "raft-prof-warm-$(date +%s)"
+  --value-prefix "raft-prof-warm-$(date +%s)" || true
 
 echo "== load + profile leader mode=$MODE duration=${DURATION}s ops=$OPS clients=$CLIENTS =="
 python3 "$BENCH" \
