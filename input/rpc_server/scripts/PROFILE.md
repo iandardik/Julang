@@ -151,6 +151,27 @@ Serial handler was a major amplifier on multi-client short benches. Remaining ga
 
 Top-level per-request Proc spawn removed from HTTP path; remaining gap is SyncChannel/Select + fresh TS factory per request.
 
+### Post–Phase 5 re-profile (2026-08-31)
+
+**Allocation (`profile_rpc.sh --variant julay --mode alloc --duration 12 --clients 4`)** — sustained mix load during profile ≈ **5090 RPS** Julay vs **5850 RPS** native (~1.15×).
+
+| Area | Phase 3 (pre-pool) | After Phase 5 |
+|------|-------------------:|--------------:|
+| JDK HttpServer / NIO | ~36% | **~43%** |
+| HTTP / JulHttpServer / bridge | ~18% | **~21%** |
+| SyncChannel / Select | ~19% | **~21%** |
+| invokeProcFun / Proc | ~13% | **~11%** |
+| SyncResolveFast | ~13% | **~3%** |
+| Z3 / Context | ~0% | ~0% |
+
+**Native alloc (same harness):** ~100% JDK HttpServer / NIO (handler is thin mutex + respond).
+
+**Proc-bucket sub-breakdown (Julay):** mostly pooled handler work — `runHttpHandlerLoop` ~66%, `ProcFunHandlerPool` ~10%, `runOneStep` ~8%. Literal `invokeProcFun` spawn is gone from the HTTP hot path.
+
+**SyncChannel/Select sub-breakdown:** `SelectCoordinator` ~52%, `syncFast` ~38% — Protocol’s always-on multi-offer Select dominates Julay-only alloc.
+
+**Keyword shares (all samples):** `runHttpHandlerLoop` ~17%, `SelectCoordinator` ~11%, `syncFast` ~10%, `readAllBytes` ~10%, `finishConstruction` / TS factory ~0.3%.
+
 ## Baseline — before bridge fix (2026-08-29)
 
 ### Busy-only CPU (`-e cpu`)
@@ -190,7 +211,13 @@ Native is faster because each request is “parse → mutex → respond” on th
 
 ## Next optimization candidate
 
-**Phase 6 (optional):** reduce per-request TS factory/allocation on the pooled path (codegen `resetForNextRequest` or TS reuse); shrink Protocol’s always-on multi-offer Select. Re-profile alloc after Phase 5 to confirm `invokeProcFun / Proc` bucket drop.
+**Phase 6 — prefer Select / Protocol over TS reuse.** Post–Phase 5 alloc shows:
+
+1. **Highest Julay-only tax:** SyncChannel / Select (~21%), especially `SelectCoordinator` + `syncFast` on Protocol’s always-on multi-offer plan.
+2. **HTTP bridge (~21%)** is partly real body I/O (`readAllBytes` ~10%) plus `handle` / pool dispatch; native folds the same JDK path into the NIO bucket, so treat this as secondary.
+3. **Proc (~11%)** is mostly legitimate pooled `runHttpHandlerLoop` / `runOneStep`. Per-request TS `finishConstruction` is only ~0.3% of alloc — codegen `resetForNextRequest` is unlikely to move RPS much until Select shrinks.
+
+So Phase 6 should target **shrinking Protocol’s multi-offer Select** (park-once / single-winner / fewer live offers), not TS reuse, as the next RPS lever toward the native ~1.0–1.1× band.
 
 ## Flamegraph index (this machine)
 
