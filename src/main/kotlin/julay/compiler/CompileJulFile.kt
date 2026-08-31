@@ -10,12 +10,12 @@ import julay.compiler.ast.ValueProcExprNode
 import julay.compiler.pass.compositionLeavesOfSpec
 import julay.compiler.pass.compileSpecToTla
 import julay.compiler.pass.asSyntheticProcClass
+import julay.compiler.pass.CompilerOptConfig
 import julay.compiler.pass.TlaOptConfig
 import julay.compiler.pass.expandLeavesToPclasses
 import julay.compiler.pass.peerCompositionErrors
 import julay.compiler.pass.procFunCompositionErrors
 import julay.compiler.pass.procFunHavocWarnings
-import julay.program.sync.SyncResolveConfig
 import java.nio.file.Path
 
 fun compileJulFile(
@@ -26,7 +26,8 @@ fun compileJulFile(
     allowUnindexedSpec: Boolean = false,
     compileNames: List<String> = emptyList(),
     compileTlaNames: List<String> = emptyList(),
-    syncResolveConfig: SyncResolveConfig = SyncResolveConfig.ALL_ON,
+    syncResolveConfig: julay.program.sync.SyncResolveConfig = julay.program.sync.SyncResolveConfig.ALL_ON,
+    compilerOptConfig: CompilerOptConfig = CompilerOptConfig(syncResolve = syncResolveConfig),
     tlaOptConfig: TlaOptConfig = TlaOptConfig.ALL_ON,
     verbose: Boolean = false,
 ) {
@@ -63,13 +64,13 @@ fun compileJulFile(
     jarTargets.forEach {
         val stats = compileProgram(
             it, ast, procDecls, librariesInUse, keepBuild, compilerJar,
-            syncResolveConfig = syncResolveConfig,
+            compilerOptConfig = compilerOptConfig,
         )
         syncPathStats += stats
     }
 
     if (verbose && jarTargets.isNotEmpty()) {
-        print(syncPathStats.formatSummary(syncResolveConfig))
+        print(syncPathStats.formatSummary(compilerOptConfig.syncResolve))
     }
 
     val compositionSpecs = unit.modules

@@ -317,7 +317,7 @@ private fun substituteObjClassLiteral(
         newFields,
         expr.programLocation(),
         expr.resolvedStructTypeOrNull(),
-    )
+    ).withTypeOf(expr)
 }
 
 private fun substituteFieldAccess(

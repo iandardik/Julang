@@ -5,4 +5,4 @@ programs:
     expectFailureOutputContains:
       - "IndexOutOfBoundsException"
     run:
-      timeoutMs: 60000
+      timeoutMs: 5000

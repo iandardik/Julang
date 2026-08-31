@@ -12,6 +12,14 @@ import julay.program.type.*
 import julay.program.action.*
 import julay.program.library.LibraryRegistry
 import julay.program.sync.SyncResolveConfig
+import julay.compiler.pass.fuse.FuseSiteInfo
+import julay.compiler.pass.fuse.FUSE_PHASE_VAR
+import julay.compiler.pass.fuse.emitFusedAssignDispatchKotlin
+import julay.compiler.pass.fuse.emitFusedCalleeReturnKotlin
+import julay.compiler.pass.fuse.emitFusedReturnDispatchKotlin
+import julay.compiler.pass.fuse.fuseProcFunDecls
+import julay.compiler.pass.fuse.isFuseHost
+import julay.compiler.pass.fuse.requiredFusePhaseLiteral
 
 data class CodegenResult(
     val sourceText: String,
@@ -25,7 +33,10 @@ fun codegenPass(
     procDecls: List<ProcDecl>,
     librariesInUse: Set<String> = emptySet(),
     syncResolveConfig: SyncResolveConfig = SyncResolveConfig.ALL_ON,
+    compilerOptConfig: CompilerOptConfig = CompilerOptConfig(syncResolve = syncResolveConfig),
 ): CodegenResult {
+    val syncResolveConfig = compilerOptConfig.syncResolve
+    val procfunFuse = compilerOptConfig.procfunFuse
     val libPClassNames = librariesInUse
     val leafMap = leafActionMap(ast, program.allProcNames(procDecls), librariesInUse)
     val alphabet = computeCompositionAlphabet(
@@ -47,7 +58,13 @@ fun codegenPass(
         julay.tools.assert(procClass.size == 1, "Expected exactly one proc class for \"$proc\" but found: ${procClass.size}")
         procClass
     }
-    val procFunClasses = ast.procFunClassPass()
+    val procFunClassesRaw = ast.procFunClassPass()
+    val (procFunClasses, fuseSiteInfoByHost) = if (procfunFuse) {
+        val fused = fuseProcFunDecls(procFunClassesRaw, channelKeys)
+        fused.decls to fused.siteInfoByHost
+    } else {
+        procFunClassesRaw to emptyMap()
+    }
     val procClassByName = procClasses.associateBy { it.name }
 
     // One StaticInfo per leaf occurrence (Julay and Kotlin libraries), with occurrence channel keys.
@@ -162,7 +179,9 @@ fun codegenPass(
     val sourceText = "$imports$effectImports\n" +
         dataClassSection +
         objClassSection +
-        allClasses.joinToString("\n\n") { it.kotlinClassString(objClassDecls, classBodyKeys) } +
+        allClasses.joinToString("\n\n") {
+            it.kotlinClassString(objClassDecls, classBodyKeys, fuseSiteInfoByHost[it.name])
+        } +
         "\n\n" +
         mainFunction
 
@@ -499,6 +518,7 @@ private fun ActionDecl.kotlinErrorString(
 private fun ProcClassDecl.kotlinClassString(
     objClassDecls: List<ObjClassDecl>,
     channelKeys: Map<LeafActionId, String>,
+    fuseSite: FuseSiteInfo? = null,
 ): String {
     val stateVarTypes = stateVars.associate { Pair(it.name, it.type) }
     // Nullable backing fields start as null; getters throw JulayException until set.
@@ -520,14 +540,34 @@ private fun ProcClassDecl.kotlinClassString(
         } +
         "\n)"
     val syncStepPlanStr = kotlinSyncStepPlanString(runtimeTransitions, stateVarTypes, name, channelKeys)
-    val transitStr = "override suspend fun transit(act: ConcreteAction) {" +
-        "\nreturn when (act.symAction.name) {".prependIndent() +
-        runtimeTransitions.joinToString("") {
-            "\n\"${it.action.name}\" -> {" + "\n${it.kotlinTransitString(stateVarTypes)}".prependIndent() + "\n}"
-        }.prependIndent().prependIndent() +
-        "\nelse -> throw RuntimeException(\"Action is outside my alphabet: \${act.symAction}\")".prependIndent().prependIndent() +
-        "\n}".prependIndent() +
-        "\n}"
+    // Fuse hosts may share action names / public channelKeys across inlined callees
+    // (e.g. two `updateTerm` slices). Dispatch on (channelKey, __julayFuse phase).
+    val useChannelKeyDispatch = isFuseHost()
+    val transitStr = if (useChannelKeyDispatch) {
+        "override suspend fun transit(act: ConcreteAction) {" +
+            "\nreturn when (act.symAction.channelKey to $FUSE_PHASE_VAR) {".prependIndent() +
+            runtimeTransitions.joinToString("") {
+                val key = it.resolvedChannelKey(name, channelKeys)
+                val phase = it.requiredFusePhaseLiteral().orEmpty()
+                "\n(\"${key.escapeKotlinStringLiteral()}\" to \"${phase.escapeKotlinStringLiteral()}\") -> {" +
+                    "\n${it.kotlinTransitString(stateVarTypes, fuseSite = fuseSite)}".prependIndent() +
+                    "\n}"
+            }.prependIndent().prependIndent() +
+            "\nelse -> throw RuntimeException(\"Action is outside my alphabet: \${act.symAction} phase=\$$FUSE_PHASE_VAR\")".prependIndent().prependIndent() +
+            "\n}".prependIndent() +
+            "\n}"
+    } else {
+        "override suspend fun transit(act: ConcreteAction) {" +
+            "\nreturn when (act.symAction.name) {".prependIndent() +
+            runtimeTransitions.joinToString("") {
+                "\n\"${it.action.name}\" -> {" +
+                    "\n${it.kotlinTransitString(stateVarTypes, fuseSite = fuseSite)}".prependIndent() +
+                    "\n}"
+            }.prependIndent().prependIndent() +
+            "\nelse -> throw RuntimeException(\"Action is outside my alphabet: \${act.symAction}\")".prependIndent().prependIndent() +
+            "\n}".prependIndent() +
+            "\n}"
+    }
     // Constructors apply field inits + ctor transit sequentially so `var y := x` after
     // `var x := …` matches the documented init order (not simultaneous transition assigns).
     val finishConstructionBody = if (constructors.isEmpty()) {
@@ -535,7 +575,7 @@ private fun ProcClassDecl.kotlinClassString(
     } else {
         constructors.joinToString("") { ctor ->
             "\n\"${ctor.action.name}\" -> {" +
-                "\n${ctor.kotlinTransitString(stateVarTypes, sequentialAssigns = true)}".prependIndent() +
+                "\n${ctor.kotlinTransitString(stateVarTypes, sequentialAssigns = true, fuseSite = fuseSite)}".prependIndent() +
                 "\n}"
         }
     }
@@ -656,13 +696,20 @@ private fun ActionDecl.kotlinActionString(
         channelKeys,
         isConstructor = false,
     )
-    val guardStr = if (guards.isEmpty()) {
+    val innerGuardStr = if (guards.isEmpty()) {
         "ctx.mkTrue()"
     } else if (guards.size == 1) {
         guards[0].toZ3GuardString(symbolTypes, argSymbols)
     } else {
         val body = guards.joinToString(", ") { it.toZ3GuardString(symbolTypes, argSymbols) }
         "ctx.mkAnd($body)"
+    }
+    // Fused-in slices: don't evaluate arg-dependent state while the slice is idle.
+    val phaseLit = requiredFusePhaseLiteral()
+    val guardStr = if (phaseLit != null) {
+        "if ($FUSE_PHASE_VAR == \"${phaseLit.escapeKotlinStringLiteral()}\") $innerGuardStr else ctx.mkFalse()"
+    } else {
+        innerGuardStr
     }
     val syncRoleStr = when (modifier) {
         TSAction.SyncRole.Default -> "TSAction.SyncRole.Default"
@@ -672,7 +719,11 @@ private fun ActionDecl.kotlinActionString(
     }
     val fastIr = guards.toCombinedBoolExprFastOrNull(symbolTypes, argSymbols)
     val fastParam = if (fastIr != null) {
-        ",\nfastGuard = $fastIr"
+        if (phaseLit != null) {
+            ",\nfastGuard = if ($FUSE_PHASE_VAR == \"${phaseLit.escapeKotlinStringLiteral()}\") $fastIr else null"
+        } else {
+            ",\nfastGuard = $fastIr"
+        }
     } else {
         ""
     }
@@ -726,13 +777,31 @@ private fun kotlinSyncStepPlanString(
             TSAction.SyncRole.Provider -> "TSAction.SyncRole.Provider"
             TSAction.SyncRole.Client -> "TSAction.SyncRole.Client"
         }
-        """
-        run {
+        val phaseLit = decl.requiredFusePhaseLiteral()
+        val guardEval = if (phaseLit != null) {
+            """
+            if ($FUSE_PHASE_VAR != "${phaseLit.escapeKotlinStringLiteral()}") {
+                // Idle fused slice: skip before reading uninitialized callee locals.
+            } else {
+                val __g = $ir
+                val __grounded = SyncResolveFast.groundForOffer(__g, __locals)
+                if (__grounded != null) {
+                    __offers.add(FastOffer($actionSigStr, __grounded, $syncRoleStr))
+                }
+            }
+            """.trimIndent()
+        } else {
+            """
             val __g = $ir
             val __grounded = SyncResolveFast.groundForOffer(__g, __locals)
             if (__grounded != null) {
                 __offers.add(FastOffer($actionSigStr, __grounded, $syncRoleStr))
             }
+            """.trimIndent()
+        }
+        """
+        run {
+${guardEval.prependIndent("            ")}
         }
         """.trimIndent()
     }
@@ -749,17 +818,49 @@ ${offerBlocks.prependIndent()}
 private fun ActionDecl.kotlinTransitString(
     stateVarTypes: Map<String, Type>,
     sequentialAssigns: Boolean = false,
+    fuseSite: FuseSiteInfo? = null,
 ): String {
     val symbolTypes = stateVarTypes + actionArgEnv(action.args)
     val argSymbols = actionArgSymbols(action.args)
-    // Error checks run before before/transit/after so they see pre-state variables
-    // and no side effects happen upon an error.
     val errorStr = kotlinErrorString(stateVarTypes)
     val (beforeArgSnapshots, beforeLines) = kotlinCallStmtsString(befores, stateVarTypes, "__beforeArg")
+    val calleeInits = fuseSite?.calleeInits.orEmpty()
+    val assignDests = fuseSite?.assignDests.orEmpty()
+
     if (returnExpr != null) {
+        val (afterArgSnapshots, afterLines) = kotlinCallStmtsString(afters, stateVarTypes, "__afterArg")
+        // Prefer fused dispatch (nested calls) over callee-return / invokeProcFun.
+        val phasePrefix = fuseOriginPclass.orEmpty()
+        val fusedDispatch = if (fuseSite != null) {
+            emitFusedReturnDispatchKotlin(
+                returnExpr, symbolTypes, argSymbols, calleeInits,
+                phasePrefix = phasePrefix,
+            )
+        } else {
+            null
+        }
+        if (fusedDispatch != null) {
+            return listOfNotNull(errorStr.takeIf { it.isNotEmpty() })
+                .plus(beforeArgSnapshots)
+                .plus(beforeLines)
+                .plus(afterArgSnapshots)
+                .plus(fusedDispatch)
+                .plus(afterLines)
+                .joinToString("\n")
+        }
+        // Fused callee return: deliver to host _procFunReturn or assign dest, clear phase.
+        if (fuseOriginPclass != null) {
+            val body = emitFusedCalleeReturnKotlin(returnExpr, symbolTypes, argSymbols, assignDests)
+            return listOfNotNull(errorStr.takeIf { it.isNotEmpty() })
+                .plus(beforeArgSnapshots)
+                .plus(beforeLines)
+                .plus(afterArgSnapshots)
+                .plus(body)
+                .plus(afterLines)
+                .joinToString("\n")
+        }
         val retType = returnExpr.getType()
         val retStr = returnExpr.toTransitString(symbolTypes, argSymbols)
-        val (afterArgSnapshots, afterLines) = kotlinCallStmtsString(afters, stateVarTypes, "__afterArg")
         return listOfNotNull(errorStr.takeIf { it.isNotEmpty() })
             .plus(beforeArgSnapshots)
             .plus(beforeLines)
@@ -791,11 +892,10 @@ private fun ActionDecl.kotlinTransitString(
     val transitSequentialLines = mutableListOf<String>()
     var assignIndex = 0
     var discardIndex = 0
+    var fusedAssignDispatch: String? = null
     for (update in transits) {
         when (update) {
             is TransitUpdate.Let -> {
-                // Discard bindings (`_`) may repeat; give each a unique Kotlin temp and never
-                // register them for later substitution (they cannot be referenced).
                 val localBind = if (update.name.isDiscardBinding()) {
                     "__discard_${discardIndex++}__transitLet"
                 } else {
@@ -819,6 +919,22 @@ private fun ActionDecl.kotlinTransitString(
                 }
             }
             is TransitUpdate.Assign -> {
+                val fused = if (fuseSite != null && !sequentialAssigns) {
+                    emitFusedAssignDispatchKotlin(
+                        update.key,
+                        substTransitLets(update.expr),
+                        transitSymbolTypes,
+                        transitArgSymbols,
+                        calleeInits,
+                    )
+                } else {
+                    null
+                }
+                if (fused != null) {
+                    // One fused call per transition: dispatch and skip value apply this step.
+                    fusedAssignDispatch = fused
+                    continue
+                }
                 val rootVar = transitRootVar(update.key)
                 val rootType = stateVarTypes.getValue(rootVar)
                 val fieldPath = if (update.key.contains('.')) update.key.substringAfter('.').split('.') else emptyList()
@@ -864,14 +980,23 @@ private fun ActionDecl.kotlinTransitString(
                 if (sequentialAssigns) {
                     transitSequentialLines += putLines
                 } else {
-                    // Index/value are pre-state; applying puts in order composes multiple updates
-                    // to the same map/list (TLA+-style EXCEPT with several fields).
                     transitEvalSnapshots += putLines.dropLast(1)
                     transitApplyLines += putLines.last()
                 }
                 assignIndex++
             }
         }
+    }
+    if (fusedAssignDispatch != null) {
+        val (afterArgSnapshots, afterLines) = kotlinCallStmtsString(afters, stateVarTypes, "__afterArg")
+        return listOfNotNull(errorStr.takeIf { it.isNotEmpty() })
+            .plus(beforeArgSnapshots)
+            .plus(beforeLines)
+            .plus(afterArgSnapshots)
+            .plus(transitEvalSnapshots + transitApplyLines)
+            .plus(fusedAssignDispatch)
+            .plus(afterLines)
+            .joinToString("\n")
     }
     // Snapshot all after args from the pre-transit state (same as historical effect args).
     // For sequential constructors, after still sees post-assign state (init is complete).
@@ -885,6 +1010,26 @@ private fun ActionDecl.kotlinTransitString(
         .joinToString("\n")
 }
 
+private fun ActionDecl.resolvedChannelKey(
+    pclassName: String,
+    channelKeys: Map<LeafActionId, String>,
+    occurrenceId: String = "",
+    isConstructor: Boolean = false,
+): String {
+    val lookupClass = fuseOriginPclass ?: pclassName
+    channelKeys[LeafActionId(lookupClass, occurrenceId, action.name, isConstructor)]?.let { return it }
+    // Fused-in offers live under the callee's leaf occurrence, not the host's.
+    if (fuseOriginPclass != null) {
+        channelKeys.entries.firstOrNull { (id, _) ->
+            id.pclassKey == lookupClass &&
+                id.actionName == action.name &&
+                id.isConstructor == isConstructor
+        }?.value?.let { return it }
+    }
+    channelKeys[LeafActionId(lookupClass, "", action.name, isConstructor)]?.let { return it }
+    return action.channelKey
+}
+
 private fun ActionDecl.kotlinStaticInfoString(
     pclassName: String = "",
     occurrenceId: String = "",
@@ -894,13 +1039,7 @@ private fun ActionDecl.kotlinStaticInfoString(
     val actionArgsStr = action.args.joinToString(", ") {
         "Variable(\"${it.name}\", ${it.type.toCodegenTypeVal()})"
     }
-    val resolvedKey = if (occurrenceId.isNotEmpty()) {
-        channelKeys[LeafActionId(pclassName, occurrenceId, action.name, isConstructor)]
-            ?: action.channelKey
-    } else {
-        channelKeys[LeafActionId(pclassName, "", action.name, isConstructor)]
-            ?: action.channelKey
-    }
+    val resolvedKey = resolvedChannelKey(pclassName, channelKeys, occurrenceId, isConstructor)
     val flags = buildList {
         if (action.isInternal || modifier == TSAction.SyncRole.Internal) {
             add("isInternal = true")

@@ -242,18 +242,51 @@ class SelectEdgeTest {
     @Test
     fun closeIdempotentDuringSuccessfulSyncRace() = runBlocking {
         withContext(Dispatchers.Default) {
-            repeat(50) {
+            repeat(200) {
                 val chan = SyncChannel<Int, Int>(2) { Optional.of(1) }
-                val a = launch { chan.sync() }
-                val b = launch { chan.sync() }
-                launch { chan.close() }
+                val a = async { chan.sync() }
+                val b = async { chan.sync() }
+                val closer = launch { chan.close() }
                 withTimeout(gateTimeout) {
-                    a.join(); b.join()
+                    a.await()
+                    b.await()
+                    closer.join()
                     chan.close()
                 }
                 assertTrue(chan.isClosed())
                 assertEquals(0, chan.participantCountForTests())
             }
+        }
+    }
+
+    /**
+     * Close must unblock a follower even if cancel races before [Participant.awaitValue] suspends
+     * (sticky cancel). Without this, close-during-success can hang forever.
+     */
+    @Test
+    fun closeUnblocksFollowerWaitingForLeaderValue() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val computeEntered = CompletableDeferred<Unit>()
+            val releaseCompute = CountDownLatch(1)
+            val chan = SyncChannel<Int, Int>(2) {
+                computeEntered.complete(Unit)
+                releaseCompute.await()
+                Optional.of(7)
+            }
+            val follower = async { chan.sync() }
+            awaitParticipantCount(chan, 1)
+            val leader = async { chan.sync() }
+            computeEntered.await()
+            // Close while leader is still in compute (neither is a follower yet), then again
+            // after release so we also cover post-commit races across iterations.
+            chan.close()
+            releaseCompute.countDown()
+            withTimeout(gateTimeout) {
+                follower.await()
+                leader.await()
+            }
+            assertTrue(chan.isClosed())
+            assertEquals(0, chan.participantCountForTests())
         }
     }
 

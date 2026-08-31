@@ -93,6 +93,21 @@ sequenceDiagram
   Call->>Caller: resume with result
 ```
 
+## Optimization: fusion
+
+Named JAR opt **`procfun-fuse`** (default **on**; disable with `--disable-opt=procfun-fuse` or bare `--disable-opt`).
+
+Nested procfun calls are normally `hostProc.invokeProcFun(...)`: spawn a child Proc, await return. Fusion is an equivalent rewrite that **inlines** the callee’s state and transitions into the caller’s generated `TransitionSystem`:
+
+1. **Blocking** — host state `__julayFuse` is `""` while the caller may offer; otherwise it holds the active callee path (e.g. `inIncrementRPC` or `mid/leaf`). Host-only offers are disabled while a callee slice is active (same idea as TLA `Host_blocking` / today’s await).
+2. **Disambiguation** — overlapping action names keep distinct composition `channelKey`s so caller vs callee offers do not collide on the static channel table.
+
+Observable behavior matches spawn-and-await. Top-level HTTP entry (`invokeProcFunBlocking("handleRpc")`) still spawns; only **nested** calls fuse. Sites the planner cannot fuse keep `invokeProcFun` for that site only.
+
+Fusing long-lived `proc` / `||` peers is out of scope (same planning machinery, later `proc-fuse`).
+
+Turn fusion off when debugging codegen or comparing opt-on vs opt-off stdout.
+
 ## Callable procfun references (`~>`)
 
 Register a procfun as a handler or callback by type `A ~> R` (or `(A, B) ~> R` for multiple arguments). At runtime the value is the procfun name as a `String`; guards compare with `handler = myHandler`.

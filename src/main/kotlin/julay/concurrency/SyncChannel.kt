@@ -54,6 +54,7 @@ class SyncChannel<C : Any, V : Any>(
     private val wakeWaiters = mutableListOf<CompletableDeferred<Unit>>()
     /** Completions deferred until after [withChannelLock] releases [mutex] (avoid lock re-entry). */
     private var wakeFlushBatch: MutableList<() -> Unit>? = null
+    @Volatile
     private var closed = false
 
     init {
@@ -371,8 +372,12 @@ class SyncChannel<C : Any, V : Any>(
             return
         }
         if (closed) {
+            // Abort the whole reserved group — leaving a peer registered after close hangs it.
+            for (p in group) {
+                p.cancelValue()
+            }
             releasePairingLocked(group)
-            removeParticipants(setOf(me))
+            removeParticipants(group.filter { it in participants }.toSet())
             out.setAbort()
             return
         }
@@ -524,9 +529,10 @@ class SyncChannel<C : Any, V : Any>(
                 closed = true
                 val groupsToClose = mutableListOf<SelectGroup<V>>()
                 participants.forEach {
-                    if (!it.followerValue.get()) {
-                        it.cancelValue()
-                    }
+                    // Cancel everyone still registered, including followers waiting on
+                    // awaitValue(): skipping followers races with finishAfterComputeLocked
+                    // (followerValue set, completeValue not yet) and leaves them hung.
+                    it.cancelValue()
                     it.selectGroup?.let { g -> groupsToClose.add(g) }
                     it.pairGate?.complete(Unit)
                     it.pairGate = null
@@ -776,38 +782,63 @@ class SyncChannel<C : Any, V : Any>(
         private var pendingValue: V? = null
         @Volatile
         private var valueCont: CancellableContinuation<V>? = null
+        /** Sticky: [cancelValue] may race before [awaitValue] suspends. */
+        @Volatile
+        private var valueCancelled = false
 
-        suspend fun awaitValue(): V {
-            pendingValue?.let {
-                pendingValue = null
-                return it
-            }
-            return suspendCancellableCoroutine { cont ->
+        suspend fun awaitValue(): V = suspendCancellableCoroutine { cont ->
+            val early: V? = synchronized(this) {
+                if (valueCancelled) {
+                    cont.cancel(CancellationException())
+                    return@suspendCancellableCoroutine
+                }
                 val pending = pendingValue
                 if (pending != null) {
                     pendingValue = null
-                    cont.resumeWith(Result.success(pending))
-                    return@suspendCancellableCoroutine
+                    pending
+                } else {
+                    valueCont = cont
+                    null
                 }
-                valueCont = cont
-                cont.invokeOnCancellation { valueCont = null }
+            }
+            if (early != null) {
+                cont.resumeWith(Result.success(early))
+                return@suspendCancellableCoroutine
+            }
+            cont.invokeOnCancellation {
+                synchronized(this) {
+                    if (valueCont === cont) {
+                        valueCont = null
+                    }
+                }
             }
         }
 
         fun completeValue(value: V) {
-            val cont = valueCont
-            if (cont != null) {
-                valueCont = null
-                cont.resumeWith(Result.success(value))
-            } else {
-                pendingValue = value
+            val cont = synchronized(this) {
+                if (valueCancelled) {
+                    return
+                }
+                val c = valueCont
+                if (c != null) {
+                    valueCont = null
+                    c
+                } else {
+                    pendingValue = value
+                    null
+                }
             }
+            cont?.resumeWith(Result.success(value))
         }
 
         fun cancelValue() {
-            pendingValue = null
-            val cont = valueCont
-            valueCont = null
+            val cont = synchronized(this) {
+                valueCancelled = true
+                pendingValue = null
+                val c = valueCont
+                valueCont = null
+                c
+            }
             cont?.cancel(CancellationException())
         }
 

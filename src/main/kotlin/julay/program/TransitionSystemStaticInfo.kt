@@ -40,15 +40,22 @@ data class TransitionSystemStaticInfo(
     /**
      * Resolve a TS-offered action (possibly with a default public channelKey) to the alphabet /
      * constructor entry for this StaticInfo occurrence.
+     *
+     * Prefer an exact [SymbolicAction.channelKey] match so fused-in slices that share an action
+     * name (e.g. multiple `go` / `respond`) do not collapse to the first alphabet entry.
      */
     fun resolveAction(act: SymbolicAction): SymbolicAction {
-        fun matches(candidate: SymbolicAction) =
+        fun sameShape(candidate: SymbolicAction) =
             candidate.name == act.name &&
                 candidate.args == act.args &&
                 candidate.isInternal == act.isInternal &&
                 candidate.isSession == act.isSession
-        return alphabet.firstOrNull { matches(it) }
-            ?: constructors.keys.firstOrNull { matches(it) }
+        fun exact(candidate: SymbolicAction) =
+            sameShape(candidate) && candidate.channelKey == act.channelKey
+        return alphabet.firstOrNull { exact(it) }
+            ?: constructors.keys.firstOrNull { exact(it) }
+            ?: alphabet.firstOrNull { sameShape(it) }
+            ?: constructors.keys.firstOrNull { sameShape(it) }
             ?: act
     }
 }

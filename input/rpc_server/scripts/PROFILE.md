@@ -99,6 +99,26 @@ Collapsed stacks show `runOneStepFast → syncFast → sync` on client/internal 
 
 **Next:** Phase 3 — cut double procfun spawn (`handleRpc` → `in*RPC`); optionally shrink Protocol’s always-on multi-offer Select.
 
+## Phase 3 — procfun-fuse (2026-08-30)
+
+**Change:** compile-time opt `procfun-fuse` (default on; `--disable-opt=procfun-fuse` / bare `--disable-opt` off). Nested procfun calls are inlined into the caller `TransitionSystem` with `__julayFuse` blocking state and composition `channelKey` disambiguation. Top-level HTTP still `invokeProcFunBlocking("handleRpc")`.
+
+**`bench_toys.sh --targets rpc,rpc-native --ops 200 --clients 4`:** Julay **~2160 RPS**, native ~4890 (~2.3×). Short-bench variance dominates; fusion’s win is alloc shape, not this toy RPS.
+
+**Allocation (`profile_rpc.sh --variant julay --mode alloc --duration 12 --clients 4`)**
+
+| Area | After Phase 2 | After Phase 3 (fuse) |
+|------|--------------:|---------------------:|
+| JDK HttpServer / NIO | ~41% | ~36% |
+| SyncChannel / Select | ~24% | ~19% |
+| HTTP / JulHttpServer / bridge | ~21% | ~18% |
+| SyncResolveFast | ~2–4% | ~13% |
+| invokeProcFun / Proc | ~11% | ~13% |
+
+Collapsed stacks: **`handleRpc.transit → invokeProcFun` for nested `in*RPC` is gone**. Remaining `invokeProcFun` / `Proc` samples are the **top-level** HTTP spawn (`invokeProcFunBlocking` → `handleRpc`). SyncResolveFast share rose because the fused `handleRpc` offers more actions per step (router + all `in*RPC` slices) under one FastOnly plan.
+
+**Spot-check:** rebuild with `--disable-opt=procfun-fuse` still correct (nested spawn path).
+
 ## Baseline — before bridge fix (2026-08-29)
 
 ### Busy-only CPU (`-e cpu`)

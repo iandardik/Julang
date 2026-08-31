@@ -424,6 +424,13 @@ class Proc(
                 k.name == resolvedSym.name &&
                     k.isSession == resolvedSym.isSession &&
                     k.isInternal == resolvedSym.isInternal &&
+                    k.args == resolvedSym.args &&
+                    k.channelKey == resolvedSym.channelKey
+            }?.value
+            ?: staticChannelTable.entries.firstOrNull { (k, _) ->
+                k.name == resolvedSym.name &&
+                    k.isSession == resolvedSym.isSession &&
+                    k.isInternal == resolvedSym.isInternal &&
                     k.args == resolvedSym.args
             }?.value
         return entry?.channel

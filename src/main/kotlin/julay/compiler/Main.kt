@@ -13,6 +13,7 @@ import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.types.path
 import com.github.ajalt.clikt.parameters.options.optionalValue
 import julay.compiler.analysis.AnalyzeOptions
+import julay.compiler.pass.CompilerOptConfig
 import julay.compiler.pass.TlaOptConfig
 import julay.program.sync.SyncResolveConfig
 
@@ -71,8 +72,8 @@ class Julayc : CliktCommand(name = "julayc") {
     private val disableOpt by option(
         "--disable-opt",
         metavar = "OPT,...",
-        help = "Disable sync optimizations. Use bare --disable-opt to disable all " +
-            "(eq-unify, arg-ownership, directed-eval), or --disable-opt=ID,ID for a subset. " +
+        help = "Disable named optimizations. Use bare --disable-opt to disable all " +
+            "(eq-unify, arg-ownership, directed-eval, procfun-fuse), or --disable-opt=ID,ID for a subset. " +
             "The '=' form is required when passing ids so the input path is not consumed. " +
             "See docs/language/compiler-optimizations.md",
     ).optionalValue("ALL", acceptsUnattachedValue = false)
@@ -101,8 +102,8 @@ class Julayc : CliktCommand(name = "julayc") {
             return
         }
         val file = input ?: throw UsageError("Missing argument \"<input>\"")
-        val syncResolveConfig = try {
-            SyncResolveConfig.fromDisableOptFlag(disableOpt)
+        val compilerOptConfig = try {
+            CompilerOptConfig.fromDisableOptFlag(disableOpt)
         } catch (e: IllegalArgumentException) {
             throw UsageError(e.message ?: "Invalid --disable-opt")
         }
@@ -118,7 +119,7 @@ class Julayc : CliktCommand(name = "julayc") {
             allowUnindexedSpec = allowUnindexedSpec,
             compileNames = compileNames,
             compileTlaNames = compileTlaNames,
-            syncResolveConfig = syncResolveConfig,
+            compilerOptConfig = compilerOptConfig,
             tlaOptConfig = tlaOptConfig,
             verbose = verbose,
         )

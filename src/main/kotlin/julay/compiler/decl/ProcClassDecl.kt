@@ -26,6 +26,11 @@ data class ActionDecl(
     val errors: List<ErrorArmNode> = emptyList(),
     /** When non-null, this transition is a procfun return edge (mutually exclusive with [transits]). */
     val returnExpr: ExprNode? = null,
+    /**
+     * When set, this transition was inlined from a fused callee procfun named [fuseOriginPclass].
+     * Used for composition channelKey lookup and transit dispatch disambiguation.
+     */
+    val fuseOriginPclass: String? = null,
 ) {
     val isSession: Boolean get() = action.isSession
     val isReturn: Boolean get() = returnExpr != null

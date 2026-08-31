@@ -2,6 +2,7 @@ package julay.compiler
 
 import julay.compiler.ast.RootNode
 import julay.compiler.decl.ProcDecl
+import julay.compiler.pass.CompilerOptConfig
 import julay.compiler.pass.codegenPass
 import julay.program.sync.SyncResolveConfig
 import java.io.File
@@ -53,6 +54,7 @@ fun compileProgram(
     keepBuild: Boolean = false,
     compilerJar: Path = resolveCompilerJar(),
     syncResolveConfig: SyncResolveConfig = SyncResolveConfig.ALL_ON,
+    compilerOptConfig: CompilerOptConfig = CompilerOptConfig(syncResolve = syncResolveConfig),
 ): SyncPathStats {
     val buildDir = "${program.name}-jul-build"
     if (!File(buildDir).exists() && !File(buildDir).mkdir()) {
@@ -65,7 +67,14 @@ fun compileProgram(
     File(buildDir).listFiles()?.filter { it.isFile && it.extension == "kt" }?.forEach { it.delete() }
     deleteDirectory(File("$buildDir/build"))
 
-    val codegen = codegenPass(ast, program, procDecls, librariesInUse, syncResolveConfig)
+    val codegen = codegenPass(
+        ast,
+        program,
+        procDecls,
+        librariesInUse,
+        syncResolveConfig = compilerOptConfig.syncResolve,
+        compilerOptConfig = compilerOptConfig,
+    )
     val fileName = "${codegen.mainClassName}.kt"
     File("$buildDir/$fileName").writeText(codegen.sourceText)
 

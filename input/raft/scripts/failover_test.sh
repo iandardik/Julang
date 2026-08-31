@@ -112,11 +112,13 @@ fail() {
 # Probe one URL: echo leader URL if this contact proves a live leader (200),
 # or if a 303 names a reachable leader that itself accepts an append.
 # Prints nothing and returns 1 otherwise.
+# Optional 2nd arg: curl max-time override (seconds).
 probe_for_leader() {
   local url="$1"
+  local curl_m="${2:-$CURL_TIMEOUT_S}"
   local body code leader leader_body leader_code
   body="$(mktemp)"
-  code="$(curl -sS -m "$CURL_TIMEOUT_S" -o "$body" -w '%{http_code}' \
+  code="$(curl -sS -m "$curl_m" -o "$body" -w '%{http_code}' \
     -X POST "${url}/client/append" -d "__failover_probe__" 2>/dev/null || echo "000")"
   if [[ "$code" == "200" ]]; then
     rm -f "$body"
@@ -128,7 +130,7 @@ probe_for_leader() {
     rm -f "$body"
     if [[ -n "$leader" ]]; then
       leader_body="$(mktemp)"
-      leader_code="$(curl -sS -m "$CURL_TIMEOUT_S" -o "$leader_body" -w '%{http_code}' \
+      leader_code="$(curl -sS -m "$curl_m" -o "$leader_body" -w '%{http_code}' \
         -X POST "${leader}/client/append" -d "__failover_probe__" 2>/dev/null || echo "000")"
       rm -f "$leader_body"
       if [[ "$leader_code" == "200" ]]; then
@@ -143,10 +145,12 @@ probe_for_leader() {
 }
 
 # Returns a live leader URL on stdout, or empty if none yet.
+# Optional 1st arg: curl max-time for this round.
 discover_leader() {
+  local curl_m="${1:-$CURL_TIMEOUT_S}"
   local url
   for url in "${URLS[@]}"; do
-    if probe_for_leader "$url"; then
+    if probe_for_leader "$url" "$curl_m"; then
       return 0
     fi
   done
@@ -157,12 +161,33 @@ wait_for_leader() {
   local label="$1"
   local max_s="$2"
   local leader=""
-  echo "=== wait for leader ($label, ≤${max_s}s) ===" >&2
-  for ((t = 0; t < max_s; t++)); do
-    if leader="$(discover_leader)"; then
-      echo "leader=$leader after ${t}s" >&2
+  local start now elapsed remain curl_m
+  start="$(date +%s)"
+  echo "=== wait for leader ($label, ≤${max_s}s wall) ===" >&2
+  while true; do
+    now="$(date +%s)"
+    elapsed=$((now - start))
+    remain=$((max_s - elapsed))
+    if [[ "$remain" -le 0 ]]; then
+      break
+    fi
+    # Keep each probe short so a full URL sweep cannot blow past the deadline.
+    curl_m="$CURL_TIMEOUT_S"
+    if [[ "$curl_m" -gt "$remain" ]]; then
+      curl_m="$remain"
+    fi
+    if [[ "$curl_m" -lt 1 ]]; then
+      curl_m=1
+    fi
+    if leader="$(discover_leader "$curl_m")"; then
+      echo "leader=$leader after ${elapsed}s" >&2
       echo "$leader"
       return 0
+    fi
+    now="$(date +%s)"
+    elapsed=$((now - start))
+    if [[ "$elapsed" -ge "$max_s" ]]; then
+      break
     fi
     sleep 1
   done
