@@ -12,23 +12,30 @@ class SelectGroup<V : Any>(
     onWin: (V) -> Unit = {},
 ) {
     private var onWin: (V) -> Unit = onWin
+    @Volatile
     private var completed = CompletableDeferred<Completion>()
     private val closedNoted = AtomicBoolean(false)
     /** Signaled when a channel may have a new peer for parked cases (re-promote). */
     @Volatile
-    private var nudge = CompletableDeferred<Unit>()
+    private var nudgeSignal = CompletableDeferred<Unit>()
 
     sealed class Completion {
         data class Won<V : Any>(val value: V) : Completion()
         object NoWinner : Completion()
     }
 
-    fun tryCompleteWinner(value: V) {
-        select.confirmRaceWin()
-        if (completed.complete(Completion.Won(value))) {
-            onWin.invoke(value)
+    fun tryCompleteWinner(value: V, channelHash: Int? = null) {
+        if (channelHash != null) {
+            select.forceWinnerHash(channelHash)
         }
-        nudge()
+        select.confirmRaceWin()
+        try {
+            if (completed.complete(Completion.Won(value))) {
+                onWin.invoke(value)
+            }
+        } finally {
+            nudge()
+        }
     }
 
     fun signalChannelClosed() {
@@ -49,7 +56,7 @@ class SelectGroup<V : Any>(
     }
 
     fun nudge() {
-        nudge.complete(Unit)
+        nudgeSignal.complete(Unit)
     }
 
     suspend fun awaitCompletion(): Completion = completed.await()
@@ -59,17 +66,29 @@ class SelectGroup<V : Any>(
      *
      * Must not reset a completed nudge *before* awaiting — that drops wakeups that arrived
      * between "tryLead found nothing" and park.
+     *
+     * @param timeoutMs if non-null, return after timeout even if neither fired (caller rematches).
      */
-    suspend fun awaitCompletionOrNudge(): Boolean {
+    suspend fun awaitCompletionOrNudge(timeoutMs: Long? = null): Boolean {
         if (completed.isCompleted) return true
-        val n = synchronized(this) { nudge }
-        kotlinx.coroutines.selects.select {
-            completed.onAwait { }
-            n.onAwait { }
+        val (c, n) = synchronized(this) { completed to nudgeSignal }
+        if (c.isCompleted) return true
+        if (timeoutMs == null) {
+            kotlinx.coroutines.selects.select {
+                c.onAwait { }
+                n.onAwait { }
+            }
+        } else {
+            kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+                kotlinx.coroutines.selects.select {
+                    c.onAwait { }
+                    n.onAwait { }
+                }
+            }
         }
         synchronized(this) {
-            if (nudge === n && nudge.isCompleted) {
-                nudge = CompletableDeferred()
+            if (nudgeSignal === n && nudgeSignal.isCompleted) {
+                nudgeSignal = CompletableDeferred()
             }
         }
         return completed.isCompleted
@@ -83,7 +102,7 @@ class SelectGroup<V : Any>(
         this.onWin = onWin
         closedNoted.set(false)
         completed = CompletableDeferred()
-        nudge = CompletableDeferred()
+        nudgeSignal = CompletableDeferred()
     }
 }
 
@@ -122,6 +141,11 @@ class SelectRace {
     fun hasWinner(): Boolean = state.get() != null
 
     fun winnerHash(): Int? = state.get()
+
+    /** Set hash even if a peer cleared provisional state before confirm flush. */
+    fun forceHash(channelHash: Int) {
+        state.set(channelHash)
+    }
 
     fun reset() {
         state.set(null)

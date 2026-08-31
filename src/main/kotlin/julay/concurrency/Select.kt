@@ -63,6 +63,19 @@ class Select(private vararg val cases: Case) {
         }
     }
 
+    /** Drop any unconfirmed race occupancy so a stranded Select can rematch. */
+    fun clearProvisionalRace() {
+        if (race.isConfirmed()) return
+        race.reset()
+        winner = Optional.empty()
+    }
+
+    /** Ensure [winner] / race hash match the committing channel before onWin callbacks. */
+    fun forceWinnerHash(channelHash: Int) {
+        race.forceHash(channelHash)
+        winner = Optional.of(channelHash)
+    }
+
     fun confirmRaceWin() {
         race.confirm()
         confirmedSignal.complete(Unit)

@@ -404,9 +404,22 @@ class SyncChannel<C : Any, V : Any>(
             releasePairingLocked(group)
             for (p in stale) {
                 p.cancelValue()
+                // Drop the other-channel provisional win that caused the conflict so that
+                // Select can rematch; otherwise coordinators spin on rollback/yield alone.
+                val sel = p.select.orElse(null)
+                if (sel != null && !sel.isRaceConfirmed()) {
+                    sel.winnerHash()?.let { sel.rollbackRaceWin(it) }
+                    if (sel.hasRaceWinner() && !sel.isRaceConfirmed()) {
+                        sel.clearProvisionalRace()
+                    }
+                }
             }
+            val staleGroups = stale.mapNotNull { it.selectGroup }
             removeParticipants(stale)
             signalWaitersLocked()
+            if (staleGroups.isNotEmpty()) {
+                enqueueFlush { staleGroups.forEach { it.nudge() } }
+            }
             if (me in stale) out.setAbort() else out.setRetry()
             return
         }
@@ -425,10 +438,15 @@ class SyncChannel<C : Any, V : Any>(
         // Defer SelectGroup wake until after channel unlock — completing under the lock
         // deadlocks if the coordinator resumes and unregisterSelectCase re-enters the mutex.
         val value = syncValue.get()
+        val winHash = hashCode()
         val groupsToComplete = group.mapNotNull { it.selectGroup }
         enqueueFlush {
             for (g in groupsToComplete) {
-                g.tryCompleteWinner(value)
+                try {
+                    g.tryCompleteWinner(value, winHash)
+                } catch (_: Throwable) {
+                    g.nudge()
+                }
             }
         }
     }
@@ -493,6 +511,8 @@ class SyncChannel<C : Any, V : Any>(
 
     /**
      * Select commitment via ordered lock-free race (CAS EMPTY→channel hash, then confirm).
+     * Confirm under the channel lock so peer coordinators cannot clearProvisionalRace the
+     * occupancy between CAS and the tryCompleteWinner flush (that dropped callbacks).
      * On conflict: rollback provisional winners; mark [Participant.selectIsWon] only for Selects
      * that already hold a *different* channel (won elsewhere) so finish can scrub them without
      * aborting plain sync peers or Selects that merely lost a dual-CAS after rollback.
@@ -605,13 +625,13 @@ class SyncChannel<C : Any, V : Any>(
             val (constraints, cleanup) = snapshotForCompute?.invoke(raw) ?: (raw to {})
             return SelectOfferResult.NeedCompute(me, setOf(me), constraints, cleanup)
         }
-        if (parkOnly) {
-            return SelectOfferResult.Parked(SelectCaseHandle(this, me))
-        }
         val myHash = hashCode()
         if (me.select.isPresent && !me.select.get().canCommit(myHash)) {
             removeParticipants(setOf(me))
-            return SelectOfferResult.Closed() // treat as done-elsewhere; coordinator checks race
+            return SelectOfferResult.Rejected()
+        }
+        if (parkOnly) {
+            return SelectOfferResult.Parked(SelectCaseHandle(this, me))
         }
         for (peer in participants) {
             if (peer === me) continue
@@ -758,6 +778,8 @@ class SyncChannel<C : Any, V : Any>(
 
     internal sealed class SelectOfferResult<V : Any, C : Any> {
         class Closed<V : Any, C : Any> : SelectOfferResult<V, C>()
+        /** Select cannot commit on this channel (provisional/confirmed win elsewhere). */
+        class Rejected<V : Any, C : Any> : SelectOfferResult<V, C>()
         class Parked<V : Any, C : Any>(val handle: SelectCaseHandle<V, C>) : SelectOfferResult<V, C>()
         class NeedCompute<V : Any, C : Any>(
             val me: Participant<V, C>,

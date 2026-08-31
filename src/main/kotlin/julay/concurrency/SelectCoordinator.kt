@@ -40,7 +40,8 @@ object SelectCoordinator {
         }
 
         val activeGroup = group ?: SelectGroup(select) { value ->
-            val hash = select.winner.get()
+            val hash = select.winnerHash()
+                ?: error("Select winner missing after commit")
             caseOffers.first { it.channel.hashCode() == hash }.callback(value)
         }
 
@@ -59,7 +60,8 @@ object SelectCoordinator {
                 pruneDeadHandlesInPlace(handles)
                 // Peer reserved one of our cases — wait for commit or release; do not lead elsewhere.
                 if (handles.any { it.participant.pairing || it.participant.followerValue.get() }) {
-                    activeGroup.awaitCompletionOrNudge()
+                    // Timed: stuck pairing with no nudge must not deadlock the Select.
+                    activeGroup.awaitCompletionOrNudge(timeoutMs = 50)
                     continue
                 }
 
@@ -74,6 +76,7 @@ object SelectCoordinator {
                         // After rollbackRaceWin, hasRaceWinner clears and repark can re-offer.
                         handle.channel.unregisterSelectCase(handle)
                         handles.removeAll { it.participant === handle.participant }
+                        activeGroup.nudge()
                         continue
                     }
                     val lead = handle.channel.tryLeadParked(handle) ?: continue
@@ -89,21 +92,49 @@ object SelectCoordinator {
 
                 pruneDeadHandlesInPlace(handles)
                 if (handles.isEmpty()) {
-                    kotlinx.coroutines.yield()
+                    // Stranded with a provisional win and no parks — clear so rematching works.
+                    if (select.hasRaceWinner() && !select.isRaceConfirmed()) {
+                        select.winnerHash()?.let { select.rollbackRaceWin(it) }
+                        if (select.hasRaceWinner() && !select.isRaceConfirmed()) {
+                            select.clearProvisionalRace()
+                        }
+                    }
+                    kotlinx.coroutines.delay(1)
+                    continue
+                }
+                if (!computed && select.hasRaceWinner() && !select.isRaceConfirmed()) {
+                    // Parked only on the winning channel (or none) while peers wait elsewhere.
+                    select.winnerHash()?.let { select.rollbackRaceWin(it) }
+                    if (select.hasRaceWinner() && !select.isRaceConfirmed()) {
+                        select.clearProvisionalRace()
+                    }
+                    // Avoid a tight yield spin when rematch still cannot form a pair.
+                    kotlinx.coroutines.delay(1)
+                    continue
+                }
+                if (select.isRaceConfirmed() && !activeGroup.isDone()) {
+                    // Commit confirmed; wait briefly for tryCompleteWinner flush.
+                    activeGroup.awaitCompletionOrNudge(timeoutMs = 50)
                     continue
                 }
                 if (computed) {
                     // Back off after race-fail RETRY / empty compute so peers can re-lead.
                     kotlinx.coroutines.yield()
                     if (activeGroup.isDone()) break
+                    // Timed: a RETRY with no peer left on this channel must not await forever.
+                    activeGroup.awaitCompletionOrNudge(timeoutMs = 5)
+                } else {
+                    // No lead possible (e.g. alone on each channel). Peer arrival on *this*
+                    // channel nudges; a peer parked only on another channel does not. Timed
+                    // wait recovers so reparkMissing can rematch across channels.
+                    activeGroup.awaitCompletionOrNudge(timeoutMs = 5)
                 }
-                activeGroup.awaitCompletionOrNudge()
             }
         } finally {
             for (handle in handles.sortedBy { it.channel.channelId }) {
                 handle.channel.unregisterSelectCase(handle)
             }
-            if (!activeGroup.isDone() && !select.isRaceConfirmed()) {
+            if (!activeGroup.isDone()) {
                 activeGroup.signalNoWinner()
             }
         }
@@ -195,6 +226,9 @@ object SelectCoordinator {
         ) {
             is SyncChannel.SelectOfferResult.Closed -> {
                 group.signalChannelClosed()
+            }
+            is SyncChannel.SelectOfferResult.Rejected -> {
+                group.nudge()
             }
             is SyncChannel.SelectOfferResult.Parked -> {
                 handles.add(offer.handle)
