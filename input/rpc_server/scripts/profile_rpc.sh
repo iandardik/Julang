@@ -262,99 +262,11 @@ wait "$BENCH_PID" 2>/dev/null || true
 BENCH_PID=""
 
 SUMMARY_OUT="$OUT_DIR/${LABEL}-${MODE}-buckets.txt"
+FINE_OUT="$OUT_DIR/${LABEL}-${MODE}-buckets-fine.txt"
+BUCKET_PY="$ROOT/input/rpc_server/scripts/bucket_collapsed.py"
 if [[ -f "$COLLAPSED_OUT" ]]; then
-  python3 - "$COLLAPSED_OUT" "$SUMMARY_OUT" <<'PY'
-import sys
-from collections import defaultdict
-
-path, out = sys.argv[1], sys.argv[2]
-totals = defaultdict(int)
-grand = 0
-
-def bucket(stack: str) -> str:
-    # Most-specific first (exclusive bucket per stack)
-    if (
-        "com/microsoft/z3" in stack
-        or "com.microsoft.z3" in stack
-        or "withEphemeralContext" in stack
-        or "SyncResolveZ3" in stack
-    ):
-        return "Z3 / Context / SyncResolveZ3"
-    if "SyncResolveFast" in stack:
-        return "SyncResolveFast"
-    if (
-        "SyncChannel" in stack
-        or "julay/concurrency/Select" in stack
-        or "julay.concurrency.Select" in stack
-    ):
-        return "SyncChannel / Select"
-    if (
-        "invokeProcFun" in stack
-        or "julay/program/Proc" in stack
-        or "julay.program.Proc" in stack
-        or "runOneStep" in stack
-    ):
-        return "invokeProcFun / Proc"
-    if "JulHttpServer" in stack or "julay/program/library/Http" in stack:
-        return "HTTP / JulHttpServer / bridge"
-    if (
-        "sun/net/httpserver" in stack
-        or "sun.net.httpserver" in stack
-        or "SocketDispatcher" in stack
-    ):
-        return "JDK HttpServer / NIO"
-    if "RpcServerNative" in stack:
-        return "native Protocol / handler"
-    if (
-        "kotlinx/coroutines" in stack
-        or "LockSupport.park" in stack
-        or "__psynch_cvwait" in stack
-        or "__psynch_cvsignal" in stack
-    ):
-        return "thread park / wait"
-    # JVM helper / idle threads (not application work)
-    if (
-        "semaphore_wait_trap" in stack
-        or "AttachListener" in stack
-        or "attach_listener" in stack
-        or "signal_thread_entry" in stack
-        or ("__ulock_wait" in stack and "julay" not in stack and "httpserver" not in stack)
-    ):
-        return "JVM idle / helper threads"
-    if "GC" in stack or "[gc_" in stack or "PhaseChaitin" in stack or "PhaseIdealLoop" in stack:
-        return "GC / JIT"
-    return "Other"
-
-with open(path, encoding="utf-8", errors="replace") as f:
-    for line in f:
-        line = line.strip()
-        if not line:
-            continue
-        sp = line.rsplit(" ", 1)
-        if len(sp) != 2 or not sp[1].isdigit():
-            continue
-        stack, n = sp[0], int(sp[1])
-        grand += n
-        totals[bucket(stack)] += n
-
-rows = sorted(totals.items(), key=lambda kv: -kv[1])
-idle = totals.get("JVM idle / helper threads", 0)
-app_grand = grand - idle
-with open(out, "w", encoding="utf-8") as o:
-    o.write(f"total_samples={grand}\n")
-    o.write(f"app_samples={app_grand}  (excludes JVM idle / helper threads)\n")
-    o.write("--- all samples ---\n")
-    for name, n in rows:
-        pct = (100.0 * n / grand) if grand else 0.0
-        o.write(f"{pct:6.2f}%  {n:8d}  {name}\n")
-    o.write("--- among non-idle samples ---\n")
-    for name, n in rows:
-        if name == "JVM idle / helper threads":
-            continue
-        pct = (100.0 * n / app_grand) if app_grand else 0.0
-        o.write(f"{pct:6.2f}%  {n:8d}  {name}\n")
-print(open(out, encoding="utf-8").read())
-PY
+  python3 "$BUCKET_PY" "$COLLAPSED_OUT" "$SUMMARY_OUT"
+  python3 "$BUCKET_PY" "$COLLAPSED_OUT" "$FINE_OUT" --fine --keywords
 fi
 
 echo
@@ -362,5 +274,6 @@ echo "artifacts:"
 echo "  html:       $HTML_OUT"
 echo "  collapsed:  $COLLAPSED_OUT"
 echo "  buckets:    $SUMMARY_OUT"
+echo "  fine:       $FINE_OUT"
 echo "  bench log:  $OUT_DIR/${LABEL}-${MODE}-bench.txt"
 echo "done."

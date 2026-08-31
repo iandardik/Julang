@@ -11,6 +11,12 @@ How to capture flamegraphs and what we learned from profiling (macOS arm64, JDK 
 ./input/rpc_server/scripts/profile_rpc.sh --variant julay --mode alloc --duration 12 --clients 4
 ./input/rpc_server/scripts/profile_rpc.sh --variant native --mode cpu --duration 12 --clients 4
 ./input/rpc_server/scripts/profile_rpc.sh --variant native --mode alloc --duration 12 --clients 4
+
+# No-HTTP SyncChannel / Select deep dive (fine buckets + keywords):
+./input/rpc_server/scripts/profile_rendezvous.sh --mode syncfast --event alloc --duration 12
+./input/rpc_server/scripts/profile_rendezvous.sh --mode select3 --event alloc --duration 12
+# Re-bucket any .collapsed:
+python3 input/rpc_server/scripts/bucket_collapsed.py path.collapsed out.txt --fine --keywords
 ```
 
 Artifacts land in [`profile-out/`](profile-out/) (gitignored):
@@ -20,7 +26,9 @@ Artifacts land in [`profile-out/`](profile-out/) (gitignored):
 | `*-cpu.html` / `.collapsed` | On-CPU samples + flamegraph |
 | `*-wall.html` / `.collapsed` | Wall-clock (includes blocked time) |
 | `*-alloc.html` / `.collapsed` | Allocation samples |
-| `*-buckets.txt` | Auto-bucketed share table |
+| `*-buckets.txt` | Coarse auto-bucketed share table |
+| `*-buckets-fine.txt` | SyncChannel/Select sub-stage split + keyword hits |
+| `rendezvous-*` | No-HTTP microbench profiles (`syncfast` / `select3`) |
 
 Open the `.html` files in a browser. Width ≈ share of samples.
 
@@ -227,17 +235,77 @@ Julay spends a large fraction of **on-CPU busy** time in SyncChannel + JulHttpSe
 
 Alloc makes the Julay tax even clearer: per-request **procfun invoke + SyncChannel** allocate heavily vs native’s thin handler.
 
+## Rendezvous deep dive (2026-08-31)
+
+Goal: split the opaque **SyncChannel / Select** alloc bucket into sub-stages so we can see **multiple** contributing costs (not chase a single #1).
+
+Harness: [`bucket_collapsed.py`](bucket_collapsed.py) (`--fine --keywords`), [`profile_rendezvous.sh`](profile_rendezvous.sh) (`syncfast` / `select3`), and `profile_rpc.sh` (now writes `*-buckets-fine.txt`).
+
+### rpc_server alloc — among SyncChannel/Select (~21% of all samples)
+
+Fine named share **~95%** (almost no “other”).
+
+| Sub-stage | Share of SyncChannel/Select |
+|-----------|----------------------------:|
+| Select setup (`runOffers` / `SelectCoordinator` / `SelectGroup`) | **~29%** |
+| syncFast path | **~18%** |
+| Compute / payload (`runSelectCompute`, `SyncPayload`, …) | **~15%** |
+| Select park / offer | **~13%** |
+| Select lead / wake | **~13%** |
+| Match under lock (`pickCandidateLocked`, …) | **~7%** |
+| Participant / wait + other | ~5% |
+
+Keyword hits (all samples): `SelectCoordinator` ~12%, `syncFast` ~10%, `runOffers` ~9%, `SyncPayload` ~4%, `parkPass` ~3%, `pickCandidateLocked` ~1.5%.
+
+**Read:** under real Protocol Select + handler syncFast, cost is **spread**: residual Select shell (~29%), handler syncFast (~18%), payload/compute (~15%), and park+lead together (~26%).
+
+### No-HTTP microbench alloc (rendezvous dominates samples)
+
+**`syncfast`** (pairwise size-2): SyncChannel ~98% of samples.
+
+| Sub-stage | Share of SyncChannel/Select |
+|-----------|----------------------------:|
+| syncFast path | **~58%** |
+| Match under lock | **~20%** |
+| Compute / payload | **~16%** |
+| Participant / wait | ~3% |
+
+**`select3`** (3-case `runOffers` vs one sync peer):
+
+| Sub-stage | Share of SyncChannel/Select |
+|-----------|----------------------------:|
+| Select setup | **~29%** |
+| Select park / offer | **~24%** |
+| Select lead / wake | **~20%** |
+| SyncChannel other | ~17% |
+| Compute / payload | ~5% |
+| Match under lock | ~4% |
+
+### CPU note
+
+Raw rpc **cpu** is still mostly `thread park / wait` + JDK NIO. Among the small SyncChannel slice, the same multi-factor shape appears (setup / syncFast / compute). Prefer **alloc** + microbench cpu (busy SyncChannel share higher) for rendezvous work.
+
+### Actionable optimization targets (plural)
+
+No single bucket is “the” problem. Concrete code levers suggested by the breakdown:
+
+1. **Select setup alloc** (~29% of SC on rpc + select3) — `SelectGroup` / `CompletableDeferred` nudge machinery, scramble/handle lists still allocated per Select even after Phase 6 offer reuse. Shrink or recycle Select shell objects.
+2. **syncFast + match-under-lock** (~58%+20% on syncfast microbench; ~18%+7% on rpc SC) — `Participant` construction, `pickCandidateLocked` peer scan, Optional/constraint wrappers on the single-offer path. This is the handler half of every RPC.
+3. **Compute / payload** (~15–16%) — `SyncPayload` / extract path after SAT; worth auditing for per-rendezvous object churn once (1)/(2) move.
+4. **Select park + lead/wake** (~26% rpc SC, ~44% select3) — coordinator parkPass / tryLeadParked / awaitCompletionOrNudge loop for Protocol’s always-on 3-offer wait. Complementary to (1); same Select lifecycle.
+
 ## Interpretation vs RPS gap
 
 Native is faster because each request is “parse → mutex → respond” on the HTTP thread. Julay still pays:
 
 1. `Program.invokeProcFun` (spawn a Proc per request, often **two** — `handleRpc` + `in*RPC`) — **Phase 3**
-2. SyncChannel / Select — improved in Phase 2; residual dominated by Protocol’s 3-case Select
+2. SyncChannel / Select — improved in Phase 2; residual is multi-factor rendezvous (see deep dive above), not only Select setup
 3. SyncResolveFast (small once opts are on)
 
 ## Next optimization candidate
 
-**Phase 7 — deeper SyncChannel / Protocol shape.** Phase 6 cut Select *setup* churn; bucket shares barely moved because rendezvous itself (participants, `syncFast`, Protocol’s 3-channel wait) still dominates. Next levers (still no `.jul` preferred): cheaper size-2 `syncFast` participant path; optional codegen/channel multiplex only if profiles prove setup is no longer the issue.
+**Phase 7 — attack several rendezvous factors**, starting with whichever is easiest to land safely: Select shell/`SelectGroup` reuse (setup), then `syncFast`/`Participant`/`pickCandidateLocked` alloc, then park/lead wake overhead. Re-run `profile_rpc.sh` alloc + `profile_rendezvous.sh` after each change; expect SyncChannel/Select coarse share and the fine sub-tables to move together.
+
 
 ## Flamegraph index (this machine)
 

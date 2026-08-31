@@ -85,3 +85,18 @@ tasks.test {
     dependsOn(downloadTla2tools)
     systemProperty("tla2tools.jar", tla2toolsJar.get().asFile.absolutePath)
 }
+
+tasks.register<JavaExec>("rendezvousMicrobench") {
+    group = "benchmark"
+    description = "No-HTTP SyncChannel/Select rendezvous microbench for async-profiler"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("julay.bench.RendezvousMicrobenchKt")
+}
+
+tasks.register("writeRuntimeClasspath") {
+    val outFile = layout.buildDirectory.file("runtime-classpath.txt")
+    outputs.file(outFile)
+    doLast {
+        outFile.get().asFile.writeText(sourceSets.main.get().runtimeClasspath.asPath)
+    }
+}
