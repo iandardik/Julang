@@ -254,4 +254,47 @@ class SyncChannelTest {
             assertEquals(0, chan.participantCountForTests())
         }
     }
+
+    @Test
+    fun reusedParticipantShellManyRendezvous() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val chan = SyncChannel<Int, Int>(
+                2,
+                antisCompatible = { _, _ -> true },
+            ) { cs -> Optional.of(cs.sum()) }
+            val left = SyncChannel.Participant<Int, Int>()
+            val right = SyncChannel.Participant<Int, Int>()
+            val leftDec = SyncChannel.DecisionBuf<Int, Int>()
+            val rightDec = SyncChannel.DecisionBuf<Int, Int>()
+            val n = 80
+            withTimeout(10.seconds) {
+                coroutineScope {
+                    launch {
+                        repeat(n) {
+                            left.fillForSyncFast(1, 10)
+                            try {
+                                val r = chan.syncFast(left, leftDec)
+                                assertTrue(r.isPresent)
+                            } finally {
+                                left.resetAfterSync()
+                            }
+                        }
+                    }
+                    launch {
+                        repeat(n) {
+                            right.fillForSyncFast(2, 20)
+                            try {
+                                val r = chan.syncFast(right, rightDec)
+                                assertTrue(r.isPresent)
+                            } finally {
+                                right.resetAfterSync()
+                            }
+                        }
+                    }
+                }
+            }
+            assertEquals(0, chan.participantCountForTests())
+            assertTrue(chan.mutexAvailableForTests())
+        }
+    }
 }

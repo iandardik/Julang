@@ -88,11 +88,23 @@ class SyncChannel<C : Any, V : Any>(
 
     /**
      * No-Select rendezvous for single-offer Proc steps ([Select.SyncCase.syncDirect] /
-     * [julay.program.Proc] FastOnly). Same participant table as [sync]; avoids allocating empty
-     * [Optional] Select wrappers on the hot path.
+     * [julay.program.Proc] FastOnly). Same participant table as [sync]; avoids [Optional.of]
+     * wrappers on the hot path.
      */
     suspend fun syncFast(constraint: C, anticonstraint: C): SyncChannelResult<V> {
-        return sync(Optional.of(constraint), Optional.of(anticonstraint), Optional.empty())
+        val me = Participant<V, C>(constraint, anticonstraint)
+        return syncWithParticipant(me, DecisionBuf())
+    }
+
+    /**
+     * FastOnly path with a caller-owned [Participant] shell (and optional [DecisionBuf]).
+     * [me] must not be registered on any channel; fill via [Participant.fillForSyncFast] first.
+     */
+    internal suspend fun syncFast(
+        me: Participant<V, C>,
+        decision: DecisionBuf<V, C> = DecisionBuf(),
+    ): SyncChannelResult<V> {
+        return syncWithParticipant(me, decision)
     }
 
     /**
@@ -106,8 +118,21 @@ class SyncChannel<C : Any, V : Any>(
         anticonstraint: Optional<C>,
         select: Optional<Select> = Optional.empty(),
     ): SyncChannelResult<V> {
-        val me = Participant<V, C>(constraint, anticonstraint, select)
-        val decision = DecisionBuf<V, C>()
+        val me = Participant<V, C>(
+            constraint.orElse(null),
+            anticonstraint.orElse(null),
+            select,
+        )
+        return syncWithParticipant(me, DecisionBuf())
+    }
+
+    /**
+     * Shared sync loop for [sync] / [syncFast]. [decision] may be Proc-owned and reused.
+     */
+    private suspend fun syncWithParticipant(
+        me: Participant<V, C>,
+        decision: DecisionBuf<V, C>,
+    ): SyncChannelResult<V> {
         try {
             while (true) {
                 if (me.followerValue.get()) {
@@ -303,19 +328,20 @@ class SyncChannel<C : Any, V : Any>(
             return
         }
         val myHash = hashCode()
-            if (me.select.isPresent) {
-                val sel = me.select.get()
-                if (!sel.canCommit(myHash) || sel.isComputeInFlight()) {
-                    out.setAbort()
-                    return
-                }
+        if (me.select.isPresent) {
+            val sel = me.select.get()
+            if (!sel.canCommit(myHash) || sel.isComputeInFlight()) {
+                out.setAbort()
+                return
             }
-            if (syncSize == 1) {
+        }
+        if (syncSize == 1) {
             me.pairing = true
             me.pairGate = CompletableDeferred()
-            val raw = constraintsOf(me, null)
+            constraintsInto(me, null, out.constraintsScratch)
+            val raw = out.constraintsScratch
             val (constraints, cleanup) = snapshotForCompute?.invoke(raw) ?: (raw to {})
-            out.setTry(constraints, setOf(me), pairGate = null, computeCleanup = cleanup)
+            out.setTrySelf(me, constraints, cleanup)
             return
         }
         for (peer in participants) {
@@ -334,9 +360,10 @@ class SyncChannel<C : Any, V : Any>(
             me.pairGate = gate
             peer.pairGate = gate
             signalWaitersLocked()
-            val raw = constraintsOf(me, peer)
+            constraintsInto(me, peer, out.constraintsScratch)
+            val raw = out.constraintsScratch
             val (constraints, cleanup) = snapshotForCompute?.invoke(raw) ?: (raw to {})
-            out.setTry(constraints, setOf(me, peer), pairGate = gate, computeCleanup = cleanup)
+            out.setTryPair(me, peer, constraints, gate, cleanup)
             return
         }
         out.setWait()
@@ -474,14 +501,21 @@ class SyncChannel<C : Any, V : Any>(
     }
 
     private fun constraintsOf(a: Participant<V, C>, b: Participant<V, C>?): Set<C> {
-        val hasA = a.constraint.isPresent
-        val hasB = b != null && b.constraint.isPresent
+        val ca = a.constraintOrNull
+        val cb = b?.constraintOrNull
         return when {
-            hasA && hasB -> setOf(a.constraint.get(), b!!.constraint.get())
-            hasA -> setOf(a.constraint.get())
-            hasB -> setOf(b!!.constraint.get())
+            ca != null && cb != null -> setOf(ca, cb)
+            ca != null -> setOf(ca)
+            cb != null -> setOf(cb)
             else -> emptySet()
         }
+    }
+
+    /** Fill [dest] with constraint slots (clears first). Used by sync-path DecisionBuf scratch. */
+    private fun constraintsInto(a: Participant<V, C>, b: Participant<V, C>?, dest: MutableSet<C>) {
+        dest.clear()
+        a.constraintOrNull?.let { dest.add(it) }
+        b?.constraintOrNull?.let { dest.add(it) }
     }
 
     private fun removeParticipants(toRemove: Set<Participant<V, C>>) {
@@ -497,9 +531,8 @@ class SyncChannel<C : Any, V : Any>(
     }
 
     private fun antiOk(p1: Participant<V, C>, p2: Participant<V, C>): Boolean {
-        if (p1.anticonstraint.isEmpty || p2.anticonstraint.isEmpty) return true
-        val a = p1.anticonstraint.get()
-        val b = p2.anticonstraint.get()
+        val a = p1.anticonstraintOrNull ?: return true
+        val b = p2.anticonstraintOrNull ?: return true
         return antisCompatible?.invoke(a, b)
             ?: !pairwiseSatisfiable(a, b)
     }
@@ -614,7 +647,12 @@ class SyncChannel<C : Any, V : Any>(
         if (closed) {
             return SelectOfferResult.Closed()
         }
-        val me = Participant(constraint, anticonstraint, Optional.of(select), group)
+        val me = Participant(
+            constraint.orElse(null),
+            anticonstraint.orElse(null),
+            Optional.of(select),
+            group,
+        )
         me.everRegistered = true
         participants.add(me)
         signalWaitersLocked()
@@ -795,11 +833,16 @@ class SyncChannel<C : Any, V : Any>(
     )
 
     internal class Participant<V : Any, C : Any>(
-        val constraint: Optional<C>,
-        val anticonstraint: Optional<C>,
-        val select: Optional<Select>,
-        val selectGroup: SelectGroup<V>? = null,
+        constraint: C? = null,
+        anticonstraint: C? = null,
+        select: Optional<Select> = Optional.empty(),
+        selectGroup: SelectGroup<V>? = null,
     ) {
+        var constraintOrNull: C? = constraint
+        var anticonstraintOrNull: C? = anticonstraint
+        var select: Optional<Select> = select
+        var selectGroup: SelectGroup<V>? = selectGroup
+
         @Volatile
         private var pendingValue: V? = null
         @Volatile
@@ -807,6 +850,34 @@ class SyncChannel<C : Any, V : Any>(
         /** Sticky: [cancelValue] may race before [awaitValue] suspends. */
         @Volatile
         private var valueCancelled = false
+
+        /** Prepare a Proc-owned shell for [SyncChannel.syncFast]. */
+        fun fillForSyncFast(constraint: C, anticonstraint: C) {
+            constraintOrNull = constraint
+            anticonstraintOrNull = anticonstraint
+            select = Optional.empty()
+            selectGroup = null
+            resetRuntimeState()
+        }
+
+        /** Clear rendezvous flags after [syncFast] returns (must not still be registered). */
+        fun resetAfterSync() {
+            resetRuntimeState()
+        }
+
+        private fun resetRuntimeState() {
+            synchronized(this) {
+                pendingValue = null
+                valueCont = null
+                valueCancelled = false
+            }
+            selectIsWon = false
+            pairing = false
+            pairGate = null
+            everRegistered = false
+            followerValue.set(false)
+            clearRejected()
+        }
 
         suspend fun awaitValue(): V = suspendCancellableCoroutine { cont ->
             val early: V? = synchronized(this) {
@@ -893,17 +964,25 @@ class SyncChannel<C : Any, V : Any>(
         }
     }
 
-    private enum class DecisionKind {
+    internal enum class DecisionKind {
         ABORT, WAIT, TRY, RETRY, SAT, FOLLOW,
     }
 
-    private class DecisionBuf<V : Any, C : Any> {
+    /**
+     * Scratch decision carrier for the sync loop. Proc may own one instance across FastOnly
+     * single-offer steps; [constraintsScratch] / [groupScratch] avoid per-match [setOf].
+     */
+    internal class DecisionBuf<V : Any, C : Any> {
         var kind: DecisionKind = DecisionKind.WAIT
         var constraints: Set<C> = emptySet()
         var group: Set<Participant<V, C>> = emptySet()
         var value: V? = null
         var pairGate: CompletableDeferred<Unit>? = null
         var computeCleanup: () -> Unit = {}
+
+        /** Reused under the channel lock for TRY; stable until compute finishes. */
+        val constraintsScratch: LinkedHashSet<C> = LinkedHashSet(2)
+        private val groupScratch: LinkedHashSet<Participant<V, C>> = LinkedHashSet(2)
 
         fun setAbort() {
             kind = DecisionKind.ABORT
@@ -927,6 +1006,39 @@ class SyncChannel<C : Any, V : Any>(
             value = null
             pairGate = gate
             computeCleanup = {}
+        }
+
+        fun setTrySelf(
+            me: Participant<V, C>,
+            constraints: Set<C>,
+            computeCleanup: () -> Unit,
+        ) {
+            kind = DecisionKind.TRY
+            this.constraints = constraints
+            groupScratch.clear()
+            groupScratch.add(me)
+            this.group = groupScratch
+            this.value = null
+            this.pairGate = null
+            this.computeCleanup = computeCleanup
+        }
+
+        fun setTryPair(
+            me: Participant<V, C>,
+            peer: Participant<V, C>,
+            constraints: Set<C>,
+            pairGate: CompletableDeferred<Unit>?,
+            computeCleanup: () -> Unit,
+        ) {
+            kind = DecisionKind.TRY
+            this.constraints = constraints
+            groupScratch.clear()
+            groupScratch.add(me)
+            groupScratch.add(peer)
+            this.group = groupScratch
+            this.value = null
+            this.pairGate = pairGate
+            this.computeCleanup = computeCleanup
         }
 
         fun setTry(

@@ -14,14 +14,18 @@ import julay.program.sync.BoolExprFast
  * - [anti] — [SyncAnti] role meta (classID / provider-client), also without BoolExpr
  *
  * Process identity ([procId], [classId], [proc]) is rendezvous metadata, not part of the formula.
+ *
+ * Fields are mutable so a long-lived [Proc] can [fillFast] / [fillAnti] a shell across FastOnly
+ * single-offer steps. Fill only before [julay.concurrency.SyncChannel.syncFast]; do not mutate
+ * while the instance is live in a compute [Set].
  */
 data class Constraint(
-    val expr: BoolExpr? = null,
-    val fast: BoolExprFast? = null,
-    val anti: SyncAnti? = null,
-    val procId: Long = -1L,
-    val classId: Int = -1,
-    val proc: Proc? = null,
+    var expr: BoolExpr? = null,
+    var fast: BoolExprFast? = null,
+    var anti: SyncAnti? = null,
+    var procId: Long = -1L,
+    var classId: Int = -1,
+    var proc: Proc? = null,
 ) {
     constructor(
         expr: BoolExpr,
@@ -34,6 +38,26 @@ data class Constraint(
         require(expr != null || fast != null || anti != null) {
             "Constraint needs expr, fast, and/or anti"
         }
+    }
+
+    /** FastOnly guard shell: [fast] only; clears [expr] / [anti]. */
+    fun fillFast(guard: BoolExprFast, procId: Long, classId: Int, proc: Proc?) {
+        expr = null
+        fast = guard
+        anti = null
+        this.procId = procId
+        this.classId = classId
+        this.proc = proc
+    }
+
+    /** FastOnly anticonstraint shell: [anti] only; clears [expr] / [fast]. */
+    fun fillAnti(anti: SyncAnti, procId: Long, classId: Int, proc: Proc?) {
+        expr = null
+        fast = null
+        this.anti = anti
+        this.procId = procId
+        this.classId = classId
+        this.proc = proc
     }
 
     /**

@@ -228,6 +228,47 @@ Modest alloc/shape win; sustained RPS band unchanged. Remaining Julay tax is sti
 
 Clear but modest Select-setup drop; sustained RPS unchanged. Remaining Action 1 residual: deferred recreation on reset. Next: Action 2 (syncFast / Participant) or further Select deferred pooling.
 
+## Phase 7b — syncFast / Participant / Constraint reuse (Action 2, 2026-09-01)
+
+**Change (no `.jul`):** FastOnly **single-offer** steps reuse Proc-owned shells instead of per-step alloc:
+
+- `Constraint.fillFast` / `fillAnti` on long-lived `stepConstraint` / `stepAntiConstraint`
+- Cached `SyncAnti` per role (`antiForRole`) — no `fromRole` alloc each step
+- `SyncChannel.Participant` nullable constraint slots + `fillForSyncFast` / `resetAfterSync`
+- `syncFast(me, decision)` internal overload; public `syncFast(C,C)` unchanged for tests/microbench
+- `DecisionBuf.constraintsScratch` / `groupScratch` — sync-path TRY avoids `setOf(me, peer)` / `setOf(constraints)`
+
+Multi-offer FastOnly still allocates fresh `Constraint` per offer (unchanged); Select path still allocates Participants per offer.
+
+**Tests:** `./gradlew shadowJar test` pass; Raft `smoke_test.sh` + `failover_test.sh` pass.
+
+**Sustained (`bench_toys.sh --targets rpc,rpc-native --ops 5000 --clients 4 --warmup 40`):** Julay **~4930** RPS (same band as Phase 7a ~4820; native run noisy on this machine).
+
+**Allocation fine (among SyncChannel/Select, rpc alloc):**
+
+| Sub-stage | Phase 7a (Action 1) | After Action 2 |
+|-----------|------------------:|---------------:|
+| Select setup | ~25% | ~25% |
+| syncFast path | ~19% | **~17%** |
+| Compute / payload | ~17% | ~18% |
+| Select lead / wake | ~14% | ~18% |
+| Select park / offer | ~10% | ~11% |
+| Match under lock | ~7–9% | **~7%** |
+| Participant / wait | ~5–6% | **~1%** |
+
+**Keyword hits (rpc alloc, all samples):** `syncFast` ~10%, `Participant` ~11%, `Optional` **~0.3%** (was higher before nullable slots / no `Optional.of` on Proc single-offer path), `Constraint` ~0.3%.
+
+**`syncfast` microbench** (still uses public `syncFast(C,C)` — allocates a fresh Participant per call; Proc reuse not exercised):
+
+| Sub-stage | Phase 7a | After Action 2 |
+|-----------|--------:|---------------:|
+| syncFast path | ~58% | ~62% |
+| Match under lock | ~20% | ~16% |
+| Compute / payload | ~16% | ~16% |
+| Participant / wait | ~3% | ~7% |
+
+**Read:** rpc handler path shows modest **syncFast-bucket** drop and near-zero **Optional** keyword hits; microbench unchanged by design. Sustained RPS band unchanged. Residual syncFast cost is now mostly `pickCandidateLocked` peer scan + `CompletableDeferred` pairGate (not pooled in 7b).
+
 ## Baseline — before bridge fix (2026-08-29)
 
 ### Busy-only CPU (`-e cpu`)
@@ -312,7 +353,7 @@ Raw rpc **cpu** is still mostly `thread park / wait` + JDK NIO. Among the small 
 No single bucket is “the” problem. Concrete code levers suggested by the breakdown:
 
 1. **Select setup alloc** (~25% of SC on rpc + select3 after Action 1) — residual is mostly fresh `CompletableDeferred`s on each shell reset + coordinator scramble/handle lists. Action 1 recycled `Select`/`SelectGroup`; further deferred pooling is optional.
-2. **syncFast + match-under-lock** (~58%+20% on syncfast microbench; ~19%+9% on rpc SC) — `Participant` construction, `pickCandidateLocked` peer scan, Optional/constraint wrappers on the single-offer path. This is the handler half of every RPC.
+2. **syncFast + match-under-lock** (~62%+16% on syncfast microbench; ~17%+7% on rpc SC after Action 2) — residual is `pickCandidateLocked` peer scan + `CompletableDeferred` pairGate; Proc path no longer allocates `Participant` / `Optional.of` per single-offer step.
 3. **Compute / payload** (~15–17%) — `SyncPayload` / extract path after SAT; worth auditing for per-rendezvous object churn once (1)/(2) move.
 4. **Select park + lead/wake** (~24% rpc SC, ~46% select3) — coordinator parkPass / tryLeadParked / awaitCompletionOrNudge loop for Protocol’s always-on 3-offer wait. Complementary to (1); same Select lifecycle.
 
@@ -326,7 +367,7 @@ Native is faster because each request is “parse → mutex → respond” on th
 
 ## Next optimization candidate
 
-**Phase 7 — continue multi-factor rendezvous work:** Action 1 (Select shell reuse) landed. Next: Action 2 (`syncFast`/`Participant`/`pickCandidateLocked`), then park/lead (Action 5) or payload (Action 3). Re-run `profile_rpc.sh` alloc + `profile_rendezvous.sh` after each change.
+**Phase 7 — continue multi-factor rendezvous work:** Actions 1–2 landed (Select shell reuse; Proc-owned syncFast shells for single-offer FastOnly). Next: Action 3 (one-peer `pickCandidateLocked` short-circuit) or Action 5 (Select park/lead), or Action 4 (SyncPayload trim). Re-run `profile_rpc.sh` alloc + `profile_rendezvous.sh` after each change.
 
 
 ## Flamegraph index (this machine)

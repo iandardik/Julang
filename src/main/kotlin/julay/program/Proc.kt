@@ -67,6 +67,21 @@ class Proc(
 
     private val stepSelectGroup = SelectGroup<SyncPayload>(stepSelect)
 
+    /** FastOnly single-offer Constraint shells (filled each step; never mutated during compute). */
+    private val stepConstraint = Constraint(fast = julay.program.sync.BoolExprFast.True)
+    private val stepAntiConstraint = Constraint(
+        anti = julay.program.sync.SyncAnti.ClassId(tsInfo.classID()),
+    )
+
+    /** Cached SyncAnti values so FastOnly steps skip [julay.program.sync.SyncAnti.fromRole] alloc. */
+    private val cachedAntiClassId = julay.program.sync.SyncAnti.ClassId(tsInfo.classID())
+    private val cachedAntiProvider = julay.program.sync.SyncAnti.ProviderClient(isProvider = true)
+    private val cachedAntiClient = julay.program.sync.SyncAnti.ProviderClient(isProvider = false)
+
+    /** Proc-owned syncFast Participant + DecisionBuf (single-offer FastOnly only). */
+    private val stepParticipant = SyncChannel.Participant<SyncPayload, Constraint>()
+    private val stepDecision = SyncChannel.DecisionBuf<SyncPayload, Constraint>()
+
     private val silentlyKilled = AtomicBoolean(false)
     @Volatile
     private var runJob: Job? = null
@@ -328,23 +343,18 @@ class Proc(
         if (offers.isEmpty()) {
             return false
         }
-        // Single offer: syncFast directly — no Select.SyncCase list/map/callback churn.
+        // Single offer: reused Constraint / Participant / DecisionBuf — no Optional.of / setOf.
         if (offers.size == 1) {
             val offer = offers[0]
             val syncChannel = resolveSyncChannel(offer)
-            val constraint = Constraint(
-                fast = offer.guard,
-                procId = procId,
-                classId = classId,
-                proc = this,
-            )
-            val anticonstraint = Constraint(
-                anti = julay.program.sync.SyncAnti.fromRole(offer.syncRole, tsInfo.classID()),
-                procId = procId,
-                classId = classId,
-                proc = this,
-            )
-            val ret = syncChannel.syncFast(constraint, anticonstraint)
+            stepConstraint.fillFast(offer.guard, procId, classId, this)
+            stepAntiConstraint.fillAnti(antiForRole(offer.syncRole), procId, classId, this)
+            stepParticipant.fillForSyncFast(stepConstraint, stepAntiConstraint)
+            val ret = try {
+                syncChannel.syncFast(stepParticipant, stepDecision)
+            } finally {
+                stepParticipant.resetAfterSync()
+            }
             if (ret.isEmpty) {
                 scrubClosedSessionsAndAffinity()
                 return true
@@ -364,7 +374,7 @@ class Proc(
                 proc = this,
             )
             val anticonstraint = Constraint(
-                anti = julay.program.sync.SyncAnti.fromRole(offer.syncRole, tsInfo.classID()),
+                anti = antiForRole(offer.syncRole),
                 procId = procId,
                 classId = classId,
                 proc = this,
@@ -393,6 +403,15 @@ class Proc(
             stepCaseOffers.add(SelectCaseOffer())
         }
     }
+
+    private fun antiForRole(role: julay.program.action.TSAction.SyncRole): julay.program.sync.SyncAnti =
+        when (role) {
+            julay.program.action.TSAction.SyncRole.Default,
+            julay.program.action.TSAction.SyncRole.Internal,
+            -> cachedAntiClassId
+            julay.program.action.TSAction.SyncRole.Provider -> cachedAntiProvider
+            julay.program.action.TSAction.SyncRole.Client -> cachedAntiClient
+        }
 
     /**
      * Runs one select/transit step using [ctx].
@@ -428,7 +447,7 @@ class Proc(
                     proc = this,
                 ).cloneInto(caseCtx)
                 val anticonstraint = Constraint(
-                    anti = julay.program.sync.SyncAnti.fromRole(act.syncRole, tsInfo.classID()),
+                    anti = antiForRole(act.syncRole),
                     procId = procId,
                     classId = classId,
                     proc = this,
