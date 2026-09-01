@@ -14,6 +14,7 @@ import julay.program.sync.SyncResolveConfig
 import julay.program.sync.SyncResolveFast
 import julay.program.sync.SyncStepPlan
 import julay.program.sync.SyncTerm
+import julay.program.sync.SyncAnti
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -51,33 +52,7 @@ class ProcFastPathTest {
             val infoA = TransitionSystemStaticInfo("A", setOf(handoff), emptyMap())
             val infoB = TransitionSystemStaticInfo("B", setOf(handoff), emptyMap())
             // Use a dedicated Program with known sync channel
-            val chan = SyncChannel<Constraint, SyncPayload>(
-                2,
-                satisfiable = { cs ->
-                    julay.program.sync.SyncResolveFast.trySatisfiable(cs, SyncResolveConfig.ALL_ON)
-                        ?: false
-                },
-                compute = { cs ->
-                    val concrete = julay.program.sync.SyncResolveFast.tryConcreteAction(
-                        handoff,
-                        cs,
-                        SyncResolveConfig.ALL_ON,
-                    )
-                    if (concrete == null || concrete.isEmpty) {
-                        Optional.empty()
-                    } else {
-                        Optional.of(
-                            SyncPayload(
-                                concrete.get(),
-                                cs.filter { it.procId >= 0 }.map {
-                                    julay.program.action.SessionPeerMeta(it.procId, it.classId, it.proc!!)
-                                },
-                                Optional.empty(),
-                            ),
-                        )
-                    }
-                },
-            )
+            val chan = handoffSyncChannel(handoff)
             val staticTable = mapOf(
                 handoff to ProgramAction(handoff, chan),
             )
@@ -101,6 +76,61 @@ class ProcFastPathTest {
             assertTrue(a.transited && b.transited)
             // silence unused
             assertTrue(before >= 0)
+        }
+    }
+
+    /** Many FastOnly single-offer steps exercise Proc-owned stepParticipant / Constraint shells. */
+    @Test
+    fun singleOfferFastOnlyManyRoundsNoStragglers() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val handoff = SymbolicAction("handoff", emptyList())
+            val infoA = TransitionSystemStaticInfo("A", setOf(handoff), emptyMap())
+            val infoB = TransitionSystemStaticInfo("B", setOf(handoff), emptyMap())
+            val chan = handoffSyncChannel(handoff)
+            val staticTable = mapOf(handoff to ProgramAction(handoff, chan))
+            val prog = Program(setOf(infoA, infoB), emptyList())
+            val rounds = 80
+            val a = RepeatingHandoffTs(handoff, maxRounds = rounds)
+            val b = RepeatingHandoffTs(handoff, maxRounds = rounds)
+            val procA = Proc(a, infoA, staticTable, prog)
+            val procB = Proc(b, infoB, staticTable, prog)
+            withTimeout(20_000) {
+                val ja = async { procA.run() }
+                val jb = async { procB.run() }
+                ja.await()
+                jb.await()
+            }
+            assertEquals(rounds, a.transits)
+            assertEquals(rounds, b.transits)
+            assertEquals(0, chan.participantCountForTests())
+            assertTrue(chan.mutexAvailableForTests())
+        }
+    }
+
+    /** Provider/client FastOnly offers use cached SyncAnti via Proc.antiForRole. */
+    @Test
+    fun providerClientFastOnlyProcRendezvous() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val act = SymbolicAction("rpc", emptyList())
+            val providerInfo = TransitionSystemStaticInfo("Provider", setOf(act), emptyMap())
+            val clientInfo = TransitionSystemStaticInfo("Client", setOf(act), emptyMap())
+            val chan = providerClientSyncChannel(act)
+            val staticTable = mapOf(act to ProgramAction(act, chan))
+            val prog = Program(setOf(providerInfo, clientInfo), emptyList())
+            val rounds = 40
+            val provider = RepeatingHandoffTs(act, TSAction.SyncRole.Provider, rounds)
+            val client = RepeatingHandoffTs(act, TSAction.SyncRole.Client, rounds)
+            val procProvider = Proc(provider, providerInfo, staticTable, prog)
+            val procClient = Proc(client, clientInfo, staticTable, prog)
+            withTimeout(15_000) {
+                val jp = async { procProvider.run() }
+                val jc = async { procClient.run() }
+                jp.await()
+                jc.await()
+            }
+            assertEquals(rounds, provider.transits)
+            assertEquals(rounds, client.transits)
+            assertEquals(0, chan.participantCountForTests())
         }
     }
 
@@ -151,6 +181,81 @@ class ProcFastPathTest {
         }
     }
 }
+
+private class RepeatingHandoffTs(
+    private val act: SymbolicAction,
+    private val syncRole: TSAction.SyncRole = TSAction.SyncRole.Default,
+    private val maxRounds: Int,
+) : TransitionSystem {
+    var transits = 0
+
+    override suspend fun actions(ctx: Context): Set<TSAction> =
+        error("Z3 actions should not be called on FastOnly path")
+
+    override fun syncStepPlan(): SyncStepPlan {
+        if (transits >= maxRounds) {
+            return SyncStepPlan.FastOnly(emptyList())
+        }
+        return SyncStepPlan.FastOnly(listOf(FastOffer(act, BoolExprFast.True, syncRole)))
+    }
+
+    override suspend fun transit(act: ConcreteAction) {
+        transits++
+    }
+}
+
+private fun handoffSyncChannel(handoff: SymbolicAction): SyncChannel<Constraint, SyncPayload> =
+    SyncChannel(
+        2,
+        satisfiable = { cs ->
+            SyncResolveFast.trySatisfiable(cs, SyncResolveConfig.ALL_ON) ?: false
+        },
+        compute = { cs ->
+            val concrete = SyncResolveFast.tryConcreteAction(handoff, cs, SyncResolveConfig.ALL_ON)
+            if (concrete == null || concrete.isEmpty) {
+                Optional.empty()
+            } else {
+                Optional.of(
+                    SyncPayload(
+                        concrete.get(),
+                        cs.filter { it.procId >= 0 }.map {
+                            julay.program.action.SessionPeerMeta(it.procId, it.classId, it.proc!!)
+                        },
+                        Optional.empty(),
+                    ),
+                )
+            }
+        },
+    )
+
+private fun providerClientSyncChannel(act: SymbolicAction): SyncChannel<Constraint, SyncPayload> =
+    SyncChannel(
+        2,
+        satisfiable = { cs ->
+            SyncResolveFast.trySatisfiable(cs, SyncResolveConfig.ALL_ON) ?: false
+        },
+        antisCompatible = { a, b ->
+            val aa = a.anti as? SyncAnti.ProviderClient
+            val bb = b.anti as? SyncAnti.ProviderClient
+            if (aa != null && bb != null) aa.isProvider != bb.isProvider else true
+        },
+        compute = { cs ->
+            val concrete = SyncResolveFast.tryConcreteAction(act, cs, SyncResolveConfig.ALL_ON)
+            if (concrete == null || concrete.isEmpty) {
+                Optional.empty()
+            } else {
+                Optional.of(
+                    SyncPayload(
+                        concrete.get(),
+                        cs.filter { it.procId >= 0 }.map {
+                            julay.program.action.SessionPeerMeta(it.procId, it.classId, it.proc!!)
+                        },
+                        Optional.empty(),
+                    ),
+                )
+            }
+        },
+    )
 
 private class PureIrTs(
     private val act: SymbolicAction,

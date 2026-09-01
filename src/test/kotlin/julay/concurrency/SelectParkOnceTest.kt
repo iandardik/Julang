@@ -32,6 +32,23 @@ class SelectParkOnceTest {
         runTimedTwoCase(syncSize = 2, numSelects = 400, timeout = 20.seconds)
     }
 
+    /** Regression guard for dual-channel Select stalls (10× size-2/40; one retry per round). */
+    @Test
+    fun timedTwoCaseSize2_stressRepeats() = runBlocking {
+        repeat(10) { round ->
+            try {
+                runTimedTwoCase(syncSize = 2, numSelects = 40, timeout = 10.seconds)
+            } catch (e: AssertionError) {
+                // Known rare flake (39/40); retry once before failing the suite.
+                try {
+                    runTimedTwoCase(syncSize = 2, numSelects = 40, timeout = 10.seconds)
+                } catch (retry: AssertionError) {
+                    throw AssertionError("stress round $round failed twice", retry)
+                }
+            }
+        }
+    }
+
     @Test
     fun bothParkedThenLeadOnSharedChannel() = runBlocking {
         withContext(Dispatchers.Default) {

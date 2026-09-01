@@ -240,9 +240,11 @@ Clear but modest Select-setup drop; sustained RPS unchanged. Remaining Action 1 
 
 Multi-offer FastOnly still allocates fresh `Constraint` per offer (unchanged); Select path still allocates Participants per offer.
 
-**Tests:** `./gradlew shadowJar test` pass; Raft `smoke_test.sh` + `failover_test.sh` pass.
+**Tests:** `./gradlew shadowJar test` pass; Raft `smoke_test.sh` + `failover_test.sh` pass. Added `ProcFastPathTest` single-offer / provider-client stress, `SyncChannelTest.reusedParticipantShellRecoversAfterCloseAbort`, `SelectParkOnceTest.timedTwoCaseSize2_stressRepeats` (10× with one retry).
 
-**Sustained (`bench_toys.sh --targets rpc,rpc-native --ops 5000 --clients 4 --warmup 40`):** Julay **~4930** RPS (same band as Phase 7a ~4820; native run noisy on this machine).
+**Sustained (`bench_toys.sh --targets rpc,rpc-native --ops 5000 --clients 4 --warmup 40`):** Julay **4,990** vs native **5,801** RPS (**1.16×** native).
+
+**Under alloc profile load** (`profile_rpc.sh --mode alloc --duration 12 --clients 4`, 32k ops): Julay **5,100** vs native **5,841** RPS (**1.15×**).
 
 **Allocation fine (among SyncChannel/Select, rpc alloc):**
 

@@ -297,4 +297,50 @@ class SyncChannelTest {
             assertTrue(chan.mutexAvailableForTests())
         }
     }
+
+    @Test
+    fun reusedParticipantShellRecoversAfterCloseAbort() = runBlocking {
+        withContext(Dispatchers.Default) {
+            val shell = SyncChannel.Participant<Int, Int>()
+            val dec = SyncChannel.DecisionBuf<Int, Int>()
+
+            // Lone sync() on size-2 blocks until close aborts it (do not add a second peer).
+            val chan = SyncChannel<Int, Int>(
+                2,
+                antisCompatible = { _, _ -> true },
+            ) { Optional.of(1) }
+            val waiter = async { chan.sync() }
+            awaitParticipantCount(chan, 1)
+            chan.close()
+            assertTrue(waiter.await().isEmpty)
+            assertEquals(0, chan.participantCountForTests())
+
+            // Lone syncFast shell on size-2 blocks until close; resetAfterSync must clear flags.
+            val chanAbort = SyncChannel<Int, Int>(
+                2,
+                antisCompatible = { _, _ -> true },
+            ) { Optional.of(1) }
+            shell.fillForSyncFast(10, 20)
+            val fast = async { chanAbort.syncFast(shell, dec) }
+            awaitParticipantCount(chanAbort, 1)
+            chanAbort.close()
+            assertTrue(fast.await().isEmpty)
+            shell.resetAfterSync()
+            assertEquals(0, chanAbort.participantCountForTests())
+
+            val chan2 = SyncChannel<Int, Int>(
+                2,
+                antisCompatible = { _, _ -> true },
+            ) { Optional.of(99) }
+            val peer = async { chan2.syncFast(1, 2) }
+            shell.fillForSyncFast(3, 4)
+            val r = chan2.syncFast(shell, dec)
+            assertTrue(r.isPresent)
+            assertEquals(99, r.result.get())
+            shell.resetAfterSync()
+            assertTrue(peer.await().isPresent)
+            assertEquals(0, chan2.participantCountForTests())
+            assertTrue(chan2.mutexAvailableForTests())
+        }
+    }
 }
