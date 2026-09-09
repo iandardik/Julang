@@ -1,0 +1,6 @@
+source: regression/input/basic/ctor-after-state.jul
+programs:
+  - name: P
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/basic-ctor-after-state.stdout

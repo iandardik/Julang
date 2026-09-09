@@ -43,36 +43,26 @@ proc ClientDispatcher {
 }
 
 proc ClientLogic {
-    const reqNum : Int
-    var respText : String
     var done : Boolean
+    var respText : String
 
     constructor startReq(num : Int) {
-        transit:
-            reqNum := num
-            respText := ""
-            done := false
-    }
-
-    internal transition sendAndReceive() {
-        guard: ~done
         transit:
             respText := httpRequest(HttpClientRequest {
                 url := "http://localhost:8000",
                 method := "POST",
-                body := "ReqNum: " + reqNum
+                body := "ReqNum: " + num
             }).body
-            done := true
-    }
-
-    internal transition println(msg : String) {
-        guard: done & msg = "response: " + respText
+            done := false
         after:
-            println(msg)
+            println("response: " + respText)
     }
 
     transition gotResp() {
-        guard: done
+        guard:
+            ~done
+        transit:
+            done := true
     }
 }
 

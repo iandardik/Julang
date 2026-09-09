@@ -1,0 +1,23 @@
+import julay.funlib.exitProgram
+import julay.funlib.println
+
+/*
+ * Constructor after: must observe state assigned in the same constructor's transit.
+ * Previously, codegen snapshotted after: args before sequential inits, so reading
+ * the just-assigned var threw "read before it was initialized".
+ */
+proc S {
+    var msg : String
+
+    constructor initially(args : List<String>) {
+        transit:
+            msg := "hello"
+        after:
+            println(msg)
+            exitProgram(0)
+    }
+}
+
+proc P := S
+
+compile P

@@ -998,14 +998,20 @@ private fun ActionDecl.kotlinTransitString(
             .plus(afterLines)
             .joinToString("\n")
     }
-    // Snapshot all after args from the pre-transit state (same as historical effect args).
-    // For sequential constructors, after still sees post-assign state (init is complete).
     val (afterArgSnapshots, afterLines) = kotlinCallStmtsString(afters, stateVarTypes, "__afterArg")
+    val transitLines =
+        if (sequentialAssigns) transitSequentialLines
+        else transitEvalSnapshots + transitApplyLines
+    // Transitions snapshot after: args from the pre-transit state (historical effect args).
+    // Constructors apply sequential inits first so after: can read initialized state
+    // (docs: put setup IO in after: after state is assigned).
+    val transitAndAfterSnapshots =
+        if (sequentialAssigns) transitLines + afterArgSnapshots
+        else afterArgSnapshots + transitLines
     return listOfNotNull(errorStr.takeIf { it.isNotEmpty() })
         .plus(beforeArgSnapshots)
         .plus(beforeLines)
-        .plus(afterArgSnapshots)
-        .plus(if (sequentialAssigns) transitSequentialLines else transitEvalSnapshots + transitApplyLines)
+        .plus(transitAndAfterSnapshots)
         .plus(afterLines)
         .joinToString("\n")
 }
