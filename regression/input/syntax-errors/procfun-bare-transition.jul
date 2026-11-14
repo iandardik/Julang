@@ -1,7 +1,10 @@
+/*
+ * Procfuns cannot declare `service` transitions (hubs stay outside procfuns).
+ */
 procfun bad(n : Int) : Int {
     var i : Int := 0
 
-    provider transition step() {
+    service transition step() {
         transit: i := i + 1
     }
 

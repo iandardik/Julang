@@ -8,6 +8,25 @@
     ],
     "description": "Proc assembly with compile target"
   },
+  "static proc class": {
+    "prefix": "staticproc",
+    "body": [
+      "static proc ${1:Name} {",
+      "\tvar ${2:x} : ${3:Int}",
+      "",
+      "\tconstructor initially(args : List<String>) {",
+      "\t\ttransit:",
+      "\t\t\t${2:x} := ${4:0}",
+      "\t}",
+      "",
+      "\tservice transition ${5:step}() {",
+      "\t\tguard: true",
+      "\t\ttransit:",
+      "\t}",
+      "}"
+    ],
+    "description": "Static proc hub with initially and a service transition"
+  },
   "proc class": {
     "prefix": "procclass",
     "body": [
@@ -76,7 +95,29 @@
       "\t\t$0",
       "}"
     ],
-    "description": "Ordinary transition"
+    "description": "Ordinary transition (composition-private when || meets)"
+  },
+  "service transition": {
+    "prefix": "service",
+    "body": [
+      "service transition ${1:name}(${2:args}) {",
+      "\tguard: ${3:true}",
+      "\ttransit:",
+      "\t\t$0",
+      "}"
+    ],
+    "description": "Service hub transition (stays in external alphabet)"
+  },
+  "client transition": {
+    "prefix": "client",
+    "body": [
+      "client transition ${1:name}(${2:args}) {",
+      "\tguard: ${3:true}",
+      "\ttransit:",
+      "\t\t$0",
+      "}"
+    ],
+    "description": "Client transition (syncs only with a matching service)"
   },
   "internal transition": {
     "prefix": "internal",
@@ -89,38 +130,16 @@
     ],
     "description": "Source-internal transition"
   },
-  "provider transition": {
-    "prefix": "provider",
+  "timer transition": {
+    "prefix": "timer",
     "body": [
-      "provider transition ${1:name}(${2:args}) {",
-      "\tguard: ${3:true}",
+      "timer transition ${1:name}() {",
+      "\tguard: ${2:true}",
       "\ttransit:",
       "\t\t$0",
       "}"
     ],
-    "description": "Provider transition"
-  },
-  "client transition": {
-    "prefix": "client",
-    "body": [
-      "client transition ${1:name}(${2:args}) {",
-      "\tguard: ${3:true}",
-      "\ttransit:",
-      "\t\t$0",
-      "}"
-    ],
-    "description": "Client transition"
-  },
-  "session transition": {
-    "prefix": "session",
-    "body": [
-      "session transition ${1:name}(${2:args}) {",
-      "\tguard: ${3:true}",
-      "\ttransit:",
-      "\t\t$0",
-      "}"
-    ],
-    "description": "Session transition"
+    "description": "Timer transition (arm with setTimer)"
   },
   "spec": {
     "prefix": "spec",

@@ -37,12 +37,12 @@ class CheckJulFileTest {
         val dir = Files.createTempDirectory("julay-check-warn")
         val file = dir.resolve("solo.jul")
         // Soft sync warnings require a named `compile` target; without one,
-        // incomplete session/ordinary sync is allowed for intermediate assemblies.
+        // incomplete ordinary sync is allowed for intermediate assemblies.
         file.toFile().writeText(
             """
             proc Solo {
                 constructor initially(args : List<String>) { transit: }
-                session transition ping() { transit: }
+                transition ping() { transit: }
             }
             proc P := Solo
             compile P
@@ -54,10 +54,7 @@ class CheckJulFileTest {
         assertTrue(
             result.diagnostics.any {
                 it.severity == DiagnosticSeverity.Warning &&
-                    (
-                        it.message.contains("exactly two sync peers") ||
-                            it.message.contains("not synchronized with any peer")
-                    )
+                    it.message.contains("not synchronized with any peer")
             },
             result.diagnostics.toString(),
         )
@@ -72,7 +69,7 @@ class CheckJulFileTest {
         val file = dir.resolve("ok.jul")
         file.toFile().writeText(
             """
-            proc A {
+            static proc A {
                 constructor initially(args : List<String>) { transit: }
                 transition ping() { transit: }
             }
@@ -100,7 +97,7 @@ class CheckJulFileTest {
                     return: 0
                 }
             }
-            proc Host {
+            static proc Host {
                 var out : Int
                 constructor initially(args : List<String>) {
                     transit: out := helper()
@@ -110,7 +107,7 @@ class CheckJulFileTest {
             proc Core {
                 constructor initially(args : List<String>) { transit: }
                 constructor startCore() { transit: }
-                provider transition bump() { transit: }
+                service transition bump() { transit: }
             }
             proc P := Host || Core
             """.trimIndent(),
@@ -123,7 +120,7 @@ class CheckJulFileTest {
             "composition alias should pair transition+ctor; got: ${result.diagnostics}",
         )
         assertFalse(
-            result.diagnostics.any { it.message.contains("provider with no clients") },
+            result.diagnostics.any { it.message.contains("service with no clients") },
             "folded procfun clients should count; got: ${result.diagnostics}",
         )
     }

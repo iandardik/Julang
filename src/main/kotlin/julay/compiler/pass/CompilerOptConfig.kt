@@ -1,31 +1,28 @@
 package julay.compiler.pass
 
-import julay.program.sync.SyncResolveConfig
-
 /**
  * Compile-time JAR optimization flags.
  *
- * [syncResolve] is baked into generated [julay.program.Program] (runtime sync path).
- * [procfunFuse] affects codegen only (nested procfun inlining); it is not a Program field.
- *
- * Parsed from `--disable-opt` / `--disable-opt=ID,...` (see [fromDisableOptFlag]).
+ * Sync resolve / procfun-fuse options are retired with the Kotlin runtime; `--disable-opt`
+ * still accepts the old IDs as no-ops for CLI compatibility.
  */
 data class CompilerOptConfig(
-    val syncResolve: SyncResolveConfig = SyncResolveConfig.ALL_ON,
-    /** When true, nested procfun calls are fused into the caller TransitionSystem. */
+    /** Reserved no-op (former SyncChannel fast-path). */
+    val syncResolveNoop: Boolean = true,
+    /** Reserved no-op (former Kotlin procfun fuse). */
     val procfunFuse: Boolean = true,
-    // Reserved for later: val procFuse: Boolean = false,
 ) {
     companion object {
         val ALL_ON = CompilerOptConfig()
-        val ALL_OFF = CompilerOptConfig(
-            syncResolve = SyncResolveConfig.ALL_OFF,
-            procfunFuse = false,
-        )
+        val ALL_OFF = CompilerOptConfig(syncResolveNoop = false, procfunFuse = false)
 
-        /** Stable CLI / docs IDs (sync resolve + JAR codegen). */
-        val OPT_IDS: Set<String> =
-            SyncResolveConfig.OPT_IDS + setOf("procfun-fuse")
+        /** Former CLI / docs IDs retained as accepted no-ops. */
+        val OPT_IDS: Set<String> = setOf(
+            "eq-unify",
+            "arg-ownership",
+            "directed-eval",
+            "procfun-fuse",
+        )
 
         /**
          * @param raw `null` if `--disable-opt` was not passed; `"ALL"` for a bare flag;
@@ -46,11 +43,9 @@ data class CompilerOptConfig(
             }
             val disabled = names.toSet()
             return CompilerOptConfig(
-                syncResolve = SyncResolveConfig(
-                    eqUnify = "eq-unify" !in disabled,
-                    argOwnership = "arg-ownership" !in disabled,
-                    directedEval = "directed-eval" !in disabled,
-                ),
+                syncResolveNoop = "eq-unify" !in disabled &&
+                    "arg-ownership" !in disabled &&
+                    "directed-eval" !in disabled,
                 procfunFuse = "procfun-fuse" !in disabled,
             )
         }

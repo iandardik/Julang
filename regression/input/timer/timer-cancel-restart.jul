@@ -1,42 +1,30 @@
-import julay.proclib.Timer
+import julay.funlib.setTimer
+import julay.funlib.cancelTimer
 import julay.funlib.exitProgram
 import julay.funlib.println
 
 /*
  * Start a long timer, cancel it, then start a short one that should fire.
- * Long delay is only to prove cancel (we never wait it out); short delay is 1s.
- * Exits after print so the regression harness can wait for completion instead of
- * a fixed background sleep (which is capped by the case compile+run budget).
  */
-proc Driver {
+static proc Driver {
     var step : String
 
     constructor initially(args : List<String>) {
-        transit: step := "create"
-    }
-
-    session transition createTimer() {
-        guard: step = "create"
         transit: step := "startLong"
+        after:
+            setTimer("timeout", 5000)
     }
 
-    session transition startTimer(time : Int) {
-        guard:
-            (step = "startLong" & time = 5) | (step = "startShort" & time = 1)
-        transit:
-            step := when (step) {
-                "startLong" -> "cancel"
-                else -> "wait"
-            }
-    }
-
-    session transition cancelTimer() {
-        guard: step = "cancel"
+    internal transition cancelLong() {
+        guard: step = "startLong"
         transit: step := "startShort"
+        after:
+            cancelTimer("timeout")
+            setTimer("timeout", 50)
     }
 
-    session transition timeout() {
-        guard: step = "wait"
+    timer transition timeout() {
+        guard: step = "startShort"
         transit: step := "print"
     }
 
@@ -49,6 +37,6 @@ proc Driver {
     }
 }
 
-proc TimerCancelRestart := Driver || Timer
+proc TimerCancelRestart := Driver
 
 compile TimerCancelRestart

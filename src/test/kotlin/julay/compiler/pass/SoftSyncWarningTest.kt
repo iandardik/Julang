@@ -16,14 +16,14 @@ import kotlin.test.assertTrue
 class SoftSyncWarningTest {
 
     @Test
-    fun analyzeUnilateralSessionEmitsAlphabetWithoutSyncRequirement() {
+    fun analyzeUnilateralOrdinaryEmitsAlphabetWithoutSyncRequirement() {
         val dir = Files.createTempDirectory("julay-soft-sync-analyze")
         val file = dir.resolve("solo.jul")
         file.toFile().writeText(
             """
             proc Solo {
                 constructor initially(args : List<String>) { transit: }
-                session transition ping() { transit: }
+                transition ping() { transit: }
             }
             proc P := Solo
             """.trimIndent(),
@@ -39,7 +39,7 @@ class SoftSyncWarningTest {
             checked.librariesInUse,
             requireCompleteSync = false,
         )
-        assertTrue(ok, "incomplete session sync must not abort intermediate analyze")
+        assertTrue(ok, "incomplete ordinary sync must not abort intermediate analyze")
 
         val intermediateWarnings = checked.ast.warningPass(
             components,
@@ -47,8 +47,11 @@ class SoftSyncWarningTest {
             requireCompleteSync = false,
         )
         assertFalse(
-            intermediateWarnings.any { it.toString().contains("exactly two sync peers") },
-            "intermediate analyze must not require session sync; got: $intermediateWarnings",
+            intermediateWarnings.any {
+                it.toString().contains("not synchronized with any peer") ||
+                    it.toString().contains("tag it `internal`")
+            },
+            "intermediate analyze must not require ordinary sync; got: $intermediateWarnings",
         )
 
         val compileWarnings = checked.ast.warningPass(
@@ -57,8 +60,11 @@ class SoftSyncWarningTest {
             requireCompleteSync = true,
         )
         assertTrue(
-            compileWarnings.any { it.toString().contains("exactly two sync peers") },
-            "top-level compile must still warn on unilateral session; got: $compileWarnings",
+            compileWarnings.any {
+                it.toString().contains("not synchronized with any peer") ||
+                    it.toString().contains("tag it `internal`")
+            },
+            "top-level compile must still warn on unilateral ordinary; got: $compileWarnings",
         )
 
         val scope = resolveAnalyzeScope(
@@ -123,8 +129,8 @@ class SoftSyncWarningTest {
     }
 
     @Test
-    fun providerClientsOnFoldedProcfunDoNotWarnDeadlock() {
-        val dir = Files.createTempDirectory("julay-provider-procfun-clients")
+    fun serviceClientsOnFoldedProcfunDoNotWarnDeadlock() {
+        val dir = Files.createTempDirectory("julay-service-procfun-clients")
         val file = dir.resolve("sync.jul")
         file.toFile().writeText(
             """
@@ -141,7 +147,7 @@ class SoftSyncWarningTest {
             }
             proc Core {
                 constructor initially(args : List<String>) { transit: }
-                provider transition bump() { transit: }
+                service transition bump() { transit: }
             }
             proc P := Host || Core
             compile P
@@ -159,18 +165,18 @@ class SoftSyncWarningTest {
             checked.procDecls,
         )
         assertFalse(
-            warnings.any { it.toString().contains("provider with no clients") },
+            warnings.any { it.toString().contains("service with no clients") },
             "folded procfun clients must count; got: $warnings",
         )
     }
 
     @Test
-    fun providerClientsViaHandlerRefAndNestedReturnFoldDoNotWarnDeadlock() {
+    fun serviceClientsViaHandlerRefAndNestedReturnFoldDoNotWarnDeadlock() {
         val dir = Files.createTempDirectory("julay-handler-ref-fold")
         val file = dir.resolve("http.jul")
         file.toFile().writeText(
             """
-            import julay.proclib.HttpServer
+            import julay.funlib.serveHttp
 
             procfun nested() : HttpServerResponse {
                 client transition bump() {
@@ -184,27 +190,18 @@ class SoftSyncWarningTest {
                 }
             }
 
-            proc Starter {
-                var started : Boolean
+            static proc Starter {
                 constructor initially(args : List<String>) {
-                    transit: started := false
+                    after: serveHttp(8000, handle)
                 }
-                session transition listen(
-                    port : Int,
-                    handler : HttpServerRequest ~> HttpServerResponse
-                ) {
-                    guard: ~started & port = 8000 & handler = handle
-                    transit: started := true
-                }
-                session transition close() { guard: false }
             }
 
             proc Core {
                 constructor initially(args : List<String>) { transit: }
-                provider transition bump() { transit: }
+                service transition bump() { transit: }
             }
 
-            proc P := Starter || HttpServer || Core
+            proc P := Starter || Core
             compile P
             """.trimIndent(),
         )
@@ -220,20 +217,20 @@ class SoftSyncWarningTest {
             checked.procDecls,
         )
         assertFalse(
-            warnings.any { it.toString().contains("provider with no clients") },
-            "~> handler ref + nested return: calls must fold clients; got: $warnings",
+            warnings.any { it.toString().contains("service with no clients") },
+            "serveHttp handler ref + nested return: calls must fold clients; got: $warnings",
         )
     }
 
     @Test
-    fun providerWithNoClientsStillWarnsDeadlock() {
-        val dir = Files.createTempDirectory("julay-provider-no-clients")
+    fun serviceWithNoClientsStillWarnsDeadlock() {
+        val dir = Files.createTempDirectory("julay-service-no-clients")
         val file = dir.resolve("solo.jul")
         file.toFile().writeText(
             """
             proc Core {
                 constructor initially(args : List<String>) { transit: }
-                provider transition bump() { transit: }
+                service transition bump() { transit: }
             }
             proc P := Core
             compile P
@@ -251,8 +248,8 @@ class SoftSyncWarningTest {
             checked.procDecls,
         )
         assertTrue(
-            warnings.any { it.toString().contains("provider with no clients") },
-            "expected provider-deadlock warning; got: $warnings",
+            warnings.any { it.toString().contains("service with no clients") },
+            "expected service-deadlock warning; got: $warnings",
         )
     }
 
@@ -264,7 +261,10 @@ class SoftSyncWarningTest {
             """
             proc HeartbeatImpl {
                 constructor start() { transit: }
-                client transition staleTerm(term : Int) { transit: }
+                client transition staleTerm(term : Int) {
+                    guard: term = 0
+                    transit:
+                }
             }
             api Heartbeat {
                 proc: HeartbeatImpl
@@ -305,7 +305,7 @@ class SoftSyncWarningTest {
             intermediateWarnings.none {
                 it.toString().contains("not synchronized") ||
                     it.toString().contains("exactly two sync peers") ||
-                    it.toString().contains("no `provider`")
+                    it.toString().contains("no `service`")
             },
             "intermediate must not require complete sync; got: $intermediateWarnings",
         )
@@ -411,7 +411,7 @@ class SoftSyncWarningTest {
             """
             proc Core {
                 constructor initially(args : List<String>) { transit: }
-                provider transition bump() {
+                service transition bump() {
                     guard: true
                 }
             }
@@ -431,7 +431,7 @@ class SoftSyncWarningTest {
             checked.procDecls,
         )
         val bump = warnings.map { it.toStructuredDiagnostic(file) }.filter {
-            it.message.contains("bump") && it.message.contains("provider with no clients")
+            it.message.contains("bump") && it.message.contains("service with no clients")
         }
         assertTrue(bump.isNotEmpty(), "expected bump warning; got: $warnings")
         assertEquals(bump[0].startLine, bump[0].endLine, "signature-only underline; got: $bump")

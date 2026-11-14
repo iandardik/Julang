@@ -46,7 +46,7 @@ internal fun analyzeTlaRelevantVars(
     val varsByLeaf = pclasses.mapValues { (_, pc) ->
         pc.localDecls().filterIsInstance<VarNode>().map { it.name }.toSet()
     }
-    val lists = collectEmittedOfferLists(offers)
+    val lists = collectEmittedOfferLists(offers, pclasses)
     val relevant = mutableSetOf<Pair<String, String>>()
     // Procfun leaves are always written by *_call / *_ret handshake; keep every state var.
     procFunLeafNames.forEach { leafName ->

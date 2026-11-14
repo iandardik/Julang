@@ -5,30 +5,30 @@
 | File | Role |
 |------|------|
 | [`main.jul`](../../input/list_server/main.jul) | `RunningList`, composition, `compile` |
-| [`server.jul`](../../input/list_server/server.jul) | HTTP starter + `listHandler` procfun |
+| [`server.jul`](../../input/list_server/server.jul) | `serveHttp` + `listHandler` procfun |
 | [`printer.jul`](../../input/list_server/printer.jul) | Periodic `getList` + print |
 
 ## Intent
 
-Same architectural pattern as the [inc server](inc-server.md), but the resource is a **`List<String>`**. Clients append via HTTP; the list lives only inside `RunningList`, exposed through `provider` / `client` actions.
+Same architectural pattern as the [inc server](inc-server.md), but the resource is a **`List<String>`**. HTTP handlers append; the list lives only inside `RunningList`, exposed as a **`service` hub** with **`client`** callers.
 
 ## The list as an interface
 
 ```jul
 import julay.funlib.listOf
 
-proc RunningList {
+static proc RunningList {
     var list : List<String>
 
     constructor initially(args : List<String>) {
         transit: list := listOf()
     }
 
-    provider transition getList(lst : List<String>) {
+    service transition getList(lst : List<String>) {
         guard: lst = list
     }
 
-    provider transition getAndAppend(e : String, lst : List<String>) {
+    service transition getAndAppend(e : String, lst : List<String>) {
         guard: lst = list
         transit: list := list + listOf(e)
     }
@@ -48,7 +48,7 @@ proc ListServer := RunningList || Printer || ServerLogic
 
 ### HTTP handler (`server.jul`)
 
-`listHandler` procfun (registered via `handler = listHandler` on `listen`):
+`listHandler` procfun (registered via `serveHttp(8000, listHandler)`):
 
 1. Stores the request body
 2. Syncs `getAndAppend(e, lst)` with `e = reqBody`
@@ -69,10 +69,10 @@ Periodically `getList`s, prints the list via funlib `println` in an `after:` blo
 java -jar build/libs/julayc.jar input/list_server/main.jul
 ```
 
-This writes `ListServer.jar` in the current directory. Start the server on port **8000**, then POST bodies to append:
+This writes `ListServer` in the current directory. Start the server on port **8000**, then POST bodies to append:
 
 ```bash
-java -jar ListServer.jar          # terminal 1
+./ListServer          # terminal 1
 
 curl -s -X POST -d 'hello' http://localhost:8000/
 curl -s -X POST -d 'world' http://localhost:8000/
@@ -97,9 +97,9 @@ curl -s -X POST -d 'world' http://localhost:8000/
 ## Language features showcased
 
 - `List<String>` state and list concatenation in `transit`
-- `provider` interface for a collection resource
+- Static `service` hub for a collection resource; handlers/printer as `client`
 - Procfun HTTP handler + modular layout (same pattern as echo/inc)
-- Printer as a separate `client` of `getList`
+- Printer as a separate peer on `getList`
 
 ## Compare to inc server
 

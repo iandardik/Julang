@@ -130,18 +130,18 @@ class ObjSortFieldTest {
             """.trimIndent(),
         )
         val cwd = java.io.File(".").absoluteFile
-        val jar = java.io.File(cwd, "App.jar")
+        val binary = java.io.File(cwd, "App")
         val tla = java.io.File(cwd, "Sys.tla")
         val cfg = java.io.File(cwd, "Sys.cfg")
-        jar.delete()
+        binary.delete()
         tla.delete()
         cfg.delete()
         try {
             compileJulFile(main, keepBuild = false)
-            assertTrue(jar.exists(), "JAR App should compile despite sort-bearing objs used only by specs")
+            assertTrue(binary.exists(), "Go binary App should compile despite sort-bearing objs used only by specs")
             assertTrue(tla.exists() && cfg.exists(), "spec Sys should emit TLA")
         } finally {
-            jar.delete()
+            binary.delete()
             tla.delete()
             cfg.delete()
             root.toFile().deleteRecursively()
@@ -153,18 +153,18 @@ class ObjSortFieldTest {
         val source = File("regression/input/spec/mixedjarsort/main.jul")
         assertTrue(source.exists(), "missing ${source.path}")
         val cwd = java.io.File(".").absoluteFile
-        val jar = java.io.File(cwd, "PeerApp.jar")
+        val binary = java.io.File(cwd, "PeerApp")
         val tla = java.io.File(cwd, "Sys.tla")
         val cfg = java.io.File(cwd, "Sys.cfg")
-        jar.delete()
+        binary.delete()
         tla.delete()
         cfg.delete()
         try {
             compileJulFile(source.toPath(), keepBuild = false)
-            assertTrue(jar.exists(), "expected PeerApp.jar from mixedjarsort fixture")
+            assertTrue(binary.exists(), "expected PeerApp Go binary from mixedjarsort fixture")
             assertTrue(tla.exists() && cfg.exists(), "expected Sys.tla/cfg from mixedjarsort fixture")
         } finally {
-            jar.delete()
+            binary.delete()
             tla.delete()
             cfg.delete()
         }
@@ -199,13 +199,13 @@ class ObjSortFieldTest {
         )
 
         val cwd = java.io.File(".").absoluteFile
-        val jar = java.io.File(cwd, "Bad.jar")
-        jar.delete()
+        val binary = java.io.File(cwd, "Bad")
+        binary.delete()
         try {
             compileJulFile(file, keepBuild = false)
-            assertFalse(jar.exists(), "JAR must not be produced for sort-bearing target")
+            assertFalse(binary.exists(), "Go binary must not be produced for sort-bearing target")
         } finally {
-            jar.delete()
+            binary.delete()
             dir.toFile().deleteRecursively()
         }
     }
@@ -250,13 +250,13 @@ class ObjSortFieldTest {
         val cwd = java.io.File(".").absoluteFile
         val tla = java.io.File(cwd, "Good.tla")
         val cfg = java.io.File(cwd, "Good.cfg")
-        val jar = java.io.File(cwd, "Bad.jar")
-        listOf(tla, cfg, jar).forEach { it.delete() }
+        val binary = java.io.File(cwd, "Bad")
+        listOf(tla, cfg, binary).forEach { it.delete() }
         try {
             compileJulFile(file, keepBuild = false)
             // prepareCheckedCompilation fails entirely if any jar target is sort-bearing,
-            // so neither TLA nor JAR should be emitted when Bad is co-targeted.
-            assertFalse(jar.exists(), "Bad.jar must not exist")
+            // so neither TLA nor binary should be emitted when Bad is co-targeted.
+            assertFalse(binary.exists(), "Bad binary must not exist")
             // Spec-only compile of Good still works when Bad is not a compile target:
             file.writeText(
                 """
@@ -276,7 +276,7 @@ class ObjSortFieldTest {
             assertTrue(tla.exists(), "expected Good.tla")
             assertTrue(cfg.exists(), "expected Good.cfg")
         } finally {
-            listOf(tla, cfg, jar).forEach { it.delete() }
+            listOf(tla, cfg, binary).forEach { it.delete() }
             dir.toFile().deleteRecursively()
         }
     }
@@ -306,17 +306,17 @@ class ObjSortFieldTest {
         val cwd = java.io.File(".").absoluteFile
         val tla = java.io.File(cwd, "Env.tla")
         val cfg = java.io.File(cwd, "Env.cfg")
-        val jar = java.io.File(cwd, "Env.jar")
-        listOf(tla, cfg, jar).forEach { it.delete() }
+        val binary = java.io.File(cwd, "Env")
+        listOf(tla, cfg, binary).forEach { it.delete() }
         try {
             compileJulFile(source.toPath(), keepBuild = false)
             assertTrue(tla.exists(), "expected Env.tla")
             assertTrue(cfg.exists(), "expected Env.cfg")
-            assertFalse(jar.exists(), "spec must not produce JAR")
+            assertFalse(binary.exists(), "spec must not produce a Go binary")
             val cfgText = cfg.readText()
             assertTrue(cfgText.contains("NodeSet"), "expected NodeSet in cfg;\n$cfgText")
         } finally {
-            listOf(tla, cfg, jar).forEach { it.delete() }
+            listOf(tla, cfg, binary).forEach { it.delete() }
         }
     }
 
@@ -326,8 +326,6 @@ class ObjSortFieldTest {
         val inner = ObjClassType(
             "Inner",
             listOf(Variable("d", node)),
-            { _, _ -> throw UnsupportedOperationException() },
-            { _, _ -> throw UnsupportedOperationException() },
         )
         assertTrue(inner.containsUninterpretedType())
         val detail = sortBearingDetail(inner)

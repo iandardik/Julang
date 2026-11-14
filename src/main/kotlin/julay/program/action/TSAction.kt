@@ -1,39 +1,23 @@
 package julay.program.action
 
-import com.microsoft.z3.BoolExpr
-import julay.concurrency.SyncChannel
-import julay.program.Constraint
-import julay.program.sync.BoolExprFast
 import julay.tools.assert
 
 /**
- * Represents a symbolic action for a given transition system / proc.
- * This class is particular to a transition system / proc because it dictates when it's enabled (via the guard). Usually
- * a symbolic action also describes how the transition system transits to a new state, but we do not include this here
- * (each TransitionSystem class decides how the transit should happen).
+ * Symbolic action role metadata used by the compiler (alphabet / modifiers).
+ * Runtime SyncChannel / Z3 guards have been removed; Go codegen is the JAR backend.
  */
 data class TSAction(
     val symAction: SymbolicAction,
-    val guard: BoolExpr,
     val syncRole: SyncRole = SyncRole.Default,
-    /**
-     * When non-null, sync on this dedicated session SyncChannel instead of the static
-     * [Program.actionTable] channel.
-     */
-    val syncChannel: SyncChannel<Constraint, SyncPayload>? = null,
-    /**
-     * Optional [BoolExprFast] for this action (codegen / libraries). When non-null, Julay may
-     * use it instead of [guard] to avoid Z3 on sat/commit; null means BoolExpr/[guard] only.
-     */
-    val fastGuard: BoolExprFast? = null,
 ) {
     /**
-     * [Default] / [Internal] come from source tags (untagged / `internal`).
-     * [Provider] comes from the `provider` tag (one hub per action name).
-     * [Client] comes from the `client` tag (only syncs with a provider, not other clients).
-     * Session is tracked on [SymbolicAction.isSession], not as a sync role.
+     * [Default] comes from untagged actions (composition-private when paired).
+     * [Internal] comes from the `internal` tag (local).
+     * [Timer] comes from the `timer` tag (local like Internal).
+     * [Service] comes from the `service` tag (one hub per action name; stays external).
+     * [Client] comes from the `client` tag (only syncs with a service).
      */
-    enum class SyncRole { Default, Internal, Provider, Client }
+    enum class SyncRole { Default, Internal, Timer, Service, Client }
 
     init {
         assert(
@@ -45,16 +29,12 @@ data class TSAction(
             "Expected non-Internal role => !SymbolicAction.isInternal",
         )
         assert(
-            !(symAction.isSession && syncRole == SyncRole.Provider),
-            "Session actions cannot use Provider sync role",
+            !(syncRole == SyncRole.Timer) || symAction.isTimer,
+            "Expected Timer role => SymbolicAction.isTimer",
         )
         assert(
-            !(symAction.isSession && syncRole == SyncRole.Client),
-            "Session actions cannot use Client sync role",
-        )
-        assert(
-            !(symAction.isSession && syncRole == SyncRole.Internal),
-            "Session actions cannot use Internal sync role",
+            !(syncRole != SyncRole.Timer) || !symAction.isTimer,
+            "Expected non-Timer role => !SymbolicAction.isTimer",
         )
     }
 }

@@ -1,31 +1,19 @@
-import julay.proclib.Timer
+import julay.funlib.setTimer
 import julay.funlib.exitProgram
 import julay.funlib.println
 
-proc Driver {
+static proc Driver {
     var step : String
 
     constructor initially(args : List<String>) {
-        transit: step := "create"
-    }
-
-    session transition createTimer() {
-        guard: step = "create"
-        transit: step := "start"
-    }
-
-    session transition startTimer(time : Int) {
-        guard: step = "start" & time = 1
         transit: step := "wait"
+        after:
+            setTimer("timeout", 50)
     }
 
-    session transition timeout() {
+    timer transition timeout() {
         guard: step = "wait"
         transit: step := "print"
-    }
-
-    session transition cancelTimer() {
-        guard: false
     }
 
     internal transition println(msg : String) {
@@ -37,6 +25,6 @@ proc Driver {
     }
 }
 
-proc TimerSmoke := Driver || Timer
+proc TimerSmoke := Driver
 
 compile TimerSmoke

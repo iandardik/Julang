@@ -68,9 +68,6 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
                 ResolvedSymbol.ImportedDecl(decl, module.modulePath, module.sourcePath)
             }
         }
-        LibraryRegistry.kotlinLibraries.forEach { lib ->
-            symbols[LibraryRegistry.proclibModulePath(lib.julName)] = ResolvedSymbol.Library(lib)
-        }
         FunBuiltinRegistry.all.forEach { builtin ->
             symbols[qualifiedKey(listOf(JULAY_MODULE, JULAY_FUNLIB, builtin.name))] = ResolvedSymbol.FunLib(builtin)
         }

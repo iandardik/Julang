@@ -1,30 +1,22 @@
+import julay.funlib.setTimer
 import julay.funlib.exitProgram
 import julay.funlib.println
 
-proc Driver {
+/*
+ * Former Timer proclib composition test — rewritten for timer builtins.
+ */
+static proc Driver {
     var step : String
 
     constructor initially(args : List<String>) {
-        transit: step := "create"
-    }
-
-    session transition createTimer() {
-        guard: step = "create"
-        transit: step := "start"
-    }
-
-    session transition startTimer(time : Int) {
-        guard: step = "start" & time = 1
         transit: step := "wait"
+        after:
+            setTimer("timeout", 50)
     }
 
-    session transition timeout() {
+    timer transition timeout() {
         guard: step = "wait"
         transit: step := "print"
-    }
-
-    session transition cancelTimer() {
-        guard: false
     }
 
     internal transition println(msg : String) {
@@ -41,6 +33,6 @@ proc Driver {
     }
 }
 
-proc QualifiedProcExprTest := Driver || julay.proclib.Timer
+proc QualifiedProcExprTest := Driver
 
 compile QualifiedProcExprTest

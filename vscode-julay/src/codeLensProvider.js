@@ -3,7 +3,7 @@ const vscode = require("vscode");
 const { fetchAlphabet } = require("./alphabet");
 
 const PROC_DECL =
-  /^\s*(?:export\s+)?(proc|spec|procfun|api)\s+([A-Za-z_][A-Za-z0-9_]*)\b/;
+  /^\s*(?:export\s+)?(?:static\s+)?(proc|spec|procfun|api)\s+([A-Za-z_][A-Za-z0-9_]*)\b/;
 
 class JulayCodeLensProvider {
   constructor() {
@@ -58,9 +58,29 @@ class JulayCodeLensProvider {
     }
     const alphabetScope =
       result.data.scopes.find((s) => s.name === scope) || result.data.scopes[0];
-    const n = alphabetScope?.external?.length ?? 0;
+    const external = alphabetScope?.external || [];
+    const n = external.length;
+    const hasService = external.some((o) => o.modifier === "service");
+    const hasClient = external.some((o) => o.modifier === "client");
+    const hidden = alphabetScope?.compositionHidden || [];
+    const hiddenSvc = hidden.some(
+      (g) =>
+        g.role === "service/client" ||
+        (g.offers || []).some((o) => o.modifier === "service" || o.modifier === "client"),
+    );
+    let title = `External alphabet (${n} action${n === 1 ? "" : "s"})`;
+    if (hasService || hasClient) {
+      const bits = [];
+      if (hasService) bits.push("service");
+      if (hasClient) bits.push("client");
+      title += ` · ${bits.join("/")}`;
+    } else if (hiddenSvc) {
+      title += " · service/client synced";
+    } else if (hidden.length > 0) {
+      title += ` · ${hidden.length} scoped`;
+    }
     codeLens.command = {
-      title: `External alphabet (${n} action${n === 1 ? "" : "s"})`,
+      title,
       command: "julay.showExternalAlphabet",
       arguments: [{ scope }],
     };

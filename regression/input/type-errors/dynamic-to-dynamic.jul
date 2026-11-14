@@ -1,0 +1,28 @@
+import julay.funlib.println
+
+/*
+ * Two dynamic procs syncing is an illegal shape.
+ */
+
+proc A {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    transition ping() {
+    }
+}
+
+proc B {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    transition ping() {
+        after: println("pong")
+    }
+}
+
+proc DynToDyn := A || B
+
+compile DynToDyn

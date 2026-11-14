@@ -19,7 +19,7 @@ class EmptyConcatGuardElisionTest {
                 import julay.funlib.exitProgram
                 import julay.funlib.println
 
-                proc S {
+                static proc S {
                     var n : Int
                     var done : Boolean
                     constructor initially(args : List<String>) {
@@ -54,23 +54,26 @@ class EmptyConcatGuardElisionTest {
             )
             compileJulFile(src, keepBuild = true)
             assertTrue(buildDir.exists(), "expected $buildDir after keepBuild compile")
-            val ktText = buildDir.listFiles()
-                ?.filter { it.extension == "kt" }
+            val goText = buildDir.listFiles()
+                ?.filter { it.extension == "go" }
                 ?.joinToString("\n") { it.readText() }
                 ?: ""
-            assertTrue(ktText.contains("handoff"), "expected generated source;\n$ktText")
+            assertTrue(goText.contains("handoff"), "expected generated source;\n$goText")
             assertFalse(
-                ktText.contains("mkConcat"),
-                "expected empty-string concat to be elided (no mkConcat) from guards;\n$ktText",
+                goText.contains("+ \"\"") || goText.contains("+\"\""),
+                "expected empty-string concat to be elided from guards;\n$goText",
             )
             assertTrue(
-                ktText.contains("n.toString()") || ktText.contains("SyncTerm.ToString"),
-                "expected string coerce embedding;\n$ktText",
+                goText.contains("julay.ToStringOf") ||
+                    goText.contains("strconv.") ||
+                    goText.contains("fmt."),
+                "expected Go string coerce embedding;\n$goText",
             )
         } finally {
             dir.toFile().deleteRecursively()
             buildDir.deleteRecursively()
             File("CoerceElide.jar").delete()
+            File("CoerceElide").delete()
         }
     }
 
@@ -85,7 +88,7 @@ class EmptyConcatGuardElisionTest {
                 import julay.funlib.exitProgram
                 import julay.funlib.println
 
-                proc S {
+                static proc S {
                     var n : Int
                     var done : Boolean
                     constructor initially(args : List<String>) {
@@ -120,23 +123,26 @@ class EmptyConcatGuardElisionTest {
             )
             compileJulFile(src, keepBuild = true)
             assertTrue(buildDir.exists(), "expected $buildDir after keepBuild compile")
-            val ktText = buildDir.listFiles()
-                ?.filter { it.extension == "kt" }
+            val goText = buildDir.listFiles()
+                ?.filter { it.extension == "go" }
                 ?.joinToString("\n") { it.readText() }
                 ?: ""
-            assertTrue(ktText.contains("handoff"), "expected generated source;\n$ktText")
+            assertTrue(goText.contains("handoff"), "expected generated source;\n$goText")
             assertFalse(
-                ktText.contains("mkConcat"),
-                "expected empty-string concat to be elided (no mkConcat) from guards;\n$ktText",
+                goText.contains("+ \"\"") || goText.contains("+\"\""),
+                "expected empty-string concat to be elided from guards;\n$goText",
             )
             assertTrue(
-                ktText.contains("intToString") || ktText.contains("SyncTerm.ToString"),
-                "expected nested arithmetic string coerce;\n$ktText",
+                goText.contains("julay.ToStringOf") ||
+                    goText.contains("strconv.") ||
+                    goText.contains("fmt."),
+                "expected nested arithmetic Go string coerce;\n$goText",
             )
         } finally {
             dir.toFile().deleteRecursively()
             buildDir.deleteRecursively()
             File("NestedArithCoerce.jar").delete()
+            File("NestedArithCoerce").delete()
         }
     }
 }

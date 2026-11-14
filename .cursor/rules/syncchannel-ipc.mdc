@@ -1,14 +1,30 @@
 ---
-description: Julay inter-process communication must use SyncChannel only
+description: Julay Go-channel IPC — service/client, scoped ordinary, compile-time direction
 globs: src/main/kotlin/julay/**/*.kt
 alwaysApply: false
 ---
 
-# SyncChannel-only IPC
+# Go-channel IPC (replaces SyncChannel / SMT sync)
 
-All inter-process communication in Julay must go exclusively through `SyncChannel` (action rendezvous). Do not add shared caches, mutable statics, or other cross-process shortcuts.
+Inter-process communication uses Go channels. Do not add shared caches, mutable statics, or other cross-process shortcuts. There is **no Z3 / SMT** on the Go run path.
 
-- Default and `service` actions → sync size 2
-- `internal` actions → sync size 1
-- Intentional deadlock → a `service` with no consumers (not a synthetic `deadlock` action)
-- Do not reintroduce type-factory interning/caching in `ListType` / `MapType` / `SetType` as an optimization that blurs process isolation assumptions
+## Channels and modifiers
+
+- **`service` transition** — hub (old provider). Stays in the **external** alphabet; channel key is the public action name (global). At most one service per action name.
+- **`client` transition** — syncs **only** with a matching `service`. Meeting a service removes the client from the external alphabet; clients never sync with each other.
+- **Ordinary (untagged)** — when peers meet under `||`, they become **composition-private** (scoped channel key, composition-hidden). Two-static or hub shapes still apply for untagged multi-class offers that remain external.
+- **`internal` / `timer`** — occurrence-local keys (not name-global). Keep these; do not replace with service/client.
+- A `static proc` appears at most once; only dynamic procs may be spawned via non-`initially` constructors.
+
+## Sender / receiver
+
+- Deduce direction at **compile time** from guard bindings (`=` / `<=>` / `in`) and body reads (`ChannelDirectionPass`).
+- Hub / service direction must be uniform; tie → dynamic sends, hub receives.
+- **Reply args:** receiver-only bindings that the sender body reads → reply channel.
+- Do not reintroduce runtime solver-based rendezvous or SyncChannel session affinity.
+
+## Composition
+
+- `||` lists system members. Ordinary syncs that meet under a compose step get a **scope-private** channel key and leave the external alphabet.
+- `service` stays external so further clients can still sync on the same public name.
+- No `provider` / `session` modifiers; no `exitSession` / `killSessionPeer`.

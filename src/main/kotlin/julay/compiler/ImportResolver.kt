@@ -2,15 +2,15 @@ package julay.compiler
 
 import julay.compiler.ast.*
 import julay.program.library.JULAY_MODULE
-import julay.program.library.JulLibrary
 import julay.program.library.LibraryRegistry
 import java.nio.file.Path
 
 sealed class ResolvedSymbol {
     abstract val flatName: String
 
-    data class Library(val lib: JulLibrary) : ResolvedSymbol() {
-        override val flatName: String = lib.julName
+    /** Former Kotlin-native proclib leaf (no longer registered). */
+    data class Library(val julName: String) : ResolvedSymbol() {
+        override val flatName: String = julName
     }
 
     data class FunLib(val builtin: FunBuiltin) : ResolvedSymbol() {
@@ -37,7 +37,6 @@ fun resolveQualifiedName(parts: List<String>, moduleSymbols: Map<String, Resolve
     val key = qualifiedKey(parts)
     moduleSymbols[key]?.let { return it }
     FunBuiltinRegistry.resolveQualified(parts)?.let { return ResolvedSymbol.FunLib(it) }
-    LibraryRegistry.resolveQualified(parts)?.let { return ResolvedSymbol.Library(it) }
     return null
 }
 
@@ -49,9 +48,6 @@ fun resolveImportTarget(
     val parts = qn.parts()
     if (parts.size < 2) return null
     resolveQualifiedName(parts, moduleSymbols)?.let { return it }
-    if (LibraryRegistry.isProclibImport(parts)) {
-        LibraryRegistry.resolve(JULAY_MODULE, parts[2])?.let { return ResolvedSymbol.Library(it) }
-    }
     return null
 }
 
@@ -133,7 +129,6 @@ fun resolveProcLeaf(
     if (node.isQualified()) {
         val parts = node.qualifiedParts()!!
         val resolved = resolveQualifiedName(parts, moduleSymbols)
-            ?: LibraryRegistry.resolveQualified(parts)?.let { ResolvedSymbol.Library(it) }
         if (resolved == null) {
             return null to OneLocCompileError(
                 node.programLocation(),

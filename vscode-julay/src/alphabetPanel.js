@@ -156,7 +156,7 @@ function alphabetHtml(scope, entryFile, internal, leafProcs) {
       ${sourceInternalSection}
 
       <h2>Synchronized (composition-hidden)</h2>
-      <p class="hint">Internalized by <code>||</code> synchronization — not source <code>internal</code>.</p>
+      <p class="hint">Ordinary peers scoped by <code>||</code>, or <code>service</code>/<code>client</code> meetings (clients leave the external alphabet; the service may still appear under External). Not source <code>internal</code>.</p>
       ${syncSection}
     </div>
   `);
@@ -177,7 +177,7 @@ function renderCompositionGraph(graph, scopeName) {
   }).replace(/</g, "\\u003c");
   return `
     <h2>Composition sync</h2>
-    <p class="hint">Immediate <code>||</code> children and their composition syncs; for a leaf scope, also procfuns that leaf calls. Solid lines are syncs; dotted arrows are spawn-await procfun calls (caller→callee). Uncheck a proc’s box to hide it and its edges.</p>
+    <p class="hint">Immediate <code>||</code> children and their composition syncs (ordinary scoped peers and <code>service</code>/<code>client</code> meetings); for a leaf scope, also procfuns that leaf calls. Solid lines are syncs; dotted arrows are spawn-await procfun calls (caller→callee). Uncheck a proc’s box to hide it and its edges.</p>
     <script type="application/json" id="compositionGraphData">${payload}</script>
     <div class="diagram-wrap" id="compositionSvgWrap"></div>
     <div id="compositionFilters" class="diagram-filters"></div>
@@ -521,13 +521,26 @@ function renderSyncGroups(groups) {
         .join(" ‖ ");
       const args = g.args && g.args.length ? `(${g.args.join(", ")})` : "()";
       const sample = (g.offers || [])[0];
+      const mods = new Set(
+        (g.offers || [])
+          .map((o) => o.modifier)
+          .filter((m) => m && m !== "ordinary"),
+      );
       const role = g.role
         || (sample?.isConstructor
           ? "constructor"
-          : sample?.isSession
-            ? "session"
-            : sample?.modifier || "ordinary");
-      return `<li><code>${esc(g.name)}${esc(args)}</code> — ${esc(role)} — synchronized: ${peers}</li>`;
+          : sample?.isTimer
+            ? "timer"
+            : mods.has("service") && mods.has("client")
+              ? "service/client"
+              : sample?.modifier || "ordinary");
+      const channelHint =
+        g.channelKey && g.channelKey !== g.name
+          ? ` <span class="hint">(scoped channel)</span>`
+          : mods.has("service")
+            ? ` <span class="hint">(public channel)</span>`
+            : "";
+      return `<li><code>${esc(g.name)}${esc(args)}</code> — ${esc(role)}${channelHint} — synchronized: ${peers}</li>`;
     })
     .join("\n");
   return `<ul>${items}</ul>`;

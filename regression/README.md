@@ -1,6 +1,6 @@
 # Julang regression tests
 
-End-to-end checks for Julang programs. Each case compiles a `.jul` file, runs the generated JAR(s), and compares terminal output and/or HTTP responses to what you declare in YAML.
+End-to-end checks for Julang programs. Each case compiles a `.jul` file, runs the generated **native binary**(ies), and compares terminal output and/or HTTP responses to what you declare in YAML.
 
 Language documentation for users lives under [`docs/`](../docs/README.md). This page is for contributors extending the test harness.
 
@@ -29,9 +29,9 @@ Regression tests are `julay.regression.RegressionTest` and run as part of the no
 1. Creates an isolated workspace under `build/regression-workspace/`
 2. Copies `julayc.jar` into that workspace
 3. Compiles the `.jul` file (same as `java -jar julayc.jar <source>`)
-4. Runs each listed program and checks expectations
+4. Runs each listed program binary and checks expectations
 
-**Note:** Each compile spawns a temporary Gradle build for generated code, so the suite is slow. HTTP cases also run **one at a time** (shared port 8000).
+**Note:** Each compile invokes `go build` on generated sources, so the suite needs a Go toolchain. HTTP cases also run **one at a time** (shared port 8000).
 
 ## Case file structure
 
@@ -42,28 +42,28 @@ source: regression/input/basic/test1.jul   # required: path to .jul file
 tags:                           # optional
   - http
 programs:                       # required for positive cases
-  - name: TermTest1             # must match a name listed in `compile ...` (JAR target)
-    dependsOn: EchoServer       # optional: start another program’s JAR first
+  - name: TermTest1             # must match a name listed in `compile ...` (binary target)
+    dependsOn: EchoServer       # optional: start another program’s binary first
     expectFailure: false        # optional: set true when the program run should fail
     run:                        # required per program entry (unless expectFailure-only)
       # ... run options below
 ```
 
-A single `.jul` file may list **multiple** JAR targets in `compile` (e.g. `compile EchoServer, EchoClient`). List each target you want to exercise under `programs`. The harness compiles the file **once** per case and produces one JAR per name (e.g. `TermTest1.jar`).
+A single `.jul` file may list **multiple** targets in `compile` (e.g. `compile EchoServer, EchoClient`). List each target you want to exercise under `programs`. The harness compiles the file **once** per case and produces one binary per name (e.g. `TermTest1`).
 
 ### `tags`
 
 | Tag | Effect |
 |-----|--------|
-| `http` | Case runs under a global lock so only one HTTP test uses port 8000 at a time. Use for any case that starts `HttpServer` or depends on localhost:8000. |
+| `http` | Case runs under a global lock so only one HTTP test uses port 8000 at a time. Use for any case that calls `serveHttp` or depends on localhost:8000. |
 
 ### `programs[].name`
 
-Must match a `compile` JAR target in the source file exactly (case-sensitive). This is also the JAR base name: `TermTest1` → `TermTest1.jar`.
+Must match a `compile` binary target in the source file exactly (case-sensitive). This is also the binary name: `TermTest1` → `./TermTest1`.
 
 ### `programs[].dependsOn`
 
-Optional. Name of another program in the **same** case file whose JAR should be started in the **background** before this program runs. Typical pattern: start `EchoServer`, then run `EchoClient`.
+Optional. Name of another program in the **same** case file whose binary should be started in the **background** before this program runs. Typical pattern: start `EchoServer`, then run `EchoClient`.
 
 The harness waits until **port 8000** accepts connections before continuing.
 
@@ -83,7 +83,7 @@ All fields under `run` are optional except that each program should have a `run`
 | Field | Default | Description |
 |-------|---------|-------------|
 | `stdin` | `[]` | Lines fed to the process stdin. A newline is appended to each entry if it does not already end with `\n`. Used with funlib `readln` and similar. |
-| `args` | `[]` | Command-line arguments passed after the JAR path (`java -jar Prog.jar …`). Bound to `initially(args : List<String>)`. |
+| `args` | `[]` | Command-line arguments passed to the binary. Bound to `initially(args : List<String>)`. |
 
 Example:
 
@@ -100,15 +100,15 @@ The harness picks a mode based on which fields you set:
 
 | Mode | When | Behavior |
 |------|------|----------|
-| **Foreground** | Default (no `http`, no `background`) | Run JAR until it exits or `timeoutMs` elapses. |
+| **Foreground** | Default (no `http`, no `background`) | Run binary until it exits or `timeoutMs` elapses. |
 | **HTTP + server** | `http` list is non-empty | Start program in background, wait for port 8000, send each HTTP check, capture stdout for `durationMs` (default 3s), then stop. |
-| **Background** | `background: true` | Start JAR in background, capture stdout for `durationMs` or `timeoutMs`, then stop. |
+| **Background** | `background: true` | Start binary in background, capture stdout for `durationMs` or `timeoutMs`, then stop. |
 
 You do not need `background: true` when using `http`; the harness starts the server automatically.
 
 ### HTTP checks (`http`)
 
-List of POST requests sent to **`http://localhost:8000/`** (plain text body). Cases that use `HttpServer` should call `startServer` with port `8000` so the probe can connect.
+List of POST requests sent to **`http://localhost:8000/`** (plain text body). Cases that use `serveHttp` should listen on port `8000` so the probe can connect.
 
 ```yaml
 http:
@@ -141,7 +141,7 @@ Use when a `.jul` file should **not** compile. No `programs` block is needed.
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `expectCompileFailure` | `false` | When `true`, the harness expects **no program JARs** to be produced. |
+| `expectCompileFailure` | `false` | When `true`, the harness expects **no program binaries** to be produced. |
 | `expectCompileOutputContains` | `[]` | Optional substrings that must appear in compiler stdout (e.g. `"type errors"`, `"compile errors"`). |
 
 ```yaml
@@ -151,7 +151,7 @@ expectCompileOutputContains:
   - "Expected assignment to \"x\" (Int) but got expression of type Bool"
 ```
 
-The test **passes** when compilation produces no JARs. If any JAR is produced, the test fails. When `expectCompileOutputContains` is set, each listed substring must appear in the compiler output.
+The test **passes** when compilation produces no binaries. If any binary is produced, the test fails. When `expectCompileOutputContains` is set, each listed substring must appear in the compiler output.
 
 ### Run failure (program-level)
 
@@ -254,8 +254,8 @@ Capture once by running the program locally, or copy the stdout section from a f
 
 ## Limitations
 
-- **Port 8000** is what the HTTP probe uses; cases must `startServer` on that port. Only one HTTP case runs at a time.
-- **Compile failures** on positive cases are detected when no program JARs appear in the workspace (the compiler CLI may still exit 0 on semantic errors).
+- **Port 8000** is what the HTTP probe uses; cases must `serveHttp` on that port. Only one HTTP case runs at a time.
+- **Compile failures** on positive cases are detected when no program binaries appear in the workspace (the compiler CLI may still exit 0 on semantic errors).
 - Programs that never exit need `background: true` or an `http`/`durationMs` capture path, not foreground `timeoutMs` alone (unless using `expectFailure: true` to assert a timeout).
 
 ## Implementation reference

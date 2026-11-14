@@ -14,12 +14,12 @@ import julay.compiler.pass.reachableProcFunNamesFromHosts
 /**
  * Immediate children of [root] as diagram nodes, with edges for actions that
  * composition-hide while folding those children (not nested syncs inside a child).
- * Also includes provider↔client meetings (each client leaves the external alphabet
- * with the provider; clients never gain edges to each other).
+ * Also includes service↔client meetings (each client leaves the external alphabet
+ * with the service; clients never gain edges to each other).
  *
  * For a **leaf** analyze root only: called procfuns (bare and api-qualified) are
  * added as nodes with unlabeled directed edges caller→callee (spawn-await, not
- * SyncChannel peers). Composites never lift nested call edges onto their diagram.
+ * channel peers). Composites never lift nested call edges onto their diagram.
  */
 data class TopLevelSyncGraph(
     val nodes: List<String>,
@@ -31,7 +31,7 @@ data class TopLevelSyncEdge(
     val b: String,
     /**
      * Empty for directed procfun call edges (`a` = caller, `b` = callee);
-     * otherwise undirected composition-hidden / provider-client action names.
+     * otherwise undirected composition-hidden / service-client action names.
      */
     val actions: List<String>,
 )
@@ -103,6 +103,7 @@ fun computeTopLevelSyncGraph(
             val leftIds = left.map { it.leafId }.toSet()
             val rightIds = right.map { it.leafId }.toSet()
 
+            // Ordinary: private scoped channel keys.
             composed
                 .filter { it.compositionHidden && it.channelKey.startsWith("$scopeId#") }
                 .groupBy { it.channelKey }
@@ -118,27 +119,24 @@ fun computeTopLevelSyncGraph(
                     addEdgesBetween(leftNodes, rightNodes, action)
                 }
 
-            // Provider↔client meetings only involve offers that are still external at this
-            // compose step. Already-hidden clients must not gain edges to later clients
-            // (clients never sync with each other — only with the provider hub).
-            val leftExt = left.filter { !it.sourceInternal && !it.compositionHidden }
-            val rightExt = right.filter { !it.sourceInternal && !it.compositionHidden }
-            val leftByName = leftExt.groupBy { it.name }
-            val rightByName = rightExt.groupBy { it.name }
+            // Service ↔ client: clients leave the external alphabet but keep a public channel key.
+            // Detect from pre-compose externals so only meetings at this fold are recorded.
+            val leftByName = left.filter { !it.isLocal && !it.compositionHidden }.groupBy { it.name }
+            val rightByName = right.filter { !it.isLocal && !it.compositionHidden }.groupBy { it.name }
             for (name in leftByName.keys.intersect(rightByName.keys)) {
                 if (name == "initially") continue
                 val l = leftByName.getValue(name)
                 val r = rightByName.getValue(name)
-                val leftProviders = l.filter { it.isProvider }.mapNotNull { tags[it.leafId] }.toSet()
-                val rightProviders = r.filter { it.isProvider }.mapNotNull { tags[it.leafId] }.toSet()
-                val leftClients = l.filter { it.isClient }.mapNotNull { tags[it.leafId] }.toSet()
-                val rightClients = r.filter { it.isClient }.mapNotNull { tags[it.leafId] }.toSet()
-                if (leftProviders.isNotEmpty() && rightClients.isNotEmpty()) {
-                    addEdgesBetween(leftProviders, rightClients, name)
+                val leftHasService = l.any { it.isService }
+                val rightHasService = r.any { it.isService }
+                val leftHasClient = l.any { it.isClient }
+                val rightHasClient = r.any { it.isClient }
+                if (!((leftHasService && rightHasClient) || (rightHasService && leftHasClient))) {
+                    continue
                 }
-                if (rightProviders.isNotEmpty() && leftClients.isNotEmpty()) {
-                    addEdgesBetween(rightProviders, leftClients, name)
-                }
+                val leftNodes = l.mapNotNull { tags[it.leafId] }.toSet()
+                val rightNodes = r.mapNotNull { tags[it.leafId] }.toSet()
+                addEdgesBetween(leftNodes, rightNodes, name)
             }
         }
 

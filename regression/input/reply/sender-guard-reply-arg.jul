@@ -1,0 +1,32 @@
+import julay.funlib.println
+
+/*
+ * Direction error: sender guard reads the reply arg (newVal).
+ */
+
+static proc Protocol {
+    var counter : Int
+
+    constructor initially(args : List<String>) {
+        transit: counter := 0
+    }
+
+    transition add(delta : Int, newVal : Int) {
+        guard: newVal = counter + delta
+        transit: counter := counter + delta
+    }
+}
+
+proc Handler {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+
+    transition add(delta : Int, newVal : Int) {
+        guard: delta = 1 & newVal > 0
+    }
+}
+
+proc SenderGuardReplyArg := Protocol || Handler
+
+compile SenderGuardReplyArg

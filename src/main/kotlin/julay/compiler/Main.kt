@@ -15,7 +15,6 @@ import com.github.ajalt.clikt.parameters.options.optionalValue
 import julay.compiler.analysis.AnalyzeOptions
 import julay.compiler.pass.CompilerOptConfig
 import julay.compiler.pass.TlaOptConfig
-import julay.program.sync.SyncResolveConfig
 
 class Julayc : CliktCommand(name = "julayc") {
     init {
@@ -33,9 +32,9 @@ class Julayc : CliktCommand(name = "julayc") {
           JULAY_PATH  Colon-separated list of directories searched for imported .jul modules
                       (after the entry file's directory, any -L paths, and the embedded stdlib).
 
-        Stdlib: julay.proclib.Timer is a Julay module shipped in the compiler jar.
-        julay.proclib.HttpServer remains a Kotlin-native library
-        (with builtin HttpServerRequest/Response and HttpClientRequest/Response obj types).
+        Timers use builtin `timer transition` plus setTimer / cancelTimer.
+        HTTP uses Go runtime builtins (serveHttp / DoHttpRequest) with builtin
+        HttpServerRequest/Response and HttpClientRequest/Response obj types.
         Outbound HTTP uses the julay.funlib.httpRequest procfun.
 
         Use `julayc analyze --help` to inspect program structure without codegen.
@@ -72,10 +71,10 @@ class Julayc : CliktCommand(name = "julayc") {
     private val disableOpt by option(
         "--disable-opt",
         metavar = "OPT,...",
-        help = "Disable named optimizations. Use bare --disable-opt to disable all " +
-            "(eq-unify, arg-ownership, directed-eval, procfun-fuse), or --disable-opt=ID,ID for a subset. " +
-            "The '=' form is required when passing ids so the input path is not consumed. " +
-            "See docs/language/compiler-optimizations.md",
+        help = "Accepted for compatibility; former JAR sync/fuse opts are no-ops " +
+            "(eq-unify, arg-ownership, directed-eval, procfun-fuse). " +
+            "Use bare --disable-opt or --disable-opt=ID,ID. " +
+            "The '=' form is required when passing ids so the input path is not consumed.",
     ).optionalValue("ALL", acceptsUnattachedValue = false)
 
     private val disableTlaOpt by option(
@@ -90,7 +89,7 @@ class Julayc : CliktCommand(name = "julayc") {
 
     private val verbose by option(
         "--verbose",
-        help = "Print sync-path summary (FastOnly vs NeedsZ3).",
+        help = "Reserved; former sync-path summary is no longer emitted.",
     ).flag()
 
     private val input by argument(

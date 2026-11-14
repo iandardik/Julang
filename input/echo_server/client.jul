@@ -4,7 +4,7 @@ import julay.funlib.parseInt
 import julay.funlib.exitProgram
 import julay.funlib.println
 
-proc ClientDispatcher {
+static proc ClientDispatcher {
     const targetNumReqs : Int
     var numReqs : Int
     var numResps : Int

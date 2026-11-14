@@ -8,59 +8,48 @@ Compose procs with `||`:
 proc IncServer := Counter || Printer || ServerLogic
 ```
 
-Each component keeps its own state. They interact only by **synchronizing on shared actions**. Rendezvous may use sync fast paths that avoid Z3 on simple equality guards; see [Compiler optimizations](compiler-optimizations.md).
+Each component keeps its own state. They interact only by **synchronizing on shared actions**.
 
-`||` is **occurrence-based** and **left-associative**: each mention of a proc class is a separate occurrence (`A || A` is two occurrences of `A`, not one). Do not confuse this with exchanging action arguments **by copy** (no shared references).
+`||` is **occurrence-based** and **left-associative**: each mention of a proc class is a separate occurrence (`A || A` is two occurrences of `A`, not one). Do not confuse this with exchanging action arguments **by copy** (no shared references). A **`static proc`** may appear at most once in a composition.
 
-When both sides of a binary `||` offer the same **ordinary** (untagged) or `session` action with a matching signature, they sync and that action becomes **internal to the composition** — it is not part of the outer alphabet. Unilateral actions and unmatched `client` actions remain visible on the assembly. A `provider` stays external after meeting clients (further clients can still sync with it); those clients leave the external alphabet. Source-tagged `internal` actions never leave their declaring proc and may reuse names freely.
+### Channel keys and alphabets
+
+| Kind | Channel | External alphabet |
+|------|---------|-------------------|
+| **`service` transition** | Public action name (global hub API) | Service **stays** external after clients meet it |
+| **`client` transition** | Same public name as its service | Client **leaves** external when it syncs with the service |
+| **Ordinary (untagged)** | Scope-private when peers meet under `||` | Both sides become **composition-hidden** at that compose step |
+| **`internal` / `timer`** | Occurrence-local | Never in the external alphabet |
+
+So `||` both **lists the members** of the system and **scopes ordinary syncs**: matching untagged offers under a compose step get a private channel key and disappear from the external alphabet. Nested assemblies do not cross-sync on the same ordinary name unless that name remains external (for example a still-unmatched ordinary, or a `service` hub).
 
 ```jul
-proc X := A || B    // A,B sync on y → y internal to X (private channel)
-proc Z := C || D    // C,D sync on y → y internal to Z (different private channel)
+proc X := A || B
+proc Z := C || D
 proc W := X || Z
 ```
 
-In `W`, **A does not sync with C or D on `y`**, and **B does not sync with C or D on `y`**. Same surface name, distinct hidden events.
+If `A` and `B` both offer ordinary `y`, that pair becomes composition-private inside `X`. The same name on `C` / `D` is a separate scoped channel inside `Z` — not one global `y` across `W`.
 
-The same scoping applies to duplicated classes under different partners:
+Use **`service` / `client`** when a static hub must stay visible so many callers can sync on the same public API (see [inc server](../examples/inc-server.md)).
 
-```jul
-proc P := (A || X) || (B || X)   // or: Left := A||X; Right := B||X; P := Left || Right
-```
+### Alphabet integrity (native binary only)
 
-Here the two occurrences of `X` sync with `A` and `B` respectively on a shared action `w`; those events stay private to each pair. Tooling: `julayc analyze --tree` lists each occurrence; `--actions-detail --include-internal` shows composition-hidden offers with distinct `scope=…` channel keys (not collapsed by class name).
+**Complete sync** of ordinary / client actions is required only on the **top-level native `compile` target** — not on intermediate apis or procs that a parent will compose later, and not when compiling to TLA+ (`spec` or `--compile-tla`).
 
-### Provider / client (local compose rules)
+On that top-level binary target:
 
-| Offers on `w` | Behavior |
-|---------------|----------|
-| ordinary / ordinary | sync → composition-hide |
-| `client` / `client` | do **not** hide; both stay external |
-| `client` / `provider` | provider stays external; clients leave the external alphabet |
-| ordinary / `provider` or ordinary / `client` | **compile error** |
-| `provider` / `provider` | **compile error** (at most one provider) |
+- Unsynced ordinary actions in the external alphabet → **warn** (compile still succeeds). Tag them `internal` if a solo step is intentional.
+- Dangling `client` with no `service` → **error** (except folded procfun clients waiting for a parent hub).
+- Action-shape and static-occurrence errors are hard failures (see below).
 
-`client` is an explicit opt-in: two clients never pairwise-hide with each other, so they can wait for a `provider` that appears later in the composition tree. Ordinary peers that already hid `w` inside a library stay sealed — `(A || B) || P || C` still compiles when `A`/`B` are ordinary and `P`/`C` are provider/client.
+TLA+ compile skips composition-alphabet checks entirely, so partial specs are allowed.
 
-Same-class ordinary offers never sync: when two occurrences of class `X` both expose untagged `w` at a compose step (e.g. `(A || X) || (B || X)` with no peer syncing on `w`), that is a **compose-time** error. A later `provider` cannot redeem those offers (ordinary + provider is also illegal).
-
-### Alphabet integrity (JAR only)
-
-**Complete sync** of `client`, ordinary (default), and `session` actions is required only on the **top-level JAR `compile` target** — not on intermediate apis or procs that a parent will compose later, and not when compiling to TLA+ (`spec` or `--compile-tla`).
-
-On that top-level JAR target:
-
-- External `client` of `w` with no `provider` `w` → error, **except** when every external client offer for `w` comes from a **procfun** (call-folded or listed in an api's `calls:`). Those surfaces stay visible on the parent until a provider peer is composed.
-- At most one `provider` per action name (always checked on the JAR / analyze path, including intermediate analyze).
-- Unsynced ordinary or session actions in the external alphabet → **warn** (JAR still succeeds). Tag them `internal` if a solo step is intentional.
-
-TLA+ compile skips composition-alphabet checks entirely, so partial specs (unmatched clients, unilateral ordinary/session actions, dual providers, etc.) are allowed.
-
-`analyze`, IDE alphabet panels, and `check` without a `compile` directive do not require incomplete client / ordinary / session wiring to be resolved yet.
+`analyze`, IDE alphabet panels, and `check` without a `compile` directive do not require incomplete ordinary wiring to be resolved yet.
 
 ### Procfuns and alphabets
 
-Procfuns are **not** allowed in `||` (compile error). They are not SyncChannel-started peers. For **analyze / IDE alphabets**, any procfun **called** by a host under an assembly contributes its non-synthetic actions to that assembly. To **couple** a procfun in TLA+, list it in an [api](#apis)'s `calls:` (see below).
+Procfuns are **not** allowed in `||` (compile error). They are not composition peers. For **analyze / IDE alphabets**, any procfun **called** by a host under an assembly contributes its non-synthetic actions to that assembly. To **couple** a procfun in TLA+, list it in an [api](#apis)'s `calls:` (see below).
 
 ### TLA+ occurrence names
 
@@ -74,7 +63,7 @@ An **api** packages a resident parallel composition (`proc:`) with optional proc
 api RpcOut := <proc-field> || <call₁> || <call₂> || …
 ```
 
-Operationally, only `proc:` leaves are SyncChannel-started; `calls` participate in alphabet, channel keys, and TLA coupling, and are still spawn-awaited when invoked.
+Operationally, only `proc:` leaves are started as composition peers; `calls` participate in alphabet and TLA coupling, and are still spawn-awaited when invoked.
 
 ### Syntax
 
@@ -90,7 +79,7 @@ export api RpcOut {
 
 ### Author mental model
 
-As the api author, treat everything in the api as one parallel composition: the `proc:` peers plus each `calls` procfun. Matching actions sync and may become internal to the api. Incomplete wiring is allowed at declaration time:
+As the api author, treat everything in the api as one parallel composition: the `proc:` peers plus each `calls` procfun. Matching actions sync under the service/client or ordinary composition rules above. Incomplete wiring is allowed at declaration time:
 
 ```jul
 export api RpcOut {
@@ -99,7 +88,7 @@ export api RpcOut {
 }
 ```
 
-This is legal. `rpcOutClientCaller`'s `sendRpcOut` / `responseRpcOut` do not meet a peer inside the api, so they remain **external actions of `RpcOut`** (visible in `analyze -s RpcOut` and the VS Code alphabet panel). A parent may still compose a partner that syncs those actions. `compile RpcOut` yields the usual unsynced ordinary/session **warning** (same as proc assemblies), not a hard error.
+This is legal. `rpcOutClientCaller`'s actions that do not meet a peer inside the api remain **external actions of `RpcOut`** (visible in `analyze -s RpcOut` and the VS Code alphabet panel). A parent may still compose a partner that syncs those actions. `compile RpcOut` yields the usual unsynced ordinary **warning** (same as proc assemblies), not a hard error.
 
 ### Consumer mental model
 
@@ -121,7 +110,7 @@ transit:
 
 - `import path.Api` is enough to compose that api and to call every procfun listed in its `calls:` as `Api.fn(...)`. Those procfuns need not be `export`ed (and usually should not be — the api is the public surface).
 - Outside the api, listed procfuns **must** be called as `ApiName.fn(...)` (not bare `fn(...)`).
-- Inside other procfuns of the same module, bare calls to siblings remain allowed (e.g. `outRequestVoteRPC` calling `rpcOutClientCaller`).
+- Inside other procfuns of the same module, bare calls to siblings remain allowed.
 - `ApiName.fn(...)` requires a **unique** occurrence of that api in the enclosing composition (error if missing or duplicated).
 
 ### Nesting
@@ -131,7 +120,6 @@ Apis may appear in other apis' `proc:` fields and in ordinary `||`:
 ```jul
 export api RaftNode {
     proc: RaftNodeMain || RaftCore || RpcOut || RpcIn
-        || ElectionTimeout || Timer || VoteRequester || LeaderHeartbeat
 }
 ```
 
@@ -184,7 +172,7 @@ spec CountUpSpec := CountUpApi
 
 ## Synchronization (language level)
 
-When two (or more, for some roles) procs offer the **same action** with compatible arguments and guards, they take a **synchronized step** together.
+When procs offer the **same action** with compatible arguments and guards, they take a **synchronized step** together — on a **service** public channel, or on a **composition-scoped** ordinary channel after `||` hides the pair.
 
 ```mermaid
 flowchart LR
@@ -205,38 +193,68 @@ Important consequences of Julay’s philosophy:
 
 ### Same class never syncs
 
-**Two different occurrences of the same proc class never synchronize with each other** on ordinary (default) or `internal` actions. Only **distinct proc classes** can pair on a shared action.
+**Two different occurrences of the same proc class never synchronize with each other** on ordinary or `internal` actions. Only **distinct proc classes** can pair on a shared action. Clients of the same `service` also never sync with each other — only with the service.
 
-`provider` / `client` actions pair one hub with many clients—not two equal peers of the same class collaborating as duplicates of each other.
+## Action shapes
+
+For ordinary (non-`service`/`client`, non-`internal`, non-`timer`) multi-class offers that remain external, every offer of a given name must form one of these shapes:
+
+| Shape | Who offers | Role |
+|-------|------------|------|
+| **Hub** | Exactly one **static** class + any number of **dynamic** classes | Static is the hub; dynamics are peers of that API |
+| **Two statics** | Exactly two static classes, no dynamics | Peer sync between two statics |
+| **Local / single class** | One class only | Unsynced / solo on that name (may warn on a binary target) |
+
+Illegal: dynamic↔dynamic only, three or more statics, or two-or-more statics plus a dynamic.
+
+**`service` / `client`** pairs skip these ordinary-shape checks: the service is the hub; any number of clients may sync with it (never with each other). Prefer tagging static hub APIs as `service` and callers as `client` when the hub must stay in the external alphabet (multiple handlers, printers, nested assemblies).
+
+`static proc` classes may appear **at most once** in a composition. Only dynamic procs may be spawned via non-`initially` constructors.
+
+## Sender / receiver deduction
+
+At compile time the compiler analyzes guards and bodies to deduce **channel direction** (who sends, who receives) for each sync group:
+
+- Bindings from `=` / `<=>` and membership `in` decide which peer owns which args.
+- For a hub, direction must be uniform; ties break toward **dynamic sends, hub receives**.
+- **Reply args:** arguments bound only on the receiver that the **sender’s body** still reads travel on a reply channel.
+- Receiver guards must not residual-filter on sender-owned args; sender guards must not reference reply args.
+
+Relational-only guards that never bind args fail compilation (they cannot lower to directed Go sends/receives).
+
+### `arg in S` (random choice)
+
+Membership in a guard can **bind** an argument by choosing uniformly from a set (runtime `ChooseUniformFiltered`). Equality bindings win over membership when both are present. Example: [`regression/input/set/random-choice-from-set.jul`](../../regression/input/set/random-choice-from-set.jul).
 
 ## Action modifiers
 
 | Modifier | Role |
 |----------|------|
-| *(none)* | Ordinary rendezvous between complementary peers |
-| `internal` | Local / solo-style step (no cross-class pairing of the ordinary kind) |
-| `provider` | One hub for an action name; syncs with `client`s |
-| `client` | Only syncs with a `provider` of the same name (never with other clients) |
-| `session` | Sticky pairwise protocol—see [Sessions](sessions.md) |
-
-`session` is incompatible with `provider`, `client`, and `internal`. If two classes share any session action, they must not also share an ordinary (untagged) action; ordinary sync or `provider`/`client` with a *different* peer class is fine (examples in [Sessions](sessions.md)).
+| *(none)* | Ordinary rendezvous; composition-private when peers meet under `||` |
+| `service` | Hub API; stays external; public action-name channel |
+| `client` | Syncs only with a matching `service` |
+| `internal` | Occurrence-local solo step (no cross-class pairing) |
+| `timer` | Occurrence-local timer fire; arm with `setTimer` / `cancelTimer` — see [Effects](effects.md) |
 
 Examples:
 
 ```jul
-provider transition increment() { ... }   // API on Counter
-client transition increment() { ... }     // handler uses Counter
+service transition increment() { ... }      // static hub API
+client transition increment() { ... }       // handler / printer caller
+transition peerHandoff(x : Int) { ... }     // ordinary; scoped when || meets
 internal transition println(msg : String) { ... }
-session transition listen(port : Int) { ... }
+timer transition timeout() { ... }
 ```
 
 ## Offering the same action
 
-For ordinary sync, different classes declare the same action name. For a shared API, the hub uses `provider` and callers use `client`. For example, `incHandler` offers `client transition increment()` while `Counter` offers `provider transition increment()` ([inc server](../examples/inc-server.md)).
+Different classes declare the same action name. For a shared hub API, mark the resource as `static proc` with **`service` transitions**, and tag handlers / printers / procfun callers as **`client`**. For example, `Counter` exposes `service` `increment` / `getCounter` while `incHandler` and `Printer` use `client` ([inc server](../examples/inc-server.md)).
+
+Leave **ordinary** (untagged) syncs for two-static peers or composition-private pairs that should not remain in the external alphabet.
 
 ## See also
 
-- [Processes](processes.md)
+- [Processes](processes.md) — `static proc` vs dynamic
 - [Procfuns](procfun.md) — call-site alphabet folding; packaging via [apis](#apis)
-- [Sessions](sessions.md)
+- [Compiler optimizations](compiler-optimizations.md) — compile-time direction analysis
 - [Creating libraries](creating-libraries.md)

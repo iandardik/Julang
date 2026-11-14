@@ -1,0 +1,52 @@
+import julay.funlib.exitProgram
+import julay.funlib.println
+
+/*
+ * Two-way args: sender binds delta; receiver replies with newVal.
+ */
+
+static proc Protocol {
+    var counter : Int
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            counter := 10
+            done := false
+    }
+
+    transition add(delta : Int, newVal : Int) {
+        guard:
+            & ~done
+            & newVal = counter + delta
+        transit:
+            counter := counter + delta
+            done := true
+        after:
+            println("sum " + newVal)
+    }
+
+    internal transition exitSystem() {
+        guard: done
+        after:
+            exitProgram(0)
+    }
+}
+
+proc Handler {
+    var got : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            got := -1
+    }
+
+    transition add(delta : Int, newVal : Int) {
+        guard: delta = 5
+        transit: got := newVal
+    }
+}
+
+proc ReplyArgAdd := Protocol || Handler
+
+compile ReplyArgAdd

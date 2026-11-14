@@ -1,0 +1,7 @@
+source: regression/input/set/random-choice-from-set.jul
+programs:
+  - name: RandomChoiceFromSet
+    run:
+      timeoutMs: 8000
+      expectStdoutContains:
+        - "picked 7"

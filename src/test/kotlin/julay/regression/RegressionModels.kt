@@ -10,13 +10,12 @@ data class CaseFile(
     val expectCompileFailure: Boolean,
     val expectCompileOutputContains: List<String>,
     val programs: List<ProgramCase>,
-    /** Compile must produce at least one program JAR (compile-only success). */
-    val expectJars: Boolean = false,
+    /** Compile must produce at least one native program binary (compile-only success). */
+    val expectBinaries: Boolean = false,
     /** Extra args passed to `julayc` before the source path (e.g. `--disable-opt`). */
     val compileArgs: List<String> = emptyList(),
     /**
-     * When true, compile and run once with default opts and once with `--disable-opt`,
-     * requiring identical program stdout for each program that declares expectStdout*.
+     * Legacy flag from the Kotlin/JAR era. Ignored: Go codegen has no opt-parity recompile path.
      */
     val compileTwiceWithDisableOpt: Boolean = false,
 )
@@ -31,7 +30,8 @@ data class ProgramCase(
 
 data class CompileResult(
     val output: String,
-    val jars: Map<String, File>,
+    /** Native binaries keyed by program / compile-target name. */
+    val binaries: Map<String, File>,
 )
 
 data class RunConfig(

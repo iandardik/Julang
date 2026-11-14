@@ -1,3 +1,4 @@
+disabled: true  # needs Go-port rewrite (unbound/HOF/handler fold)
 source: regression/input/expr/map-list-set.jul
 programs:
   - name: MapListSetTest

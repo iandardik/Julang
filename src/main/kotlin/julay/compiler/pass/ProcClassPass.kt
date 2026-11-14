@@ -27,5 +27,5 @@ private fun ProcClassNode.procClassPassNode(procs: Set<String>): List<ProcClassD
         else ctor.copy(transits = inlineAssigns + ctor.transits)
     }
     val transitions = localDecls().flatMap { it.transitions() }
-    return listOf(ProcClassDecl(procClassNodeName(), stateVars, constructors, transitions))
+    return listOf(ProcClassDecl(procClassNodeName(), stateVars, constructors, transitions, isStatic = isStatic))
 }

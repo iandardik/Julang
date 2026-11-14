@@ -2,10 +2,10 @@ import julay.funlib.exitProgram
 import julay.funlib.println
 
 /*
- * Client binds n; provider leaves n unconstrained (ownership / unilateral).
+ * Dynamic binds n; static hub leaves n unconstrained (ownership / unilateral).
  */
 
-proc Hub {
+static proc Hub {
     var seen : Int
     var done : Boolean
 
@@ -15,7 +15,7 @@ proc Hub {
             done := false
     }
 
-    provider transition req(n : Int) {
+    service transition req(n : Int) {
         guard: ~done
         transit:
             seen := n

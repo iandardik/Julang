@@ -5,28 +5,28 @@
 | File | Role |
 |------|------|
 | [`main.jul`](../../input/inc_server/main.jul) | `Counter`, composition, invariants, specs, `compile` |
-| [`server.jul`](../../input/inc_server/server.jul) | HTTP starter + `incHandler` procfun |
+| [`server.jul`](../../input/inc_server/server.jul) | `serveHttp` + `incHandler` procfun |
 | [`printer.jul`](../../input/inc_server/printer.jul) | Periodic read of the counter |
 
 ## Intent
 
-A counter exposed as a **provider interface**: HTTP handlers and a printer never hold shared mutable state with `Counter`. They synchronize on `increment` / `getCounter` (`provider` on Counter, `client` on handlers), and values move **by copy**. The same file also declares **specs** so you can emit JARs and TLA+ together—Julay’s verification-aware story in one demo.
+A counter exposed as a **`service` hub**: HTTP handlers and a printer never hold shared mutable state with `Counter`. They synchronize as **`client`s** on `increment` / `getCounter`, and values move **by copy**. The same file also declares **specs** so you can emit a native binary and TLA+ together—Julay’s verification-aware story in one demo.
 
 ## The counter as an interface
 
 ```jul
-proc Counter {
+static proc Counter {
     var counter : Int
 
     constructor initially(args : List<String>) {
         transit: counter := 0
     }
 
-    provider transition increment() {
+    service transition increment() {
         transit: counter := counter + 1
     }
 
-    provider transition getCounter(counterVal : Int) {
+    service transition getCounter(counterVal : Int) {
         guard: counterVal = counter
     }
 }
@@ -34,8 +34,9 @@ proc Counter {
 
 - `increment` mutates only Counter’s local state.
 - `getCounter(counterVal)` syncs when the peer’s `counterVal` equals the true counter—the peer learns the value by agreement on the argument (copy), not by reading Counter’s memory.
+- Handlers / printer use `client transition` so they sync only with this service (the hub stays in the external alphabet).
 
-This matches the [language philosophy](../language/README.md): no shared resources; the proc **is** the interface.
+This matches the [language philosophy](../language/README.md): no shared resources; the proc **is** the interface. See [Composition — service/client](../language/composition-and-actions.md#action-modifiers).
 
 ## Composition
 
@@ -46,14 +47,19 @@ proc IncServer := Counter || Printer || ServerLogic
 ### HTTP path (`server.jul`)
 
 ```jul
-procfun incHandler(req : HttpServerRequest) : HttpServerResponse { ... }
+static proc ServerStarter {
+    constructor initially(args : List<String>) {
+        after:
+            serveHttp(8000, incHandler)
+    }
+}
 
-proc ServerLogic := ServerStarter || HttpServer
+export proc ServerLogic := ServerStarter
 ```
 
-`incHandler` is registered at startup (`handler = incHandler` on `listen`). Each request spawns a procfun instance via `Program.invokeProcFun`; the handler then:
+`incHandler` is registered via `serveHttp`. Each request runs the procfun, which then:
 
-1. Syncs on `increment` (with Counter’s provider)
+1. Syncs on `increment` (with Counter)
 2. Syncs on `getCounter` to learn `localCounter`
 3. Returns an `HttpServerResponse` with that value as the body
 
@@ -80,7 +86,7 @@ spec IncSpec := <true> Counter || HandlerSpec <AllInvs>
 compile IncServer, IncSpec
 ```
 
-- **`IncServer`** → runnable JAR  
+- **`IncServer`** → native binary  
 - **`HandlerSpec` / `IncSpec`** → `.tla` / `.cfg` for TLC  
 
 Indexed `incHandler[t : Int]` models many handler instances. See [Specifications](../language/specifications.md).
@@ -92,10 +98,10 @@ Indexed `incHandler[t : Int]` models many handler instances. See [Specifications
 java -jar build/libs/julayc.jar input/inc_server/main.jul
 ```
 
-This writes `IncServer.jar` (and `IncSpec` TLA files) in the current directory. Start the server on port **8000**, then POST with curl:
+This writes `IncServer` (and `IncSpec` TLA files) in the current directory. Start the server on port **8000**, then POST with curl:
 
 ```bash
-java -jar IncServer.jar           # terminal 1
+./IncServer           # terminal 1
 
 curl -s -X POST -d 'hello' http://localhost:8000/
 curl -s -X POST -d 'hello' http://localhost:8000/
@@ -123,13 +129,13 @@ Spec artifacts appear as `HandlerSpec` / `IncSpec` TLA files in the working dire
 
 ## Language features showcased
 
-- `provider` actions as a resource API
-- Procfun HTTP handler with `client` steps to Counter
+- `static proc` + `service` hub as a resource API; callers tagged `client`
+- Procfun HTTP handler syncing with Counter
 - Modules (`printer`, `server`)
-- Assume-guarantee `spec`, indexed procfuns, `compile` mixing JAR and TLA targets
+- Assume-guarantee `spec`, indexed procfuns, `compile` mixing binary and TLA targets
 
 ## See also
 
 - [Specifications](../language/specifications.md)
-- [Effects](../language/effects.md) — `delaySeconds` in the printer
+- [Effects](../language/effects.md) — `serveHttp`, `delaySeconds`
 - Previous: [Echo server](echo-server.md) · Next: [List server](list-server.md) · [RPC server](rpc-server.md)

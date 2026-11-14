@@ -3,6 +3,7 @@ import julay.funlib.println
 
 /*
  * Equality-only peer sync: both sides constrain handoff(x) with equalities.
+ * Receiver is the static hub.
  */
 
 proc Sender {
@@ -10,13 +11,12 @@ proc Sender {
         transit:
     }
 
-    transition handoff(x : Int) {
+    client transition handoff(x : Int) {
         guard: x = 7
-        // sender silent for deterministic stdout
     }
 }
 
-proc Receiver {
+static proc Receiver {
     var k : Int
     var done : Boolean
 
@@ -26,7 +26,7 @@ proc Receiver {
             done := false
     }
 
-    transition handoff(x : Int) {
+    service transition handoff(x : Int) {
         guard:
             & x = k
             & ~done

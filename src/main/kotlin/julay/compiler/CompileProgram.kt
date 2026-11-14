@@ -3,47 +3,30 @@ package julay.compiler
 import julay.compiler.ast.RootNode
 import julay.compiler.decl.ProcDecl
 import julay.compiler.pass.CompilerOptConfig
-import julay.compiler.pass.codegenPass
-import julay.program.sync.SyncResolveConfig
+import julay.compiler.pass.goCodegenPass
 import java.io.File
 import java.nio.file.Files
-import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
 
-private const val GRADLE_BUILD_TIMEOUT_MINUTES = 10L
-private const val GRADLE_WARMUP_TIMEOUT_MINUTES = 5L
-private const val WRAPPER_RESOURCE_PREFIX = "gradle-wrapper-template/"
+private const val GO_BUILD_TIMEOUT_MINUTES = 2L
+private const val GORUNTIME_RESOURCE_PREFIX = "goruntime/julay/"
+private val GORUNTIME_FILES = listOf(
+    "collections.go",
+    "runtime.go",
+    "http.go",
+    "timer.go",
+)
 
 /**
- * Download the vendored Gradle distribution, start the daemon, and resolve the same
- * Kotlin/Shadow plugins used by [compileProgram]. Call once before a burst of compiles
- * (e.g. the regression suite) so each case stays within a short timeout.
+ * No-op retained for the regression harness. Go builds do not need a Gradle daemon warmup.
  */
 fun warmGradleForProgramCompile(
-    workDir: File,
-    compilerJar: Path = resolveCompilerJar(),
+    @Suppress("UNUSED_PARAMETER") workDir: File,
+    @Suppress("UNUSED_PARAMETER") compilerJar: java.nio.file.Path = resolveCompilerJar(),
 ) {
-    if (!workDir.exists() && !workDir.mkdirs()) {
-        error("Could not create Gradle warmup dir: $workDir")
-    }
-    installVendoredGradleWrapper(workDir)
-    File(workDir, "settings.gradle.kts").writeText(gradleSettingsFileContents("julay-gradle-warmup"))
-    File(workDir, "Warmup.kt").writeText("fun main() {}\n")
-    File(workDir, "build.gradle.kts").writeText(
-        gradleBuildFileContents("Warmup", "Warmup", compilerJar),
-    )
-    val result = runShellCommand(
-        "cd ${workDir.absolutePath}; ./gradlew --version && ./gradlew shadowJar 2>&1",
-        GRADLE_WARMUP_TIMEOUT_MINUTES,
-    )
-    if (result.timedOut) {
-        error("Gradle warmup timed out after ${GRADLE_WARMUP_TIMEOUT_MINUTES}m:\n${result.output}")
-    }
-    check(result.exitCode == 0) {
-        "Gradle warmup failed (exit ${result.exitCode}):\n${result.output}"
-    }
+    // Intentionally empty: program compile now uses `go build`.
 }
 
 fun compileProgram(
@@ -52,89 +35,72 @@ fun compileProgram(
     procDecls: List<ProcDecl>,
     librariesInUse: Set<String> = emptySet(),
     keepBuild: Boolean = false,
-    compilerJar: Path = resolveCompilerJar(),
-    syncResolveConfig: SyncResolveConfig = SyncResolveConfig.ALL_ON,
-    compilerOptConfig: CompilerOptConfig = CompilerOptConfig(syncResolve = syncResolveConfig),
-): SyncPathStats {
-    val buildDir = "${program.name}-jul-build"
-    if (!File(buildDir).exists() && !File(buildDir).mkdir()) {
-        println("Could not create $buildDir dir")
+    @Suppress("UNUSED_PARAMETER") compilerJar: java.nio.file.Path = resolveCompilerJar(),
+    @Suppress("UNUSED_PARAMETER") compilerOptConfig: CompilerOptConfig = CompilerOptConfig.ALL_ON,
+) {
+    val buildDir = File("${program.name}-jul-build")
+    if (!buildDir.exists() && !buildDir.mkdir()) {
+        println("Could not create ${buildDir.name} dir")
         exitProcess(1)
     }
 
-    // Each program gets its own generated source file; remove stale ones so Gradle
-    // does not compile multiple programs' procs into the same module.
-    File(buildDir).listFiles()?.filter { it.isFile && it.extension == "kt" }?.forEach { it.delete() }
-    deleteDirectory(File("$buildDir/build"))
-
-    val codegen = codegenPass(
-        ast,
-        program,
-        procDecls,
-        librariesInUse,
-        syncResolveConfig = compilerOptConfig.syncResolve,
-        compilerOptConfig = compilerOptConfig,
-    )
-    val fileName = "${codegen.mainClassName}.kt"
-    File("$buildDir/$fileName").writeText(codegen.sourceText)
-
-    File("$buildDir/settings.gradle.kts").delete()
-    File("$buildDir/build.gradle.kts").delete()
-
-    File("$buildDir/settings.gradle.kts").writeText(gradleSettingsFileContents(program.name))
-    try {
-        installVendoredGradleWrapper(File(buildDir))
-    } catch (e: Exception) {
-        println("Failed to install Gradle wrapper for program \"${program.name}\": ${e.message}")
-        return codegen.syncPathStats
+    // Clear previous generated sources
+    buildDir.listFiles()?.forEach { f ->
+        when {
+            f.isFile && (f.name == "main.go" || f.name == "go.mod" || f.name == "go.sum") -> f.delete()
+            f.isDirectory && f.name == "julay" -> deleteDirectory(f)
+        }
     }
 
-    File("$buildDir/build.gradle.kts").writeText(
-        gradleBuildFileContents(program.name, codegen.mainClassName, compilerJar),
+    val codegen = goCodegenPass(ast, program, procDecls, librariesInUse)
+
+    File(buildDir, "go.mod").writeText(
+        "module ${codegen.moduleName}\n\ngo 1.21\n",
     )
-    val gradleResult = runShellCommand(
-        "cd $buildDir; ./gradlew shadowJar 2>&1",
-        GRADLE_BUILD_TIMEOUT_MINUTES,
-    )
-    if (gradleResult.timedOut) {
-        println("Gradle build timed out for program \"${program.name}\"")
-        return codegen.syncPathStats
+
+    val julayDir = File(buildDir, "julay")
+    if (!julayDir.exists() && !julayDir.mkdirs()) {
+        println("Could not create ${julayDir.path}")
+        exitProcess(1)
     }
-    if (gradleResult.exitCode != 0) {
-        println("Gradle build failed for program \"${program.name}\" (exit ${gradleResult.exitCode}):\n${gradleResult.output}")
-        return codegen.syncPathStats
+    copyGoRuntime(julayDir)
+
+    File(buildDir, "main.go").writeText(codegen.mainGo)
+
+    val binaryName = codegen.binaryName
+    val outPath = File(buildDir.parentFile ?: File("."), binaryName).absolutePath
+    val goResult = runShellCommand(
+        "cd ${buildDir.absolutePath} && go mod tidy && go build -o ${shellQuote(outPath)} . 2>&1",
+        GO_BUILD_TIMEOUT_MINUTES,
+    )
+    if (goResult.timedOut) {
+        println("go build timed out for program \"${program.name}\" after ${GO_BUILD_TIMEOUT_MINUTES}m:\n${goResult.output}")
+        return
+    }
+    if (goResult.exitCode != 0) {
+        println("go build failed for program \"${program.name}\" (exit ${goResult.exitCode}):\n${goResult.output}")
+        return
     }
     if (!keepBuild) {
-        deleteDirectory(File(buildDir))
+        deleteDirectory(buildDir)
     }
-    return codegen.syncPathStats
 }
 
-/**
- * Copy a checked-in Gradle wrapper into [buildDir] instead of invoking host `gradle wrapper`,
- * which is flaky under Gradle 9+ (HEAD validation of services.gradle.org often 504s).
- */
-private fun installVendoredGradleWrapper(buildDir: File) {
-    // gradle-wrapper.jar is stored as .jar.bin so ShadowJar does not explode it into the fat jar.
-    val copies = listOf(
-        "gradlew" to "gradlew",
-        "gradlew.bat" to "gradlew.bat",
-        "gradle/wrapper/gradle-wrapper.jar.bin" to "gradle/wrapper/gradle-wrapper.jar",
-        "gradle/wrapper/gradle-wrapper.properties" to "gradle/wrapper/gradle-wrapper.properties",
-    )
-    for ((resourceRel, destRel) in copies) {
-        val resource = WRAPPER_RESOURCE_PREFIX + resourceRel
-        val stream = Julayc::class.java.classLoader.getResourceAsStream(resource)
+private fun copyGoRuntime(destDir: File) {
+    val loader = Julayc::class.java.classLoader
+    for (name in GORUNTIME_FILES) {
+        val resource = GORUNTIME_RESOURCE_PREFIX + name
+        val stream = loader.getResourceAsStream(resource)
             ?: error("Missing classpath resource: $resource")
-        val dest = File(buildDir, destRel)
-        dest.parentFile?.mkdirs()
+        val dest = File(destDir, name)
         stream.use { input ->
             Files.copy(input, dest.toPath(), StandardCopyOption.REPLACE_EXISTING)
         }
     }
-    val gradlew = File(buildDir, "gradlew")
-    gradlew.setExecutable(true)
 }
+
+private fun shellQuote(path: String): String =
+    "'" + path.replace("'", "'\\''") + "'"
 
 private data class ShellResult(val exitCode: Int, val output: String, val timedOut: Boolean)
 
@@ -162,7 +128,6 @@ private fun runShellCommand(command: String, timeoutMinutes: Long): ShellResult 
     return ShellResult(proc.exitValue(), output.toString(), timedOut = false)
 }
 
-// thank you: https://www.baeldung.com/kotlin/delete-directories-with-contents
 private fun deleteDirectory(directory: File) {
     if (directory.exists() && directory.isDirectory) {
         directory.listFiles()?.forEach { file ->
@@ -174,50 +139,4 @@ private fun deleteDirectory(directory: File) {
         }
         directory.delete()
     }
-}
-
-private fun gradleSettingsFileContents(name : String) : String {
-    return "rootProject.name = \"$name\""
-}
-
-private fun gradleBuildFileContents(name: String, mainClassName: String, compilerJar: Path): String {
-    val compilerJarPath = compilerJar.toGradlePathLiteral()
-    return "plugins {\n" +
-            "    kotlin(\"jvm\") version \"2.1.0\"\n" +
-            "    application\n" +
-            "    id(\"com.github.johnrengelman.shadow\") version \"8.1.1\"\n" +
-            "}\n" +
-            "\n" +
-            "\n" +
-            "repositories {\n" +
-            "    mavenCentral()\n" +
-            "}\n" +
-            "\n" +
-            "dependencies {\n" +
-            "    implementation(files(\"$compilerJarPath\"))\n" +
-            "}\n" +
-            "\n" +
-            "application {\n" +
-            "    mainClass.set(\"${mainClassName}Kt\")\n" +
-            "}\n" +
-            "\n" +
-            "kotlin {\n" +
-            "    jvmToolchain(17)\n" +
-            "}\n" +
-            "\n" +
-            "sourceSets {\n" +
-            "    main {\n" +
-            "        kotlin {\n" +
-            "            srcDir(\".\")\n" +
-            "            include(\"${mainClassName}.kt\")\n" +
-            "        }\n" +
-            "    }\n" +
-            "}\n" +
-            "\n" +
-            "tasks.shadowJar {\n" +
-            "    archiveBaseName.set(\"$name\")\n" +
-            "    archiveVersion.set(\"\")\n" +
-            "    archiveClassifier.set(\"\")\n" +
-            "    destinationDirectory.set(file(\"\$buildDir/../..\"))\n" +
-            "}"
 }

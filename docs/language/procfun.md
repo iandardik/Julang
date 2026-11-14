@@ -59,7 +59,7 @@ Rules of the desugar:
 | Source | Becomes |
 |--------|---------|
 | Parameters | Implicit `const`s (plus bind in `F_call`) |
-| `return: e` | `transit: retVal := e`; sync modifier unchanged (`client` / `session` / `internal` / bare). Completion is the synthetic `_ret` edge |
+| `return: e` | `transit: retVal := e`; sync modifier unchanged (`client` / `internal` / `timer` / bare). Completion is the synthetic `_ret` edge |
 | — | Synthetic `F_call` constructor (spawn entry) |
 | — | Synthetic `F_ret` completion edge (`guard: ret = retVal`) |
 
@@ -72,21 +72,21 @@ At **runtime**, a call still feels like one logical return: the caller spawns th
 
 ## Spawn-and-await
 
-Evaluating a procfun call suspends the caller's current action, runs a fresh instance until `_ret` completes, then resumes with the returned value. While the instance is live it can take `internal` steps alone and `client` / ordinary / `session` steps with peers in the surrounding program.
+Evaluating a procfun call suspends the caller's current action, runs a fresh instance until `_ret` completes, then resumes with the returned value. While the instance is live it can take `internal` steps alone and `client` / ordinary steps with peers in the surrounding program.
 
 ```mermaid
 sequenceDiagram
   participant Caller as CallerProc
   participant Call as procfun_call
   participant Child as procfun_instance
-  participant Prov as ProviderPeer
+  participant Hub as ServicePeer
   Caller->>Call: evaluate clientGetRPC(req)
   Call->>Child: spawn args as consts
   loop until F_ret
     alt internal
       Child->>Child: solo step
     else client
-      Child->>Prov: sync on provider action
+      Child->>Hub: sync on service action
     end
   end
   Child->>Call: retVal via F_ret
@@ -113,7 +113,7 @@ Turn fusion off when debugging codegen or comparing opt-on vs opt-off stdout.
 Register a procfun as a handler or callback by type `A ~> R` (or `(A, B) ~> R` for multiple arguments). At runtime the value is the procfun name as a `String`; guards compare with `handler = myHandler`.
 
 ```jul
-session transition listen(
+transition listen(
     port : Int,
     handler : HttpServerRequest ~> HttpServerResponse
 ) {
@@ -153,7 +153,7 @@ procfun parseCfg(cfg : String) : Set<Node> {
 | Args | Each parameter is an implicit `const`. Do not redeclare it as `var`/`const`. |
 | Inline init | `var x : T := expr` / `const c : T := expr` is allowed. Init may use args and pure expressions, but **not** state variables (use a constructor + transit `let` instead). |
 | Init XOR | A state name is initialized **either** inline **or** in the procfun's single optional constructor — never both. |
-| Step modifiers | Any of bare / `internal` / `client` / `session`. **`provider` is forbidden.** |
+| Step modifiers | Any of bare / `internal` / `client` / `timer`. **`service` is forbidden** (hubs stay outside procfuns). |
 | Reserved names | User transitions/ctors/vars cannot be named `initially`, `F_call`, `F_ret`, or `retVal`. |
 | Return | `return: expr` on a transition (any allowed modifier). Mutually exclusive with `transit:` / `error:` / `after:`. Use `before:` for side effects on return steps (e.g. logging before the value is delivered). Desugars to `retVal := expr` without changing the transition's sync tag. Synthetic `_ret` is the completion edge (alphabet / TLA); runtime still delivers the value when the return-bearing step fires. ≥1 return required. |
 | `exitProc` | **Compile error** inside procfun bodies. Procfuns must finish via `return:`; `exitProc` is only for ordinary procs. Without `return:`, a silent child exit would leave the host with `JulayException("… exited without return")` and TLA `Host_blocking` stuck. |
@@ -210,7 +210,7 @@ Outside an api, call listed procfuns as `ApiName.fn(...)`. See [Composition and 
 
 ## Client steps with return
 
-`return:` may sit on a `client` (or bare / `session` / `internal`) transition — no need for a separate untagged return step:
+`return:` may sit on a `client` (or bare / `internal` / `timer`) transition — no need for a separate untagged return step:
 
 ```jul
 procfun fetchAndInc() : Int {
@@ -226,8 +226,8 @@ procfun fetchAndInc() : Int {
 ## Illegal examples
 
 ```jul
-// ERROR: provider forbidden
-provider transition serve() { transit: x := 1 }
+// ERROR: service forbidden on procfuns
+service transition serve() { transit: x := 1 }
 
 // ERROR: return + transit together
 transition done() {

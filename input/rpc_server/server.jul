@@ -1,4 +1,4 @@
-import julay.proclib.HttpServer
+import julay.funlib.serveHttp
 import julay.funlib.parseInt
 import julay.funlib.split
 import lib.fieldValue
@@ -6,26 +6,12 @@ import lib.fieldValue
 /*
  * Inbound HTTP → RPC router (same shape as Raft RpcIn / handleRpc).
  */
-export proc RpcIn := ServerInitializer || HttpServer
+export proc RpcIn := ServerInitializer
 
-proc ServerInitializer {
-    var started : Boolean
-
+static proc ServerInitializer {
     constructor initially(args : List<String>) {
-        transit:
-            started := false
-    }
-
-    session transition listen(
-        port : Int,
-        handler : HttpServerRequest ~> HttpServerResponse
-    ) {
-        guard: ~started & port = 8000 & handler = handleRpc
-        transit: started := true
-    }
-
-    session transition close() {
-        guard: false
+        after:
+            serveHttp(8000, handleRpc)
     }
 }
 

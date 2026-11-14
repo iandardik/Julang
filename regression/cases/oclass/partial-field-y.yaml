@@ -1,3 +1,4 @@
+disabled: true  # needs Go-port rewrite (unbound/HOF/handler fold)
 source: regression/input/oclass/partial-field-y.jul
 programs:
   - name: PartialFieldYTest

@@ -308,7 +308,9 @@ private fun emitProjectedTla(
     unusedFieldWarnings: List<OneLocCompileWarning>,
     domains: Map<String, DomainType>,
 ): TlaCodegenResult {
-    val emittedOffers = collectEmittedOfferLists(offers).filter { offerGroupHasEmittedUpdate(it) }.flatten()
+    val emittedOffers = collectEmittedOfferLists(offers, pclassesForTla)
+        .filter { offerGroupHasEmittedUpdate(it) }
+        .flatten()
     invClosure.forEach { collectBuiltinDomainUses(it.invariantFormula(), cfgOverrides) }
     leaves.forEach { leaf ->
         leaf.initExprs.forEach { collectBuiltinDomainUses(it, cfgOverrides) }
@@ -392,14 +394,10 @@ private fun emitProjectedTla(
             invClosure.any { exprContainsAllDistinct(it.invariantFormula()) }
     val unsupportedBuiltinWarnings =
         collectUnsupportedBuiltinWarnings(offers, usedFunOps, invClosure)
-    val sessionPairs = detectTwoSidedSessionPairs(offers)
-    val emittedOfferLists = collectEmittedOfferLists(offers)
-    val killTargets = collectKillTargets(emittedOfferLists, sessionPairs)
-    val needsSessionException = emittedOfferLists.any { offerList ->
-        sessionPairForOffers(offerList, sessionPairs) != null && offerList.any { it.isConstructor }
-    }
+    val emittedOfferLists = collectEmittedOfferLists(offers, pclassesForTla)
+    val killTargets = collectKillTargets(emittedOfferLists)
     val stateVarNames = buildStateVarNames(leaves, pclassesForTla, reservedTlaIds, killTargets)
-    val foldedCtors = foldableInitConstructors(offers, callSites, havocSites)
+    val foldedCtors = foldableInitConstructors(offers, callSites, havocSites, pclassesForTla)
     val foldedCtorLeaves = foldedCtors.keys
 
     // cfg Int/Nat may be finite \E bounds; TypeOK uses TypeOKInt (Int \cup Nat \cup extras).
@@ -606,20 +604,9 @@ private fun emitProjectedTla(
             typeOkParts += typeOkConjunct(varName, "BOOLEAN", domain)
         }
     }
-    sessionPairs.forEach { pair ->
-        variables += pair.varName
-        initParts += sessionVarInit(pair)
-        typeOkParts += typeOkConjunct(pair.varName, sessionVarTypeOkRange(pair), null)
-    }
-    if (needsSessionException) {
-        variables += "sessionException"
-        initParts += "/\\ sessionException = FALSE"
-        typeOkParts += typeOkConjunct("sessionException", "BOOLEAN", null)
-    }
-
     val built = buildTlaActions(
-        leaves, pclassesForTla, offers, sessionPairs, stateVarNames,
-        killTargets, needsSessionException, callSites, handshake, procFunNodes,
+        leaves, pclassesForTla, offers, stateVarNames,
+        killTargets, callSites, handshake, procFunNodes,
         havocSites, cfgOverrides, leafSpecNodes, foldedCtorLeaves,
     )
     val helpers = built.helpers
@@ -659,9 +646,6 @@ private fun emitProjectedTla(
     } else {
         emptyList()
     }
-    val sessionIntegrityDef =
-        if (needsSessionException) "SessionIntegrity == ~sessionException" else null
-
     val constLine = if (constants.isEmpty()) "" else "CONSTANT ${constants.joinToString(", ")}\n\n"
     val varsLine = if (variables.isEmpty()) {
         "VARIABLES dummy\n\n"
@@ -793,10 +777,6 @@ private fun emitProjectedTla(
             appendLine()
             appendLine(constraintDef)
         }
-        if (sessionIntegrityDef != null) {
-            appendLine()
-            appendLine(sessionIntegrityDef)
-        }
         if (invDefs.isNotEmpty()) {
             appendLine()
             appendLine("\\* user-specified invariants")
@@ -825,9 +805,6 @@ private fun emitProjectedTla(
         appendLine("INVARIANT TypeOK")
         if (constraintDef != null) {
             appendLine("CONSTRAINT StateConstraint")
-        }
-        if (needsSessionException) {
-            appendLine("INVARIANT SessionIntegrity")
         }
         if (invDefs.isNotEmpty()) {
             val skipCfgInv = cfgSkipConjunctiveInvariants(invClosure)
@@ -912,32 +889,75 @@ internal data class TlaActionOffer(
 
 /**
  * Transition-type label for TLA section comments, matching analyze/`ListActions` wording:
- * `constructor` / `transition`, optionally prefixed with `session` / `provider` / `client` / `internal`.
+ * `constructor` / `transition`, optionally prefixed with `timer` / `internal`.
  * Uses [TlaActionOffer.decl] modifier (not [TlaActionOffer.role]), since constructors are stored as
  * Internal on the offer for codegen grouping while their decl modifier remains Default.
  */
 internal fun tlaTransitionTypeLabel(offer: TlaActionOffer): String {
     val kindStr = if (offer.isConstructor) "constructor" else "transition"
     return when {
-        offer.decl.isSession -> "session $kindStr"
-        offer.decl.modifier == TSAction.SyncRole.Provider -> "provider $kindStr"
-        offer.decl.modifier == TSAction.SyncRole.Client -> "client $kindStr"
+        offer.decl.isTimer || offer.decl.modifier == TSAction.SyncRole.Timer -> "timer $kindStr"
         offer.decl.modifier == TSAction.SyncRole.Internal -> "internal $kindStr"
+        offer.decl.modifier == TSAction.SyncRole.Service -> "service $kindStr"
+        offer.decl.modifier == TSAction.SyncRole.Client -> "client $kindStr"
         else -> kindStr
     }
 }
 
-/** Two SpecLeaves that both offer at least one shared session action. */
-internal data class SessionLeafPair(
-    val leafA: SpecLeaf,
-    val leafB: SpecLeaf,
-) {
-    init {
-        require(leafA.tlaName <= leafB.tlaName) { "leafA must be ordered before leafB by tlaName" }
+/** Local (non-syncing) offer: `internal`, `timer`, or Timer role. */
+private fun isLocalTlaOffer(offer: TlaActionOffer): Boolean =
+    !offer.isConstructor && (
+        offer.role == TSAction.SyncRole.Internal ||
+            offer.role == TSAction.SyncRole.Timer ||
+            offer.decl.isTimer
+        )
+
+/** Sync offer: Default / Service / Client (non-timer). */
+private fun isSyncableTlaOffer(offer: TlaActionOffer): Boolean =
+    !offer.isConstructor &&
+        !offer.decl.isTimer &&
+        offer.role != TSAction.SyncRole.Internal &&
+        offer.role != TSAction.SyncRole.Timer &&
+        (
+            offer.role == TSAction.SyncRole.Default ||
+                offer.role == TSAction.SyncRole.Service ||
+                offer.role == TSAction.SyncRole.Client
+            )
+
+private fun offerIsStatic(offer: TlaActionOffer, pclasses: Map<String, ProcClassNode>): Boolean =
+    pclasses[offer.leaf.name]?.isStatic == true
+
+/**
+ * Pairing for syncable offers of one action name.
+ * - one Service + N Clients → N pairwise lists (service with each client)
+ * - one static + N dynamics (Defaults) → N pairwise lists (hub with each peer)
+ * - exactly two statics / two Defaults → one pairwise list
+ * - otherwise null (caller falls back to ordinary default grouping)
+ */
+private fun hubPairedOfferLists(
+    syncables: List<TlaActionOffer>,
+    pclasses: Map<String, ProcClassNode>,
+): List<List<TlaActionOffer>>? {
+    if (syncables.isEmpty()) return null
+    val services = syncables.filter { it.role == TSAction.SyncRole.Service }
+    val clients = syncables.filter { it.role == TSAction.SyncRole.Client }
+    if (services.size == 1 && clients.isNotEmpty()) {
+        return clients.map { listOf(services[0], it) }
     }
 
-    val varName: String get() = "session_${leafA.tlaName}_${leafB.tlaName}"
-    val canStartName: String get() = "CanStartSession_${leafA.tlaName}_${leafB.tlaName}"
+    val defaults = syncables.filter { it.role == TSAction.SyncRole.Default }
+    if (defaults.isEmpty()) return null
+    val statics = defaults.filter { offerIsStatic(it, pclasses) }
+    val dynamics = defaults.filter { !offerIsStatic(it, pclasses) }
+    return when {
+        statics.size == 1 && dynamics.isNotEmpty() ->
+            dynamics.map { listOf(statics[0], it) }
+        statics.size == 2 && dynamics.isEmpty() ->
+            listOf(statics)
+        defaults.size == 2 ->
+            listOf(defaults)
+        else -> null
+    }
 }
 
 private data class TlaBuildResult(
@@ -985,82 +1005,52 @@ private fun collectTlaActionOffers(
     return offers
 }
 
-/** Session pairs where both peers appear as SpecLeaves (one-sided → empty). */
-internal fun detectTwoSidedSessionPairs(offers: List<TlaActionOffer>): List<SessionLeafPair> {
-    val leafByTla = offers.map { it.leaf }.associateBy { it.tlaName }
-    val pairKeys = linkedSetOf<Pair<String, String>>()
-    offers.groupBy { it.decl.action.name }.forEach { (_, group) ->
-        val sessionOffers = group.filter { it.decl.isSession }
-        if (sessionOffers.size != 2) return@forEach
-        val tlaNames = sessionOffers.map { it.leaf.tlaName }.toSet()
-        if (tlaNames.size != 2) return@forEach
-        // Same class never sessions with itself (two occurrences of one class).
-        if (sessionOffers.map { it.leaf.name }.toSet().size != 2) return@forEach
-        val sorted = tlaNames.sorted()
-        pairKeys += sorted[0] to sorted[1]
-    }
-    return pairKeys.mapNotNull { (a, b) ->
-        val la = leafByTla[a] ?: return@mapNotNull null
-        val lb = leafByTla[b] ?: return@mapNotNull null
-        if (la.tlaName <= lb.tlaName) SessionLeafPair(la, lb) else SessionLeafPair(lb, la)
-    }
-}
-
-private fun sessionPairForOffers(
-    offerList: List<TlaActionOffer>,
-    pairs: List<SessionLeafPair>,
-): SessionLeafPair? {
-    if (offerList.size != 2) return null
-    if (!offerList.all { it.decl.isSession }) return null
-    val names = offerList.map { it.leaf.tlaName }.sorted()
-    return pairs.find { it.leafA.tlaName == names[0] && it.leafB.tlaName == names[1] }
-}
-
 /**
  * Offer lists that [buildTlaActions] would pass to [emitConjoined], in the same grouping order.
- * Used to precompute kill targets and whether sessionException is needed.
+ * Used to precompute kill targets (`exitProc`).
  */
-internal fun collectEmittedOfferLists(offers: List<TlaActionOffer>): List<List<TlaActionOffer>> {
+internal fun collectEmittedOfferLists(
+    offers: List<TlaActionOffer>,
+    pclasses: Map<String, ProcClassNode> = emptyMap(),
+): List<List<TlaActionOffer>> {
     val result = mutableListOf<List<TlaActionOffer>>()
     offers.groupBy { it.decl.action.name }.forEach { (_, group) ->
-        val providers = group.filter { it.role == TSAction.SyncRole.Provider }
-        val clients = group.filter { it.role == TSAction.SyncRole.Client }
         val constructors = group.filter { it.isConstructor }
-        val internals = group.filter { it.role == TSAction.SyncRole.Internal && !it.isConstructor }
-        val defaults = group.filter { it.role == TSAction.SyncRole.Default && !it.isConstructor }
+        val locals = group.filter { isLocalTlaOffer(it) }
+        val syncables = group.filter { isSyncableTlaOffer(it) }
 
-        if (providers.size == 1 && clients.isNotEmpty()) {
-            clients.forEach { cli -> result += listOf(providers[0], cli) }
+        hubPairedOfferLists(syncables, pclasses)?.let { pairs ->
+            pairs.forEach { result += it }
+            constructors.forEach { result += listOf(it) }
+            locals.forEach { result += listOf(it) }
             return@forEach
         }
-        if (constructors.size == 1 && defaults.size == 1) {
-            result += listOf(defaults[0], constructors[0])
+
+        // 1 constructor + 1 default transition → one hybrid shared action
+        if (constructors.size == 1 && syncables.size == 1) {
+            result += listOf(syncables[0], constructors[0])
             return@forEach
         }
+
         constructors.forEach { result += listOf(it) }
-        internals.forEach { result += listOf(it) }
+        locals.forEach { result += listOf(it) }
         when {
-            defaults.size >= 2 -> result += defaults
-            defaults.size == 1 -> result += defaults
-        }
-        if (providers.isNotEmpty() && clients.isEmpty()) {
-            providers.forEach { result += listOf(it) }
-        }
-        if (clients.isNotEmpty() && providers.isEmpty()) {
-            clients.forEach { result += listOf(it) }
+            syncables.size >= 2 -> result += syncables
+            syncables.size == 1 -> result += syncables
         }
     }
     return result
 }
 
 /**
- * Sole unsynced constructors folded into Init: not a client/provider pair, not hybrid
+ * Sole unsynced constructors folded into Init: not a hub-paired API, not hybrid
  * ctor+default, not a procfun `*_call` / havoc site, and the leaf has no other constructor.
  */
 internal fun foldableInitConstructors(
     offers: List<TlaActionOffer>,
     callSites: List<ProcFunCallSite>,
     havocSites: List<ProcFunCallSite>,
+    pclasses: Map<String, ProcClassNode> = emptyMap(),
 ): Map<String, TlaActionOffer> {
     val splitKeys = (callSites + havocSites).map { it.hostName to it.hostActionName }.toSet()
     val out = linkedMapOf<String, TlaActionOffer>()
@@ -1069,12 +1059,10 @@ internal fun foldableInitConstructors(
         val offer = ctors.single()
         if ((offer.leaf.tlaName to offer.decl.action.name) in splitKeys) return@forEach
         val group = offers.filter { it.decl.action.name == offer.decl.action.name }
-        val providers = group.filter { it.role == TSAction.SyncRole.Provider }
-        val clients = group.filter { it.role == TSAction.SyncRole.Client }
-        if (providers.size == 1 && clients.isNotEmpty()) return@forEach
+        val syncables = group.filter { isSyncableTlaOffer(it) }
+        if (hubPairedOfferLists(syncables, pclasses) != null) return@forEach
         val constructors = group.filter { it.isConstructor }
-        val defaults = group.filter { it.role == TSAction.SyncRole.Default && !it.isConstructor }
-        if (constructors.size == 1 && defaults.size == 1) return@forEach
+        if (constructors.size == 1 && syncables.size == 1) return@forEach
         out[tlaName] = offer
     }
     return out
@@ -1093,10 +1081,9 @@ internal fun offerGroupHasEmittedUpdate(group: List<TlaActionOffer>): Boolean =
         }
     }
 
-/** Leaf names that are kill targets: `killSessionPeer` peers or `exitProc` callers. */
+/** Leaf names that are kill targets: `exitProc` callers. */
 private fun collectKillTargets(
     emittedOfferLists: List<List<TlaActionOffer>>,
-    sessionPairs: List<SessionLeafPair>,
 ): Set<String> {
     val targets = linkedSetOf<String>()
     emittedOfferLists.forEach { offerList ->
@@ -1105,92 +1092,12 @@ private fun collectKillTargets(
                 targets += offer.leaf.tlaName
             }
         }
-        if (offerList.none { "killSessionPeer" in sessionEffectNames(it) }) return@forEach
-        val actionPair = sessionPairForOffers(offerList, sessionPairs)
-        val effectPair = resolveSessionEffectPair(offerList, actionPair, sessionPairs) ?: return@forEach
-        val caller = sessionEffectCaller(offerList, "killSessionPeer") ?: return@forEach
-        targets += peerLeafOf(effectPair, caller).tlaName
     }
     return targets
 }
 
 private fun offerHasExitProc(offer: TlaActionOffer): Boolean =
     (offer.decl.befores + offer.decl.afters).any { it.callName() == "exitProc" }
-
-private fun sessionEffectNames(offer: TlaActionOffer): List<String> =
-    (offer.decl.befores + offer.decl.afters).map { it.callName() }.filter {
-        it == "exitSession" || it == "killSessionPeer"
-    }
-
-/**
- * Resolve the session pair targeted by exitSession(Peer) / killSessionPeer(Peer) on [offers].
- * The peer leaf name is taken from the effect's proc-class argument.
- */
-private fun resolveSessionEffectPair(
-    offers: List<TlaActionOffer>,
-    @Suppress("UNUSED_PARAMETER") actionSessionPair: SessionLeafPair?,
-    allPairs: List<SessionLeafPair>,
-): SessionLeafPair? {
-    val effectNames = offers.flatMap { sessionEffectNames(it) }.toSet()
-    if (effectNames.isEmpty()) return null
-    val hasKill = "killSessionPeer" in effectNames
-    val hasExit = "exitSession" in effectNames
-    if (hasKill && hasExit) {
-        throw RuntimeException(
-            "TLA+: action \"${offers.first().decl.action.name}\" cannot use both " +
-                "exitSession and killSessionPeer",
-        )
-    }
-    val effectName = if (hasKill) "killSessionPeer" else "exitSession"
-    val caller = sessionEffectCaller(offers, effectName)
-        ?: throw RuntimeException("TLA+: $effectName missing caller leaf")
-    val peerName = offers.mapNotNull { sessionEffectPeerClassName(it, effectName) }.firstOrNull()
-        ?: throw RuntimeException(
-            "TLA+: $effectName on \"${offers.first().decl.action.name}\" " +
-                "requires a leaf proc class name argument",
-        )
-    if (peerName == caller.name) {
-        throw RuntimeException(
-            "TLA+: $effectName on \"${offers.first().decl.action.name}\" " +
-                "cannot target the caller leaf \"$peerName\"",
-        )
-    }
-    val matching = allPairs.filter { pair ->
-        (pair.leafA.name == caller.name && pair.leafB.name == peerName) ||
-            (pair.leafB.name == caller.name && pair.leafA.name == peerName)
-    }
-    return when (matching.size) {
-        1 -> matching.single()
-        0 -> throw RuntimeException(
-            "TLA+: $effectName on \"${offers.first().decl.action.name}\" " +
-                "has no two-sided session pair between ${caller.name} and $peerName",
-        )
-        else -> throw RuntimeException(
-            "TLA+: $effectName on \"${offers.first().decl.action.name}\" " +
-                "is ambiguous across ${matching.map { it.varName }}",
-        )
-    }
-}
-
-/** Peer proc-class name from exitSession(Peer) / killSessionPeer(Peer). */
-private fun sessionEffectPeerClassName(offer: TlaActionOffer, effectName: String): String? {
-    val stmt = (offer.decl.befores + offer.decl.afters).firstOrNull { it.callName() == effectName } ?: return null
-    val arg = stmt.callArgs().singleOrNull() as? SymbolValueExprNode ?: return null
-    return arg.symbol
-}
-
-/** Caller leaf for a kill/exit effect (first offer that declares it). */
-private fun sessionEffectCaller(offers: List<TlaActionOffer>, effectName: String): SpecLeaf? =
-    offers.firstOrNull { effectName in sessionEffectNames(it) }?.leaf
-
-private fun peerLeafOf(pair: SessionLeafPair, caller: SpecLeaf): SpecLeaf =
-    when (caller.name) {
-        pair.leafA.name -> pair.leafB
-        pair.leafB.name -> pair.leafA
-        else -> throw RuntimeException(
-            "TLA+: leaf ${caller.name} is not in session pair ${pair.varName}",
-        )
-    }
 
 private fun killedAssignTrueExpr(
     leaf: SpecLeaf,
@@ -1416,414 +1323,12 @@ private fun collectConstGlobalInitDomainModels(
     }
 }
 
-private fun sessionVarTypeOkRange(pair: SessionLeafPair): String {
-    val a = pair.leafA
-    val b = pair.leafB
-    return when {
-        a.isParameterized && b.isParameterized -> {
-            val da = typeDomainConstant(a.paramType!!) ?: a.paramType.toString()
-            val db = typeDomainConstant(b.paramType!!) ?: b.paramType.toString()
-            "[$da -> [$db -> BOOLEAN]]"
-        }
-        a.isParameterized && !b.isParameterized -> {
-            val da = typeDomainConstant(a.paramType!!) ?: a.paramType.toString()
-            "[$da -> BOOLEAN]"
-        }
-        !a.isParameterized && b.isParameterized -> {
-            val db = typeDomainConstant(b.paramType!!) ?: b.paramType.toString()
-            "[$db -> BOOLEAN]"
-        }
-        else -> "BOOLEAN"
-    }
-}
-
-private fun sessionVarInit(pair: SessionLeafPair): String {
-    val v = pair.varName
-    val a = pair.leafA
-    val b = pair.leafB
-    return when {
-        a.isParameterized && b.isParameterized -> {
-            val da = typeDomainConstant(a.paramType!!) ?: a.paramType.toString()
-            val db = typeDomainConstant(b.paramType!!) ?: b.paramType.toString()
-            val ba = indexBinderName(a, emptySet())
-            val bb = indexBinderName(b, setOf(ba))
-            "/\\ $v = [$ba \\in $da |-> [$bb \\in $db |-> FALSE]]"
-        }
-        a.isParameterized && !b.isParameterized -> {
-            val da = typeDomainConstant(a.paramType!!) ?: a.paramType.toString()
-            val ba = indexBinderName(a, emptySet())
-            "/\\ $v = [$ba \\in $da |-> FALSE]"
-        }
-        !a.isParameterized && b.isParameterized -> {
-            val db = typeDomainConstant(b.paramType!!) ?: b.paramType.toString()
-            val bb = indexBinderName(b, emptySet())
-            "/\\ $v = [$bb \\in $db |-> FALSE]"
-        }
-        else -> "/\\ $v = FALSE"
-    }
-}
-
-private fun canStartSessionDef(pair: SessionLeafPair): String {
-    val v = pair.varName
-    val a = pair.leafA
-    val b = pair.leafB
-    return when {
-        a.isParameterized && b.isParameterized -> {
-            val da = typeDomainConstant(a.paramType!!) ?: a.paramType.toString()
-            val db = typeDomainConstant(b.paramType!!) ?: b.paramType.toString()
-            val ba = indexBinderName(a, emptySet())
-            val bb = indexBinderName(b, setOf(ba))
-            val ba2 = "${ba}2"
-            val bb2 = "${bb}2"
-            "${pair.canStartName}($ba, $bb) ==\n" +
-                "  /\\ ~\\E $bb2 \\in $db : $v[$ba][$bb2]\n" +
-                "  /\\ ~\\E $ba2 \\in $da : $v[$ba2][$bb]"
-        }
-        a.isParameterized && !b.isParameterized -> {
-            val da = typeDomainConstant(a.paramType!!) ?: a.paramType.toString()
-            val ba = indexBinderName(a, emptySet())
-            val ba2 = "${ba}2"
-            "${pair.canStartName}($ba) ==\n  ~\\E $ba2 \\in $da : $v[$ba2]"
-        }
-        !a.isParameterized && b.isParameterized -> {
-            val db = typeDomainConstant(b.paramType!!) ?: b.paramType.toString()
-            val bb = indexBinderName(b, emptySet())
-            val bb2 = "${bb}2"
-            "${pair.canStartName}($bb) ==\n  ~\\E $bb2 \\in $db : $v[$bb2]"
-        }
-        else -> "${pair.canStartName} ==\n  ~$v"
-    }
-}
-
-private fun sessionLookup(
-    pair: SessionLeafPair,
-    binderA: String?,
-    binderB: String?,
-): String {
-    val v = pair.varName
-    return when {
-        binderA != null && binderB != null -> "$v[$binderA][$binderB]"
-        binderA != null -> "$v[$binderA]"
-        binderB != null -> "$v[$binderB]"
-        else -> v
-    }
-}
-
-/**
- * True when [caller] has any live session in [pair] (any peer index).
- * Used so teardown no-op applies only when affinity is fully absent; if some peer
- * session exists, [sessionLookup] must hold for the quantified indices.
- */
-private fun anySessionWithCaller(
-    pair: SessionLeafPair,
-    caller: SpecLeaf,
-    binderA: String?,
-    binderB: String?,
-): String {
-    val v = pair.varName
-    val a = pair.leafA
-    val b = pair.leafB
-    return when {
-        a.isParameterized && b.isParameterized -> {
-            val da = typeDomainConstant(a.paramType!!) ?: a.paramType.toString()
-            val db = typeDomainConstant(b.paramType!!) ?: b.paramType.toString()
-            when (caller.name) {
-                a.name -> {
-                    val bb = binderB ?: indexBinderName(b, emptySet())
-                    val bb2 = "${bb}2"
-                    val ba = binderA ?: indexBinderName(a, setOf(bb))
-                    "\\E $bb2 \\in $db : $v[$ba][$bb2]"
-                }
-                b.name -> {
-                    val ba = binderA ?: indexBinderName(a, emptySet())
-                    val ba2 = "${ba}2"
-                    val bb = binderB ?: indexBinderName(b, setOf(ba))
-                    "\\E $ba2 \\in $da : $v[$ba2][$bb]"
-                }
-                else -> error("caller ${caller.name} not in pair ${pair.varName}")
-            }
-        }
-        else -> sessionLookup(pair, binderA, binderB)
-    }
-}
-
-private fun sessionAssignTrueExpr(
-    pair: SessionLeafPair,
-    binderA: String?,
-    binderB: String?,
-): String {
-    val v = pair.varName
-    return when {
-        binderA != null && binderB != null ->
-            "$v' = [$v EXCEPT ![$binderA] = [@ EXCEPT ![$binderB] = TRUE]]"
-        binderA != null -> "$v' = [$v EXCEPT ![$binderA] = TRUE]"
-        binderB != null -> "$v' = [$v EXCEPT ![$binderB] = TRUE]"
-        else -> "$v' = TRUE"
-    }
-}
-
-private fun sessionAssignFalseExpr(
-    pair: SessionLeafPair,
-    binderA: String?,
-    binderB: String?,
-): String {
-    val v = pair.varName
-    return when {
-        binderA != null && binderB != null ->
-            "$v' = [$v EXCEPT ![$binderA] = [@ EXCEPT ![$binderB] = FALSE]]"
-        binderA != null -> "$v' = [$v EXCEPT ![$binderA] = FALSE]"
-        binderB != null -> "$v' = [$v EXCEPT ![$binderB] = FALSE]"
-        else -> "$v' = FALSE"
-    }
-}
-
-private fun canStartCall(
-    pair: SessionLeafPair,
-    binderA: String?,
-    binderB: String?,
-): String {
-    val name = pair.canStartName
-    return when {
-        binderA != null && binderB != null -> "$name($binderA, $binderB)"
-        binderA != null -> "$name($binderA)"
-        binderB != null -> "$name($binderB)"
-        else -> name
-    }
-}
-
-private fun deadOperatorName(leaf: SpecLeaf): String = "${leaf.tlaName}_dead"
-
-private fun negateLocalGuards(
-    offer: TlaActionOffer,
-    self: String?,
-    stateVarsByLeaf: Map<String, Set<String>>,
-    stateVarNames: Map<Pair<String, String>, String>,
-    pclasses: Map<String, ProcClassNode> = emptyMap(),
-    leafSpecs: Map<String, LeafSpecNode> = emptyMap(),
-): String {
-    val guards = offer.decl.guards
-    if (guards.isEmpty()) return "FALSE"
-    val extra = collectTlaExtraArgNames(listOf(offer), pclasses, leafSpecs)
-    val plan = analyzeTlaArgBind(listOf(offer), TlaEmitOpts.get(), extra)
-    return TlaSkipConjuncts.with(plan.skipConjuncts) {
-        negateLocalGuardsBody(offer, self, stateVarsByLeaf, stateVarNames, plan)
-    }
-}
-
-private fun negateLocalGuardsBody(
-    offer: TlaActionOffer,
-    self: String?,
-    stateVarsByLeaf: Map<String, Set<String>>,
-    stateVarNames: Map<Pair<String, String>, String>,
-    plan: TlaArgBindPlan,
-): String {
-    val guards = offer.decl.guards
-    offer.decl.action.args.forEach { TlaSymbolTypes.set(TlaSymbolTypes.get() + (it.name to it.type)) }
-    val bindNames = linkedSetOf<String>().apply {
-        addAll(plan.skipArgs)
-        addAll(plan.extraBinderNames())
-        plan.setBinds.forEach { add(it.arg) }
-        plan.determined.forEach { add(it.first) }
-        plan.listBinds.forEach { add(it.arg) }
-        plan.structBinds.forEach { b -> b.argPaths.forEach { add(it.first) } }
-    }
-    val argNames = offer.decl.action.args.map { it.name }.toSet() + bindNames
-    val leafCtx = mapOf(offer.leaf.name to offer.leaf, offer.leaf.tlaName to offer.leaf)
-    val bare = stateVarsByLeaf[offer.leaf.tlaName].orEmpty()
-    val takenParamIds = stateVarNames.values.toMutableSet()
-    val argRenames = linkedMapOf<String, String>()
-    val seenArgs = mutableSetOf<String>()
-    fun argTla(name: String): String = argRenames[name] ?: name
-    fun renameIfTaken(name: String) {
-        if (name in seenArgs) return
-        seenArgs += name
-        val tlaArg = firstFreeParamTlaName(name, takenParamIds)
-        takenParamIds += tlaArg
-        if (tlaArg != name) argRenames[name] = tlaArg
-    }
-    offer.decl.action.args.forEach { arg -> renameIfTaken(arg.name) }
-    bindNames.forEach { renameIfTaken(it) }
-    fun emit(expr: ExprNode, linePrefix: String = ""): String =
-        exprToTla(
-            expr, leafCtx, argNames, self,
-            bareStateVars = bare,
-            stateVarNames = stateVarNames,
-            symbolOverrides = argRenames,
-            linePrefix = linePrefix,
-        )
-    val guardStrs = guards.flatMap { flattenTopLevelAnd(it) }
-        .filter { !plan.skipped(it) }
-        .map { emit(it) }
-    val keepStrs = plan.structBinds.flatMap { b ->
-        val elemType = try {
-            (b.set.getType() as? SetType)?.elementType
-        } catch (_: RuntimeException) {
-            null
-        }
-        b.keep.map { (path, expr) ->
-            "${emitUnwrappedFieldPath(argTla(b.tmp), elemType, path)} = ${emit(expr)}"
-        }
-    }
-    val allGuards = guardStrs + keepStrs
-    val conj = when {
-        allGuards.isEmpty() -> "TRUE"
-        allGuards.size == 1 -> allGuards[0]
-        else -> allGuards.joinToString(" /\\ ")
-    }
-    val letBindings = mutableListOf<Pair<String, String>>()
-    plan.listBinds.forEach { b ->
-        letBindings += argTla(b.arg) to "${emit(b.list)}[${argTla(b.index)}]"
-    }
-    plan.structBinds.forEach { b ->
-        val elemType = try {
-            (b.set.getType() as? SetType)?.elementType
-        } catch (_: RuntimeException) {
-            null
-        }
-        b.argPaths.forEach { (arg, path) ->
-            letBindings += argTla(arg) to emitUnwrappedFieldPath(argTla(b.tmp), elemType, path)
-        }
-    }
-    plan.determined.forEach { (arg, expr) ->
-        letBindings += argTla(arg) to emit(expr)
-    }
-    val inner = wrapTlaLet(letBindings, conj)
-    val existsParams = mutableListOf<Pair<String, String>>()
-    plan.listBinds.forEach { b ->
-        existsParams += argTla(b.index) to "1..Len(${emit(b.list)})"
-    }
-    plan.setBinds.forEach { b ->
-        existsParams += argTla(b.arg) to emit(b.set)
-    }
-    plan.structBinds.forEach { b ->
-        existsParams += argTla(b.tmp) to emit(b.set)
-    }
-    val omit = plan.omitArgTypeDomains()
-        offer.decl.action.args.filter { arg ->
-        arg.name !in omit && guards.any { exprReferencesSymbol(it, arg.name) }
-    }.forEach { arg ->
-        val proj = plan.projectedBind(arg.name)
-        val domain = if (proj != null) {
-            emitProjectedArgDomain(proj) { emit(it) }
-        } else {
-            argLiteralDomain(listOf(offer), arg.name, arg.type) ?: typeToTlaDomain(arg.type)
-        }
-        existsParams += argTla(arg.name) to domain
-    }
-    val exists = wrapTlaExists(existsParams, inner)
-    return "~($exists)"
-}
-
-private fun deadOperatorDef(
-    leaf: SpecLeaf,
-    leafOffers: List<TlaActionOffer>,
-    stateVarsByLeaf: Map<String, Set<String>>,
-    stateVarNames: Map<Pair<String, String>, String>,
-    killTargets: Set<String>,
-    foldedCtorLeaves: Set<String> = emptySet(),
-    pclasses: Map<String, ProcClassNode> = emptyMap(),
-    leafSpecs: Map<String, LeafSpecNode> = emptyMap(),
-): String {
-    val self = if (leaf.isParameterized) {
-        indexBinderName(leaf, stateVarsByLeaf[leaf.tlaName].orEmpty())
-    } else {
-        null
-    }
-    val naturalParts = mutableListOf<String>()
-    if (leaf.tlaName !in foldedCtorLeaves) {
-        val c = stateTlaName(leaf.tlaName, "constructed", stateVarNames)
-        naturalParts += if (self != null) "/\\ $c[$self]" else "/\\ $c"
-    }
-    leafOffers.filter { !it.isConstructor }.forEach { offer ->
-        naturalParts += "/\\ ${negateLocalGuards(offer, self, stateVarsByLeaf, stateVarNames, pclasses, leafSpecs)}"
-    }
-    val naturalBody = naturalParts.joinToString("\n       ")
-    val signature = if (self != null) "${deadOperatorName(leaf)}($self)" else deadOperatorName(leaf)
-    return if (leaf.tlaName in killTargets) {
-        val killed = stateTlaName(leaf.tlaName, "killed", stateVarNames)
-        val killedLit = if (self != null) "$killed[$self]" else killed
-        val comment =
-            "\\* True when ${leaf.name} was explicitly killed or all of its actions are disabled."
-        "$comment\n$signature ==\n  \\/ $killedLit\n  \\/ ($naturalBody)"
-    } else {
-        val comment =
-            "\\* True when all of ${leaf.name}'s actions are disabled."
-        val body = naturalParts.joinToString("\n  ")
-        "$comment\n$signature ==\n  $body"
-    }
-}
-
-private fun endSessionActionName(
-    pair: SessionLeafPair,
-    leaf: SpecLeaf,
-    allPairs: List<SessionLeafPair>,
-): String {
-    val count = allPairs.count { it.leafA.tlaName == leaf.tlaName || it.leafB.tlaName == leaf.tlaName }
-    return if (count == 1) {
-        "EndSession_${leaf.tlaName}"
-    } else {
-        "EndSession_${pair.leafA.tlaName}_${pair.leafB.tlaName}_${leaf.tlaName}"
-    }
-}
-
-private fun emitEndSession(
-    pair: SessionLeafPair,
-    exiting: SpecLeaf,
-    allPairs: List<SessionLeafPair>,
-    allVars: List<String>,
-    stateVarsByLeaf: Map<String, Set<String>>,
-): TlaAction {
-    val name = endSessionActionName(pair, exiting, allPairs)
-    val binderA = if (pair.leafA.isParameterized) {
-        indexBinderName(pair.leafA, stateVarsByLeaf[pair.leafA.tlaName].orEmpty())
-    } else null
-    val binderB = if (pair.leafB.isParameterized) {
-        val reserved = stateVarsByLeaf[pair.leafB.tlaName].orEmpty().toMutableSet()
-        binderA?.let { reserved += it }
-        indexBinderName(pair.leafB, reserved)
-    } else null
-    val exitingBinder = when (exiting.name) {
-        pair.leafA.tlaName -> binderA
-        else -> binderB
-    }
-    val deadCall = if (exitingBinder != null) {
-        "${deadOperatorName(exiting)}($exitingBinder)"
-    } else {
-        deadOperatorName(exiting)
-    }
-    val lookup = sessionLookup(pair, binderA, binderB)
-    val assign = sessionAssignFalseExpr(pair, binderA, binderB)
-    val changed = setOf(pair.varName)
-    val unchanged = allVars.filter { it !in changed }
-    val parts = mutableListOf<String>()
-    parts += "/\\ $deadCall"
-    parts += "\\* Session connection semantics"
-    parts += "/\\ $lookup"
-    parts += "/\\ $assign"
-    if (unchanged.isNotEmpty()) {
-        parts += "/\\ UNCHANGED <<${unchanged.joinToString(", ")}>>"
-    }
-    val params = mutableListOf<Pair<String, String>>()
-    if (binderA != null) {
-        val domain = typeDomainConstant(pair.leafA.paramType!!) ?: pair.leafA.paramType.toString()
-        params += binderA to domain
-    }
-    if (binderB != null) {
-        val domain = typeDomainConstant(pair.leafB.paramType!!) ?: pair.leafB.paramType.toString()
-        params += binderB to domain
-    }
-    val signature = if (params.isEmpty()) name else "$name(${params.joinToString(", ") { it.first }})"
-    return TlaAction(name, "$signature ==\n  ${parts.joinToString("\n  ")}", params)
-}
-
 private fun buildTlaActions(
     leaves: List<SpecLeaf>,
     pclasses: Map<String, ProcClassNode>,
     offers: List<TlaActionOffer>,
-    sessionPairs: List<SessionLeafPair>,
     stateVarNames: Map<Pair<String, String>, String>,
     killTargets: Set<String>,
-    needsSessionException: Boolean,
     callSites: List<ProcFunCallSite> = emptyList(),
     handshake: ProcFunHandshakeVars = ProcFunHandshakeVars(emptyList(), emptyMap(), emptyMap()),
     procFunNodes: Map<String, ProcFunNode> = emptyMap(),
@@ -1833,9 +1338,7 @@ private fun buildTlaActions(
     foldedCtorLeaves: Set<String> = emptySet(),
 ): TlaBuildResult {
     val allVars = allTlaVars(leaves, pclasses, stateVarNames, killTargets, foldedCtorLeaves) +
-        handshake.allNames() +
-        sessionPairs.map { it.varName } +
-        if (needsSessionException) listOf("sessionException") else emptyList()
+        handshake.allNames()
     val stateVarsByLeaf = leaves.associate { leaf ->
         leaf.tlaName to (
             pclasses[leaf.name]
@@ -1866,7 +1369,7 @@ private fun buildTlaActions(
     ) {
         emitConjoined(
             name, offerList, allVars, stateVarsByLeaf, stateVarNames,
-            sessionPairForOffers(offerList, sessionPairs), sessionPairs, killTargets, comment,
+            killTargets, comment,
             returnToByOccurrence = returnToByOccurrence,
             blockingByHost = blockingByHost,
             hostsWithBlocking = hostsWithBlocking,
@@ -1897,43 +1400,79 @@ private fun buildTlaActions(
         )
     }
 
-    byName.forEach { (actionName, group) ->
-        val providers = group.filter { it.role == TSAction.SyncRole.Provider }
-        val clients = group.filter { it.role == TSAction.SyncRole.Client }
-        val constructors = group.filter { it.isConstructor }
-        val internals = group.filter { it.role == TSAction.SyncRole.Internal && !it.isConstructor }
-        val defaults = group.filter { it.role == TSAction.SyncRole.Default && !it.isConstructor }
+    fun emitSplitOrPlain(offer: TlaActionOffer): Boolean {
+        val key = offer.leaf.tlaName to offer.decl.action.name
+        callSiteByHostAction[key]?.let { emitCoupled(offer, it); return true }
+        havocByHostAction[key]?.let { emitHavoc(offer, it); return true }
+        return false
+    }
 
-        if (providers.size == 1 && clients.isNotEmpty()) {
-            val prov = providers[0]
-            val needDisambiguate = clients.size > 1
-            clients.forEach { cli ->
+    byName.forEach { (actionName, group) ->
+        val constructors = group.filter { it.isConstructor }
+        val locals = group.filter { isLocalTlaOffer(it) }
+        val syncables = group.filter { isSyncableTlaOffer(it) }
+
+        hubPairedOfferLists(syncables, pclasses)?.let { pairs ->
+            val needDisambiguate = pairs.size > 1
+            pairs.forEach { pair ->
                 val name: String
                 val comment: String?
-                if (needDisambiguate) {
-                    name = "${actionName}_${prov.leaf.tlaName}_${cli.leaf.tlaName}"
-                    comment =
-                        "$actionName action where ${prov.leaf.tlaName} is the provider and ${cli.leaf.tlaName} is the client"
+                if (needDisambiguate && pair.size >= 2) {
+                    val a = pair[0]
+                    val b = pair[1]
+                    name = "${actionName}_${a.leaf.tlaName}_${b.leaf.tlaName}"
+                    comment = when {
+                        pair.any { it.role == TSAction.SyncRole.Service } &&
+                            pair.any { it.role == TSAction.SyncRole.Client } -> {
+                            val service = pair.first { it.role == TSAction.SyncRole.Service }
+                            val client = pair.first { it.role == TSAction.SyncRole.Client }
+                            "$actionName action where ${service.leaf.tlaName} is the service and " +
+                                "${client.leaf.tlaName} is the client"
+                        }
+                        pair.count { offerIsStatic(it, pclasses) } == 1 -> {
+                            val hub = pair.first { offerIsStatic(it, pclasses) }
+                            val peer = pair.first { !offerIsStatic(it, pclasses) }
+                            "$actionName action where ${hub.leaf.tlaName} is the hub and " +
+                                "${peer.leaf.tlaName} is the peer"
+                        }
+                        else ->
+                            "$actionName action between ${a.leaf.tlaName} and ${b.leaf.tlaName}"
+                    }
                 } else {
                     name = actionName
                     comment = null
                 }
-                emit(name, listOf(prov, cli), comment)
+                emit(name, pair, comment)
+            }
+            // Still emit constructors / locals for this action name
+            val disambiguateCtors = constructors.size > 1
+            constructors.forEach { offer ->
+                if (offer.leaf.tlaName in foldedCtorLeaves) return@forEach
+                if (emitSplitOrPlain(offer)) return@forEach
+                val name = if (disambiguateCtors) {
+                    if (offer.decl.action.name == "initially") "${offer.leaf.tlaName}_initially"
+                    else "${actionName}_${offer.leaf.tlaName}"
+                } else actionName
+                val comment = if (disambiguateCtors) {
+                    if (offer.decl.action.name == "initially") "initially constructor on ${offer.leaf.tlaName}"
+                    else "$actionName action on ${offer.leaf.tlaName}"
+                } else null
+                emit(name, listOf(offer), comment)
+            }
+            val disambiguateLocals = locals.size > 1
+            locals.forEach { offer ->
+                if (emitSplitOrPlain(offer)) return@forEach
+                val name = if (disambiguateLocals) "${actionName}_${offer.leaf.tlaName}" else actionName
+                val comment = if (disambiguateLocals) "$actionName action on ${offer.leaf.tlaName}" else null
+                emit(name, listOf(offer), comment)
             }
             return@forEach
         }
 
         // 1 constructor + 1 default transition → one hybrid shared action
-        if (constructors.size == 1 && defaults.size == 1) {
-            emit(actionName, listOf(defaults[0], constructors[0]))
+        if (constructors.size == 1 && syncables.size == 1) {
+            emit(actionName, listOf(syncables[0], constructors[0]))
             return@forEach
-        }
-
-        fun emitSplitOrPlain(offer: TlaActionOffer): Boolean {
-            val key = offer.leaf.tlaName to offer.decl.action.name
-            callSiteByHostAction[key]?.let { emitCoupled(offer, it); return true }
-            havocByHostAction[key]?.let { emitHavoc(offer, it); return true }
-            return false
         }
 
         // Solo constructors (any name, including initially) — valid leaf entry
@@ -1961,12 +1500,12 @@ private fun buildTlaActions(
             emit(name, listOf(offer), comment)
         }
 
-        val disambiguateInternals = internals.size > 1
-        internals.forEach { offer ->
+        val disambiguateLocals = locals.size > 1
+        locals.forEach { offer ->
             if (emitSplitOrPlain(offer)) return@forEach
             val name: String
             val comment: String?
-            if (disambiguateInternals) {
+            if (disambiguateLocals) {
                 name = "${actionName}_${offer.leaf.tlaName}"
                 comment = "$actionName action on ${offer.leaf.tlaName}"
             } else {
@@ -1977,73 +1516,23 @@ private fun buildTlaActions(
         }
 
         when {
-            defaults.size >= 2 -> {
-                val (coupled, plain) = defaults.partition {
+            syncables.size >= 2 -> {
+                val (coupled, plain) = syncables.partition {
                     (it.leaf.tlaName to it.decl.action.name) in splitHostActions
                 }
                 coupled.forEach { offer -> emitSplitOrPlain(offer) }
                 if (plain.isNotEmpty()) emit(actionName, plain)
             }
-            defaults.size == 1 -> {
-                val offer = defaults[0]
-                if (!emitSplitOrPlain(offer)) emit(actionName, defaults)
+            syncables.size == 1 -> {
+                val offer = syncables[0]
+                if (!emitSplitOrPlain(offer)) emit(actionName, syncables)
             }
         }
-
-        if (providers.isNotEmpty() && clients.isEmpty()) {
-            val disambiguate = providers.size > 1
-            providers.forEach { prov ->
-                val name: String
-                val comment: String?
-                if (disambiguate) {
-                    name = "${actionName}_${prov.leaf.tlaName}"
-                    comment = "$actionName action on ${prov.leaf.tlaName}"
-                } else {
-                    name = actionName
-                    comment = null
-                }
-                emit(name, listOf(prov), comment)
-            }
-        }
-        if (clients.isNotEmpty() && providers.isEmpty()) {
-            val disambiguate = clients.size > 1
-            clients.forEach { cli ->
-                val name: String
-                val comment: String?
-                if (disambiguate) {
-                    name = "${actionName}_${cli.leaf.tlaName}"
-                    comment = "$actionName action on ${cli.leaf.tlaName}"
-                } else {
-                    name = actionName
-                    comment = null
-                }
-                emit(name, listOf(cli), comment)
-            }
-        }
-    }
-
-    val helpers = mutableListOf<String>()
-    sessionPairs.forEach { pair ->
-        helpers += canStartSessionDef(pair)
-    }
-    val sessionLeaves = sessionPairs
-        .flatMap { listOf(it.leafA, it.leafB) }
-        .distinctBy { it.name }
-    sessionLeaves.forEach { leaf ->
-        val leafOffers = offers.filter { it.leaf.tlaName == leaf.tlaName }
-        helpers += deadOperatorDef(
-            leaf, leafOffers, stateVarsByLeaf, stateVarNames, killTargets, foldedCtorLeaves, pclasses, leafSpecs,
-        )
-    }
-
-    sessionPairs.forEach { pair ->
-        result += emitEndSession(pair, pair.leafA, sessionPairs, allVars, stateVarsByLeaf)
-        result += emitEndSession(pair, pair.leafB, sessionPairs, allVars, stateVarsByLeaf)
     }
 
     val unique = result.distinctBy { it.name }
     val (initiallyActions, otherActions) = unique.partition { it.isInitiallyAction() }
-    return TlaBuildResult(helpers, initiallyActions + otherActions)
+    return TlaBuildResult(emptyList(), initiallyActions + otherActions)
 }
 
 /** True for solo `initially` / `Leaf_initially` constructors (defs + Next lead with these). */
@@ -2082,8 +1571,6 @@ private fun emitConjoined(
     allVars: List<String>,
     stateVarsByLeaf: Map<String, Set<String>>,
     stateVarNamesIn: Map<Pair<String, String>, String>,
-    sessionPair: SessionLeafPair? = null,
-    allSessionPairs: List<SessionLeafPair> = emptyList(),
     killTargets: Set<String> = emptySet(),
     comment: String? = null,
     returnToByOccurrence: Map<String, String> = emptyMap(),
@@ -2173,21 +1660,6 @@ private fun emitConjoined(
     // not be suffix-renamed just because that binder is in `reserved`.
     val moduleLevelTaken = (variableTlaIds + allVars).toMutableSet()
     val reserved = moduleLevelTaken.toMutableSet()
-    // Session pair may need binders for both leaves even when indexing session after updates.
-    val effectSessionPair = resolveSessionEffectPair(offers, sessionPair, allSessionPairs)
-    val tearsDownSameSessionPair =
-        effectSessionPair != null &&
-            sessionPair != null &&
-            effectSessionPair.varName == sessionPair.varName
-    val pairsNeedingBinders = listOfNotNull(sessionPair, effectSessionPair).distinctBy { it.varName }
-    pairsNeedingBinders.forEach { pair ->
-        listOf(pair.leafA, pair.leafB).forEach { leaf ->
-            registerWithBinder(leaf)
-            if (leaf.isParameterized) {
-                reserved += variableTlaIds
-            }
-        }
-    }
     fun bindLeaf(leaf: SpecLeaf) {
         // Apply-only / leaf-spec under `with`: register shared binder without lifting state.
         if (!leaf.isParameterized && leaf.withScopeId != null && leaf.paramName != null) {
@@ -2204,10 +1676,6 @@ private fun emitConjoined(
         leaf.withScopeId?.let { sharedWithBinders.putIfAbsent(it, binder) }
     }
     offers.forEach { offer -> bindLeaf(offer.leaf) }
-    pairsNeedingBinders.forEach { pair ->
-        bindLeaf(pair.leafA)
-        bindLeaf(pair.leafB)
-    }
 
     val takenParamIds = moduleLevelTaken.toMutableSet()
     val argRenames = linkedMapOf<String, String>()
@@ -2267,9 +1735,6 @@ private fun emitConjoined(
         argParams += argTla(b.tmp) to emitBound(b.set)
     }
 
-    val deferCtorSpawn = sessionPair != null && offers.any { it.isConstructor }
-    val deferredSpawnParts = mutableListOf<String>()
-    val deferredSpawnChanged = mutableSetOf<String>()
 
     fun emitTransitUpdates(offer: TlaActionOffer, targetParts: MutableList<String>, targetChanged: MutableSet<String>) {
         val self = selfOf(offer.leaf)
@@ -2549,88 +2014,12 @@ private fun emitConjoined(
             }
         }
 
-        // Defer constructor spawn updates into the CanStart THEN branch (throw-before-launch).
-        if (deferCtorSpawn && offer.isConstructor) {
-            emitTransitUpdates(offer, deferredSpawnParts, deferredSpawnChanged)
-        } else {
-            emitTransitUpdates(offer, parts, changed)
-            if (offerHasExitProc(offer)) {
-                val killedVar = stateTlaName(offer.leaf.tlaName, "killed", stateVarNames)
-                parts += "/\\ ${killedAssignTrueExpr(offer.leaf, self, stateVarNames)}"
-                changed += killedVar
-            }
-        }
-    }
-
-    if (sessionPair != null) {
-        val binderA = selfBinders[sessionPair.leafA.tlaName]
-        val binderB = selfBinders[sessionPair.leafB.tlaName]
-        val lookup = sessionLookup(sessionPair, binderA, binderB)
-        val canStart = canStartCall(sessionPair, binderA, binderB)
-        parts += "\\* Session connection semantics"
-        if (deferCtorSpawn) {
-            // sessionException mirrors runtime JulayException on session-ctor rebind
-            val thenParts = mutableListOf<String>()
-            thenParts += sessionAssignTrueExpr(sessionPair, binderA, binderB)
-            thenParts.addAll(deferredSpawnParts.map { it.removePrefix("/\\ ") })
-            thenParts += "UNCHANGED sessionException"
-            val elseUnchanged = (listOf(sessionPair.varName) + deferredSpawnChanged.toList()).distinct()
-            val elseParts = mutableListOf<String>()
-            elseParts += "sessionException' = TRUE"
-            elseParts += "UNCHANGED <<${elseUnchanged.joinToString(", ")}>>"
-            val thenBody = thenParts.joinToString("\n          /\\ ")
-            val elseBody = elseParts.joinToString("\n          /\\ ")
-            parts += "/\\ IF $canStart"
-            parts += "   THEN /\\ $thenBody"
-            parts += "   ELSE /\\ $elseBody"
-            changed += sessionPair.varName
-            changed += deferredSpawnChanged
-            changed += "sessionException"
-        } else if (tearsDownSameSessionPair) {
-            // Rendezvous may start or continue the session; exit/kill effect sets session' below.
-            parts += "/\\ ($lookup \\/ $canStart)"
-        } else {
-            parts += "/\\ ($lookup \\/ $canStart)"
-            parts += "/\\ ${sessionAssignTrueExpr(sessionPair, binderA, binderB)}"
-            changed += sessionPair.varName
-        }
-    }
-
-    if (effectSessionPair != null) {
-        val hasExit = offers.any { "exitSession" in sessionEffectNames(it) }
-        val hasKill = offers.any { "killSessionPeer" in sessionEffectNames(it) }
-        if (hasExit && hasKill) {
-            throw RuntimeException(
-                "TLA+: action \"$name\" cannot use both exitSession and killSessionPeer",
-            )
-        }
-        val effectName = if (hasKill) "killSessionPeer" else "exitSession"
-        val caller = sessionEffectCaller(offers, effectName)
-            ?: throw RuntimeException("TLA+: $effectName missing caller leaf")
-        val binderA = selfBinders[effectSessionPair.leafA.tlaName]
-        val binderB = selfBinders[effectSessionPair.leafB.tlaName]
-        val lookup = sessionLookup(effectSessionPair, binderA, binderB)
-        // When a session exists, require the correct peer index (lookup); when none exists, no-op.
-        // Avoids cancelTimer(c, wrong_h) clearing transit while leaving the real helper session live.
-        val anyLive = anySessionWithCaller(effectSessionPair, caller, binderA, binderB)
-        parts += "\\* Session connection semantics"
-        val thenParts = mutableListOf<String>()
-        thenParts += lookup
-        thenParts += sessionAssignFalseExpr(effectSessionPair, binderA, binderB)
-        val elseUnchanged = mutableListOf(effectSessionPair.varName)
-        if (hasKill) {
-            val peer = peerLeafOf(effectSessionPair, caller)
-            val peerBinder = selfBinders[peer.name]
-            val killedVar = stateTlaName(peer.name, "killed", stateVarNames)
-            thenParts += killedAssignTrueExpr(peer, peerBinder, stateVarNames)
-            elseUnchanged += killedVar
+        emitTransitUpdates(offer, parts, changed)
+        if (offerHasExitProc(offer)) {
+            val killedVar = stateTlaName(offer.leaf.tlaName, "killed", stateVarNames)
+            parts += "/\\ ${killedAssignTrueExpr(offer.leaf, self, stateVarNames)}"
             changed += killedVar
         }
-        val thenBody = thenParts.joinToString("\n          /\\ ")
-        parts += "/\\ IF $anyLive"
-        parts += "   THEN /\\ $thenBody"
-        parts += "   ELSE /\\ UNCHANGED <<${elseUnchanged.joinToString(", ")}>>"
-        changed += effectSessionPair.varName
     }
 
     val unchanged = allVars.filter { it !in changed }
@@ -2665,13 +2054,6 @@ private fun emitConjoined(
     val body = wrapTlaLet(letBindings, innerBody)
     val indexParams = selfBinders.map { (leafName, binder) ->
         val leaf = offers.firstOrNull { it.leaf.tlaName == leafName }?.leaf
-            ?: pairsNeedingBinders.firstNotNullOfOrNull { p ->
-                when (leafName) {
-                    p.leafA.tlaName -> p.leafA
-                    p.leafB.tlaName -> p.leafB
-                    else -> null
-                }
-            }
             ?: error("missing leaf $leafName")
         val domain = typeDomainConstant(leaf.paramType!!) ?: leaf.paramType.toString()
         binder to domain
@@ -3714,7 +3096,9 @@ private fun tlaStringCoerce(expr: ExprNode, rendered: String): String =
     if (exprIsStringTyped(expr)) rendered else "ToString($rendered)"
 
 private fun isEmptyStringLiteral(expr: ExprNode): Boolean =
-    julay.compiler.ast.isEmptyStringLiteral(expr)
+    expr is LiteralValueExprNode &&
+        expr.getType() is StringType &&
+        expr.literalText().isEmpty()
 
 private fun exprIsListTyped(expr: ExprNode): Boolean = try {
     expr.getType() is ListType

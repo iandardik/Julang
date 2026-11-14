@@ -1,11 +1,6 @@
 # Creating libraries
 
-Julay libraries are reusable procs and functions that programs `import`. There are two implementation styles:
-
-1. **`.jul` modules** — ordinary Julay source, often shipped under the embedded stdlib or found via `JULAY_PATH` / `-L`
-2. **Kotlin-native** — `TransitionSystem` implementations registered in `LibraryRegistry`
-
-Callers of a library should not need to know which style it uses. Authors must, especially for Kotlin-native channel keys under occurrence-based `||`.
+Julay libraries are reusable procs and functions that programs `import`. Prefer **`.jul` modules** under the embedded stdlib or found via `JULAY_PATH` / `-L`. Effectful OS/network behavior that used to be Kotlin-native proclib (`HttpServer`, `Timer`) is now **builtins** (`serveHttp`, `setTimer` / `cancelTimer`) implemented in the Go runtime — see [Standard library](standard-library.md) and [Side effects](effects.md).
 
 ## `.jul` libraries
 
@@ -13,63 +8,39 @@ Callers of a library should not need to know which style it uses. Authors must, 
 
 Stdlib Julay modules live under `src/main/resources/stdlib/` with a package path matching the import, e.g.:
 
-- Import: `julay.proclib.Timer`
-- File: `stdlib/julay/proclib/Timer.jul`
+- Import: `julay.funlib.max` (from `math.jul`)
+- File: `stdlib/julay/funlib/math.jul`
 
 Project-local libraries can sit on `JULAY_PATH` or `-L` the same way as any other module ([Modules](modules.md)).
 
 ### What to export
 
-Write normal `proc` / `api` / `fun` / `spec` declarations. Use `export` when the module should expose a stable public surface (see [Modules](modules.md)). Prefer an **api** when callables (procfuns) need resident peers — see [Composition and actions — APIs](composition-and-actions.md#apis). Specs are useful for libraries that ship TLC checks (Timer’s `TimerSpec` is an example).
+Write normal `proc` / `static proc` / `api` / `fun` / `spec` declarations. Use `export` when the module should expose a stable public surface (see [Modules](modules.md)). Prefer an **api** when callables (procfuns) need resident peers — see [Composition and actions — APIs](composition-and-actions.md#apis). Specs are useful for libraries that ship TLC checks.
 
 ### Funlib-style functions
 
 Pure or effectful functions in `.jul` are declared with `export fun` under `stdlib/julay/funlib/` and imported as `julay.funlib.<funName>`. A module may export several funs (e.g. [`math.jul`](../../src/main/resources/stdlib/julay/funlib/math.jul) exports `max` / `min`); callers still import each by function name. Effectful functions must follow the same `before` / `transit` / `after` rules as the rest of the language ([Side effects](effects.md)).
 
+Builtins such as `serveHttp` / `setTimer` / `cancelTimer` are registered in the compiler (`FunBuiltinRegistry`) and imported as `julay.funlib.<name>` the same way; they are not ordinary `.jul` funs.
+
 ### Optional
 
 [`optional.jul`](../../src/main/resources/stdlib/julay/optional.jul) is a multi-export stdlib module: import `julay.optional.Optional`, `julay.optional.some`, and `julay.optional.none` (same name-per-import rule as funlib). See [Standard library — Optional](standard-library.md#optional).
 
-### Example pattern (proclib)
+## Go runtime helpers
 
-See [`Timer.jul`](../../src/main/resources/stdlib/julay/proclib/Timer.jul): a `proc` with session constructors/transitions, funlib effects (`delayMillis`, `exitSession`, …), and an optional `spec` for model checking.
-
-## Kotlin-native libraries
-
-Use Kotlin when the implementation needs JDK APIs (HTTP, files outside funlib, etc.). Current examples: `HttpServer` in `julay.program.library`; HTTP **clients** use the stdlib `httpRequest` procfun (`doHttpRequest` Kotlin effect), not a proclib.
-
-### Checklist
-
-1. **Implement `TransitionSystem`** (and usually a `companion object : JulLibrary`).
-2. **Declare `SymbolicAction`s** for the alphabet and constructors.
-3. **Implement `staticInfo(): TransitionSystemStaticInfo`** with that alphabet and constructor map.
-4. **Register** the library in `LibraryRegistry` under its Julay import name (`julName`).
-5. **Provide `actionDecls`** so the compiler can type-check and compose.
-6. **Compare actions by name** in `transit` / `actions` (not full `SymbolicAction` equality): composition may assign per-occurrence `channelKey`s that differ from the companion defaults.
-7. **Use `StaticInfo` / host occurrence keys at runtime** — do not assume companion singletons are what `Program` registered. `Proc.resolveSymbolicAction` remaps offers onto the bound StaticInfo. Nested spawns (e.g. per-request resources) should reuse `hostProc.occurrenceStaticInfo()` so they share composition-assigned channel keys.
-8. **Support `withChannelKeys`** — codegen emits `Lib.staticInfo().withChannelKeys(mapOf(...))` for each leaf occurrence when keys differ from the public action name.
-
-### Channel keys and duplicate occurrences
-
-Parallel composition is occurrence-based. Composition-hidden syncs use private scoped `channelKey`s on **both** peers, including Kotlin-native library occurrences. Codegen emits one `TransitionSystemStaticInfo` per leaf (via `withChannelKeys` when keys differ from the public action name). Library `transit` / `actions` must use the bound StaticInfo alphabet (or remap companion offers with `Proc.resolveSymbolicAction`). Nested spawns should reuse `hostProc.occurrenceStaticInfo()` so they share the host occurrence’s keys.
-
-### Wiring
-
-- `JulLibrary` / `LibraryRegistry` — discovery and codegen expr (`JulHttpServer.staticInfo()`)
-- Builtin obj types for HTTP requests/responses live beside the library
-- Document the import and effects in [Standard library](standard-library.md)
+Native binaries embed Go sources from `src/main/resources/goruntime/julay/` (`runtime.go`, `http.go`, `timer.go`, collections, …). Extend those packages when a new builtin needs runtime support; wire the name through `FunBuiltinRegistry` and Go codegen emit.
 
 ## Choosing a style
 
 | Need | Prefer |
 |------|--------|
-| Protocol logic, sessions, specs/TLC | `.jul` |
-| JDK / OS APIs not in funlib | Kotlin-native |
-| Both (Timer + delayMillis) | `.jul` calling funlib effects |
+| Protocol logic, specs/TLC | `.jul` |
+| HTTP serve / timers | Builtins (`serveHttp`, `setTimer` / `cancelTimer`) |
+| Pure helpers | `.jul` funlib or `export fun` |
 
 ## See also
 
 - [Standard library](standard-library.md)
-- [Composition and actions](composition-and-actions.md) — occurrence-based `||` and channel keys
 - [Modules](modules.md)
 - [Side effects](effects.md)

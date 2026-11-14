@@ -18,8 +18,6 @@ repositories {
 
 dependencies {
     implementation(kotlin("stdlib-jdk8"))
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
-    implementation("com.microsoft.z3:java-jar:4.11.2")
     implementation("org.antlr:antlr4-runtime:4.13.2")
     implementation("com.github.ajalt.clikt:clikt:5.0.3")
 
@@ -84,13 +82,6 @@ tasks.test {
     dependsOn(tasks.shadowJar)
     dependsOn(downloadTla2tools)
     systemProperty("tla2tools.jar", tla2toolsJar.get().asFile.absolutePath)
-}
-
-tasks.register<JavaExec>("rendezvousMicrobench") {
-    group = "benchmark"
-    description = "No-HTTP SyncChannel/Select rendezvous microbench for async-profiler"
-    classpath = sourceSets.main.get().runtimeClasspath
-    mainClass.set("julay.bench.RendezvousMicrobenchKt")
 }
 
 tasks.register("writeRuntimeClasspath") {

@@ -1,23 +1,9 @@
-import julay.proclib.HttpServer
+import julay.funlib.serveHttp
 
-proc ServerStarter {
-    var started : Boolean
-
+static proc ServerStarter {
     constructor initially(args : List<String>) {
-        transit:
-            started := false
-    }
-
-    session transition listen(
-        port : Int,
-        handler : HttpServerRequest ~> HttpServerResponse
-    ) {
-        guard: ~started & port = 8000 & handler = incHandler
-        transit: started := true
-    }
-
-    session transition close() {
-        guard: false
+        after:
+            serveHttp(8000, incHandler)
     }
 }
 
@@ -46,4 +32,4 @@ export procfun incHandler(req : HttpServerRequest) : HttpServerResponse {
     }
 }
 
-export proc ServerLogic := ServerStarter || HttpServer
+export proc ServerLogic := ServerStarter

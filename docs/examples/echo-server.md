@@ -5,7 +5,7 @@
 | File | Role |
 |------|------|
 | [`main.jul`](../../input/echo_server/main.jul) | Aliases and `compile` |
-| [`server.jul`](../../input/echo_server/server.jul) | HTTP server + procfun handler |
+| [`server.jul`](../../input/echo_server/server.jul) | `serveHttp` + procfun handler |
 | [`client.jul`](../../input/echo_server/client.jul) | Client dispatcher + per-request logic |
 
 ## Intent
@@ -26,14 +26,18 @@ compile EchoServer, EchoClient
 ```jul
 procfun echoHandler(req : HttpServerRequest) : HttpServerResponse { ... }
 
-proc Server := ServerStarter || HttpServer
+static proc ServerStarter {
+    constructor initially(args : List<String>) {
+        after:
+            serveHttp(8000, echoHandler)
+    }
+}
+
+export proc Server := ServerStarter
 ```
 
-- **`echoHandler`** — procfun registered at startup via `handler = echoHandler` on `listen`; each request invokes the handler directly (no per-request session proc).
-- **`ServerStarter`** — `initially` then session `listen(port, handler)` with `port = 8000` and `handler = echoHandler`.
-- **`HttpServer`** — Kotlin proclib ([Standard library](../language/standard-library.md)).
-
-Lifecycle `listen` / `close` remain **session** actions between `ServerStarter` and `HttpServer` so startup pairs correctly; request handling is procfun-based.
+- **`echoHandler`** — procfun registered at startup via `serveHttp`; each request invokes the handler.
+- **`ServerStarter`** — `static proc` with `initially`; starts HTTP in `after:`.
 
 ### Client (`client.jul`)
 
@@ -41,7 +45,7 @@ Lifecycle `listen` / `close` remain **session** actions between `ServerStarter` 
 proc Client := ClientDispatcher || ClientLogic
 ```
 
-- **`ClientDispatcher`** — `initially` reads an optional count from `args` (`parseInt` / `length` from funlib); offers `startReq` / `gotResp`; exits when all responses arrive.
+- **`ClientDispatcher`** — `static proc`; `initially` reads an optional count from `args`; offers `startReq` / `gotResp`; exits when all responses arrive.
 - **`ClientLogic`** — constructed on `startReq(num)`; calls `httpRequest` (stdlib procfun) to POST and print the response body.
 
 Spawning `ClientLogic` via a **named constructor** (`startReq`) after program `initially` shows the “construct upon an action” pattern from [Processes](../language/processes.md).
@@ -53,11 +57,11 @@ Spawning `ClientLogic` via a **named constructor** (`startReq`) after program `i
 java -jar build/libs/julayc.jar input/echo_server/main.jul
 ```
 
-This writes `EchoServer.jar` and `EchoClient.jar` in the current directory. Start the server, then the client (optional request-count argument; default is 25). The server listens on port **8000**.
+This writes native binaries `EchoServer` and `EchoClient` in the current directory. Start the server, then the client (optional request-count argument; default is 25). The server listens on port **8000**.
 
 ```bash
-java -jar EchoServer.jar          # terminal 1
-java -jar EchoClient.jar 3        # terminal 2
+./EchoServer          # terminal 1
+./EchoClient 3        # terminal 2
 ```
 
 **Server** sample output:
@@ -80,9 +84,8 @@ Request order can interleave differently across runs.
 
 ## Language features showcased
 
-- Parallel composition and modules (`import server.Server`, …)
-- Procfun handler registration (`HttpServerRequest ~> HttpServerResponse`)
-- Session lifecycle sync with `HttpServer` (`listen` / `close`)
+- Modules (`import server.Server`, …)
+- `static proc` + `serveHttp` with a procfun handler
 - `httpRequest` stdlib procfun for the client
 - `obj` literals (HTTP request/response types)
 - Funlib (`length`, `parseInt`, `println`)
@@ -92,5 +95,5 @@ Request order can interleave differently across runs.
 
 - [Composition and actions](../language/composition-and-actions.md)
 - [Procfun](../language/procfun.md)
-- [Standard library](../language/standard-library.md) — HttpServer and `httpRequest`
+- [Standard library](../language/standard-library.md) — `serveHttp` and `httpRequest`
 - Next: [Inc server](inc-server.md)

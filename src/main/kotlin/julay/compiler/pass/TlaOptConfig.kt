@@ -4,7 +4,7 @@ package julay.compiler.pass
  * Which named TLA+ emission optimizations are enabled (`unused-fields`, …).
  *
  * Compile-time only: affects `.tla` / `.cfg` output, not generated JARs.
- * Independent of [julay.program.sync.SyncResolveConfig] / `--disable-opt`.
+ * Independent of `--disable-opt` (retired JAR sync/fuse flags).
  */
 data class TlaOptConfig(
     val unusedFields: Boolean = true,

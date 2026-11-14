@@ -1,0 +1,4 @@
+source: regression/input/type-errors/static-ctor-rule.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "exactly one constructor named \"initially\""

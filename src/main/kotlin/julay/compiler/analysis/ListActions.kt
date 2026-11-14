@@ -9,8 +9,6 @@ import julay.compiler.pass.computeCompositionAlphabet
 import julay.compiler.pass.leafActionMap
 import julay.compiler.pass.procClassPass
 import julay.program.action.TSAction
-import julay.program.library.LibraryRegistry
-
 private enum class OfferKind { Constructor, Transition }
 
 private data class ListedActionOffer(
@@ -84,20 +82,20 @@ fun printActionView(
         offers = offers.filter { it.actionName in shared }
     }
     if (options.scopeMutual && options.scopeNames.size > 1 && scope.leafSets.size > 1) {
-        // Provider status is program-wide: the provider offer may be outside the selected scopes.
-        val providerNames = collectListedActionOffers(
+        // Service status is program-wide: the service offer may be outside the selected scopes.
+        val serviceNames = collectListedActionOffers(
             ast,
             allPClassNames + librariesInUse,
             librariesInUse,
             procDecls,
             scope,
         )
-            .filter { it.modifier == TSAction.SyncRole.Provider }
+            .filter { it.modifier == TSAction.SyncRole.Service }
             .map { it.actionName }
             .toSet()
         val offersByAction = offers.groupBy { it.actionName }
         val mutualNames = offersByAction.keys.filter { actionName ->
-            scopesMutuallySyncOn(actionName, scope.leafSets, offersByAction[actionName].orEmpty(), providerNames)
+            scopesMutuallySyncOn(actionName, scope.leafSets, offersByAction[actionName].orEmpty(), serviceNames)
         }.toSet()
         offers = offers.filter { it.actionName in mutualNames }
     }
@@ -119,14 +117,15 @@ private fun externalActionNames(
 }
 
 /**
- * True when every pair of selected scopes can sync on [actionName].
- * Clients of a provider action do not sync with each other.
+ * True when every pair of selected scopes can sync on [actionName]
+ * (ordinary↔ordinary, or service↔client when [serviceNames] contains the action).
+ * Clients of a service action do not sync with each other.
  */
 private fun scopesMutuallySyncOn(
     actionName: String,
     leafSets: List<Set<String>>,
     actionOffers: List<ListedActionOffer>,
-    providerNames: Set<String>,
+    serviceNames: Set<String>,
 ): Boolean {
     val rolesPerScope = leafSets.map { leaves ->
         actionOffers
@@ -136,7 +135,7 @@ private fun scopesMutuallySyncOn(
     }
     for (i in rolesPerScope.indices) {
         for (j in i + 1 until rolesPerScope.size) {
-            if (!scopesSyncOn(rolesPerScope[i], rolesPerScope[j], actionName in providerNames)) {
+            if (!scopesSyncOn(rolesPerScope[i], rolesPerScope[j], actionName in serviceNames)) {
                 return false
             }
         }
@@ -148,16 +147,15 @@ private fun scopesMutuallySyncOn(
 private fun scopesSyncOn(
     rolesA: Set<TSAction.SyncRole>,
     rolesB: Set<TSAction.SyncRole>,
-    hasProvider: Boolean,
+    hasService: Boolean,
 ): Boolean {
-    if (hasProvider) {
-        val aProvider = TSAction.SyncRole.Provider in rolesA
-        val bProvider = TSAction.SyncRole.Provider in rolesB
+    if (hasService) {
+        val aService = TSAction.SyncRole.Service in rolesA
+        val bService = TSAction.SyncRole.Service in rolesB
         val aClient = TSAction.SyncRole.Client in rolesA
         val bClient = TSAction.SyncRole.Client in rolesB
-        return (aProvider && bClient) || (bProvider && aClient)
+        return (aService && bClient) || (bService && aClient)
     }
-    // Ordinary pairwise rendezvous: Default (or session, still Default role) peers.
     return TSAction.SyncRole.Default in rolesA && TSAction.SyncRole.Default in rolesB
 }
 
@@ -190,10 +188,7 @@ private fun collectPclassNames(
     val julayNames = ast.declNodes()
         .flatMap { it.procClassPass(procs) }
         .map { it.name }
-    val libNames = librariesInUse
-        .filter { it in procs && LibraryRegistry.isKotlinLibrary(it) }
-        .map { LibraryRegistry.staticInfo(it).name }
-    return (julayNames + libNames).toSortedSet().toList()
+    return julayNames.toSortedSet().toList()
 }
 
 /**
@@ -244,8 +239,9 @@ private fun julay.compiler.pass.AlphabetOffer.modifierLabel(kind: OfferKind): St
         OfferKind.Transition -> "transition"
     }
     return when {
-        isSession -> "session $kindStr"
-        modifier == TSAction.SyncRole.Provider -> "provider $kindStr"
+        isTimer -> "timer $kindStr"
+        modifier == TSAction.SyncRole.Timer -> "timer $kindStr"
+        modifier == TSAction.SyncRole.Service -> "service $kindStr"
         modifier == TSAction.SyncRole.Client -> "client $kindStr"
         modifier == TSAction.SyncRole.Internal || sourceInternal -> "internal $kindStr"
         else -> kindStr

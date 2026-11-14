@@ -26,10 +26,9 @@ fun compileJulFile(
     allowUnindexedSpec: Boolean = false,
     compileNames: List<String> = emptyList(),
     compileTlaNames: List<String> = emptyList(),
-    syncResolveConfig: julay.program.sync.SyncResolveConfig = julay.program.sync.SyncResolveConfig.ALL_ON,
-    compilerOptConfig: CompilerOptConfig = CompilerOptConfig(syncResolve = syncResolveConfig),
+    @Suppress("UNUSED_PARAMETER") compilerOptConfig: CompilerOptConfig = CompilerOptConfig.ALL_ON,
     tlaOptConfig: TlaOptConfig = TlaOptConfig.ALL_ON,
-    verbose: Boolean = false,
+    @Suppress("UNUSED_PARAMETER") verbose: Boolean = false,
 ) {
     val checked = prepareCheckedCompilation(
         source,
@@ -60,17 +59,11 @@ fun compileJulFile(
         }
     }
 
-    var syncPathStats = SyncPathStats.EMPTY
     jarTargets.forEach {
-        val stats = compileProgram(
+        compileProgram(
             it, ast, procDecls, librariesInUse, keepBuild, compilerJar,
             compilerOptConfig = compilerOptConfig,
         )
-        syncPathStats += stats
-    }
-
-    if (verbose && jarTargets.isNotEmpty()) {
-        print(syncPathStats.formatSummary(compilerOptConfig.syncResolve))
     }
 
     val compositionSpecs = unit.modules

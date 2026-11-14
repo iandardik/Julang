@@ -2,7 +2,7 @@ import julay.funlib.exitProgram
 import julay.funlib.println
 
 /*
- * Mixed equality + relational on one action → residual Z3 for the whole action.
+ * Mixed equality + relational — residual relational arg cannot bind for Go channels.
  */
 
 proc P {
@@ -10,12 +10,12 @@ proc P {
         transit:
     }
 
-    transition mix(a : Int, b : Int) {
+    client transition mix(a : Int, b : Int) {
         guard: a = 2 & b > a
     }
 }
 
-proc Q {
+static proc Q {
     var done : Boolean
 
     constructor initially(args : List<String>) {
@@ -23,7 +23,7 @@ proc Q {
             done := false
     }
 
-    transition mix(a : Int, b : Int) {
+    service transition mix(a : Int, b : Int) {
         guard: b = 5 & ~done
         transit:
             done := true

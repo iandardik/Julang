@@ -4,9 +4,9 @@ Compact cheat sheet. For explanations, use the other chapters.
 
 ## Keywords
 
-`proc` `procfun` `type` `fun` `import` `export` `compile` `spec` `invariant`  
+`proc` `static` `procfun` `type` `fun` `import` `export` `compile` `spec` `invariant`  
 `var` `const` `constructor` `transition`  
-`internal` `provider` `client` `session`  
+`service` `client` `internal` `timer`  
 `guard` `before` `transit` `error` `after` `return`  
 `also` `with` `this` `global` `init`  
 `forall` `exists` `if` `else` `let` `when` `in` `to`  
@@ -56,15 +56,15 @@ spec Name := System[v : T] { global y }       // create-index; y unindexed (muta
 compile Name1, Name2, ...
 ```
 
-System atoms: `Name[v : T]` **creates** an index (lifts state); `{ const global x }` / `{ global y }` on create-index leave those vars scalar in TLA+ (`const global` also freezes them; does not affect JAR). Inside `with`, only `Name[v]` **applies** a shared binder. Shorthand `(A || B)[n : T]` desugars to create-temps + `with` + applies — see [Specifications](specifications.md#indexes-create-with-and-apply).
+System atoms: `Name[v : T]` **creates** an index (lifts state); `{ const global x }` / `{ global y }` on create-index leave those vars scalar in TLA+ (`const global` also freezes them; does not affect the native binary). Inside `with`, only `Name[v]` **applies** a shared binder. Shorthand `(A || B)[n : T]` desugars to create-temps + `with` + applies — see [Specifications](specifications.md#indexes-create-with-and-apply).
 
 Leaf-spec actions: `transition name(args) also (aux : T) { … }` (leaf specs only). Bodies may read peer state `P.var` / `P[idx].var` (compile checks composition + indexing).
 
-**Types:** record `type Name { fields }`; typedef `type Name := Carrier`; uninterpreted `type Name`. Delayed models `Name := { lits }` appear only in create-index or leaf-spec bodies — required for uninterpreted when used, optional for typedef (cfg aliases carrier if absent), forbidden for records. Nullary fun overrides `name := expr` in those same places rewrite the TLA operator only (JAR unchanged). Uninterpreted types are spec-only; JAR `compile` errors if a proc reaches one. Typedefs erase to the carrier in procs. Details: [Types and expressions](types-and-expressions.md#delayed-models), [Specifications — Fun overrides](specifications.md#fun-overrides).
+**Types:** record `type Name { fields }`; typedef `type Name := Carrier`; uninterpreted `type Name`. Delayed models `Name := { lits }` appear only in create-index or leaf-spec bodies — required for uninterpreted when used, optional for typedef (cfg aliases carrier if absent), forbidden for records. Nullary fun overrides `name := expr` in those same places rewrite the TLA operator only (binary unchanged). Uninterpreted types are spec-only; proc `compile` errors if a proc reaches one. Typedefs erase to the carrier in procs. Details: [Types and expressions](types-and-expressions.md#delayed-models), [Specifications — Fun overrides](specifications.md#fun-overrides).
 
 `Guarantee` may be a named invariant, an inline Boolean formula (`true` / `false` included), or `true` meaning no guarantee. Plain `spec := System` equals `<true> System <true>` / `--compile-tla`.
 
-`compile` targets: **proc** → JAR (fails if the assembly reaches an uninterpreted type); **spec** (composition or leaf) → `.tla` / `.cfg`; **procfun** → standalone TLA/analyze (not a JAR root). Leaf specs must not appear in `proc Name := …` assemblies.
+`compile` targets: **proc** → native binary (fails if the assembly reaches an uninterpreted type); **spec** (composition or leaf) → `.tla` / `.cfg`; **procfun** → standalone TLA/analyze (not a binary root). Leaf specs must not appear in `proc Name := …` assemblies.
 
 Procfuns cannot appear in `||`. List them in an [api](composition-and-actions.md#apis)'s `calls:` for TLA coupling. Parent **alphabets** always include called procfuns' non-synthetic actions. See [Procfuns](procfun.md).
 
@@ -73,8 +73,8 @@ Procfuns cannot appear in `||`. List them in an [api](composition-and-actions.md
 Pure / expression helpers: `length` · `max` · `min` · `parseInt` · `startsWith` · `split` · `trim` · `portFromUrl`  
 (`split` / `trim` / `portFromUrl`: not for guards)
 
-Effectful: `println` · `readln` · `readFile` · `exitProgram(code)` · `exitProc` · `delaySeconds` · `delayMillis` · `exitSession(Peer)` · `killSessionPeer(Peer)`  
-(`exitSession` / `killSessionPeer`: transitions only; Peer is a leaf proc-class name; no-op if affinity absent)  
+Effectful: `serveHttp` · `setTimer` · `cancelTimer` · `println` · `readln` · `readFile` · `exitProgram(code)` · `exitProc` · `delaySeconds` · `delayMillis`  
+(`cancelTimer`: transitions only; `setTimer` / `serveHttp` also OK in constructor `after:`)  
 (`exitProc`: ordinary procs / leaf-spec actions only — **compile error inside procfuns**)
 
 Full tables: [Standard library](standard-library.md). Calling conventions: [Side effects](effects.md).

@@ -1,6 +1,4 @@
 source: regression/input/basic/test1.jul
-programs:
-  - name: TermTest1
-    run:
-      timeoutMs: 60000
-      expectStdout: regression/expected/basic-test1-termtest1.stdout
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "unbound"

@@ -116,11 +116,29 @@ function formatOfferSignature(offer) {
   return `${offer.name}${args}`;
 }
 
+/** Display label for an offer's sync role (service / client / ordinary / …). */
+function offerRoleLabel(offer) {
+  if (!offer) {
+    return "ordinary";
+  }
+  if (offer.isConstructor) {
+    return "constructor";
+  }
+  if (offer.isTimer || offer.modifier === "timer") {
+    return "timer";
+  }
+  const mod = offer.modifier || "ordinary";
+  if (mod === "service" || mod === "client" || mod === "internal" || mod === "ordinary") {
+    return mod;
+  }
+  return mod;
+}
+
 function groupOffersBySignatureAndRole(offers) {
   const groups = [];
   const indexByKey = new Map();
   for (const o of offers) {
-    const role = o.isConstructor ? "constructor" : o.modifier;
+    const role = offerRoleLabel(o);
     const signature = formatOfferSignature(o);
     const key = `${signature}\0${role}`;
     let idx = indexByKey.get(key);
@@ -158,7 +176,7 @@ function identifierAt(document, position) {
 function declaredProcNames(document) {
   const text = document.getText();
   const names = new Set();
-  const re = /^\s*(?:export\s+)?(?:proc|spec|procfun|api)\s+([A-Za-z_][A-Za-z0-9_]*)/gm;
+  const re = /^\s*(?:export\s+)?(?:static\s+)?(?:proc|spec|procfun|api)\s+([A-Za-z_][A-Za-z0-9_]*)/gm;
   let m;
   while ((m = re.exec(text)) !== null) {
     names.add(m[1]);
@@ -170,6 +188,7 @@ module.exports = {
   clearAlphabetCache,
   fetchAlphabet,
   formatOfferSignature,
+  offerRoleLabel,
   groupOffersBySignatureAndRole,
   formatExternalMarkdown,
   identifierAt,

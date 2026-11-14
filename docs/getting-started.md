@@ -1,6 +1,6 @@
 # Getting started
 
-This guide builds the Julay compiler (`julayc`), compiles a small program, and runs it. For concepts, see the [language guide](language/README.md).
+This guide builds the Julay compiler (`julayc`), compiles a small program, and runs the native binary. For concepts, see the [language guide](language/README.md).
 
 ## Build the compiler
 
@@ -10,7 +10,7 @@ From the repository root:
 ./gradlew shadowJar
 ```
 
-This produces `build/libs/julayc.jar`.
+This produces `build/libs/julayc.jar`. You also need a **Go toolchain** on `PATH` so `julayc` can `go build` the generated sources.
 
 ## Your first program
 
@@ -30,7 +30,11 @@ Compile it:
 java -jar build/libs/julayc.jar regression/input/basic/test1.jul
 ```
 
-`julayc` emits a JAR named after each **proc** listed in `compile` (here `TermTest1`). Run that JAR from the directory where it was written (usually the current working directory).
+`julayc` emits a **native binary** named after each **proc** listed in `compile` (here `TermTest1`). Run it from the directory where it was written (usually the current working directory):
+
+```bash
+./TermTest1
+```
 
 ## What `compile` does
 
@@ -44,7 +48,7 @@ selects build targets:
 
 | Target kind | Output |
 |-------------|--------|
-| A **proc** (including a parallel composition) | Runnable JAR |
+| A **proc** (including a parallel composition) | Native binary (Go) |
 | A **spec** | `.tla` and `.cfg` for TLC |
 
 You can mix both in one file. See [Specifications](language/specifications.md) for the verification path, and [Tooling](tooling.md) for CLI flags.

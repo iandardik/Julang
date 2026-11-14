@@ -14,14 +14,14 @@ proc FrontEnd {
             valReq := ""
     }
 
-    client transition prompt() {
+    transition prompt() {
         guard:
             state = "A"
         transit:
             state := "B"
     }
-    
-    client transition readln(msg : String) {
+
+    transition readln(msg : String) {
         guard:
             state = "B"
         transit:
@@ -54,7 +54,7 @@ proc FrontEnd {
     }
 }
 
-proc DB {
+static proc DB {
     constructor initially(args : List<String>) {}
 
     transition readDB(key : String, val : String) {
@@ -69,7 +69,7 @@ proc DB {
     }
 }
 
-proc DB2 {
+static proc DB2 {
     constructor initially(args : List<String>) {}
 
     transition readDB(key : String, val : String) {
@@ -81,7 +81,7 @@ proc DB2 {
     }
 }
 
-proc Readln {
+static proc Readln {
     var prompt : Boolean
     var readMsg : String
 
@@ -91,14 +91,14 @@ proc Readln {
             readMsg := ""
     }
 
-    provider transition prompt() {
+    transition prompt() {
         guard: prompt
         transit:
             prompt := false
             readMsg := readln()
     }
 
-    provider transition readln(msg : String) {
+    transition readln(msg : String) {
         guard: ~prompt & (readMsg = msg)
         transit:
             prompt := true

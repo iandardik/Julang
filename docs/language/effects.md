@@ -1,11 +1,51 @@
 # Side effects
 
-In Julay, side effects are not ambient language primitives. They come from the **standard library** in one of two ways:
+In Julay, side effects are not ambient language primitives. They come from:
 
-1. **Library processes** that perform effects (for example `HttpServer`, `Timer`) — compose them into your system and synchronize on their actions. `HttpServer` lifecycle (`listen` / `close`) is session sync; per-request work is delegated to a procfun handler (not session actions).
+1. **Builtins** for HTTP serving and timers — `serveHttp`, `setTimer`, `cancelTimer` (import as `julay.funlib.<name>`).
 2. **Library functions** and **stdlib procfuns** that perform effects — for example `println()`, `readln()`, `exitProgram(code)`, `exitProc()`, and blocking HTTP client I/O via `httpRequest` (`import julay.funlib.httpRequest`). Call funlib from action bodies (`before:` / `after:` for void effects; `transit:` RHS for value-returning IO). `httpRequest` is spawn-and-await like any procfun call.
 
-Which procs and functions are effectful is listed in [Standard library](standard-library.md).
+Which functions are effectful is listed in [Standard library](standard-library.md). There is no `julay.proclib`; former `HttpServer` / `Timer` library procs are replaced by the builtins below.
+
+## Builtins: HTTP and timers
+
+| Builtin | Role | Notes |
+|---------|------|--------|
+| `serveHttp(port, handler)` | Start an HTTP server on `port`; `handler` is a **procfun** name | Typically in a static starter’s `after:` |
+| `setTimer(name, ms)` | Arm a named timer; `name` must match a `timer transition` | Allowed in constructor `after:` |
+| `cancelTimer(name)` | Cancel a named timer | **Transition-only** (`before:` / `after:`) |
+
+```jul
+import julay.funlib.serveHttp
+
+static proc ServerStarter {
+    constructor initially(args : List<String>) {
+        after:
+            serveHttp(8000, echoHandler)
+    }
+}
+```
+
+```jul
+import julay.funlib.setTimer
+
+static proc Driver {
+    constructor initially(args : List<String>) {
+        transit: step := "wait"
+        after:
+            setTimer("timeout", 50)
+    }
+
+    timer transition timeout() {
+        guard: step = "wait"
+        transit: step := "done"
+    }
+}
+```
+
+`timer transition` offers are occurrence-local. When the timer fires, the run loop selects that transition (subject to its guard).
+
+Session teardown builtins (`exitSession`, `killSessionPeer`) are **removed**.
 
 ## Library functions: `before`, `transit`, and `after`
 
@@ -39,7 +79,7 @@ internal transition step() {
 }
 ```
 
-`after:` is the former `effect:` clause (renamed). Session teardown functions (`exitSession`, `killSessionPeer`) are **transition-only** and may appear in `before:` or `after:` (not constructors). Their argument is a bare leaf proc-class name. See [Sessions](sessions.md).
+`after:` is the former `effect:` clause (renamed).
 
 `exitProc()` cancels the **calling** proc’s coroutine after the current action finishes (prefer `after:` so state updates commit first). It is a **compile-time error inside procfun bodies** — procfuns must complete via `return:` (otherwise the host would get no return value, and TLA+ `Host_blocking` would stick). See [Procfuns](procfun.md).
 
@@ -123,8 +163,7 @@ x ==
 
 ## See also
 
-- [Standard library](standard-library.md) — which procs and functions have effects
+- [Standard library](standard-library.md) — builtins and funlib
 - [Processes](processes.md)
 - [Types and expressions](types-and-expressions.md) — expression `let`
-- [Sessions](sessions.md)
 - [Specifications](specifications.md)

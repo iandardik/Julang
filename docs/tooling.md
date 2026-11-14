@@ -9,6 +9,8 @@ Build:
 # → build/libs/julayc.jar
 ```
 
+Requires a **Go toolchain** on `PATH` when compiling procs to native binaries.
+
 Compile a Julay file (reads top-level `compile` targets, unless overridden with `--compile`):
 
 ```bash
@@ -17,7 +19,9 @@ java -jar build/libs/julayc.jar --compile EchoServer --compile EchoClient path/t
 java -jar build/libs/julayc.jar --compile-tla IncServer path/to/file.jul
 ```
 
-Compiling a **proc** fails (no `.jar`) if that target reaches an **uninterpreted** type — directly or nested in a record or collection. Spec `compile` targets are unaffected and may use uninterpreted types and typedefs freely. `julayc check` reports the same JAR reachability errors for named `compile` procs.
+Compiling a **proc** fails (no binary) if that target reaches an **uninterpreted** type — directly or nested in a record or collection. Spec `compile` targets are unaffected and may use uninterpreted types and typedefs freely. `julayc check` reports the same reachability errors for named `compile` procs.
+
+Successful proc compile writes a **native binary** named after the target (e.g. `./EchoServer`). Optional `--keep-build` keeps the generated `<name>-jul-build/` Go sources.
 ### Useful flags
 
 | Flag | Meaning |
@@ -27,9 +31,9 @@ Compiling a **proc** fails (no `.jar`) if that target reaches an **uninterpreted
 | `--compile-tla NAME` | Emit TLA+ for proc `NAME` as `<true> NAME <true>` (repeatable; no extra invariants; leaf/composition specs use `--compile` instead) |
 | `--keep-build` | Keep generated `<name>-jul-build` dirs after success |
 | `--allow-unindexed-spec` | Warn instead of error when a multi-instance proc appears unindexed in a spec |
-| `--verbose` | Print a compile-time sync-path summary (`FastOnly` vs `NeedsZ3` procs, and per-action `fastGuard` vs opaque). See [Compiler optimizations](language/compiler-optimizations.md) |
-| `--disable-opt` / `--disable-opt=ID,...` | Disable named optimizations (bare `--disable-opt` = all). Ids: `eq-unify`, `arg-ownership`, `directed-eval`, `procfun-fuse`. Use `=` when passing ids. See [Compiler optimizations](language/compiler-optimizations.md) |
-| `--disable-tla-opt` / `--disable-tla-opt=ID,...` | Disable TLA+ emission optimizations (bare `--disable-tla-opt` = all). Ids: `unused-fields`, `unused-vars`, `determined-args`, `from-collection`, `literal-domains`, `unwrap-singletons`. Independent of `--disable-opt`. Use `=` when passing ids. See [Compiler optimizations](language/compiler-optimizations.md) |
+| `--verbose` | Reserved; former sync-path summary is no longer emitted |
+| `--disable-opt` / `--disable-opt=ID,...` | Accepted for compatibility; former JAR sync/fuse opts are no-ops. See [Compiler optimizations](language/compiler-optimizations.md) |
+| `--disable-tla-opt` / `--disable-tla-opt=ID,...` | Disable TLA+ emission optimizations (bare `--disable-tla-opt` = all). Ids: `unused-fields`, `unused-vars`, `determined-args`, `from-collection`, `literal-domains`, `unwrap-singletons`, `unused-lets`. Use `=` when passing ids. See [Compiler optimizations](language/compiler-optimizations.md) |
 
 ### Environment
 
@@ -54,12 +58,14 @@ Common options (see `--help` for the full list):
 |--------|------|
 | `-s` / `--scope NAME` | Restrict to a proc or spec (repeatable) |
 | `--tree` | Composition tree (default-oriented view) |
-| `--actions` / `--actions-detail` | List actions (optionally with modifiers) |
+| `--actions` / `--actions-detail` | List actions (optionally with modifiers: ordinary / `internal` / `timer`) |
 | `--procs` / `--procs-detail` | List procs |
 | `--intersect` / `--mutual` | How multiple scopes combine for action views |
-| `--include-internal` | Include `internal` and composition-hidden synced actions; with `--actions-detail`, each occurrence and hidden `scope=` channel key is listed separately |
-| `--json` | Emit machine-readable alphabet JSON for the scope: `compositionGraph` (top-level `||` children and sync edges with action labels; for a **leaf** scope, also called / api-qualified procfuns with unlabeled directed call edges `a`→`b`; api-listed `calls:` remain composition children), `external`, `sourceInternal`, and `compositionHidden` sync groups. For a **procfun** scope, `external` lists user actions (synthetics omitted). Parent scopes include called procfuns' non-synthetic actions. **Api** scopes analyze like proc assemblies (including `calls:`). Used by the VS Code extension; suppresses human-readable views |
+| `--include-internal` | Include `internal` / `timer` and synced peer groups |
+| `--json` | Emit machine-readable alphabet JSON for the scope: `compositionGraph`, `external`, `sourceInternal`, and sync groups. Sync groups may include a **`role`** of `"hub"` or `"static/static"` (plus constructor / timer / ordinary). Used by the VS Code extension; suppresses human-readable views |
 | `-L` | Module search path (same as compile) |
+
+Compile-time **sender/receiver** direction (forward vs reply args) is deduced for codegen; analyze JSON currently surfaces sync **roles** (`hub` / `static/static`) rather than per-arg ownership. See [Composition and actions](language/composition-and-actions.md#sender--receiver-deduction).
 
 ## `julayc check`
 
@@ -80,7 +86,7 @@ Exit code **1** if any error diagnostics; **0** if clean or warnings-only (inclu
 
 ## VS Code / Cursor extension
 
-The [`vscode-julay/`](../vscode-julay/) extension adds `.jul` highlighting, snippets, compile tasks, go-to-definition, hover alphabets, a panel with a top-level composition sync diagram plus external / source-internal / composition-hidden actions, and **on-save diagnostics** (Problems panel + squiggles via `julayc check --json`). See [vscode-julay/README.md](../vscode-julay/README.md) for install and settings.
+The [`vscode-julay/`](../vscode-julay/) extension adds `.jul` highlighting, snippets, compile tasks, go-to-definition, hover alphabets, a panel with a top-level composition sync diagram plus external / source-internal / synced actions, and **on-save diagnostics** (Problems panel + squiggles via `julayc check --json`). See [vscode-julay/README.md](../vscode-julay/README.md) for install and settings.
 
 ## Testing
 

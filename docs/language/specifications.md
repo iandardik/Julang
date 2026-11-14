@@ -348,7 +348,7 @@ See also [Collections](collections.md).
 
 ### Action layout
 
-- Multi-leaf (and solo) actions group each participant under `\* <Proc> <transition type> logic` (e.g. `transition`, `constructor`, `session transition`, `provider transition`), with that leaf’s enablement gates, guards, and transits together — similar to Init’s `\* State variables for <Proc>` sections.
+- Multi-leaf (and solo) actions group each participant under `\* <Proc> <transition type> logic` (e.g. `transition`, `constructor`, `timer transition`), with that leaf’s enablement gates, guards, and transits together — similar to Init’s `\* State variables for <Proc>` sections.
 - When an action has `error:` arms, TLA+ emits `\* <Proc> <transition type> assumption` **before** the logic section. Each arm’s condition is negated and becomes a `/\\` conjunct (a guard): top-level `~in` / `~=` / `~` flip to `\in` / `=` / the inner formula; otherwise a `~` wraps the condition. List `in` / `~in` emit as `\in Range(xs)` / `\notin Range(xs)` (sequences are functions; `Range` is a generated helper). Error messages are runtime-only (JAR still throws `JulayException`).
 - Top-level `&` guard conjuncts become separate `/\\` lines (matching multi-line Julay guards). Nested multi-line `&` / `|` are formatted recursively as `/\\` and `\\/` branches (single-line boolean ops stay compact).
 - Multi-line Julay `Rec { ... }` literals become TLA records with one field per line; field lines are indented 2 spaces past the first non-`/\`/`\/` symbol on the opening line (single-line record inits stay compact).
@@ -356,7 +356,7 @@ See also [Collections](collections.md).
 - Transit-level `let` bindings become TLA `LET` around later assign conjuncts (not AST-inlined); consecutive lets share one `LET`. Discard `let _ := …` is omitted. Chained expression `let`s are also one `LET`.
 - Julay `when` becomes TLA `CASE` with `[]` arms and `OTHER` for the trailing else.
 - Invariants preserve multi-line structure (boolean trees). Consecutive `\A` / `\E` binders over the same domain are condensed like Next (`\A n1, n2 \in NodeSet`). Parentheses written in the `.jul` source are kept; other parentheses are omitted when operator precedence makes them unnecessary. A blank line separates consecutive user-specified invariant operators. List indices are 1-based: `i <= xs.length => xs[i]` is true for `i = 0` on an empty list (`0 <= 0`), and TLC then evaluates `<<>>[0]`. Guard with `i >= 1` as well.
-- A leaf’s **only** constructor, when it has no sync partner (not a client/provider pair, not hybrid ctor+default, not a procfun `*_call` / havoc site), is folded into `Init`: constructor transits become Init assignments, `error:` arms become Init constraints under `\* <Proc> constructor assumption` immediately after that leaf’s state variables, and the constructor is omitted from `Next`. `initially` constructors that are **not** folded (`initially` / `*_initially`) are emitted first after `Init`, both as operator definitions and as the leading disjuncts of `Next`. Consecutive `\E` binders in `Next` over the same domain are written `\E n, m \in NodeSet`.
+- A leaf’s **only** constructor, when it has no sync partner (not a client/service pair, not hybrid ctor+default, not a procfun `*_call` / havoc site), is folded into `Init`: constructor transits become Init assignments, `error:` arms become Init constraints under `\* <Proc> constructor assumption` immediately after that leaf’s state variables, and the constructor is omitted from `Next`. `initially` constructors that are **not** folded (`initially` / `*_initially`) are emitted first after `Init`, both as operator definitions and as the leading disjuncts of `Next`. Consecutive `\E` binders in `Next` over the same domain are written `\E n, m \in NodeSet`.
 - Two blank lines separate funs/helpers from `\* system definition`, then a blank line before `Init`. After `Spec == Init /\ [][Next]_vars`, two blank lines precede `\* Invariants`. A blank line precedes the closing `====`. Automatically generated operators (`TypeOKInt`, `TypeOK`, `StateConstraint` when Int/list state vars exist, and `SessionIntegrity` when present) sit under `\* automatically generated invariants`; named and inline guarantees sit under `\* user-specified invariants`. `TypeOK` is listed first in the `.cfg`, then `CONSTRAINT StateConstraint` when present. `TypeOKInt == Int \cup Nat \cup {lo..hi}` sits immediately above `TypeOK`. It unions cfg `Int` (a finite non-negative `\E` bound that cannot include negatives), `Nat` (so `x := x + 1` counters stay in-type when `Nat` is not overridden), and every integer from the lowest negative literal through `max(highest literal, MaxListLen+1)`. List vars use `Seq(S)` rather than `BoundedSeq` so membership stays pointwise. `StateConstraint` is the finite-model bound: Int vars inhabit cfg `Int` (plus those negatives), list `Len` is `<= MaxListLen`.
 - `BoundedSeq`, `Range`, and `SetToSeq` are emitted under `\* TLA+ helpers` (above `\* Julay lib funs`) when used. Julay `fun`s referenced from Init/action guards, transit RHS, **or invariants** (and their transitive callees) are emitted as TLA+ operators immediately above `Init`, grouped under `\* Julay lib funs` (stdlib funlib) or `\* user defined funs`. Operator parameters that collide with `VARIABLES` / `CONSTANT`s / other module operators are renamed (`p_…`).
 - `splice(xs, a, b)` becomes a call to a module-level `splice` operator (defined above `Init` under `\* Julay lib funs` when any call is used); splice params/binders are clash-renamed like fun params.
@@ -383,40 +383,26 @@ java -cp /path/to/tla2tools.jar tlc2.TLC SpecName
 
 Exact classpath and options depend on your TLC install; project smoke tests live in `src/test/kotlin/julay/spec/`.
 
-## Sessions in TLA+
+## Construction / exit bookkeeping in TLA+
 
-When a spec includes **two-sided** session actions (both peer classes appear as SpecLeaves), `julayc` encodes affinity and teardown in the generated module. One-sided specs (only one peer in the composition) omit the affinity helpers.
+Session affinity encoding (`session_*`, `CanStartSession_*`, `exitSession` / `killSessionPeer`, `SessionIntegrity`) is **removed** with the session language feature. Remaining bookkeeping:
 
-**Always emitted for two-sided pairs:**
+**Per SpecLeaf:**
 
-- `session_A_B` — affinity flag (Init `FALSE`)
-- `CanStartSession_A_B` — whether a new session may start (exclusivity)
-- Sticky enablement on transition-only session actions: `(session \/ CanStart)` under `\* Session connection semantics`
-- `*_dead` / `EndSession_*` — clear affinity when a peer’s actions are naturally disabled (or the peer was killed, when applicable)
-
-**Per SpecLeaf (any spec):**
-
-- `*_constructed` — constructors require `~constructed`, transitions require `constructed`. Omitted when that leaf’s sole unsynced constructor is folded into `Init` (every reachable state is constructed).
+- `*_constructed` — constructors require `~constructed`, transitions require `constructed`. Omitted when that leaf’s sole unsynced constructor is folded into `Init`.
 
 **Omitted when unused:**
 
-- `*_killed` — for leaves that are a `killSessionPeer(Peer)` peer target **or** that call `exitProc` somewhere in the module. Those leaves also get `~killed` enablement gates, and their `*_dead` includes a kill disjunct. Specs with neither omit all `*_killed` variables.
-- `sessionException` and `SessionIntegrity == ~sessionException` (checked in the `.cfg`) — only when a **session constructor** action exists (models rebind `JulayException`). Transition-only or exit-only session specs omit them. A stdlib Timer bug caught by `SessionIntegrity` is written up under [Bugs found with Julay](../examples/bugs-found-with-julay.md).
-- Actions whose TLA body updates no variables (guard-only / no primed updates) are omitted from action definitions and from `Next`; stuttering remains via `[][Next]_vars`. Constructors, session sticky/teardown, and procfun terminate still update bookkeeping vars and are kept.
-
-**Effect mapping** (`before:` / `after:` session teardown calls):
+- `*_killed` — for leaves that call `exitProc` somewhere in the module. Those leaves also get `~killed` enablement gates. Specs without `exitProc` omit `*_killed`.
+- Actions whose TLA body updates no variables (guard-only / no primed updates) are omitted from action definitions and from `Next`; stuttering remains via `[][Next]_vars`.
 
 | Effect | TLA+ |
 |--------|------|
-| `exitSession(Peer)` | `IF anyLive THEN session /\ session_*' = FALSE ELSE UNCHANGED` |
-| `killSessionPeer(Peer)` | `IF anyLive THEN session /\ clear and peer `*_killed' = TRUE ELSE UNCHANGED` |
 | `exitProc()` | caller `*_killed' = TRUE` (self-exit; compile error inside procfuns) |
-
-The peer leaf is taken from the effect argument (caller ↔ named peer among SpecLeaves).
 
 **IO in transit (havoc):** assignments whose RHS involves `readln()` or `readFile(...)` do not emit a concrete next-state expression. The target is **havoc’d**: `stateVar' \in String` (or an `\E` form for indexed leaves). See [Before/after and IO](effects.md#tla-translation-io-havoc).
 
-Examples under [`regression/input/spec/`](../../regression/input/spec/): `session-pair.jul` (affinity only), `session-exit.jul`, `session-kill.jul`, `exit-proc.jul` (`exitProc` / `*_killed`), `session-spawn-rebind.jul` (session ctor + `SessionIntegrity`).
+Example: [`regression/input/spec/exit-proc.jul`](../../regression/input/spec/exit-proc.jul) (`exitProc` / `*_killed`).
 
 ## What else to expect
 
@@ -425,6 +411,6 @@ Examples under [`regression/input/spec/`](../../regression/input/spec/): `sessio
 
 ## See also
 
-- [Inc server example](../examples/inc-server.md) — JAR + specs in one file
-- [Bugs found with Julay](../examples/bugs-found-with-julay.md) — Timer `SessionIntegrity` case study
+- [Inc server example](../examples/inc-server.md) — native binary + specs in one file
+- [Bugs found with Julay](../examples/bugs-found-with-julay.md) — historical Timer / session case study
 - [`regression/input/spec/safe-inc.jul`](../../regression/input/spec/safe-inc.jul) — small AG example

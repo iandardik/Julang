@@ -11,15 +11,13 @@ proc Left {
         transit:
     }
 
-    transition handoff(p : Point) {
+    client transition handoff(pt : Point) {
         guard:
-            & p.x = 1
-            & p.y = 2
-        // no print — keep stdout deterministic across schedules
+            pt = Point { x := 1, y := 2 }
     }
 }
 
-proc Right {
+static proc Right {
     var done : Boolean
 
     constructor initially(args : List<String>) {
@@ -27,15 +25,14 @@ proc Right {
             done := false
     }
 
-    transition handoff(p : Point) {
+    service transition handoff(pt : Point) {
         guard:
-            & p.x = 1
-            & p.y = 2
+            & pt = Point { x := 1, y := 2 }
             & ~done
         transit:
             done := true
         after:
-            println("R " + p.x + "," + p.y)
+            println("R " + pt.x + "," + pt.y)
     }
 
     internal transition exitSystem() {

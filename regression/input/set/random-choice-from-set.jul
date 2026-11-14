@@ -1,0 +1,39 @@
+import julay.funlib.exitProgram
+import julay.funlib.println
+import julay.funlib.setOf
+
+/*
+ * Membership binding: pick an element from a finite set (Go ChooseUniformFiltered).
+ */
+
+static proc Driver {
+    const choices : Set<Int>
+    var picked : Int
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            choices := setOf(7)
+            picked := -1
+            done := false
+    }
+
+    internal transition choose(x : Int) {
+        guard: ~done & x in choices
+        transit:
+            picked := x
+            done := true
+        after:
+            println("picked " + x)
+    }
+
+    internal transition exitSystem() {
+        guard: done & picked = 7
+        after:
+            exitProgram(0)
+    }
+}
+
+proc RandomChoiceFromSet := Driver
+
+compile RandomChoiceFromSet

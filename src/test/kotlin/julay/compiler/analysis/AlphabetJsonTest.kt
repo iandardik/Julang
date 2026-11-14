@@ -72,10 +72,10 @@ class AlphabetJsonTest {
             """
             type Node
 
-            proc Protocol {
+            static proc Protocol {
                 constructor initially(args : List<String>) { transit: }
                 transition requestVote() { transit: }
-                provider transition handleVote() { transit: }
+                service transition handleVote() { transit: }
             }
 
             spec Net[n : Node] {
@@ -131,7 +131,7 @@ class AlphabetJsonTest {
         )
         assertTrue(
             graphBlock.contains("\"handleVote\""),
-            "provider/client handleVote must label the ClusterSpec—Net edge:\n$graphBlock",
+            "service/client handleVote must label the ClusterSpec—Net edge:\n$graphBlock",
         )
 
         val hiddenIdx = json.indexOf("\"compositionHidden\"")
@@ -181,7 +181,7 @@ class AlphabetJsonTest {
         val file = dir.resolve("main.jul")
         file.writeText(
             """
-            proc A {
+            static proc A {
                 constructor initially(args : List<String>) { transit: }
                 transition inner() { transit: }
                 transition outer() { transit: }
@@ -238,7 +238,7 @@ class AlphabetJsonTest {
             """
             proc Hub {
                 constructor initially(args : List<String>) { transit: }
-                provider transition w() { transit: }
+                service transition w() { transit: }
             }
             proc Cli {
                 constructor initially(args : List<String>) { transit: }
@@ -280,7 +280,7 @@ class AlphabetJsonTest {
             """
             proc Hub {
                 constructor initially(args : List<String>) { transit: }
-                provider transition staleTerm(term : Int) { transit: }
+                service transition staleTerm(term : Int) { transit: }
             }
             proc CliA {
                 constructor initially(args : List<String>) { transit: }
@@ -326,10 +326,10 @@ class AlphabetJsonTest {
         assertTrue(hiddenIdx >= 0, json)
         val hiddenBlock = json.substring(hiddenIdx)
         // Each client pairs with Hub separately; Hub appears as a peer in each group.
-        assertTrue(hiddenBlock.contains("\"role\": \"provider/client\""), hiddenBlock)
+        assertTrue(hiddenBlock.contains("\"role\": \"service/client\""), hiddenBlock)
         assertTrue(
             hiddenBlock.contains("\"pclassKey\": \"Hub\""),
-            "provider must appear in compositionHidden peers:\n$hiddenBlock",
+            "service must appear in compositionHidden peers:\n$hiddenBlock",
         )
         // Clients must not be listed as the only peers of one shared group.
         assertTrue(
@@ -540,16 +540,16 @@ class AlphabetJsonTest {
                 constructor initially(args : List<String>) {
                     transit: out := helper(1)
                 }
-                session transition ping() { transit: }
+                transition ping() { transit: }
             }
-            proc ServerInitializer {
+            static proc ServerInitializer {
                 constructor initially(args : List<String>) { transit: }
-                session transition setup() { transit: }
+                transition setup() { transit: }
             }
-            proc HttpServer {
+            static proc HttpServer {
                 constructor initially(args : List<String>) { transit: }
-                session transition setup() { transit: }
-                session transition ping() { transit: }
+                transition setup() { transit: }
+                transition ping() { transit: }
             }
 
             proc RpcIn := RpcReqHandler || ServerInitializer || HttpServer
@@ -566,7 +566,7 @@ class AlphabetJsonTest {
             librariesInUse = checked.librariesInUse,
             procFunNames = julay.compiler.collectProcFunNames(checked.ast as RootNode),
         )
-        assertNotNull(scope)
+        assertNotNull(scope, "RpcIn scope must resolve after ordinary/static sync rewrite")
         val json = buildAlphabetJsonDocument(
             checked.ast as RootNode,
             scope,

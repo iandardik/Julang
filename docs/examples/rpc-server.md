@@ -5,13 +5,13 @@
 | File | Role |
 |------|------|
 | [`main.jul`](../../input/rpc_server/main.jul) | Composition + `compile` |
-| [`protocol.jul`](../../input/rpc_server/protocol.jul) | Counter core (`Protocol` provider RPCs) |
-| [`server.jul`](../../input/rpc_server/server.jul) | HTTP listen + path router + per-RPC handlers |
+| [`protocol.jul`](../../input/rpc_server/protocol.jul) | Counter core (`Protocol` `service` hub RPCs) |
+| [`server.jul`](../../input/rpc_server/server.jul) | `serveHttp` + path router + per-RPC handlers |
 | [`lib.jul`](../../input/rpc_server/lib.jul) | `fieldValue` for pipe-delimited bodies |
 
 ## Intent
 
-Same sync model as the [inc server](inc-server.md), but HTTP ingress looks like Raft’s inbound RPC path ([`rpc_in.jul`](../../input/raft/node/rpc_in.jul)): **route by path → parse the body → `client` sync into a core protocol proc**. Use it as a runtime / load-test toy between echo/inc and full Raft.
+Same sync model as the [inc server](inc-server.md), but HTTP ingress looks like Raft’s inbound RPC path: **route by path → parse the body → sync into a core protocol proc**. Use it as a runtime / load-test toy between echo/inc and full Raft.
 
 No TLA+ specs in the first cut (execution-focused, like the [list server](list-server.md)).
 
@@ -34,7 +34,7 @@ Pipe-delimited `key=value` fields match Raft’s wire style (`fieldValue` / `spl
 proc RpcServer := Protocol || RpcIn
 ```
 
-`RpcIn` is `ServerInitializer || HttpServer`. `handleRpc` dispatches:
+`RpcIn` is `ServerInitializer` (`static proc` + `serveHttp(8000, handleRpc)`). `handleRpc` dispatches:
 
 ```jul
 return: when (req.path) {
@@ -52,7 +52,7 @@ Each handler parses (if needed), syncs with `Protocol`, then returns an `HttpSer
 ```bash
 ./gradlew shadowJar
 java -jar build/libs/julayc.jar input/rpc_server/main.jul
-java -jar RpcServer.jar
+./RpcServer
 ```
 
 ```bash
@@ -77,32 +77,20 @@ v=6
 
 # Julay rpc vs Kotlin-native twin (same wire API):
 ./input/rpc_server/scripts/bench_toys.sh --targets rpc,rpc-native --ops 200 --clients 4 --warmup 40
-
-# Compile + run echo / inc / rpc (opts on; add --with-disable-opt for A/B):
-./input/rpc_server/scripts/bench_toys.sh --ops 80 --clients 2 --warmup 20 --with-disable-opt
 ```
 
-Kotlin twin sources: [`native/`](../../input/rpc_server/native/). Server stdout is redirected so echo’s per-request `println` does not dominate the floor.
-
-### Profiling
-
-```bash
-./input/rpc_server/scripts/profile_rpc.sh --variant julay --mode alloc --duration 12 --clients 4
-./input/rpc_server/scripts/profile_rpc.sh --variant native --mode alloc --duration 12 --clients 4
-```
-
-See [`PROFILE.md`](../../input/rpc_server/scripts/PROFILE.md) for flamegraphs, the bucketed hotspot table, and the next optimization candidate.
+Kotlin twin sources: [`native/`](../../input/rpc_server/native/). Profiling notes under [`PROFILE.md`](../../input/rpc_server/scripts/PROFILE.md) still describe the former JVM path; treat them as historical.
 
 ## Compare
 
-| | Echo | Inc | RPC (Julay) | RPC (Kotlin native) |
-|--|------|-----|-------------|---------------------|
-| HTTP | yes | yes | yes | yes (same JDK server) |
-| User SyncChannel | no | yes | yes | no (mutex) |
-| Path route + body parse | no | no | yes | yes |
+| | Echo | Inc | RPC (Julay) |
+|--|------|-----|-------------|
+| HTTP | yes (`serveHttp`) | yes | yes |
+| `service`/`client` hub sync | no | yes | yes |
+| Path route + body parse | no | no | yes |
 
 ## See also
 
 - [Inc server](inc-server.md) — simpler counter without RPC dispatch
 - [Echo server](echo-server.md) — HTTP floor
-- Raft [`rpc_in.jul`](../../input/raft/node/rpc_in.jul) — full multi-RPC ingress this toy miniaturizes
+- Raft port notes: [`input/raft/README_GO_PORT.md`](../../input/raft/README_GO_PORT.md)

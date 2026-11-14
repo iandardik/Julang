@@ -1,90 +1,26 @@
 package julay.program.type
 
-import com.microsoft.z3.*
-import julay.program.ContextLocalCache
-import julay.program.Value
 import julay.program.Variable
 
-// Z3 mkDatatypeSort artifacts for one obj in a given Context.
-// sort: the record's Z3 sort; constructorDecl: mk-Name(...);
-// accessors: field getters in declaration order (e.g. x, y for Point).
-class JulangDatatypeMetadata(
-    val sort: DatatypeSort<*>,
-    val constructorDecl: FuncDecl<*>,
-    val accessors: Array<FuncDecl<*>>,
-)
-
 /**
- * Built-in obj type. Datatype metadata is built directly in the caller's [Context]
- * (no per-instance home Context); results are cached per live Context so the datatype is not
- * redefined on every use, without retaining closed Contexts — same pattern as [SetType] / [MapType].
+ * Built-in / user obj type (structural fields for typing and emission helpers).
  */
 class ObjClassType(
     val name: String,
     val fields: List<Variable>,
-    private val valueToZ3: (Value, Context) -> Expr<*>,
-    private val valueFromZ3: (Expr<*>, Model) -> Any,
 ) : Type {
-    /**
-     * Z3 constructor symbol name (`mk-$name`). Stable across Contexts, so constructor-application
-     * matching in `fromZ3` can compare against this string without reading decls from another Context.
-     */
     val constructorName: String = "mk-$name"
-
-    // TODO: this shared per-Context cache breaks the rule that interprocess communication
-    // must go only through SyncChannel (procs can observe/reuse metadata across contexts).
-    // Fix later; kept for now so fixed-name mkDatatypeSort is not redefined within a Context.
-    private val metaByCtx = ContextLocalCache<JulangDatatypeMetadata>()
-
-    private fun metadataFor(ctx: Context): JulangDatatypeMetadata =
-        metaByCtx.getOrPut(ctx) { buildMetadata(ctx) }
-
-    private fun buildMetadata(ctx: Context): JulangDatatypeMetadata {
-        // Polymorphic obj instantiations (fields still typed as TypeVar) must not reach here;
-        // concrete monomorphized types force this on first Z3 use.
-        val fieldNames = fields.map { it.name }.toTypedArray()
-        val fieldSorts = fields.map { field -> z3SortForField(field.type, ctx) }.toTypedArray()
-        val constructor = ctx.mkConstructor<Any>(
-            constructorName,
-            "is-$name",
-            fieldNames,
-            fieldSorts,
-            null,
-        )
-        val sort: DatatypeSort<*> = ctx.mkDatatypeSort(name, arrayOf(constructor))
-        return JulangDatatypeMetadata(
-            sort = sort,
-            constructorDecl = constructor.ConstructorDecl(),
-            accessors = constructor.accessorDecls,
-        )
-    }
-
-    override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {
-        return ctx.mkConst(variable.name, metadataFor(ctx).sort)
-    }
-
-    override fun toZ3Expr(value: Value, ctx: Context): Expr<*> =
-        valueToZ3(value, ctx)
-
-    override fun fromZ3Expr(expr: Expr<*>, model: Model): Any =
-        valueFromZ3(expr, model)
 
     override fun isOfType(obj: Any): Boolean = obj.javaClass.simpleName == name
 
     override fun toString(): String = name
 
-    override fun equals(other: Any?): Boolean = other is ObjClassType && other.name == name && other.fields == fields
+    override fun equals(other: Any?): Boolean =
+        other is ObjClassType && other.name == name && other.fields == fields
 
     override fun hashCode(): Int = name.hashCode()
 
-    fun sort(ctx: Context): DatatypeSort<*> = metadataFor(ctx).sort
-
-    /** Constructor FuncDecl in [ctx] (callers apply field exprs). */
-    fun constructorDecl(ctx: Context): FuncDecl<*> = metadataFor(ctx).constructorDecl
-
-    /** Field accessor FuncDecl in [ctx] (callers apply the record expr). */
-    fun accessor(ctx: Context, fieldIndex: Int): FuncDecl<*> = metadataFor(ctx).accessors[fieldIndex]
-
+    /** Legacy Kotlin-codegen helper retained for unused Z3 AST string paths. */
     fun literalToZ3Codegen(fieldExprStrs: List<String>): String {
         val args = fieldExprStrs.joinToString(", ")
         return "${objClassMkFunName(name)}(ctx, $args)"
@@ -96,8 +32,6 @@ class ObjClassType(
         }
         return "$name($args)"
     }
-
-    private fun z3SortForField(type: Type, ctx: Context): Sort = type.toZ3Sort(ctx)
 
     companion object {
         fun z3ConstString(symbol: String, typeValName: String): String {

@@ -9,9 +9,9 @@ const {
 } = require("./config");
 
 const PROC_DECL =
-  /^\s*(?:export\s+)?(?:proc|spec|procfun|api)\s+([A-Za-z_][A-Za-z0-9_]*)\b/;
+  /^\s*(?:export\s+)?(?:static\s+)?(?:proc|spec|procfun|api)\s+([A-Za-z_][A-Za-z0-9_]*)\b/;
 const ACTION_DECL =
-  /^\s*(?:internal\s+|provider\s+|client\s+|session\s+)*(?:transition|constructor)\s+([A-Za-z_][A-Za-z0-9_]*)\b/;
+  /^\s*(?:(?:internal|timer|service|client)\s+)*(?:transition|constructor)\s+([A-Za-z_][A-Za-z0-9_]*)\b/;
 const IMPORT_RE =
   /^\s*import\s+([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\s*$/;
 

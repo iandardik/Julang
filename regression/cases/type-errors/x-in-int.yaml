@@ -1,0 +1,4 @@
+source: regression/input/type-errors/x-in-int.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Unknown variable \"Int\""

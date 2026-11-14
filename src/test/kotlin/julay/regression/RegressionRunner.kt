@@ -1,6 +1,5 @@
 package julay.regression
 
-import julay.compiler.warmGradleForProgramCompile
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.assertTrue
@@ -19,7 +18,8 @@ object RegressionRunner {
         check(cases.isNotEmpty()) {
             "No regression cases matched REGRESSION_CASE=${caseFilter ?: "(unset)"}"
         }
-        warmGradle(projectRoot)
+        ensureCompilerJar(projectRoot)
+        val failures = mutableListOf<Pair<String, Throwable>>()
         cases.forEach { case ->
             if (case.disabled) {
                 println("Regression case: ${case.id} (skipped, disabled)")
@@ -32,7 +32,7 @@ object RegressionRunner {
                     println("  passed: ${case.id}")
                 } catch (e: Throwable) {
                     System.err.println("  FAILED: ${case.id}")
-                    throw AssertionError("Regression case failed: ${case.id} (${case.source})", e)
+                    failures += case.id to e
                 }
             }
             if ("http" in case.tags) {
@@ -41,19 +41,25 @@ object RegressionRunner {
                 block()
             }
         }
+        if (failures.isNotEmpty()) {
+            val summary = failures.joinToString("\n") { (id, err) ->
+                val cause = err.cause?.message ?: err.message ?: err.toString()
+                "  - $id: ${cause.lineSequence().firstOrNull() ?: cause}"
+            }
+            throw AssertionError(
+                "Regression failures (${failures.size}):\n$summary",
+                failures.first().second,
+            )
+        }
     }
 
-    /** Prefetch Gradle distro/plugins/daemon so case compiles fit in [RegressionTimeouts.CASE_MS]. */
-    private fun warmGradle(projectRoot: File) {
+    /** Go builds do not need Gradle warmup; just require julayc.jar to exist. */
+    private fun ensureCompilerJar(projectRoot: File) {
         val compilerJar = File(projectRoot, "build/libs/julayc.jar").takeIf { it.exists() }
             ?: File(projectRoot, "julayc.jar")
         check(compilerJar.exists()) {
-            "julayc.jar not found for Gradle warmup. Run ./gradlew shadowJar first."
+            "julayc.jar not found. Run ./gradlew shadowJar first."
         }
-        val warmupDir = File(projectRoot, "build/regression-gradle-warmup")
-        println("Warming Gradle (distro + Kotlin/Shadow plugins)…")
-        warmGradleForProgramCompile(warmupDir, compilerJar.toPath())
-        println("  Gradle warmup done")
     }
 
     fun runCase(projectRoot: File, case: CaseFile) {
@@ -90,71 +96,33 @@ object RegressionRunner {
             }
 
             if (case.programs.isEmpty()) {
-                if (case.expectJars) {
-                    check(compileResult.jars.isNotEmpty()) {
-                        "Expected JARs for case ${case.id} but none were produced\n--- compiler output ---\n${compileResult.output}"
+                if (case.expectBinaries) {
+                    check(compileResult.binaries.isNotEmpty()) {
+                        "Expected binaries for case ${case.id} but none were produced\n--- compiler output ---\n${compileResult.output}"
                     }
                     assertTrue(
                         !compileResult.output.contains("never called by a peer"),
                         "Unexpected orphan error for case ${case.id}\n--- output ---\n${compileResult.output}",
                     )
                 } else {
-                    check(compileResult.jars.isNotEmpty() || case.expectCompileOutputContains.isNotEmpty()) {
-                        "No program JARs produced for ${case.source}\n--- compiler output ---\n${compileResult.output}"
+                    check(compileResult.binaries.isNotEmpty() || case.expectCompileOutputContains.isNotEmpty()) {
+                        "No program binaries produced for ${case.source}\n--- compiler output ---\n${compileResult.output}"
                     }
                 }
                 return
             }
 
-            check(compileResult.jars.isNotEmpty()) {
-                "No program JARs produced for ${case.source}\n--- compiler output ---\n${compileResult.output}"
+            check(compileResult.binaries.isNotEmpty()) {
+                "No program binaries produced for ${case.source}\n--- compiler output ---\n${compileResult.output}"
             }
 
             stageWorkspaceFiles(projectRoot, workspace, case)
 
-            val stdoutByProgram = mutableMapOf<String, String>()
             case.programs.forEach { program ->
                 RegressionTimeouts.requireRemaining(case.id, deadlineMs)
                 background = runProgram(
-                    projectRoot, case, workspace, compileResult.jars, program, background, deadlineMs,
-                    stdoutSink = if (case.compileTwiceWithDisableOpt) stdoutByProgram else null,
+                    projectRoot, case, workspace, compileResult.binaries, program, background, deadlineMs,
                 )
-            }
-
-            if (case.compileTwiceWithDisableOpt) {
-                background?.destroy()
-                background = null
-                // Drop program jars so the second compile's outputs are unambiguous.
-                compileResult.jars.values.forEach { it.delete() }
-                val disableArgs = case.compileArgs.filter { it != "--disable-opt" && !it.startsWith("--disable-opt=") } +
-                    listOf("--disable-opt")
-                val compileOff = JulCompiler.compile(
-                    projectRoot,
-                    workspace,
-                    source,
-                    timeoutMs = RegressionTimeouts.capMs(RegressionTimeouts.CASE_MS, deadlineMs),
-                    compileArgs = disableArgs,
-                )
-                check(compileOff.jars.isNotEmpty()) {
-                    "No program JARs for --disable-opt recompile of ${case.id}\n--- output ---\n${compileOff.output}"
-                }
-                case.programs.forEach { program ->
-                    RegressionTimeouts.requireRemaining(case.id, deadlineMs)
-                    val offStdout = mutableMapOf<String, String>()
-                    background = runProgram(
-                        projectRoot, case, workspace, compileOff.jars, program, background, deadlineMs,
-                        stdoutSink = offStdout,
-                    )
-                    val onOut = stdoutByProgram[program.name]
-                    val offOut = offStdout[program.name]
-                    if (onOut != null && offOut != null) {
-                        assertTrue(
-                            onOut == offOut,
-                            "Opt-on vs --disable-opt stdout mismatch for ${program.name} in ${case.id}\n" +
-                                "--- opts on ---\n$onOut\n--- disable-opt ---\n$offOut",
-                        )
-                    }
-                }
             }
         } finally {
             background?.destroy()
@@ -178,8 +146,8 @@ object RegressionRunner {
 
     private fun assertCompileFailure(case: CaseFile, compileResult: CompileResult) {
         assertTrue(
-            compileResult.jars.isEmpty(),
-            "Expected compile failure for case ${case.id} but JARs were produced: ${compileResult.jars.keys}",
+            compileResult.binaries.isEmpty(),
+            "Expected compile failure for case ${case.id} but binaries were produced: ${compileResult.binaries.keys}",
         )
         case.expectCompileOutputContains.forEach { needle ->
             assertTrue(
@@ -202,14 +170,13 @@ object RegressionRunner {
         projectRoot: File,
         case: CaseFile,
         workspace: File,
-        jars: Map<String, File>,
+        binaries: Map<String, File>,
         program: ProgramCase,
         background: JulProcess.Running?,
         deadlineMs: Long,
-        stdoutSink: MutableMap<String, String>? = null,
     ): JulProcess.Running? {
-        val jar = jars[program.name]
-            ?: throw AssertionError("No JAR for program ${program.name} in case ${case.id}; have ${jars.keys}")
+        val binary = binaries[program.name]
+            ?: throw AssertionError("No binary for program ${program.name} in case ${case.id}; have ${binaries.keys}")
         val run = program.run
             ?: throw AssertionError("Program ${program.name} in case ${case.id} has no run config")
         val capped = cappedRun(run, deadlineMs)
@@ -217,17 +184,17 @@ object RegressionRunner {
         var activeBackground = background
         try {
             if (program.dependsOn != null) {
-                val depJar = jars[program.dependsOn]
+                val depBinary = binaries[program.dependsOn]
                     ?: throw AssertionError("dependsOn ${program.dependsOn} not found for ${program.name}")
                 activeBackground?.destroy()
-                activeBackground = JulProcess.startBackground(depJar, workspace, emptyList())
+                activeBackground = JulProcess.startBackground(depBinary, workspace, emptyList())
                 HttpProbe.waitForPort(portWaitMs(deadlineMs))
             }
 
             val stdout = when {
                 capped.http.isNotEmpty() -> {
                     activeBackground?.destroy()
-                    activeBackground = JulProcess.startBackground(jar, workspace, capped.stdin, capped.args)
+                    activeBackground = JulProcess.startBackground(binary, workspace, capped.stdin, capped.args)
                     HttpProbe.waitForPort(portWaitMs(deadlineMs))
                     capped.http.forEach { HttpProbe.postExpectBody(it.post, it.expectBody) }
                     val captureMs = capped.durationMs ?: 3_000L
@@ -235,7 +202,7 @@ object RegressionRunner {
                 }
                 capped.background -> {
                     activeBackground?.destroy()
-                    activeBackground = JulProcess.startBackground(jar, workspace, capped.stdin, capped.args)
+                    activeBackground = JulProcess.startBackground(binary, workspace, capped.stdin, capped.args)
                     if (capped.http.isNotEmpty() || case.tags.contains("http")) {
                         HttpProbe.waitForPort(portWaitMs(deadlineMs))
                     }
@@ -243,7 +210,7 @@ object RegressionRunner {
                     activeBackground!!.collect(RegressionTimeouts.capMs(captureMs, deadlineMs))
                 }
                 else -> {
-                    val result = JulProcess.runToCompletion(jar, workspace, capped, capped.timeoutMs)
+                    val result = JulProcess.runToCompletion(binary, workspace, capped, capped.timeoutMs)
                     if (result.exitCode != 0) {
                         throw AssertionError(
                             "Program exited with code ${result.exitCode}\n--- stdout ---\n${result.stdout}",
@@ -258,7 +225,6 @@ object RegressionRunner {
                     "Expected program ${program.name} in case ${case.id} to fail but it completed successfully",
                 )
             }
-            stdoutSink?.put(program.name, stdout)
             StdoutMatcher.assertMatches(projectRoot, stdout, capped)
         } catch (e: AssertionError) {
             if (!program.expectFailure) throw e

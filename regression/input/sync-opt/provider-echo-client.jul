@@ -2,10 +2,10 @@ import julay.funlib.exitProgram
 import julay.funlib.println
 
 /*
- * Client binds req; provider sets resp = req + 1 (directed-eval).
+ * Dynamic binds req; static hub sets resp = req + 1 (reply channel).
  */
 
-proc Server {
+static proc Server {
     var last : Int
     var done : Boolean
 
@@ -15,7 +15,7 @@ proc Server {
             done := false
     }
 
-    provider transition echo(req : Int, resp : Int) {
+    service transition echo(req : Int, resp : Int) {
         guard:
             & ~done
             & resp = req + 1

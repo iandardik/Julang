@@ -38,7 +38,7 @@ code --install-extension julay-0.1.0.vsix
 | Feature | How |
 |---------|-----|
 | Syntax highlighting | Automatic for `*.jul` |
-| Snippets | Prefixes: `proc`, `api`, `procclass`, `procfun`, `transition`, `internal`, `provider`, `client`, `session`, `spec`, … |
+| Snippets | Prefixes: `proc`, `staticproc`, `api`, `procclass`, `procfun`, `transition`, `service`, `client`, `internal`, `timer`, `spec`, … |
 | Go to definition | `F12` / Cmd-click on proc names, actions, and `import path.Name` (not jar stdlib) |
 | Hover alphabet | Hover a proc / spec / **procfun** / **api** name → external alphabet |
 | Alphabet panel | Command **Julay: Show External Alphabet** |
@@ -49,13 +49,13 @@ code --install-extension julay-0.1.0.vsix
 
 ### Alphabet panel
 
-- **Composition sync** diagram (when the proc has `||` children, or a leaf calls procfuns): immediate top-level components as nodes; for a **leaf** scope, also procfuns that leaf calls (each with a checkbox, on by default). Unchecking hides that node and its edges/action labels. Sync edges are solid and labeled by composition-hidden actions; **procfun call** edges are dotted arrows from caller to callee (spawn-await, not SyncChannel peers). Nested syncs and nested procfun calls under a child assembly are not shown on the parent.
-- Default list view: **external** alphabet only.
+- **Composition sync** diagram (when the proc has `||` children, or a leaf calls procfuns): immediate top-level components as nodes; for a **leaf** scope, also procfuns that leaf calls (each with a checkbox, on by default). Unchecking hides that node and its edges/action labels. Sync edges are solid and labeled by shared action names (roles may show `service/client`, `hub`, or `static/static`); **procfun call** edges are dotted arrows from caller to callee (spawn-await, not composition peers). Nested syncs and nested procfun calls under a child assembly are not shown on the parent.
+- Default list view: **external** alphabet only (`service` hubs stay here; matching `client`s leave when they meet the service).
 - Toggle **Show internal** to reveal two separate sections:
-  1. **Source-internal** — tagged `internal` in the proc definition
-  2. **Synchronized (composition-hidden)** — internalized by `||`, listing the synced peers (e.g. `S ‖ T`)
+  1. **Source-internal** — tagged `internal` (or `timer`) in the proc definition
+  2. **Synchronized (composition-hidden)** — ordinary peers scoped by `||`, plus `service`/`client` meetings (clients leave external; scoped ordinary channels are noted)
 
-**Procfun scopes:** analyzing a `procfun` alone lists its user actions under **external** (including `internal` / bare-return steps). Synthetic `F_call` / `F_ret` are hidden. **Parent procs / apis** also show non-synthetic actions from any procfun **called** under them (see [Procfuns](../docs/language/procfun.md) and [APIs](../docs/language/composition-and-actions.md#apis)).
+**Procfun scopes:** analyzing a `procfun` alone lists its user actions under **external** (including `internal` / bare-return / `client` steps). Synthetic `F_call` / `F_ret` are hidden. **`service` is illegal on procfuns.** **Parent procs / apis** also show non-synthetic actions from any procfun **called** under them (see [Procfuns](../docs/language/procfun.md) and [APIs](../docs/language/composition-and-actions.md#apis)).
 
 **Api scopes:** analyzing an `api` shows the external alphabet of its `proc:` composition (plus listed `calls` in the composition graph). Call listed entry points as `ApiName.fn(...)`.
 
@@ -89,5 +89,5 @@ Errors appear as red squiggles; soft sync-peer / unsynced-ordinary messages as y
 ## See also
 
 - [Tooling](../docs/tooling.md) — `julayc` CLI including `--json`
-- [Composition and actions](../docs/language/composition-and-actions.md) — external vs composition-hidden alphabets
+- [Composition and actions](../docs/language/composition-and-actions.md) — `service`/`client`, ordinary composition-private syncs, external vs composition-hidden alphabets
 - [Procfuns](../docs/language/procfun.md) — standalone vs parent alphabet folding

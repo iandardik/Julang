@@ -1,2 +1,4 @@
 source: regression/input/syntax-errors/procfun-bare-transition.jul
 expectCompileFailure: true
+expectCompileOutputContains:
+  - "service"

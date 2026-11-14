@@ -1,19 +1,19 @@
-import julay.proclib.HttpServer
+import julay.funlib.serveHttp
 import julay.funlib.delaySeconds
 import julay.funlib.println
 
-proc Counter {
+static proc Counter {
     var counter : Int
-    
+
     constructor initially(args : List<String>) {
         transit: counter := 0
     }
 
-    provider transition increment() {
+    service transition increment() {
         transit: counter := counter + 1
     }
 
-    provider transition getCounter(counterVal : Int) {
+    service transition getCounter(counterVal : Int) {
         guard: counterVal = counter
     }
 }
@@ -52,24 +52,10 @@ proc PeriodicPrint {
     }
 }
 
-proc ServerStarter {
-    var started : Boolean
-
+static proc ServerStarter {
     constructor initially(args : List<String>) {
-        transit:
-            started := false
-    }
-
-    session transition listen(
-        port : Int,
-        handler : HttpServerRequest ~> HttpServerResponse
-    ) {
-        guard: ~started & port = 8000 & handler = incHandler
-        transit: started := true
-    }
-
-    session transition close() {
-        guard: false
+        after:
+            serveHttp(8000, incHandler)
     }
 }
 
@@ -108,7 +94,7 @@ procfun incHandler(req : HttpServerRequest) : HttpServerResponse {
 }
 
 proc Printer := PeriodicPrint
-proc ServerLogic := ServerStarter || HttpServer
+proc ServerLogic := ServerStarter
 proc CounterServerTest := Counter || Printer || ServerLogic
 
 compile CounterServerTest

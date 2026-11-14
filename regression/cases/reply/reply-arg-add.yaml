@@ -1,0 +1,7 @@
+source: regression/input/reply/reply-arg-add.jul
+programs:
+  - name: ReplyArgAdd
+    run:
+      timeoutMs: 8000
+      expectStdoutContains:
+        - "sum 15"

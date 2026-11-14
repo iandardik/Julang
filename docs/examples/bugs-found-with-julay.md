@@ -4,7 +4,7 @@ Julay’s `spec` → TLA+ path is meant to catch real protocol bugs, not only to
 
 ## Timer: restart vs session-constructor rebind
 
-**Component:** [`julay.proclib.Timer`](../../src/main/resources/stdlib/julay/proclib/Timer.jul) — part of the [standard library](../language/standard-library.md) (shipped with `julayc`; `import julay.proclib.Timer`).
+**Component (historical):** former `julay.proclib.Timer` (removed; timers are now builtins — [Standard library](../language/standard-library.md)).
 
 ### Claim
 
@@ -73,7 +73,5 @@ After the fix, re-running TLC on `TimerSpec` finds no `SessionIntegrity` violati
 
 ### See also
 
-- Current source: [`Timer.jul`](../../src/main/resources/stdlib/julay/proclib/Timer.jul)
-- [Sessions](../language/sessions.md)
-- [Sessions in TLA+](../language/specifications.md#sessions-in-tla) (`SessionIntegrity`, `sessionException`)
-- [Standard library](../language/standard-library.md)
+- Historical write-up: proclib `Timer` and session affinity have since been **removed**; timers are now `timer transition` + `setTimer` / `cancelTimer` ([Standard library](../language/standard-library.md), [Effects](../language/effects.md)).
+- [Specifications](../language/specifications.md)

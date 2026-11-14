@@ -16,10 +16,11 @@ qualified_name
 /* Keywords allowed as module-path segments (e.g. import client.logic.Client). */
 name_id
     : ID
-    | CLIENT
-    | PROVIDER
     | INTERNAL
-    | SESSION
+    | TIMER
+    | SERVICE
+    | CLIENT
+    | STATIC
     | LISTOF
     | SETOF
     | MAPOF
@@ -82,7 +83,7 @@ api_call_list
     ;
 
 proc
-    : PROC ID LCURLY proc_body* RCURLY
+    : STATIC? PROC ID LCURLY proc_body* RCURLY
     | PROC ID ASGN_EQ proc_expr
     ;
 
@@ -188,11 +189,11 @@ var
     ;
 
 constructor
-    : SESSION? CONSTRUCTOR ID args (ALSO args)? LCURLY constructor_body* RCURLY
+    : CONSTRUCTOR ID args (ALSO args)? LCURLY constructor_body* RCURLY
     ;
 
 transition
-    : (INTERNAL | PROVIDER | CLIENT | SESSION)? TRANSITION ID args (ALSO args)? LCURLY action_body* RCURLY
+    : (INTERNAL | TIMER | SERVICE | CLIENT)? TRANSITION ID args (ALSO args)? LCURLY action_body* RCURLY
     ;
 
 args

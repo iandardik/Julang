@@ -10,12 +10,12 @@ proc Sender {
         transit:
     }
 
-    transition handoff(x : Int) {
+    client transition handoff(x : Int) {
         guard: x = 9
     }
 }
 
-proc Receiver {
+static proc Receiver {
     var k : Int
     var done : Boolean
 
@@ -25,7 +25,7 @@ proc Receiver {
             done := false
     }
 
-    transition handoff(x : Int) {
+    service transition handoff(x : Int) {
         guard:
             & x = k
             & ~done

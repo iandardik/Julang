@@ -1,0 +1,4 @@
+source: regression/input/reply/sender-guard-reply-arg.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Cannot determine channel direction"

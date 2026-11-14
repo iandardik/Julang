@@ -1,11 +1,5 @@
 package julay.program.type
 
-import com.microsoft.z3.Context
-import com.microsoft.z3.Expr
-import com.microsoft.z3.Model
-import julay.program.Value
-import julay.program.Variable
-
 enum class DomainKind {
     /** `type Name := Carrier` — erases to carrier in procs; separate TLA+ CONSTANT in specs. */
     Typedef,
@@ -26,18 +20,6 @@ class DomainType(
     val cfgElements: List<String>? = null,
 ) : Type {
     val hasModel: Boolean get() = cfgElements != null
-
-    override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {
-        throw RuntimeException("type \"$name\" is not executable")
-    }
-
-    override fun toZ3Expr(value: Value, ctx: Context): Expr<*> {
-        throw RuntimeException("type \"$name\" is not executable")
-    }
-
-    override fun fromZ3Expr(expr: Expr<*>, model: Model): Any {
-        throw RuntimeException("type \"$name\" is not executable")
-    }
 
     override fun isOfType(obj: Any): Boolean = false
 
@@ -102,7 +84,7 @@ fun firstUninterpretedName(type: Type): String? = when (type) {
     else -> null
 }
 
-/** Erase typedef domains to their carrier for JAR/Z3 codegen. */
+/** Erase typedef domains to their carrier for JAR codegen. */
 fun Type.codegenErasure(): Type = when (this) {
     is DomainType -> when (kind) {
         DomainKind.Typedef -> carrierType.codegenErasure()

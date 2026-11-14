@@ -1,21 +1,12 @@
 package julay.program.type
 
-import com.microsoft.z3.Context
-import com.microsoft.z3.Expr
-import com.microsoft.z3.IntNum
-import com.microsoft.z3.Model
-import com.microsoft.z3.RatNum
-import julay.program.Value
-import julay.program.Variable
-import julay.tools.mkStringConst
-
 val boolType = BoolType()
 val intType = IntType()
 val realType = RealType()
 val stringType = StringType()
 val baseTypes = listOf(boolType, intType, realType, stringType)
 
-fun parseType(strType : String) : Type {
+fun parseType(strType: String): Type {
     baseTypes.forEach { baseType ->
         if (strType == baseType.toString()) {
             return baseType
@@ -25,26 +16,12 @@ fun parseType(strType : String) : Type {
 }
 
 interface Type {
-    fun toZ3Expr(variable : Variable, ctx : Context) : Expr<*>
-    fun toZ3Expr(value : Value, ctx : Context) : Expr<*>
-    fun fromZ3Expr(expr : Expr<*>, model : Model) : Any
-    fun isOfType(obj : Any) : Boolean
+    fun isOfType(obj: Any): Boolean
 }
 
 class InvalidType : Type {
-    constructor(name : String) {
+    constructor(name: String) {
         throw RuntimeException("Invalid type: $name")
-    }
-    override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {
-        throw RuntimeException("Invalid type")
-    }
-
-    override fun toZ3Expr(value: Value, ctx: Context): Expr<*> {
-        throw RuntimeException("Invalid type")
-    }
-
-    override fun fromZ3Expr(expr: Expr<*>, model: Model): Any {
-        throw RuntimeException("Invalid type")
     }
 
     override fun isOfType(obj: Any): Boolean {
@@ -65,165 +42,50 @@ class InvalidType : Type {
 }
 
 class BoolType : Type {
-    override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {
-        return ctx.mkBoolConst(variable.name)
-    }
+    override fun isOfType(obj: Any): Boolean = obj is Boolean
 
-    override fun toZ3Expr(value: Value, ctx: Context): Expr<*> {
-        return ctx.mkBool(value.value as Boolean)
-    }
+    override fun toString(): String = "Boolean"
 
-    override fun fromZ3Expr(expr: Expr<*>, model: Model): Any {
-        val evaluated = model.eval(expr, true)
-        return when {
-            evaluated.isTrue -> true
-            evaluated.isFalse -> false
-            else -> evaluated.toString().lowercase() == "true"
-        }
-    }
+    override fun equals(other: Any?): Boolean = other is BoolType
 
-    override fun isOfType(obj: Any): Boolean {
-        return obj is Boolean
-    }
-
-    override fun toString(): String {
-        return "Boolean"
-    }
-
-    override fun equals(other: Any?): Boolean {
-        return other is BoolType
-    }
-
-    override fun hashCode(): Int {
-        return toString().hashCode()
-    }
+    override fun hashCode(): Int = toString().hashCode()
 }
 
 class IntType : Type {
-    override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {
-        return ctx.mkIntConst(variable.name)
-    }
+    override fun isOfType(obj: Any): Boolean = obj is Int
 
-    override fun toZ3Expr(value: Value, ctx: Context): Expr<*> {
-        return ctx.mkInt(value.value as Int)
-    }
+    override fun toString(): String = "Int"
 
-    override fun fromZ3Expr(expr: Expr<*>, model: Model): Any {
-        val evaluated = if (expr is IntNum) expr else model.eval(expr, true)
-        if (evaluated is IntNum) {
-            return evaluated.int
-        }
-        return Integer.parseInt(evaluated.toString())
-    }
+    override fun equals(other: Any?): Boolean = other is IntType
 
-    override fun isOfType(obj: Any): Boolean {
-        return obj is Int
-    }
-
-    override fun toString(): String {
-        return "Int"
-    }
-
-    override fun equals(other: Any?): Boolean {
-        return other is IntType
-    }
-
-    override fun hashCode(): Int {
-        return toString().hashCode()
-    }
+    override fun hashCode(): Int = toString().hashCode()
 }
 
 class RealType : Type {
-    override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {
-        return ctx.mkRealConst(variable.name)
-    }
+    override fun isOfType(obj: Any): Boolean = obj is Double
 
-    override fun toZ3Expr(value: Value, ctx: Context): Expr<*> {
-        return ctx.mkReal((value.value as Double).toString())
-    }
+    override fun toString(): String = "Real"
 
-    override fun fromZ3Expr(expr: Expr<*>, model: Model): Any {
-        return when (expr) {
-            is RatNum -> {
-                expr.numerator.bigInteger.toDouble() / expr.denominator.bigInteger.toDouble()
-            }
-            is IntNum -> expr.int.toDouble()
-            else -> {
-                val s = expr.toString()
-                if ('/' in s) {
-                    val parts = s.split('/')
-                    parts[0].toDouble() / parts[1].toDouble()
-                } else {
-                    s.toDouble()
-                }
-            }
-        }
-    }
+    override fun equals(other: Any?): Boolean = other is RealType
 
-    override fun isOfType(obj: Any): Boolean {
-        return obj is Double
-    }
-
-    override fun toString(): String {
-        return "Real"
-    }
-
-    override fun equals(other: Any?): Boolean {
-        return other is RealType
-    }
-
-    override fun hashCode(): Int {
-        return toString().hashCode()
-    }
+    override fun hashCode(): Int = toString().hashCode()
 }
 
 class StringType : Type {
-    override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {
-        return ctx.mkStringConst(variable.name)
-    }
+    override fun isOfType(obj: Any): Boolean = obj is String
 
-    override fun toZ3Expr(value: Value, ctx: Context): Expr<*> {
-        return ctx.mkString(value.value as String)
-    }
+    override fun toString(): String = "String"
 
-    override fun fromZ3Expr(expr: Expr<*>, model: Model): Any {
-        return expr.string
-    }
+    override fun equals(other: Any?): Boolean = other is StringType
 
-    override fun isOfType(obj: Any): Boolean {
-        return obj is String
-    }
-
-    override fun toString(): String {
-        return "String"
-    }
-
-    override fun equals(other: Any?): Boolean {
-        return other is StringType
-    }
-
-    override fun hashCode(): Int {
-        return toString().hashCode()
-    }
+    override fun hashCode(): Int = toString().hashCode()
 }
 
 /**
  * Rigid type parameter used while checking polymorphic function / obj template bodies.
- * Must not reach codegen or Z3 emission.
+ * Must not reach codegen.
  */
 class TypeVar(val name: String) : Type {
-    override fun toZ3Expr(variable: Variable, ctx: Context): Expr<*> {
-        throw RuntimeException("TypeVar \"$name\" must not reach Z3 codegen")
-    }
-
-    override fun toZ3Expr(value: Value, ctx: Context): Expr<*> {
-        throw RuntimeException("TypeVar \"$name\" must not reach Z3 codegen")
-    }
-
-    override fun fromZ3Expr(expr: Expr<*>, model: Model): Any {
-        throw RuntimeException("TypeVar \"$name\" must not reach Z3 codegen")
-    }
-
     override fun isOfType(obj: Any): Boolean = false
 
     override fun toString(): String = name

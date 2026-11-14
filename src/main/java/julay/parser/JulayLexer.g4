@@ -48,6 +48,7 @@ MAPOF : 'mapOf' ;
 
 
 TYPE : 'type' ;
+STATIC : 'static' ;
 PROC : 'proc' ;
 API : 'api' ;
 CALLS : 'calls' ;
@@ -61,9 +62,9 @@ CONST : 'const' ;
 CONSTRUCTOR : 'constructor' ;
 TRANSITION : 'transition' ;
 INTERNAL : 'internal' ;
-PROVIDER : 'provider' ;
+TIMER : 'timer' ;
+SERVICE : 'service' ;
 CLIENT : 'client' ;
-SESSION : 'session' ;
 GUARD : 'guard' ;
 TRANSIT : 'transit' ;
 ERROR : 'error' ;

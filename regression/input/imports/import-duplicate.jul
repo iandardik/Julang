@@ -1,5 +1,5 @@
-import julay.proclib.Timer
-import julay.proclib.Timer
+import julay.funlib.println
+import julay.funlib.println
 
 proc ImportDuplicateTest {
     constructor initially(args : List<String>) {}

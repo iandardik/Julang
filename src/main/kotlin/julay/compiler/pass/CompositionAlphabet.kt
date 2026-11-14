@@ -15,8 +15,6 @@ import julay.compiler.decl.ProcDecl
 import julay.program.Variable
 import julay.program.action.SymbolicAction
 import julay.program.action.TSAction
-import julay.program.library.LibraryRegistry
-
 /** Identity of a leaf action offer for channel-key assignment (occurrence-scoped). */
 data class LeafActionId(
     val pclassKey: String,
@@ -28,8 +26,11 @@ data class LeafActionId(
 /**
  * One action offer in a (possibly derived) alphabet.
  * [compositionHidden] means the offer was internalized by `||` matching (not source `internal`).
+ * Ordinary peers get a private [channelKey]; service hubs keep the public action name while
+ * meeting clients are marked composition-hidden.
  * [occurrenceId] distinguishes multiple occurrences of the same proc class.
  * [introducingAssembly] is the named proc/assembly that introduced this leaf (for TLA naming).
+ * [isStatic] is true for `static proc` classes (hub / static-static sync shapes).
  */
 data class AlphabetOffer(
     val pclassKey: String,
@@ -38,37 +39,43 @@ data class AlphabetOffer(
     val name: String,
     val args: List<Variable>,
     val modifier: TSAction.SyncRole,
-    val isSession: Boolean,
+    val isTimer: Boolean,
     val isConstructor: Boolean,
     val loc: ProgramLoc,
     val channelKey: String,
     val compositionHidden: Boolean = false,
     val sourceInternal: Boolean = false,
+    val isStatic: Boolean = false,
 ) {
-    val isProvider: Boolean get() = modifier == TSAction.SyncRole.Provider
+    val isService: Boolean get() = modifier == TSAction.SyncRole.Service
     val isClient: Boolean get() = modifier == TSAction.SyncRole.Client
+    @Deprecated("Use isService", ReplaceWith("isService"))
+    val isProvider: Boolean get() = isService
     val leafId: LeafActionId get() = LeafActionId(pclassKey, occurrenceId, name, isConstructor)
 
+    /** Local to one occurrence: `internal` or `timer` (does not sync across classes). */
+    val isLocal: Boolean get() = sourceInternal || isTimer
+
     fun signatureCompatible(other: AlphabetOffer): Boolean =
-        actionArgsCompatible(args, other.args) && isSession == other.isSession &&
+        actionArgsCompatible(args, other.args) && isTimer == other.isTimer &&
             sourceInternal == other.sourceInternal &&
-            // Ordinary/session must agree on modifier; provider↔client may differ.
-            (isProvider || other.isProvider || isClient || other.isClient || modifier == other.modifier)
+            // Ordinary must agree on modifier; service↔client may differ.
+            (isService || other.isService || isClient || other.isClient || modifier == other.modifier)
 
     fun toSymbolicAction(): SymbolicAction =
         SymbolicAction(
             name = name,
             args = args,
             isInternal = sourceInternal,
-            isSession = isSession,
+            isTimer = isTimer,
             channelKey = channelKey,
         )
 }
 
 data class CompositionAlphabetResult(
-    /** External alphabet of the composition (not source-internal, not composition-hidden). */
+    /** External alphabet (not source-internal, not timer, not composition-hidden). */
     val external: List<AlphabetOffer>,
-    /** All offers including hidden and source-internal (for channel binding / analyze --include-internal). */
+    /** All offers including hidden, source-internal, and timer (for channel binding / analyze). */
     val allOffers: List<AlphabetOffer>,
     val channelKeys: Map<LeafActionId, String>,
     /** Distinct leaf occurrences in left-to-right composition order. */
@@ -113,36 +120,26 @@ fun leafActionMap(ast: RootNode, procs: Set<String>, librariesInUse: Set<String>
     // that are invoked but not listed in ||.
     val procFuns = ast.procFunClassPass()
         .associate { pc -> pc.name to pc.toAlphabetOffers() }
-    val libs = librariesInUse
-        .filter { it in procs && LibraryRegistry.isKotlinLibrary(it) }
-        .associate { libName ->
-            val info = LibraryRegistry.staticInfo(libName)
-            // Key by julName (e.g. HttpServer) to match ProcDecl leaves; staticInfo.name may differ.
-            val ctorActs = info.constructors.keys
-            val alphabet = info.alphabet
-            val offers = LibraryRegistry.actionDecls(libName).mapNotNull { decl ->
-                when {
-                    decl.action in ctorActs -> decl.toAlphabetOffer(libName, isConstructor = true)
-                    decl.action in alphabet -> decl.toAlphabetOffer(libName, isConstructor = false)
-                    else -> null
-                }
-            }
-            libName to offers
-        }
-    return julay + procFuns + libs
+    // Kotlin-native libraries (HttpServer) removed; Go runtime provides ServeHttp.
+    return julay + procFuns
 }
 
 private fun ProcClassDecl.toAlphabetOffers(): List<AlphabetOffer> =
-    transitions.map { it.toAlphabetOffer(name, isConstructor = false) } +
-        constructors.map { it.toAlphabetOffer(name, isConstructor = true) }
+    transitions.map { it.toAlphabetOffer(name, isConstructor = false, isStatic = isStatic) } +
+        constructors.map { it.toAlphabetOffer(name, isConstructor = true, isStatic = isStatic) }
 
 /** Template offers (no occurrence id yet) for a leaf pclass. */
-private fun ActionDecl.toAlphabetOffer(pclassKey: String, isConstructor: Boolean): AlphabetOffer {
+private fun ActionDecl.toAlphabetOffer(
+    pclassKey: String,
+    isConstructor: Boolean,
+    isStatic: Boolean,
+): AlphabetOffer {
     val sourceInternal = modifier == TSAction.SyncRole.Internal
-    val channelKey = if (sourceInternal) {
-        "$pclassKey#internal#${action.name}"
-    } else {
-        action.name
+    val timer = this.isTimer || modifier == TSAction.SyncRole.Timer
+    val channelKey = when {
+        sourceInternal -> "$pclassKey#internal#${action.name}"
+        timer -> "$pclassKey#timer#${action.name}"
+        else -> action.name
     }
     return AlphabetOffer(
         pclassKey = pclassKey,
@@ -151,12 +148,13 @@ private fun ActionDecl.toAlphabetOffer(pclassKey: String, isConstructor: Boolean
         name = action.name,
         args = action.args,
         modifier = modifier,
-        isSession = isSession,
+        isTimer = timer,
         isConstructor = isConstructor,
         loc = loc,
         channelKey = channelKey,
         compositionHidden = false,
         sourceInternal = sourceInternal,
+        isStatic = isStatic,
     )
 }
 
@@ -204,8 +202,8 @@ fun collectLeafOccurrences(
 
 /**
  * Compute the inductive alphabet of [root] (a JAR/analyze/TLA target), assigning private channel
- * keys to composition-hidden syncs so nested assemblies do not cross-sync on the same surface name.
- * Expands named assemblies by occurrence (`M || M` → two independent expansions).
+ * keys to composition-hidden ordinary syncs so nested assemblies do not cross-sync on the same
+ * surface name. Expands named assemblies by occurrence (`M || M` → two independent expansions).
  *
  * When [ast] is provided, procfuns **called** by host leaves under [root] also contribute their
  * non-synthetic alphabet — even if they are not listed in `||` (TLA coupling still requires `||`).
@@ -251,10 +249,10 @@ fun computeCompositionAlphabet(
             templates
         }
         val offers = filtered.map { template ->
-            val channelKey = if (template.sourceInternal) {
-                "$occurrenceId#internal#${template.name}"
-            } else {
-                template.channelKey
+            val channelKey = when {
+                template.sourceInternal -> "$occurrenceId#internal#${template.name}"
+                template.isTimer -> "$occurrenceId#timer#${template.name}"
+                else -> template.name
             }
             template.copy(
                 occurrenceId = occurrenceId,
@@ -314,7 +312,7 @@ fun computeCompositionAlphabet(
         }
     }
 
-    val external = allOffers.filter { !it.sourceInternal && !it.compositionHidden }
+    val external = allOffers.filter { !it.isLocal && !it.compositionHidden }
     return CompositionAlphabetResult(
         external = external,
         allOffers = allOffers,
@@ -344,20 +342,21 @@ internal fun calledProcFunNamesUnder(
 
 /**
  * Compose two alphabets under [scopeId]. Matching ordinary pairs become composition-hidden
- * with a private [scopeId]-scoped channel key. Provider/client rules are local to this step.
+ * with a private [scopeId]-scoped channel key. Service/client rules are local to this step.
  * Same proc-class on both sides never syncs (same-class rule).
+ * Timers and source-internals are treated as settled/local and never re-sync.
  */
 fun composeAlphabets(
     left: List<AlphabetOffer>,
     right: List<AlphabetOffer>,
     scopeId: String,
 ): Pair<List<AlphabetOffer>, List<CompileError>> {
-    // Source-internal and already composition-hidden offers never re-sync at an outer step;
+    // Local (internal/timer) and already composition-hidden offers never re-sync at an outer step;
     // they pass through with their channel keys (binary sync scoping).
-    val leftSettled = left.filter { it.sourceInternal || it.compositionHidden }
-    val rightSettled = right.filter { it.sourceInternal || it.compositionHidden }
-    val leftExt = left.filter { !it.sourceInternal && !it.compositionHidden }
-    val rightExt = right.filter { !it.sourceInternal && !it.compositionHidden }
+    val leftSettled = left.filter { it.isLocal || it.compositionHidden }
+    val rightSettled = right.filter { it.isLocal || it.compositionHidden }
+    val leftExt = left.filter { !it.isLocal && !it.compositionHidden }
+    val rightExt = right.filter { !it.isLocal && !it.compositionHidden }
 
     val errors = mutableListOf<CompileError>()
     val result = mutableListOf<AlphabetOffer>()
@@ -384,12 +383,12 @@ fun composeAlphabets(
                 val hasOrdinary = both.any {
                     it.modifier == TSAction.SyncRole.Default
                 }
-                val hasProvider = both.any { it.isProvider }
+                val hasService = both.any { it.isService }
                 val hasClient = both.any { it.isClient }
-                if (hasOrdinary && (hasProvider || hasClient)) {
+                if (hasOrdinary && (hasService || hasClient)) {
                     val ord = both.first { it.modifier == TSAction.SyncRole.Default }
-                    val tagged = both.first { it.isProvider || it.isClient }
-                    val tag = if (tagged.isProvider) "provider" else "client"
+                    val tagged = both.first { it.isService || it.isClient }
+                    val tag = if (tagged.isService) "service" else "client"
                     errors.add(
                         TwoLocsCompileError(
                             ord.loc,
@@ -402,8 +401,8 @@ fun composeAlphabets(
                     result.addAll(r)
                     continue
                 }
-                if (hasProvider) {
-                    // Provider stays external (further clients can still sync); clients that meet
+                if (hasService) {
+                    // Service stays external (further clients can still sync); clients that meet
                     // it leave the external alphabet. Keep the public channelKey (action name).
                     result.addAll(
                         (l + r).map { offer ->
@@ -418,8 +417,8 @@ fun composeAlphabets(
                     result.addAll(r)
                     continue
                 }
-                // Same class never syncs. Ordinary/session duplicates are an immediate error
-                // (a later provider cannot redeem them). Clients still pass through to wait for a provider.
+                // Same class never syncs. Ordinary duplicates are an immediate error
+                // (a later service cannot redeem them). Clients still pass through to wait for a service.
                 val classes = both.map { it.pclassKey }.toSet()
                 if (classes.size == 1) {
                     if (hasOrdinary) {
@@ -432,7 +431,7 @@ fun composeAlphabets(
                                 other.loc,
                                 "Multiple occurrences of \"$pclass\" expose unsynced action \"$name\" in the composition; " +
                                     "sync each occurrence with a different-class peer, tag the action `internal`, " +
-                                    "or tag callers `client` with a single `provider` for \"$name\"",
+                                    "or tag callers `client` with a single `service` for \"$name\"",
                             ),
                         )
                     }
@@ -440,7 +439,24 @@ fun composeAlphabets(
                     result.addAll(r)
                     continue
                 }
-                // Ordinary (or session): require matching signatures, then hide.
+                // Ordinary: dynamic procs may not sync with each other.
+                val allDynamic = both.all { !it.isStatic }
+                if (allDynamic) {
+                    val sample = both[0]
+                    val other = both.getOrElse(1) { sample }
+                    errors.add(
+                        TwoLocsCompileError(
+                            sample.loc,
+                            other.loc,
+                            "Action \"$name\" has an illegal sync shape (dynamic-to-dynamic); " +
+                                "dynamic procs may only sync with a static peer (use `service`/`client` for hubs)",
+                        ),
+                    )
+                    result.addAll(l)
+                    result.addAll(r)
+                    continue
+                }
+                // Ordinary: require matching signatures, then hide.
                 val mismatch = findSignatureMismatch(l, r)
                 if (mismatch != null) {
                     errors.add(
@@ -478,13 +494,23 @@ private fun findSignatureMismatch(
     return null
 }
 
-/** JAR-target warning: leftover ordinary/session actions in the external alphabet are unsynced. */
+private fun findSignatureMismatch(offers: List<AlphabetOffer>): Pair<AlphabetOffer, AlphabetOffer>? {
+    if (offers.isEmpty()) return null
+    val ref = offers[0]
+    for (o in offers) {
+        if (!ref.signatureCompatible(o)) return ref to o
+    }
+    return null
+}
+
+/** JAR-target warning: leftover ordinary actions in the external alphabet are unsynced. */
 fun unsyncedOrdinaryWarnings(external: List<AlphabetOffer>): List<CompileWarning> =
     external
         .filter { offer ->
             offer.name != "initially" &&
-                !offer.isProvider &&
-                !offer.isClient
+                !offer.isService &&
+                !offer.isClient &&
+                !offer.isLocal
         }
         .distinctBy { it.channelKey }
         .map { o ->
@@ -496,16 +522,99 @@ fun unsyncedOrdinaryWarnings(external: List<AlphabetOffer>): List<CompileWarning
         }
 
 /**
- * Alphabet integrity for JAR / analyze / check composition roots (not TLA+ compile):
- * - at most one provider per action name (always when this pass runs)
- * - when [requireCompleteSync] is true (top-level JAR `compile` target only):
- *   every external client must have a provider of the same name, except when
- *   every external client offer for that name comes from a composed procfun —
- *   those stay visible on the parent until a provider peer is composed.
+ * Static procs may appear at most once in the top-level composition.
+ */
+fun staticOccurrenceErrors(
+    leafOccurrences: List<LeafOccurrence>,
+    leafOffersByPclass: Map<String, List<AlphabetOffer>>,
+): List<CompileError> {
+    val staticClasses = leafOffersByPclass
+        .filter { (_, offers) -> offers.any { it.isStatic } }
+        .keys
+    val errors = mutableListOf<CompileError>()
+    for ((pclass, occs) in leafOccurrences.groupBy { it.pclassName }) {
+        if (pclass !in staticClasses) continue
+        if (occs.size <= 1) continue
+        val sampleLoc = leafOffersByPclass[pclass]?.firstOrNull()?.loc
+        if (sampleLoc != null) {
+            errors += OneLocCompileError(
+                sampleLoc,
+                "Static proc \"$pclass\" may appear at most once in the composition; found ${occs.size} occurrences",
+            )
+        }
+    }
+    return errors
+}
+
+/**
+ * Action-shape rules for ordinary (non-service/client) multi-class offers that were not
+ * composition-hidden by [composeAlphabets]:
+ * - one static + any number of dynamics (hub)
+ * - exactly two statics
+ * - a single class (local / unsynced — allowed; warned separately)
  *
- * Incomplete sync of `client`, ordinary (default), and `session` actions is allowed on
+ * Names with service/client offers are skipped (compose handles them). Composition-hidden
+ * ordinary pairs are also skipped.
+ */
+fun actionShapeErrors(allOffers: List<AlphabetOffer>): List<CompileError> {
+    val errors = mutableListOf<CompileError>()
+    val byName = allOffers
+        .filter { !it.isLocal && it.name != "initially" }
+        .groupBy { it.name }
+    for ((name, offers) in byName) {
+        if (offers.any { it.isService || it.isClient }) continue
+        // Composition-hidden ordinary pairs were validated by composeAlphabets.
+        val open = offers.filter { !it.compositionHidden }
+        if (open.isEmpty()) continue
+        val classes = open.map { it.pclassKey }.toSet()
+        if (classes.size <= 1) continue // single class: OK (may warn)
+        val staticCount = classes.count { c -> open.any { it.pclassKey == c && it.isStatic } }
+        val dynamicCount = classes.size - staticCount
+        val sample = open.first()
+        val ok = when {
+            staticCount == 1 -> true // hub: 1 static + any dynamics
+            staticCount == 2 && dynamicCount == 0 -> true
+            else -> false
+        }
+        if (!ok) {
+            val shape = when {
+                staticCount == 0 -> "dynamic-to-dynamic"
+                staticCount >= 3 -> "three or more static classes"
+                staticCount >= 2 && dynamicCount > 0 -> "two or more static classes plus a dynamic class"
+                else -> "invalid participant set"
+            }
+            errors += OneLocCompileError(
+                sample.loc,
+                "Action \"$name\" has an illegal sync shape ($shape); " +
+                    "allowed shapes are one static hub with any number of dynamics, " +
+                    "exactly two static classes, or a single class",
+            )
+        }
+        val mismatch = findSignatureMismatch(open)
+        if (mismatch != null) {
+            errors += TwoLocsCompileError(
+                mismatch.first.loc,
+                mismatch.second.loc,
+                "Expected action \"$name\" to have the same signature on every offering class",
+            )
+        }
+    }
+    return errors
+}
+
+/**
+ * Alphabet integrity for JAR / analyze / check composition roots:
+ * - static single-occurrence ([staticOccurrenceErrors])
+ * - ordinary multi-class shape checks ([actionShapeErrors]) for non-hidden leftovers
+ * - at most one service per action name (always when this pass runs)
+ * - when [requireCompleteSync] is true (top-level JAR `compile` target only):
+ *   every external client must have a service of the same name, except when
+ *   every external client offer for that name comes from a composed procfun —
+ *   those stay visible on the parent until a service peer is composed.
+ *
+ * Incomplete sync of `client` and ordinary (default) actions is allowed on
  * intermediate assemblies and on all TLA+ targets; only the compiled top-level JAR
- * process must be fully synced (dangling clients → error; leftover ordinary/session →
+ * process must be fully synced (dangling clients → error; leftover ordinary →
  * warning via [unsyncedOrdinaryWarnings]).
  *
  * Same-class ordinary duplicates are reported eagerly in [composeAlphabets] (JAR path).
@@ -514,25 +623,34 @@ fun alphabetIntegrityErrors(
     alphabet: CompositionAlphabetResult,
     procFunNames: Set<String> = emptySet(),
     requireCompleteSync: Boolean = true,
+    leafOffersByPclass: Map<String, List<AlphabetOffer>> = emptyMap(),
 ): List<CompileError> {
-    val external = alphabet.external
+    val staticErrs = if (leafOffersByPclass.isNotEmpty()) {
+        staticOccurrenceErrors(alphabet.leafOccurrences, leafOffersByPclass)
+    } else {
+        emptyList()
+    }
+    val shapeErrs = actionShapeErrors(alphabet.allOffers)
     val errors = mutableListOf<CompileError>()
+    errors += staticErrs
+    errors += shapeErrs
 
-    val providerCountByName = external.filter { it.isProvider }.groupBy { it.name }
-    for ((name, offers) in providerCountByName) {
-        val providers = offers.distinctBy { it.occurrenceId }
-        if (providers.size >= 2) {
-            val locs = providers.map { it.loc }
+    val external = alphabet.external
+    val serviceCountByName = external.filter { it.isService }.groupBy { it.name }
+    for ((name, offers) in serviceCountByName) {
+        val services = offers.distinctBy { it.occurrenceId }
+        if (services.size >= 2) {
+            val locs = services.map { it.loc }
             errors += if (locs.size >= 2) {
                 TwoLocsCompileError(
                     locs[0],
                     locs[1],
-                    "Action \"$name\" has more than one provider in the composition",
+                    "Action \"$name\" has more than one service in the composition",
                 )
             } else {
                 OneLocCompileError(
                     locs[0],
-                    "Action \"$name\" has more than one provider in the composition",
+                    "Action \"$name\" has more than one service in the composition",
                 )
             }
         }
@@ -540,13 +658,13 @@ fun alphabetIntegrityErrors(
 
     if (!requireCompleteSync) return errors
 
-    val providerNames = providerCountByName.keys
+    val serviceNames = serviceCountByName.keys
     for ((name, clients) in external.filter { it.isClient }.groupBy { it.name }) {
-        if (name !in providerNames) {
+        if (name !in serviceNames) {
             if (clients.all { it.pclassKey in procFunNames }) continue
             errors += OneLocCompileError(
                 clients.first().loc,
-                "Action \"$name\" is tagged `client` but has no `provider` in the composition",
+                "Action \"$name\" is tagged `client` but has no `service` in the composition",
             )
         }
     }

@@ -6,19 +6,16 @@ const val JULAY_FUNLIB = "funlib"
 const val JULAY_OPTIONAL = "optional"
 
 object LibraryRegistry {
-    val julayStdlibNames: Set<String> = setOf("Timer")
+    /** Former proclib modules (Timer / HttpServer) removed; use builtins instead. */
+    val julayStdlibNames: Set<String> = emptySet()
 
     /** `.jul` funlib modules under stdlib/julay/funlib/ (may export multiple funs). */
     val julayFunlibJulModules: Set<String> = setOf("math", "http")
 
-    val kotlinLibraries: List<JulLibrary> = listOf(
-        JulHttpServer,
-    )
+    /** Former Kotlin-native libraries (HttpServer) removed; Go runtime provides ServeHttp. */
+    val kotlinLibraryNames: Set<String> = emptySet()
 
-    val kotlinLibraryNames: Set<String> = kotlinLibraries.map { it.julName }.toSet()
-    private val byJulName: Map<String, JulLibrary> = kotlinLibraries.associateBy { it.julName }
-
-    fun isKotlinLibrary(name: String) = name in byJulName
+    fun isKotlinLibrary(name: String) = name in kotlinLibraryNames
 
     fun isJulayStdlib(name: String) = name in julayStdlibNames
 
@@ -26,7 +23,7 @@ object LibraryRegistry {
 
     fun isJulayModule(module: String) = module == JULAY_MODULE
 
-    /** True for imports like julay.proclib.Timer or julay.proclib.HttpServer. */
+    /** True for imports like julay.proclib.* (legacy path; Timer/HttpServer removed). */
     fun isProclibImport(parts: List<String>): Boolean =
         parts.size == 3 && parts[0] == JULAY_MODULE && parts[1] == JULAY_PROCLIB
 
@@ -43,21 +40,4 @@ object LibraryRegistry {
 
     fun funlibModulePath(name: String): String =
         listOf(JULAY_MODULE, JULAY_FUNLIB, name).joinToString(".")
-
-    fun resolve(module: String, symbol: String): JulLibrary? {
-        if (!isJulayModule(module)) return null
-        return byJulName[symbol]
-    }
-
-    fun resolveQualified(parts: List<String>): JulLibrary? {
-        if (isProclibImport(parts) && isKotlinLibrary(parts[2])) {
-            return byJulName[parts[2]]
-        }
-        // Legacy two-part form is no longer supported for resolution of Kotlin libs.
-        return null
-    }
-
-    fun staticInfoCodegenExpr(julName: String) = byJulName[julName]!!.staticInfoCodegenExpr()
-    fun actionDecls(julName: String) = byJulName[julName]!!.actionDecls
-    fun staticInfo(julName: String) = byJulName[julName]!!.staticInfo()
 }

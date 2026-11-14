@@ -1,5 +1,0 @@
-source: regression/input/syntax-errors/session-ordinary-pair-mix.jul
-expectCompileFailure: true
-expectCompileOutputContains:
-  - 'Procs "A" and "B" share a session protocol but also share ordinary action "y"'
-programs: []

@@ -13,6 +13,7 @@ data class ProcClassDecl(
     val stateVars: List<Variable>,
     val constructors: List<ActionDecl>,
     val transitions: List<ActionDecl>,
+    val isStatic: Boolean = false,
 )
 
 data class ActionDecl(
@@ -32,6 +33,6 @@ data class ActionDecl(
      */
     val fuseOriginPclass: String? = null,
 ) {
-    val isSession: Boolean get() = action.isSession
+    val isTimer: Boolean get() = action.isTimer
     val isReturn: Boolean get() = returnExpr != null
 }

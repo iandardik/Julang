@@ -3,6 +3,7 @@ package julay.compiler
 import julay.program.type.ListType
 import julay.program.type.MapType
 import julay.program.type.ObjClassType
+import julay.program.type.ProcFunRefType
 import julay.program.type.SetType
 import julay.program.type.StringType
 import julay.program.type.IntType
@@ -267,32 +268,60 @@ object FunBuiltinRegistry {
         z3Codegen = { _ -> throw RuntimeException("Function \"delayMillis\" cannot be used in guards") },
     )
 
-    private val exitSessionBuiltin = FunBuiltin(
-        name = "exitSession",
+    private val setTimerBuiltin = FunBuiltin(
+        name = "setTimer",
+        arity = 2,
+        returnType = null,
+        checkArgs = { argTypes ->
+            when {
+                argTypes.size != 2 -> "Expected function \"setTimer\" to take 2 argument(s) but got ${argTypes.size}"
+                argTypes[0] !is StringType ->
+                    "Expected first argument of \"setTimer\" to have a String type but got ${argTypes[0]}"
+                argTypes[1] !is IntType ->
+                    "Expected second argument of \"setTimer\" to have an Int type but got ${argTypes[1]}"
+                else -> null
+            }
+        },
+        kotlinCodegen = { args -> "/* setTimer(${args[0]}, ${args[1]}) — Go runtime only */" },
+        z3Codegen = { _ -> throw RuntimeException("Function \"setTimer\" cannot be used in guards") },
+        // Allowed in constructor after: (arm timers before the run loop starts).
+    )
+
+    private val cancelTimerBuiltin = FunBuiltin(
+        name = "cancelTimer",
         arity = 1,
         returnType = null,
         checkArgs = { argTypes ->
-            if (argTypes.size == 1) null
-            else "Expected function \"exitSession\" to take 1 argument(s) but got ${argTypes.size}"
+            when {
+                argTypes.size != 1 -> "Expected function \"cancelTimer\" to take 1 argument(s) but got ${argTypes.size}"
+                argTypes[0] !is StringType ->
+                    "Expected argument of \"cancelTimer\" to have a String type but got ${argTypes[0]}"
+                else -> null
+            }
         },
-        kotlinCodegen = { args -> "hostProc.exitSession(${args[0]})" },
-        z3Codegen = { _ -> throw RuntimeException("Function \"exitSession\" cannot be used in guards") },
-        sessionPeerClassArg = true,
+        kotlinCodegen = { args -> "/* cancelTimer(${args[0]}) — Go runtime only */" },
+        z3Codegen = { _ -> throw RuntimeException("Function \"cancelTimer\" cannot be used in guards") },
         transitionOnly = true,
     )
 
-    private val killSessionPeerBuiltin = FunBuiltin(
-        name = "killSessionPeer",
-        arity = 1,
+    private val serveHttpBuiltin = FunBuiltin(
+        name = "serveHttp",
+        arity = 2,
         returnType = null,
         checkArgs = { argTypes ->
-            if (argTypes.size == 1) null
-            else "Expected function \"killSessionPeer\" to take 1 argument(s) but got ${argTypes.size}"
+            when {
+                argTypes.size != 2 -> "Expected function \"serveHttp\" to take 2 argument(s) but got ${argTypes.size}"
+                argTypes[0] !is IntType ->
+                    "Expected first argument of \"serveHttp\" to have an Int type but got ${argTypes[0]}"
+                argTypes[1] !is StringType && argTypes[1] !is ProcFunRefType ->
+                    "Expected second argument of \"serveHttp\" to be a procfun name but got ${argTypes[1]}"
+                else -> null
+            }
         },
-        kotlinCodegen = { args -> "hostProc.killSessionPeer(${args[0]})" },
-        z3Codegen = { _ -> throw RuntimeException("Function \"killSessionPeer\" cannot be used in guards") },
-        sessionPeerClassArg = true,
-        transitionOnly = true,
+        kotlinCodegen = { args -> "/* serveHttp(${args[0]}, ${args[1]}) — Go runtime only */" },
+        z3Codegen = { _ -> throw RuntimeException("Function \"serveHttp\" cannot be used in guards") },
+        // Allowed in constructor after: (blocks the starter goroutine on ListenAndServe).
+        ioHavoc = true,
     )
 
     /**
@@ -422,8 +451,9 @@ object FunBuiltinRegistry {
         readlnBuiltin.name to readlnBuiltin,
         delaySecondsBuiltin.name to delaySecondsBuiltin,
         delayMillisBuiltin.name to delayMillisBuiltin,
-        exitSessionBuiltin.name to exitSessionBuiltin,
-        killSessionPeerBuiltin.name to killSessionPeerBuiltin,
+        setTimerBuiltin.name to setTimerBuiltin,
+        cancelTimerBuiltin.name to cancelTimerBuiltin,
+        serveHttpBuiltin.name to serveHttpBuiltin,
         mapBuiltin.name to mapBuiltin,
         listOfBuiltin.name to listOfBuiltin,
         setOfBuiltin.name to setOfBuiltin,

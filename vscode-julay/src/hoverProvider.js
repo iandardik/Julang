@@ -10,15 +10,15 @@ const {
 const KEYWORDS = new Set([
   "if", "else", "let", "when", "in", "all", "exists",
   "import", "export", "obj", "sort", "proc", "api", "calls", "procfun", "compile", "spec", "invariant",
-  "var", "const", "constructor", "transition", "internal", "provider", "client",
-  "session", "guard", "transit", "error", "before", "after", "return", "fun",
+  "var", "const", "constructor", "transition", "service", "client", "internal", "static", "timer",
+  "guard", "transit", "error", "before", "after", "return", "fun",
   "also", "with", "this", "global",
   "true", "false",
 ]);
 
 function looksLikeProcReference(document, position, name) {
   const line = document.lineAt(position.line).text;
-  if (/\b(proc|spec|procfun|api)\s+\w/.test(line) && line.includes(name)) {
+  if (/\b(?:static\s+)?(?:proc|spec|procfun|api)\s+\w/.test(line) && line.includes(name)) {
     return true;
   }
   if (line.includes("||") || /:=/.test(line)) {
@@ -59,7 +59,7 @@ class JulayHoverProvider {
 
     const md = new vscode.MarkdownString(formatExternalMarkdown(scope));
     md.appendMarkdown(
-      `\n\n_Use **Julay: Show External Alphabet** for source-internal and sync-hidden details._`,
+      `\n\n_Use **Julay: Show External Alphabet** for source-internal, service/client meetings, and composition-scoped ordinary syncs._`,
     );
     return new vscode.Hover(md);
   }

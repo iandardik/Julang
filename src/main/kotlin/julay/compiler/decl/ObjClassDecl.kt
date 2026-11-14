@@ -304,12 +304,7 @@ internal class ObjClassResolver(
             }
         }
         resolving.remove(concreteName)
-        val objClassType = ObjClassType(
-            concreteName,
-            fields,
-            { _, _ -> throw RuntimeException("valueToZ3 not available on compiler-resolved ObjClassType $concreteName") },
-            { _, _ -> throw RuntimeException("valueFromZ3 not available on compiler-resolved ObjClassType $concreteName") },
-        )
+        val objClassType = ObjClassType(concreteName, fields)
         resolved[concreteName] = objClassType
         instantiationLocs[concreteName] = loc
         return ObjClassResolveResult.Success(objClassType)

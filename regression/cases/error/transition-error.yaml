@@ -3,7 +3,6 @@ programs:
   - name: P
     expectFailure: true
     expectFailureOutputContains:
-      - "JulayException"
       - "tick boom"
     run:
       timeoutMs: 10000

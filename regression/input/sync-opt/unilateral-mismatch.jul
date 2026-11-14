@@ -2,7 +2,8 @@ import julay.funlib.exitProgram
 import julay.funlib.println
 
 /*
- * Conflicting equalities on n — must not sync (expect hang / timeout failure).
+ * Receiver filters on a sender-owned arg (n > 1 while sender binds n = 1) —
+ * illegal direction under Go channel rules.
  */
 
 proc A {
@@ -10,7 +11,7 @@ proc A {
         transit:
     }
 
-    transition handoff(n : Int) {
+    client transition handoff(n : Int) {
         guard: n = 1
         after:
             println("A")
@@ -18,13 +19,13 @@ proc A {
     }
 }
 
-proc B {
+static proc B {
     constructor initially(args : List<String>) {
         transit:
     }
 
-    transition handoff(n : Int) {
-        guard: n = 2
+    service transition handoff(n : Int) {
+        guard: n > 1
         after:
             println("B")
             exitProgram(0)

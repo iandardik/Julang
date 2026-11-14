@@ -268,7 +268,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                     }
                     it
                 }
-            return ProcClassNode(name, localDecls, sourceLocation(ctx))
+            return ProcClassNode(name, localDecls, sourceLocation(ctx), isStatic = ctx.STATIC() != null)
         }
         val value = visit(ctx.proc_expr())
         return ProcNode(name, value, sourceLocation(ctx))
@@ -484,7 +484,6 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
 
     override fun visitConstructor(ctx: JulayParser.ConstructorContext?): ASTNode {
         val name = ctx!!.ID().text
-        val isSession = ctx.SESSION() != null
         val alsoArgs = if (ctx.ALSO() != null) {
             val allArgs = ctx.args()
             val alsoNode = visit(allArgs[allArgs.size - 1])
@@ -508,24 +507,25 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 }
                 it
             }
-        return ConstructorNode(name, args, body, signatureLocation(ctx, syncArgsCtx), isSession, alsoArgs)
+        return ConstructorNode(name, args, body, signatureLocation(ctx, syncArgsCtx), alsoArgs)
     }
 
     override fun visitTransition(ctx: JulayParser.TransitionContext?): ASTNode {
-        val isProvider = ctx!!.PROVIDER() != null
+        val isInternal = ctx!!.INTERNAL() != null
+        val isTimer = ctx.TIMER() != null
+        val isService = ctx.SERVICE() != null
         val isClient = ctx.CLIENT() != null
-        val isInternal = ctx.INTERNAL() != null
-        val isSession = ctx.SESSION() != null
-        assert(!isProvider || !isInternal, "A transition cannot be both provider and internal")
+        assert(!isInternal || !isTimer, "A transition cannot be both internal and timer")
+        assert(!isService || !isClient, "A transition cannot be both service and client")
+        assert(!isService || !isInternal, "A transition cannot be both service and internal")
         assert(!isClient || !isInternal, "A transition cannot be both client and internal")
-        assert(!isProvider || !isClient, "A transition cannot be both provider and client")
-        assert(!isSession || !isProvider, "A transition cannot be both session and provider")
-        assert(!isSession || !isClient, "A transition cannot be both session and client")
-        assert(!isSession || !isInternal, "A transition cannot be both session and internal")
+        assert(!isService || !isTimer, "A transition cannot be both service and timer")
+        assert(!isClient || !isTimer, "A transition cannot be both client and timer")
         val modifier = when {
-            isProvider -> TSAction.SyncRole.Provider
-            isClient -> TSAction.SyncRole.Client
             isInternal -> TSAction.SyncRole.Internal
+            isTimer -> TSAction.SyncRole.Timer
+            isService -> TSAction.SyncRole.Service
+            isClient -> TSAction.SyncRole.Client
             else -> TSAction.SyncRole.Default
         }
         val name = ctx.ID().text
@@ -552,7 +552,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 }
                 it
             }
-        return TransitionNode(modifier, name, args, body, signatureLocation(ctx, syncArgsCtx), isSession, alsoArgs)
+        return TransitionNode(modifier, name, args, body, signatureLocation(ctx, syncArgsCtx), isTimer, alsoArgs)
     }
 
     override fun visitArgs(ctx: JulayParser.ArgsContext?): ASTNode {

@@ -1,0 +1,19 @@
+/*
+ * Static procs may only have constructor initially.
+ */
+
+static proc Bad {
+    var x : Int
+
+    constructor initially(args : List<String>) {
+        transit: x := 0
+    }
+
+    constructor spawnMore() {
+        transit: x := 1
+    }
+}
+
+proc StaticCtorRule := Bad
+
+compile StaticCtorRule

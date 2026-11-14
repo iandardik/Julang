@@ -562,6 +562,13 @@ private fun forEachActionExpr(pc: ProcClassNode, walkExpr: (ExprNode) -> Unit) {
                 is julay.compiler.decl.TransitUpdate.Let -> walkExpr(update.init)
             }
         }
+        // before:/after: (e.g. serveHttp(port, handler)) and error: messages
+        decl.befores.forEach { stmt -> stmt.callArgs().forEach(walkExpr) }
+        decl.afters.forEach { stmt -> stmt.callArgs().forEach(walkExpr) }
+        decl.errors.forEach { arm ->
+            walkExpr(arm.condExpr())
+            walkExpr(arm.msgExpr())
+        }
     }
     pc.localDecls().filterIsInstance<ConstructorNode>().forEach { walkDecl(it.constructors().single()) }
     pc.localDecls().filterIsInstance<TransitionNode>().forEach { walkDecl(it.transitions().single()) }

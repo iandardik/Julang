@@ -1,0 +1,4 @@
+source: regression/input/type-errors/dynamic-to-dynamic.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "dynamic-to-dynamic"

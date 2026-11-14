@@ -1,4 +1,4 @@
-proc Env {
+static proc Env {
     var ready : Boolean
 
     constructor initially(args : List<String>) {
@@ -10,7 +10,7 @@ proc Env {
         transit: ready := true
     }
 
-    provider transition inc() {
+    transition inc() {
         guard: ready
         transit: ready := false
     }
@@ -23,7 +23,7 @@ proc Counter {
         transit: n := 0
     }
 
-    client transition inc() {
+    transition inc() {
         guard: n < 3
         transit: n := n + 1
     }

@@ -95,26 +95,26 @@ private fun scopeAlphabetJson(
 }
 
 /**
- * Ordinary/session syncs share a private [AlphabetOffer.channelKey] and group together.
- * Provider↔client meetings keep the public action name as channel key and hide only the
+ * Ordinary syncs share a private [AlphabetOffer.channelKey] and group together.
+ * Service↔client meetings keep the public action name as channel key and hide only the
  * clients; grouping those clients alone would wrongly look like they sync with each other.
- * Emit one group per client that includes the matching provider peer.
+ * Emit one group per client that includes the matching service peer.
  */
 internal fun compositionHiddenSyncGroups(
     alphabet: CompositionAlphabetResult,
 ): List<Pair<String, List<AlphabetOffer>>> {
-    val hidden = alphabet.allOffers.filter { it.compositionHidden && !it.sourceInternal }
-    val providerByName = alphabet.allOffers
-        .filter { it.isProvider && !it.sourceInternal }
+    val hidden = alphabet.allOffers.filter { it.compositionHidden && !it.isLocal }
+    val serviceByName = alphabet.allOffers
+        .filter { it.isService && !it.isLocal }
         .groupBy { it.name }
         .mapValues { (_, offers) -> offers.first() }
 
-    val providerClientClients = mutableListOf<AlphabetOffer>()
+    val serviceClientClients = mutableListOf<AlphabetOffer>()
     val ordinaryHidden = mutableListOf<AlphabetOffer>()
     for (offer in hidden) {
-        val provider = providerByName[offer.name]
-        if (offer.isClient && provider != null && offer.channelKey == provider.channelKey) {
-            providerClientClients += offer
+        val service = serviceByName[offer.name]
+        if (offer.isClient && service != null && offer.channelKey == service.channelKey) {
+            serviceClientClients += offer
         } else {
             ordinaryHidden += offer
         }
@@ -125,15 +125,15 @@ internal fun compositionHiddenSyncGroups(
         .entries
         .map { (key, offers) -> key to offers }
 
-    val providerClientGroups = providerClientClients
+    val serviceClientGroups = serviceClientClients
         .sortedWith(compareBy({ it.name }, { it.pclassKey }, { it.occurrenceId }))
         .map { client ->
-            val provider = providerByName.getValue(client.name)
-            // Distinct key so multiple clients of the same provider are separate list entries.
-            "${client.channelKey}@${client.occurrenceId}" to listOf(provider, client)
+            val service = serviceByName.getValue(client.name)
+            // Distinct key so multiple clients of the same service are separate list entries.
+            "${client.channelKey}@${client.occurrenceId}" to listOf(service, client)
         }
 
-    return (ordinaryGroups + providerClientGroups).sortedBy { it.first }
+    return (ordinaryGroups + serviceClientGroups).sortedBy { it.first }
 }
 
 private fun compositionGraphJson(graph: TopLevelSyncGraph): String {
@@ -165,10 +165,11 @@ private fun compositionGraphJson(graph: TopLevelSyncGraph): String {
 }
 
 private fun syncGroupJson(channelKey: String, offers: List<AlphabetOffer>): String {
-    // Provider before clients so hub‖client listings read naturally in the IDE panel.
+    // Service before clients; static hub first otherwise — IDE panel order.
     val sorted = offers.sortedWith(
         compareBy(
-            { if (it.isProvider) 0 else 1 },
+            { if (it.isService) 0 else 1 },
+            { if (it.isStatic) 0 else 1 },
             { it.pclassKey },
             { it.occurrenceId },
             { it.introducingAssembly },
@@ -176,13 +177,19 @@ private fun syncGroupJson(channelKey: String, offers: List<AlphabetOffer>): Stri
     )
     val actionName = sorted.firstOrNull()?.name ?: ""
     val sample = sorted.firstOrNull()
-    val hasProvider = sorted.any { it.isProvider }
+    val hasService = sorted.any { it.isService }
     val hasClient = sorted.any { it.isClient }
+    val staticCount = sorted.map { it.pclassKey }.toSet().count { c ->
+        sorted.any { it.pclassKey == c && it.isStatic }
+    }
+    val classCount = sorted.map { it.pclassKey }.toSet().size
     val roleLabel = when {
         sample == null -> "ordinary"
         sample.isConstructor -> "constructor"
-        sample.isSession -> "session"
-        hasProvider && hasClient -> "provider/client"
+        sample.isTimer -> "timer"
+        hasService && hasClient -> "service/client"
+        staticCount == 1 && classCount >= 2 -> "hub"
+        staticCount == 2 && classCount == 2 -> "static/static"
         else -> modifierLabel(sample)
     }
     return buildString {
@@ -191,7 +198,7 @@ private fun syncGroupJson(channelKey: String, offers: List<AlphabetOffer>): Stri
         append("  \"channelKey\": ").append(jsonString(channelKey)).append(",\n")
         if (sample != null) {
             append("  \"args\": ").append(argsJson(sample)).append(",\n")
-            append("  \"isSession\": ").append(sample.isSession).append(",\n")
+            append("  \"isTimer\": ").append(sample.isTimer).append(",\n")
             append("  \"isConstructor\": ").append(sample.isConstructor).append(",\n")
             append("  \"role\": ").append(jsonString(roleLabel)).append(",\n")
         }
@@ -236,7 +243,7 @@ private fun offerJson(offer: AlphabetOffer): String = buildString {
     append("  \"name\": ").append(jsonString(offer.name)).append(",\n")
     append("  \"args\": ").append(argsJson(offer)).append(",\n")
     append("  \"modifier\": ").append(jsonString(modifierLabel(offer))).append(",\n")
-    append("  \"isSession\": ").append(offer.isSession).append(",\n")
+    append("  \"isTimer\": ").append(offer.isTimer).append(",\n")
     append("  \"isConstructor\": ").append(offer.isConstructor).append(",\n")
     append("  \"pclassKey\": ").append(jsonString(offer.pclassKey)).append(",\n")
     append("  \"occurrenceId\": ").append(jsonString(offer.occurrenceId)).append(",\n")
@@ -255,8 +262,8 @@ private fun argsJson(offer: AlphabetOffer): String {
 }
 
 private fun modifierLabel(offer: AlphabetOffer): String = when {
-    offer.isSession -> "session"
-    offer.modifier == TSAction.SyncRole.Provider -> "provider"
+    offer.isTimer || offer.modifier == TSAction.SyncRole.Timer -> "timer"
+    offer.modifier == TSAction.SyncRole.Service -> "service"
     offer.modifier == TSAction.SyncRole.Client -> "client"
     offer.modifier == TSAction.SyncRole.Internal || offer.sourceInternal -> "internal"
     else -> "ordinary"

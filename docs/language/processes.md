@@ -5,14 +5,14 @@ A **proc** is a named transition system: local state plus constructors and trans
 ## Proc classes
 
 ```jul
-proc Counter {
+static proc Counter {
     var counter : Int
 
     constructor initially(args : List<String>) {
         transit: counter := 0
     }
 
-    provider transition increment() {
+    service transition increment() {
         transit: counter := counter + 1
     }
 }
@@ -21,6 +21,13 @@ proc Counter {
 - `var` — mutable local state
 - `const` — assigned once (typically in a constructor) and then fixed
 - Fields are private to the proc instance
+
+### `static proc` vs `proc`
+
+| Kind | Role |
+|------|------|
+| **`static proc`** | At most one occurrence in a composition. Exactly one constructor, named `initially`. Cannot be spawned by another class’s constructor. Typical **`service` hub** for a public API, or one side of a **two-static** ordinary sync. |
+| **`proc`** (dynamic) | May appear multiple times; may declare additional constructors used for spawning after `initially`. Often a **`client`** of a static service hub; dynamic↔dynamic sync on ordinary actions is illegal. |
 
 You can also name a composed system:
 
@@ -41,7 +48,7 @@ A Julay program is a **sequence of actions**. Procs participate by either:
 | **Constructor** | Create / initialize a proc instance upon an action |
 | **Transition** | Take a step of an existing instance upon an action |
 
-Every **program** begins with the **`initially`** action. Entry procs declare:
+Every **program** begins with the **`initially` action**. Entry procs declare:
 
 ```jul
 constructor initially(args : List<String>) {
@@ -49,7 +56,9 @@ constructor initially(args : List<String>) {
 }
 ```
 
-Compiled JARs pass command-line arguments into `args`. After `initially`, execution continues through user-defined actions. Procs may also declare **additional constructors** for spawning (for example session constructors that create a handler per request)—those run after the program has already started via `initially`.
+Compiled binaries pass command-line arguments into `args`. After `initially`, execution continues through user-defined actions. Dynamic procs may declare **additional constructors** for spawning (for example a handler constructed per request)—those run after the program has already started via `initially`. Static procs may not be spawned that way.
+
+There are **no sessions**: sticky pairwise session affinity and session teardown builtins are gone. Use **`service` / `client`** for hub APIs that stay in the external alphabet, and **ordinary** (untagged) syncs for composition-private peer meetings under `||`. Keep `static proc`, `internal`, and `timer`.
 
 ## Transition anatomy
 
@@ -60,10 +69,12 @@ A **transition** body may include:
 | `guard:` | Boolean condition; must hold (with peers’ constraints) to take the step |
 | `before:` | Calls before state updates (IO allowed; no assignments)—see [Before/after and IO](effects.md) |
 | `transit:` | State updates and optional statement `let`s (may include IO in expressions)—see [Before/after and IO](effects.md) |
-| `error:` | Pre-state checks: at runtime, if a condition holds, throw `JulayException` with the message (no transit / `after:`). In TLA+, each condition is negated and emitted as an enabling assumption (guard). |
+| `error:` | Pre-state checks: at runtime, if a condition holds, throw; no transit / `after:`. In TLA+, each condition is negated and emitted as an enabling assumption (guard). |
 | `after:` | Calls after state updates (IO allowed; no assignments)—see [Before/after and IO](effects.md) |
 
-**Constructors cannot have `guard:` or `before:`.** A constructor body may only use `transit:`, `error:`, and `after:`. Spawning is gated by peers’ transition guards (and session rebind rules), not by a guard on the constructor itself. Put setup IO in `after:` (after state is assigned) or in a following transition. Constructor transit `let` initializers and assignment RHSs must not reference any state variable (including self-updates); use args or earlier lets that do not read state — see [Effects](effects.md).
+Modifiers: `service` (hub; stays external), `client` (syncs only with a service), `internal` (occurrence-local solo step), `timer` (local timer fire; see [Effects](effects.md)), or none (ordinary sync — composition-private when peers meet under `||`).
+
+**Constructors cannot have `guard:` or `before:`.** A constructor body may only use `transit:`, `error:`, and `after:`. Spawning is gated by peers’ transition guards, not by a guard on the constructor itself. Put setup IO in `after:` (after state is assigned) or in a following transition. Constructor transit `let` initializers and assignment RHSs must not reference any state variable (including self-updates); use args or earlier lets that do not read state — see [Effects](effects.md).
 
 Example (from [`regression/input/basic/test1.jul`](../../regression/input/basic/test1.jul)):
 
@@ -85,7 +96,7 @@ Omitted clauses default sensibly (`guard` true when absent on a transition, empt
 Inside a constructor or transition body, a bare name prefers an **action arg** (or transit `let`) when it shares a name with state. Use **`this.x`** to mean the process state variable `x` instead:
 
 ```jul
-provider transition set(counter : Int) {
+transition set(counter : Int) {
     guard: this.counter ~= counter
     transit: this.counter := counter
 }
@@ -101,4 +112,4 @@ At each step a proc offers the actions it can currently take (enabled by guards)
 
 - [Language overview](README.md)
 - [Effects](effects.md)
-- [Inc server example](../examples/inc-server.md) — `Counter` as a provider interface
+- [Inc server example](../examples/inc-server.md) — `Counter` as a static hub

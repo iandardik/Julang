@@ -109,7 +109,7 @@ private fun rewriteReturnToRetVal(trans: TransitionNode, retType: Type): ActionD
             decl.action.name,
             decl.action.args,
             isInternal = decl.modifier == TSAction.SyncRole.Internal,
-            isSession = decl.isSession,
+            isTimer = decl.isTimer,
         ),
         decl.guards,
         decl.transits + retAssign,

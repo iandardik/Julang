@@ -3,7 +3,6 @@ programs:
   - name: P
     expectFailure: true
     expectFailureOutputContains:
-      - "JulayException"
       - "constructor boom"
     run:
       timeoutMs: 10000

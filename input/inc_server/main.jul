@@ -2,18 +2,18 @@ import printer.Printer
 import server.ServerLogic
 import server.incHandler
 
-proc Counter {
+static proc Counter {
     var counter : Int
-    
+
     constructor initially(args : List<String>) {
         transit: counter := 0
     }
 
-    provider transition increment() {
+    service transition increment() {
         transit: counter := counter + 1
     }
 
-    provider transition getCounter(counterVal : Int) {
+    service transition getCounter(counterVal : Int) {
         guard: counterVal = counter
     }
 }

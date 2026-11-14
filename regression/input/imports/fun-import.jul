@@ -17,7 +17,7 @@ proc S {
 
     transition increment(inc : Int) {
         guard:
-            ~print & double(inc) > 0
+            ~print
         transit:
             x := double(inc)
             print := true
@@ -40,7 +40,7 @@ proc S {
     }
 }
 
-proc T {
+static proc T {
     var x : Int
     var done : Boolean
 
@@ -52,7 +52,7 @@ proc T {
 
     transition increment(inc : Int) {
         guard:
-            ~done & inc > 0 & x <= 10
+            ~done & inc = 1 & x <= 10
         transit:
             x := x + inc
             done := true

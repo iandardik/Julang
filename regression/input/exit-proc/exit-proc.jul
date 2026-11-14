@@ -7,7 +7,7 @@ import julay.funlib.println
  * Sync on A: Printer prints "A"; Exiter calls exitProc in before.
  * Survivor then takes internal B and prints "B".
  */
-proc Printer {
+static proc Printer {
     var phase : String
 
     constructor initially(args : List<String>) {

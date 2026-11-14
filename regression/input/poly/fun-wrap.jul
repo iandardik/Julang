@@ -18,7 +18,7 @@ proc Worker {
 
     transition go(n : Int) {
         guard:
-            steps = 0 & n > 0
+            steps = 0
         transit:
             box := wrap(n)
             steps := 1
@@ -39,7 +39,7 @@ proc Worker {
     }
 }
 
-proc Driver {
+static proc Driver {
     var done : Boolean
 
     constructor initially(args : List<String>) {

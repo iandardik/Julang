@@ -122,18 +122,20 @@ class RootNode(
 class ProcClassNode(
     private val name : String,
     private val localDecls : List<ProcClassDeclNode>,
-    private val loc : ProgramLoc
+    private val loc : ProgramLoc,
+    val isStatic: Boolean = false,
 ) : DeclNode(localDecls) {
     override fun programLocation() = loc
     override fun name() = name
     internal fun procClassNodeName() = name
     internal fun localDecls(): List<ProcClassDeclNode> = localDecls
     internal fun withLocalDecls(decls: List<ProcClassDeclNode>): ProcClassNode =
-        ProcClassNode(name, decls, programLocation()).also { it.visibility = this.visibility }
+        ProcClassNode(name, decls, programLocation(), isStatic).also { it.visibility = this.visibility }
     override fun toString(): String {
         val body = localDecls.joinToString("\n") { "$it".prependIndent() }
         val export = if (isExported) "export " else ""
-        return "${export}proc $name {\n$body\n}"
+        val staticStr = if (isStatic) "static " else ""
+        return "${export}${staticStr}proc $name {\n$body\n}"
     }
 }
 
@@ -754,7 +756,6 @@ class ConstructorNode(
     private val args: ArgsNode,
     private val body: List<ActionBodyNode>,
     private val loc: ProgramLoc,
-    private val isSession: Boolean = false,
     private val alsoArgs: ArgsNode? = null,
 ) : ProcClassDeclNode(listOfNotNull(args, alsoArgs) + body) {
     override fun programLocation() = loc
@@ -764,7 +765,7 @@ class ConstructorNode(
         val guards = body.flatMap { it.guards() }
         return listOf(
             ActionDecl(
-                SymbolicAction(name, actionArgs, isSession = isSession),
+                SymbolicAction(name, actionArgs),
                 guards,
                 body.flatMap { it.transits() },
                 TSAction.SyncRole.Default,
@@ -781,12 +782,11 @@ class ConstructorNode(
     internal fun alsoArgs(): ArgsNode? = alsoArgs
     internal fun actionArgs(): List<Variable> = args.actionArgs()
     internal fun withBody(newBody: List<ActionBodyNode>): ConstructorNode =
-        ConstructorNode(name, args, newBody, programLocation(), isSession, alsoArgs)
+        ConstructorNode(name, args, newBody, programLocation(), alsoArgs)
     override fun toString(): String {
-        val sessionStr = if (isSession) "session " else ""
         val alsoStr = alsoArgs?.let { " also $it" } ?: ""
         val bodyStr = body.joinToString("\n") { "$it".prependIndent() }
-        return "${sessionStr}constructor $name($args)$alsoStr {\n$bodyStr\n}"
+        return "constructor $name($args)$alsoStr {\n$bodyStr\n}"
     }
 }
 
@@ -796,7 +796,7 @@ class TransitionNode(
     private val args: ArgsNode,
     private val body: List<ActionBodyNode>,
     private val loc: ProgramLoc,
-    private val isSession: Boolean = false,
+    private val isTimer: Boolean = false,
     private val alsoArgs: ArgsNode? = null,
 ) : ProcClassDeclNode(listOfNotNull(args, alsoArgs) + body) {
     override fun programLocation() = loc
@@ -816,7 +816,7 @@ class TransitionNode(
                     name,
                     actionArgs,
                     isInternal = modifier == TSAction.SyncRole.Internal,
-                    isSession = isSession,
+                    isTimer = isTimer,
                 ),
                 guards,
                 body.flatMap { it.transits() },
@@ -835,15 +835,15 @@ class TransitionNode(
     internal fun alsoArgs(): ArgsNode? = alsoArgs
     internal fun actionArgs(): List<Variable> = args.actionArgs()
     internal fun modifier(): TSAction.SyncRole = modifier
-    internal fun isSessionTransition(): Boolean = isSession
+    internal fun isTimerTransition(): Boolean = isTimer
     internal fun withBody(newBody: List<ActionBodyNode>): TransitionNode =
-        TransitionNode(modifier, name, args, newBody, programLocation(), isSession, alsoArgs)
+        TransitionNode(modifier, name, args, newBody, programLocation(), isTimer, alsoArgs)
     override fun toString(): String {
         val modifierStr = when {
-            isSession -> "session "
-            modifier == TSAction.SyncRole.Provider -> "provider "
-            modifier == TSAction.SyncRole.Client -> "client "
+            isTimer || modifier == TSAction.SyncRole.Timer -> "timer "
             modifier == TSAction.SyncRole.Internal -> "internal "
+            modifier == TSAction.SyncRole.Service -> "service "
+            modifier == TSAction.SyncRole.Client -> "client "
             else -> ""
         }
         val alsoStr = alsoArgs?.let { " also $it" } ?: ""
@@ -1932,6 +1932,12 @@ class IndexExprNode(
 
     override fun toString(): String = "$base[$index]"
 }
+
+/** True for a string literal `""` (empty-concat identity elision). */
+internal fun isEmptyStringLiteral(expr: ExprNode): Boolean =
+    expr is LiteralValueExprNode &&
+        expr.getType() is StringType &&
+        expr.literalText().isEmpty()
 
 class LiteralValueExprNode(
     private val value : String,

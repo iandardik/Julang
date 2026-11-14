@@ -28,12 +28,15 @@ object JulCompiler {
 
         val output = readProcessOutput(proc, timeoutMs, TimeUnit.MILLISECONDS)
 
-        val jars = workspace.listFiles { f ->
-            f.isFile && f.extension == "jar" && f.name != "julayc.jar"
-        }?.associateBy { it.nameWithoutExtension }
-            ?: emptyMap()
+        val binaries = workspace.listFiles { f ->
+            f.isFile &&
+                f.name != "julayc.jar" &&
+                !f.name.endsWith(".jar") &&
+                !f.name.endsWith(".jul") &&
+                f.canExecute()
+        }?.associateBy { it.name } ?: emptyMap()
 
-        return CompileResult(output, jars)
+        return CompileResult(output, binaries)
     }
 
     private fun resolveCompilerJar(projectRoot: File): File {

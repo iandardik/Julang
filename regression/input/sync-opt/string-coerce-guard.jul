@@ -5,7 +5,7 @@ import julay.funlib.println
  * Empty-concat coerce in a guard: msg = n + ""
  */
 
-proc S {
+static proc S {
     var n : Int
     var done : Boolean
 
@@ -15,7 +15,7 @@ proc S {
             done := false
     }
 
-    transition handoff(msg : String) {
+    service transition handoff(msg : String) {
         guard: ~done & (msg = n + "")
         transit:
             done := true
@@ -35,7 +35,7 @@ proc T {
         transit:
     }
 
-    transition handoff(msg : String) {
+    client transition handoff(msg : String) {
         guard: msg = "3"
     }
 }

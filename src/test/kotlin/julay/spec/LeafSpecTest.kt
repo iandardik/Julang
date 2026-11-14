@@ -173,19 +173,19 @@ class LeafSpecTest {
         val cwd = java.io.File(".").absoluteFile
         val tla = java.io.File(cwd, "Env.tla")
         val cfg = java.io.File(cwd, "Env.cfg")
-        val jar = java.io.File(cwd, "Env.jar")
+        val binary = java.io.File(cwd, "Env")
         tla.delete()
         cfg.delete()
-        jar.delete()
+        binary.delete()
         try {
             compileJulFile(file, keepBuild = false)
             assertTrue(tla.exists(), "expected Env.tla")
             assertTrue(cfg.exists(), "expected Env.cfg")
-            assertTrue(!jar.exists(), "leaf spec must not produce a JAR")
+            assertTrue(!binary.exists(), "leaf spec must not produce a Go binary")
         } finally {
             tla.delete()
             cfg.delete()
-            jar.delete()
+            binary.delete()
             dir.toFile().deleteRecursively()
         }
     }

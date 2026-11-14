@@ -2,20 +2,21 @@
 
 **Julay is a verification-aware language for building distributed systems correctly.**
 
-From the same source you can build an executable system and, where you write a `spec`, emit TLA+ for model checking with TLC.
+From the same source you can build an executable system (native Go binary) and, where you write a `spec`, emit TLA+ for model checking with TLC.
 
 ## Execution model
 
 A Julay **program is a sequence of actions**.
 
 - Procs may **construct** upon an action or **transition** upon an action (subject to synchronization with peers; transitions may also use guards—constructors cannot).
-- Every program **begins with the `initially` action**. After that, execution continues through **user-defined** actions—transitions and any further constructors used when spawning.
+- Every program **begins with the `initially` action**. After that, execution continues through **user-defined** actions—transitions and any further constructors used when spawning dynamic procs.
+- Use **`static proc`** for hubs (at most one occurrence; `initially` only) and ordinary **`proc`** for dynamic peers.
 
 ## Mental model
 
 - A **proc** is a transition system with local state (`var` / `const`).
-- Parallel composition (`||`) runs procs together.
-- Peers coordinate by **synchronizing on a shared action** (not shared memory). When they sync, arguments are exchanged **by copy**, never by reference. Parallel composition itself is **occurrence-based** (`A || A` is two occurrences); see [Composition and actions](composition-and-actions.md).
+- Parallel composition (`||`) lists the members of a system and scopes ordinary syncs.
+- Peers coordinate by **synchronizing on a shared action** — `service`/`client` on a public hub channel, or ordinary peers that become composition-private under `||`. When they sync, arguments are exchanged **by copy**, never by reference. Parallel composition itself is **occurrence-based** (`A || A` is two occurrences); see [Composition and actions](composition-and-actions.md).
 
 ```mermaid
 sequenceDiagram
@@ -39,26 +40,25 @@ Two different instances of the **same proc class never synchronize** with each o
 
 Top-level `compile Name, ...` selects what `julayc` emits:
 
-- **Proc** names → runnable JARs (error if the assembly reaches an uninterpreted type)
+- **Proc** names → native binaries (error if the assembly reaches an uninterpreted type)
 - **Spec** names (composition or leaf) → `.tla` / `.cfg` (uninterpreted types and typedefs allowed)
 
 How-to: [Getting started](../getting-started.md). Specs: [Specifications](specifications.md).
 
 ## Chapters
 
-1. [Processes](processes.md) — state, `initially`, constructors vs transitions
-2. [Composition and actions](composition-and-actions.md) — `||`, **apis**, modifiers, synchronization
-3. [Compiler optimizations](compiler-optimizations.md) — sync fast paths (`eq-unify`, …), `procfun-fuse`, `--disable-opt`, and TLA+ `--disable-tla-opt` (`unused-fields`, `unused-vars`, `determined-args`, `from-collection`, `literal-domains`, `unwrap-singletons`, `unused-lets`)
+1. [Processes](processes.md) — state, `initially`, `static proc` vs dynamic, constructors vs transitions
+2. [Composition and actions](composition-and-actions.md) — `||`, **service/client**, ordinary composition-private syncs, **apis**, action shapes
+3. [Compiler optimizations](compiler-optimizations.md) — compile-time direction analysis; TLA+ `--disable-tla-opt`
 4. [Types and expressions](types-and-expressions.md)
 5. [Collections](collections.md) — `List` / `Map` / `Set`, methods, lambdas
 6. [Procfuns](procfun.md) — process-backed blocking calls
 7. [Modules](modules.md) — `import` and search path
-8. [Sessions](sessions.md) — sticky pairwise protocols
-9. [Side effects](effects.md) — library procs vs funlib functions; `before` / `after` / transit IO
-10. [Standard library](standard-library.md) — proclib and funlib (including which have effects)
-11. [Creating libraries](creating-libraries.md) — authoring `.jul` and Kotlin-native libs
-12. [Specifications](specifications.md) — invariants, specs, TLC
-13. [Reference](reference.md) — keywords, operators, builtins
+8. [Side effects](effects.md) — `serveHttp` / timers / funlib; `before` / `after` / transit IO
+9. [Standard library](standard-library.md) — builtins and funlib (including which have effects)
+10. [Creating libraries](creating-libraries.md) — authoring `.jul` libs
+11. [Specifications](specifications.md) — invariants, specs, TLC
+12. [Reference](reference.md) — keywords, operators, builtins
 
 ## Examples
 

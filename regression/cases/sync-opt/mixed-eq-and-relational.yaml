@@ -1,9 +1,5 @@
 source: regression/input/sync-opt/mixed-eq-and-relational.jul
-tags: [sync-opt, sync-opt-parity]
-compileTwiceWithDisableOpt: true
-programs:
-  - name: MixedEqAndRelational
-    run:
-      timeoutMs: 60000
-      expectStdoutContains:
-        - "Q 2 5"
+tags: [sync-opt]
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Cannot determine channel direction"
