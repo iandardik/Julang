@@ -34,7 +34,20 @@ fun goCodegenPass(
     val procClasses = distinctPclasses.flatMap { proc ->
         ast.procClassPass(setOf(proc))
     }
-    val procFunClasses = ast.procFunClassPass()
+    // Only emit procfuns reachable from this compile target (not every procfun in the
+    // loaded module graph — e.g. ShardClient must not pull in ShardNode HTTP handlers).
+    val allProcFunClasses = ast.procFunClassPass()
+    val pclassNodes = ast.declNodes().filterIsInstance<ProcClassNode>().associateBy { it.name() }
+    val procFunNodes = ast.declNodes().filterIsInstance<ProcFunNode>()
+        .associate { it.name() to it.asSyntheticProcClass() }
+    val reachablePfNames = calledProcFunNamesUnder(
+        program,
+        procDecls,
+        procFunNames,
+        pclassNodes,
+        procFunNodes,
+    )
+    val procFunClasses = allProcFunClasses.filter { it.name in reachablePfNames }
     val procClassByName = (procClasses + procFunClasses).associateBy { it.name }
 
     val directionResult = computeChannelDirections(

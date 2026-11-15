@@ -1,0 +1,76 @@
+import julay.funlib.mapOf
+import specs.net.PerfectNet
+import specs.net.NodeSet
+import specs.net.Key
+
+/*
+ * Spec-only shard model (create-indexed). `also (self : NodeSet)` is this node's id.
+ * Maps use String keys/values (typedef Key/NodeSet are nominal and do not unify with Map keys).
+ */
+export spec SpecShard {
+    var store : Map<String, String>
+    var owners : Map<String, String>
+
+    constructor initially(args : List<String>) {
+        transit:
+            store := mapOf()
+            owners := mapOf()
+    }
+
+    transition putLocal(k : String, v : String) also (self : NodeSet) {
+        guard: k ~in owners
+        transit:
+            store[k] := v
+            owners[k] := self
+    }
+
+    transition putUpdate(k : String, v : String) also (self : NodeSet) {
+        guard: k in owners & owners[k] = self
+        transit:
+            store[k] := v
+    }
+
+    transition applyClaim(k : String, owner : NodeSet) {
+        transit:
+            owners[k] := owner
+    }
+
+    transition getLocal(k : String, v : String) also (self : NodeSet) {
+        guard:
+            & k in store
+            & k in owners
+            & owners[k] = self
+            & v = store[k]
+    }
+
+    transition moveOne(k : String, newOwner : NodeSet) also (self : NodeSet) {
+        guard:
+            & k in store
+            & owners[k] = self
+            & newOwner ~= self
+        transit:
+            store := store.keys.filter(x -> x ~= k).associateWith(x -> store[x])
+            owners[k] := newOwner
+    }
+}
+
+invariant AtMostOneStore := forall k : Key, forall n1 : NodeSet, forall n2 : NodeSet,
+    (k in SpecShard[n1].store & k in SpecShard[n2].store) => n1 = n2
+
+invariant OwnerHasValue := forall n : NodeSet, forall k : Key,
+    (k in SpecShard[n].owners & SpecShard[n].owners[k] = n) => k in SpecShard[n].store
+
+invariant OwnersAgree := forall n1 : NodeSet, forall n2 : NodeSet, forall k : Key,
+    (k in SpecShard[n1].owners & k in SpecShard[n2].owners) =>
+        SpecShard[n1].owners[k] = SpecShard[n2].owners[k]
+
+spec ShardIndexed := SpecShard[n : NodeSet] {
+    NodeSet := { "n1", "n2", "n3" }
+    Key := { "a", "b", "c", "d", "e", "f", "g", "h" }
+}
+
+spec ShardSys := with (n : NodeSet) {
+    ShardIndexed[n] || PerfectNet[n]
+}
+
+export spec ShardSpec := ShardSys |= (AtMostOneStore & OwnerHasValue & OwnersAgree)

@@ -1,0 +1,22 @@
+/*
+ * Perfect network (verification-only): claim delivery is an immediate rendezvous
+ * with SpecShard.applyClaim — no message bags, drops, or reorder.
+ */
+export type NodeSet := String
+export type Key := String
+
+export spec PerfectNet[n : NodeSet] {
+    NodeSet := { "n1", "n2", "n3" }
+    Key := { "a", "b", "c", "d", "e", "f", "g", "h" }
+
+    var lastClaimKey : Key := "a"
+    var lastClaimOwner : NodeSet := "n1"
+
+    constructor initially(args : List<String>) {}
+
+    transition applyClaim(k : Key, owner : NodeSet) {
+        transit:
+            lastClaimKey := k
+            lastClaimOwner := owner
+    }
+}

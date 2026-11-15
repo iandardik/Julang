@@ -40,20 +40,21 @@ func (r HttpServerResponse) Key() string {
 }
 
 // HttpClientRequest matches Julay HttpClientRequest (url, method, body).
+// Field is `Url` (not `URL`) so Go codegen's first-letter capitalization of `url` matches.
 type HttpClientRequest struct {
-	URL    string
+	Url    string
 	Method string
 	Body   string
 }
 
 func (r HttpClientRequest) ToString() string {
-	return fmt.Sprintf("HttpClientRequest(url=%s, method=%s, body=%s)", r.URL, r.Method, r.Body)
+	return fmt.Sprintf("HttpClientRequest(url=%s, method=%s, body=%s)", r.Url, r.Method, r.Body)
 }
 
 func (r HttpClientRequest) String() string { return r.ToString() }
 
 func (r HttpClientRequest) Key() string {
-	return "HttpClientRequest|" + KeyOf(r.URL) + "|" + KeyOf(r.Method) + "|" + KeyOf(r.Body)
+	return "HttpClientRequest|" + KeyOf(r.Url) + "|" + KeyOf(r.Method) + "|" + KeyOf(r.Body)
 }
 
 // HttpClientResponse matches Julay HttpClientResponse (body, code).
@@ -114,7 +115,7 @@ func DoHttpRequest(request HttpClientRequest) HttpClientResponse {
 	default:
 		bodyReader = strings.NewReader(request.Body)
 	}
-	req, err := http.NewRequest(method, request.URL, bodyReader)
+	req, err := http.NewRequest(method, request.Url, bodyReader)
 	if err != nil {
 		return HttpClientResponse{Body: "", Code: 0}
 	}

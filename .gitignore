@@ -18,4 +18,8 @@ states
 *.log
 profile-out/
 tools/async-profiler/
+tools/pgo/
 *-jul-build/
+input/sharded_kv/node/ShardNode
+input/sharded_kv/client/ShardClient
+input/sharded_kv/bench-out/

@@ -1,0 +1,139 @@
+import julay.funlib.length
+import julay.funlib.parseInt
+import julay.funlib.listOf
+import julay.funlib.setOf
+import julay.funlib.mapOf
+import julay.funlib.splice
+import julay.funlib.split
+import node.lib.Node
+import node.lib.CfgPair
+import node.lib.parseCfg
+
+export fun reshardMoveCount(store : Map<String, String>, excludeKey : String) : Int =
+    length(store.keys.filter(x -> x ~= excludeKey).toList()) / 4
+
+export fun reshardBatch(store : Map<String, String>, excludeKey : String) : String =
+    let (candidates : List<String> := store.keys.filter(x -> x ~= excludeKey).toList())
+    let (limit : Int := length(candidates) / 4)
+    let (taken : List<String> := splice(candidates, 1, limit)) {
+        taken.fold("", (acc, key) ->
+            if (acc = "") {
+                key + "=" + store[key]
+            } else {
+                acc + ";" + key + "=" + store[key]
+            })
+    }
+
+/*
+ * Per-process KV shard: local store + ownership directory.
+ * Handlers sync via service/client; peer RPCs are done from handlers over HTTP.
+ *
+ * Action arg names are unique across actions that share a procfun so Go emit
+ * does not redeclare the same := binder in one function.
+ */
+export static proc Store {
+    const me : Node
+    const cluster : List<Node>
+    var store : Map<String, String>
+    var owners : Map<String, String>
+
+    constructor initially(args : List<String>) {
+        transit:
+            let id : Int := parseInt(args[2])
+            let cfg : CfgPair := parseCfg(args[1], id)
+            me := cfg.me
+            cluster := cfg.cluster
+            store := mapOf()
+            owners := mapOf()
+        error:
+            (length(args) ~= 2) -> "usage: ShardNode <config_file> <node_id>"
+    }
+
+    service transition getMe(url : String) {
+        guard: url = me.url
+    }
+
+    service transition getClusterSize(n : Int) {
+        guard: n = length(cluster)
+    }
+
+    /* Client binds i; hub replies with url/id. */
+    service transition peerAt(i : Int, url : String, id : Int) {
+        guard:
+            & url = cluster[i].url
+            & id = cluster[i].id
+    }
+
+    /* Client binds ownKey; hub replies with owner ("" if unowned). */
+    service transition ownerOf(ownKey : String, owner : String) {
+        guard: owner = if (ownKey in owners) { owners[ownKey] } else { "" }
+    }
+
+    /* Client binds getKey; hub replies with getVal. */
+    service transition getValue(getKey : String, getVal : String) {
+        guard: getVal = store[getKey]
+    }
+
+    service transition keyCount(n : Int) {
+        guard: n = store.length
+    }
+
+    /* Client binds putKey and putVal. */
+    service transition putLocal(putKey : String, putVal : String) {
+        transit:
+            store[putKey] := putVal
+            owners[putKey] := me.url
+    }
+
+    /* Client binds claimKey and claimOwner. */
+    service transition applyClaim(claimKey : String, claimOwner : String) {
+        transit:
+            owners[claimKey] := claimOwner
+    }
+
+    /*
+     * Client binds excludeKey + newOwner; hub replies with batch + nMoved.
+     * batch format: k1=v1;k2=v2;...
+     * Drop moved keys from store; point local owners at newOwner (claim broadcast skips self).
+     */
+    service transition exportReshard(
+        excludeKey : String,
+        newOwner : String,
+        batch : String,
+        nMoved : Int
+    ) {
+        guard:
+            & nMoved = reshardMoveCount(store, excludeKey)
+            & batch = reshardBatch(store, excludeKey)
+        transit:
+            /* Remove exactly the keys named in `batch` (same value as the guard).
+             * Do not re-sample store.keys — map iteration order is not stable across calls. */
+            let takenList : List<String> := if (batch = "") {
+                listOf()
+            } else {
+                split(batch, ";").map(entry -> split(entry, "=")[1])
+            }
+            let takenSet : Set<String> := takenList.toSet()
+            let ownerKeys : Set<String> := owners.keys.filter(x -> x ~in takenSet) + takenSet
+            store := store.keys.filter(x -> x ~in takenSet).associateWith(x -> store[x])
+            owners := ownerKeys.associateWith(k ->
+                if (k in takenSet) { newOwner } else { owners[k] })
+    }
+
+    /* Client binds moveKey, moveVal, moveOwner. */
+    service transition putFromMove(moveKey : String, moveVal : String, moveOwner : String) {
+        transit:
+            store[moveKey] := moveVal
+            owners[moveKey] := moveOwner
+    }
+
+    service transition ownersBlob(blob : String) {
+        guard:
+            blob = owners.keys.toList().fold("", (acc, key) ->
+                if (acc = "") {
+                    key + "->" + owners[key]
+                } else {
+                    acc + "|" + key + "->" + owners[key]
+                })
+    }
+}

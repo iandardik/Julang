@@ -1,0 +1,4 @@
+import node.store.Store
+import node.rpc_in.RpcIn
+
+export proc ShardNode := Store || RpcIn

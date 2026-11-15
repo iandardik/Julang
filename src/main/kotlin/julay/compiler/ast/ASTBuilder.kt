@@ -23,6 +23,31 @@ fun oneChoice(vararg choices : ParserRuleContext?) : ParserRuleContext {
 private fun normalizeGuarantee(expr: ExprNode): ExprNode? =
     if (expr is LiteralValueExprNode && expr.isTrueLiteral()) null else expr
 
+/**
+ * Lexer leaves escape sequences as two characters (`\` + `n`); turn them into the
+ * real characters so Go/Kotlin string emit can re-escape correctly.
+ */
+internal fun unescapeJulayStringContent(raw: String): String =
+    buildString(raw.length) {
+        var i = 0
+        while (i < raw.length) {
+            val c = raw[i]
+            if (c == '\\' && i + 1 < raw.length) {
+                when (raw[i + 1]) {
+                    'n' -> { append('\n'); i += 2 }
+                    'r' -> { append('\r'); i += 2 }
+                    't' -> { append('\t'); i += 2 }
+                    '\\' -> { append('\\'); i += 2 }
+                    '"' -> { append('"'); i += 2 }
+                    else -> { append(c); i += 1 }
+                }
+            } else {
+                append(c)
+                i += 1
+            }
+        }
+    }
+
 private fun parseTypeExpr(ctx: JulayParser.TypeExprContext): TypeExpr {
     if (ctx.PROCFUN_ARROW() != null) {
         val domainCtx = ctx.typeDomain()
@@ -910,7 +935,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             ctx.REAL() != null -> WhenLiteral.RealLit(ctx.REAL().text)
             ctx.STRING() != null -> {
                 val rawStr = ctx.STRING().text
-                WhenLiteral.StringLit(rawStr.substring(1, rawStr.length - 1))
+                WhenLiteral.StringLit(unescapeJulayStringContent(rawStr.substring(1, rawStr.length - 1)))
             }
             ctx.TRUE() != null -> WhenLiteral.BoolLit(ctx.TRUE().text)
             ctx.FALSE() != null -> WhenLiteral.BoolLit(ctx.FALSE().text)
@@ -971,7 +996,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             LiteralValueExprNode(ctx.FALSE().text, boolType, sourceLocation(ctx))
         } else if (ctx.STRING() != null) {
             val rawStr = ctx.STRING().text
-            val unquotedStr = rawStr.substring(1,rawStr.length-1)
+            val unquotedStr = unescapeJulayStringContent(rawStr.substring(1, rawStr.length - 1))
             LiteralValueExprNode(unquotedStr, stringType, sourceLocation(ctx))
         } else {
             throw RuntimeException("Invalid visitLiteral: invalid expression found: ${ctx.text}")

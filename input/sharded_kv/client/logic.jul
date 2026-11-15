@@ -1,0 +1,96 @@
+import julay.funlib.httpRequest
+import julay.funlib.length
+import julay.funlib.split
+import julay.funlib.startsWith
+import julay.funlib.exitProgram
+import julay.funlib.println
+
+/*
+ * ShardClient CLI:
+ *   <nodeUrl> put <key> <value>
+ *   <nodeUrl> get <key>
+ *   <nodeUrl> owners
+ *
+ * On 303 OWNER <url>, retries once against that URL.
+ */
+proc ShardClientLogic {
+    const command : String
+    const key : String
+    const value : String
+    const path : String
+    const reqBody : String
+    var step : String
+    var targetUrl : String
+    var respBody : String
+    var respCode : Int
+    var retried : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            targetUrl := args[1]
+            command := args[2]
+            key := if (length(args) > 2) { args[3] } else { "" }
+            value := if (length(args) > 3) { args[4] } else { "" }
+            path := when (args[2]) {
+                "put" -> "/kv/put"
+                "get" -> "/kv/get"
+                "owners" -> "/kv/owners"
+                else -> "/kv/owners"
+            }
+            reqBody := when (args[2]) {
+                "put" -> "k=" + args[3] + "|v=" + args[4]
+                "get" -> "k=" + args[3]
+                else -> ""
+            }
+            respBody := ""
+            respCode := 0
+            retried := false
+            step := "send"
+        error:
+            (length(args) < 2) -> "usage: ShardClient <nodeUrl> put|get|owners ..."
+            (args[2] = "put" & length(args) < 4) -> "usage: ShardClient <nodeUrl> put <key> <value>"
+            (args[2] = "get" & length(args) < 3) -> "usage: ShardClient <nodeUrl> get <key>"
+    }
+
+    internal transition doRequest() {
+        guard: step = "send"
+        transit:
+            let resp : HttpClientResponse := httpRequest(HttpClientRequest {
+                url := targetUrl + path,
+                method := "POST",
+                body := reqBody
+            })
+            respBody := resp.body
+            respCode := resp.code
+            step := "print"
+    }
+
+    internal transition printResp() {
+        guard: step = "print"
+        transit: step := "afterPrint"
+        after:
+            println("" + respCode + " " + respBody)
+    }
+
+    internal transition retryOwner() {
+        guard:
+            & step = "afterPrint"
+            & ~retried
+            & respCode = 303
+            & startsWith(respBody, "OWNER ")
+        transit:
+            targetUrl := split(respBody, " ")[2]
+            retried := true
+            step := "send"
+    }
+
+    internal transition doneOk() {
+        guard:
+            & step = "afterPrint"
+            & (respCode = 200 | respCode = 404 | retried | ~(startsWith(respBody, "OWNER ")))
+        after:
+            exitProgram(0)
+    }
+}
+
+export proc ShardClient := ShardClientLogic
