@@ -90,7 +90,7 @@ fun compileJulFile(
         .associateBy { it.name() }
     val procFuns = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<ProcFunNode>() }
-        .associate { it.name() to it.asSyntheticProcClass() }
+        .associate { it.stableName() to it.asSyntheticProcClass() }
 
     for (specDecl in specTargets) {
         val specNode = compositionSpecs[specDecl.name]

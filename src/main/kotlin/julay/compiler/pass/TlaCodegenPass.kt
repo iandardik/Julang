@@ -79,7 +79,7 @@ fun tlaCodegenPass(
         .associateBy { it.name() } + leafSpecNodes.mapValues { it.value.asProcClass() }
     val procFunNodes = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<ProcFunNode>() }
-        .associateBy { it.name() }
+        .associateBy { it.stableName() }
     val procAliases = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<ProcNode>() }
         .associateBy { it.name() }

@@ -1,0 +1,49 @@
+import julay.funlib.httpRequest
+import julay.funlib.parseInt
+import node.lib.fieldValue
+
+/*
+ * Outbound peer RPCs for ShardNode. Thin wrappers over httpRequest —
+ * no worker pool (unlike Raft RpcOut); handlers call these sequentially.
+ */
+export api RpcOut {
+    proc: RpcOutIdle
+    calls: keyCount, claim, moveBatch
+}
+
+/* Resident placeholder so RpcOut can be composed; work lives in calls. */
+static proc RpcOutIdle {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+}
+
+procfun keyCount(peerUrl : String) : Int {
+    internal transition go() {
+        return: parseInt(fieldValue(httpRequest(HttpClientRequest {
+            url := peerUrl + "/rpc/keyCount",
+            method := "POST",
+            body := ""
+        }).body))
+    }
+}
+
+procfun claim(peerUrl : String, key : String, owner : String) : Int {
+    internal transition go() {
+        return: httpRequest(HttpClientRequest {
+            url := peerUrl + "/rpc/claim",
+            method := "POST",
+            body := "k=" + key + "|owner=" + owner
+        }).code
+    }
+}
+
+procfun moveBatch(peerUrl : String, ownerUrl : String, batch : String) : Int {
+    internal transition go() {
+        return: httpRequest(HttpClientRequest {
+            url := peerUrl + "/rpc/moveBatch",
+            method := "POST",
+            body := ownerUrl + "|" + batch
+        }).code
+    }
+}

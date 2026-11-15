@@ -128,7 +128,8 @@ private fun SymbolValueExprNode.symbolToGo(ctx: GoEmitCtx): String {
     }
     try {
         if (getType() is ProcFunRefType) {
-            return "\"${symbol.escapeGoStringLiteral()}\""
+            val id = resolvedProcFunRefOrNull()?.stableName() ?: symbol
+            return "\"${id.escapeGoStringLiteral()}\""
         }
     } catch (_: RuntimeException) {
     }
@@ -433,7 +434,7 @@ private fun FunCallExprNode.funCallToGo(ctx: GoEmitCtx): String {
     resolvedProcFunOrNull()?.let { pf ->
         val argStrs = callArgs().map { it.toGoString(ctx) }
         val argsJoined = argStrs.joinToString(", ")
-        return "run_${pf.procFunName()}($argsJoined)"
+        return "run_${pf.stableName()}($argsJoined)"
     }
     resolvedBuiltinOrNull()?.let { builtin ->
         val argStrs = callArgs().map { it.toGoString(ctx) }
@@ -454,7 +455,7 @@ private fun FunCallExprNode.funCallToGo(ctx: GoEmitCtx): String {
 private fun MethodCallExprNode.methodCallToGo(ctx: GoEmitCtx): String {
     resolvedProcFunOrNull()?.let { pf ->
         val argStrs = args.map { it.toGoString(ctx) }
-        return "run_${pf.procFunName()}(${argStrs.joinToString(", ")})"
+        return "run_${pf.stableName()}(${argStrs.joinToString(", ")})"
     }
     val base = baseExpr.toGoString(ctx)
     when (methodName) {
@@ -552,17 +553,20 @@ fun goBuiltinCall(
     }
     "cancelTimer" -> "${ctx.procRecv}.timers.CancelTimer(${argStrs[0]})"
     "serveHttp" -> {
-        // serveHttp(port, handlerName) — handler is a procfun name string
-        val handler = if (argExprs.size >= 2) {
+        // serveHttp(port, handler) — bind run_<stableId> at compile time
+        val handlerFn = if (argExprs.size >= 2) {
             val a = argExprs[1]
             when (a) {
-                is SymbolValueExprNode -> a.symbol
-                is LiteralValueExprNode -> a.literalText()
-                else -> null
+                is SymbolValueExprNode -> {
+                    val id = a.resolvedProcFunRefOrNull()?.stableName() ?: a.symbol
+                    "run_$id"
+                }
+                is LiteralValueExprNode -> "run_${a.literalText()}"
+                else -> "run_${argStrs.getOrNull(1)?.trim('"') ?: "handler"}"
             }
-        } else null
-        val handlerFn = handler?.let { "run_$it" }
-            ?: "run_${argStrs.getOrNull(1)?.trim('"') ?: "handler"}"
+        } else {
+            "run_${argStrs.getOrNull(1)?.trim('"') ?: "handler"}"
+        }
         "julay.ServeHttp(${argStrs[0]}, $handlerFn)"
     }
     "map" -> throw RuntimeException("map HOF requires MethodCall / named-fun path in Go codegen")

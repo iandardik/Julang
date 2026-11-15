@@ -1,7 +1,7 @@
 package julay.compiler.analysis
 
 import julay.compiler.ast.RootNode
-import julay.compiler.collectProcFunNames
+import julay.compiler.collectProcFunStableNames
 import julay.compiler.decl.ProcDecl
 import julay.compiler.decl.ProcDeclType
 import julay.compiler.pass.AlphabetOffer
@@ -21,7 +21,7 @@ fun buildAlphabetJsonDocument(
     librariesInUse: Set<String>,
     procDecls: List<ProcDecl>,
 ): String {
-    val procFunNames = collectProcFunNames(ast)
+    val procFunNames = collectProcFunStableNames(ast)
     val scopesJson = scope.rootNames.mapIndexed { i, rootName ->
         val leaves = scope.leafSets.getOrElse(i) { scope.leafComponents }
         val pd = procDecls.firstOrNull { it.name == rootName }

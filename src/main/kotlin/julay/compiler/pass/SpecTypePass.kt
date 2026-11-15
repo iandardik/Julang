@@ -135,7 +135,7 @@ private fun typePassSpec(
         }
 
     fun checkLeaves(leaves: List<SpecLeaf>, role: String) {
-        val procFunNames = collectProcFunNames(unit.root)
+        val procFunNames = collectProcFunStableNames(unit.root)
         leaves.forEach { leaf ->
             val known = leaf.name in pclassNodes ||
                 leaf.name in leafSpecNodes ||

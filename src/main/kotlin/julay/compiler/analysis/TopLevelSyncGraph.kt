@@ -154,7 +154,7 @@ fun computeTopLevelSyncGraph(
     // Includes ~> handler refs and nested calls inside registered handlers.
     val pclasses = ast?.declNodes()?.filterIsInstance<ProcClassNode>()?.associateBy { it.name() }.orEmpty()
     val procFunClasses = ast?.declNodes()?.filterIsInstance<ProcFunNode>()
-        ?.associate { it.name() to it.asSyntheticProcClass() }
+        ?.associate { it.stableName() to it.asSyntheticProcClass() }
         .orEmpty()
     val extraProcFunNodes = linkedSetOf<String>()
     val callerToCallees = mutableMapOf<String, MutableSet<String>>()

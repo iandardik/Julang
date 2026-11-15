@@ -1,0 +1,5 @@
+source: regression/input/procfun-scope/dual-api-owner.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "listed in more than one api's calls"
+  - "helper"

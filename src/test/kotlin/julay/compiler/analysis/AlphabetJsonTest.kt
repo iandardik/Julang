@@ -379,7 +379,7 @@ class AlphabetJsonTest {
             allPClassNames = checked.unit.allPClassNames,
             allProcAliasNames = checked.unit.allProcNames,
             librariesInUse = checked.librariesInUse,
-            procFunNames = julay.compiler.collectProcFunNames(checked.ast as RootNode),
+            procFunNames = julay.compiler.collectProcFunStableNames(checked.ast as RootNode),
         )
         assertNotNull(scope)
         val json = buildAlphabetJsonDocument(
@@ -437,7 +437,7 @@ class AlphabetJsonTest {
             allPClassNames = checked.unit.allPClassNames,
             allProcAliasNames = checked.unit.allProcNames,
             librariesInUse = checked.librariesInUse,
-            procFunNames = julay.compiler.collectProcFunNames(checked.ast as RootNode),
+            procFunNames = julay.compiler.collectProcFunStableNames(checked.ast as RootNode),
         )
         assertNotNull(scope)
         val json = buildAlphabetJsonDocument(
@@ -451,14 +451,14 @@ class AlphabetJsonTest {
         assertTrue(graphIdx >= 0 && externalIdx > graphIdx, json)
         val graphBlock = json.substring(graphIdx, externalIdx)
         assertTrue(
-            graphBlock.contains("\"nodes\": [\"RpcReqHandler\", \"clientAppendRPC\"]"),
-            "leaf diagram should be caller then callee:\n$graphBlock",
+            graphBlock.contains("\"nodes\": [\"RpcReqHandler\", \"main_clientAppendRPC\"]"),
+            "leaf diagram should be caller then callee (stable procfun id):\n$graphBlock",
         )
         assertTrue(
             graphBlock.contains("\"a\": \"RpcReqHandler\"") &&
-                graphBlock.contains("\"b\": \"clientAppendRPC\"") &&
+                graphBlock.contains("\"b\": \"main_clientAppendRPC\"") &&
                 graphBlock.contains("\"actions\": []"),
-            "expected directed call edge RpcReqHandler→clientAppendRPC:\n$graphBlock",
+            "expected directed call edge RpcReqHandler→main_clientAppendRPC:\n$graphBlock",
         )
     }
 
@@ -501,7 +501,7 @@ class AlphabetJsonTest {
             allPClassNames = checked.unit.allPClassNames,
             allProcAliasNames = checked.unit.allProcNames,
             librariesInUse = checked.librariesInUse,
-            procFunNames = julay.compiler.collectProcFunNames(checked.ast as RootNode),
+            procFunNames = julay.compiler.collectProcFunStableNames(checked.ast as RootNode),
         )
         assertNotNull(scope)
         val json = buildAlphabetJsonDocument(
@@ -515,12 +515,12 @@ class AlphabetJsonTest {
         assertTrue(graphIdx >= 0 && externalIdx > graphIdx, json)
         val graphBlock = json.substring(graphIdx, externalIdx)
         assertTrue(graphBlock.contains("\"Protocol\""), graphBlock)
-        assertTrue(graphBlock.contains("\"startTimeout\""), graphBlock)
+        assertTrue(graphBlock.contains("\"Timeout_startTimeout\""), graphBlock)
         assertTrue(
             graphBlock.contains("\"a\": \"Protocol\"") &&
-                graphBlock.contains("\"b\": \"startTimeout\"") &&
+                graphBlock.contains("\"b\": \"Timeout_startTimeout\"") &&
                 graphBlock.contains("\"actions\": []"),
-            "expected directed api-qualified call edge Protocol→startTimeout:\n$graphBlock",
+            "expected directed api-qualified call edge Protocol→Timeout_startTimeout:\n$graphBlock",
         )
     }
 
@@ -564,7 +564,7 @@ class AlphabetJsonTest {
             allPClassNames = checked.unit.allPClassNames,
             allProcAliasNames = checked.unit.allProcNames,
             librariesInUse = checked.librariesInUse,
-            procFunNames = julay.compiler.collectProcFunNames(checked.ast as RootNode),
+            procFunNames = julay.compiler.collectProcFunStableNames(checked.ast as RootNode),
         )
         assertNotNull(scope, "RpcIn scope must resolve after ordinary/static sync rewrite")
         val json = buildAlphabetJsonDocument(
@@ -623,7 +623,7 @@ class AlphabetJsonTest {
             allPClassNames = checked.unit.allPClassNames,
             allProcAliasNames = checked.unit.allProcNames,
             librariesInUse = checked.librariesInUse,
-            procFunNames = julay.compiler.collectProcFunNames(checked.ast as RootNode),
+            procFunNames = julay.compiler.collectProcFunStableNames(checked.ast as RootNode),
         )
         assertNotNull(scope)
         val json = buildAlphabetJsonDocument(
@@ -665,13 +665,14 @@ class AlphabetJsonTest {
         )
         val checked = prepareCheckedCompilation(file)
         assertNotNull(checked)
+        val stable = "main_countUp"
         val scope = resolveAnalyzeScope(
-            scopeNames = listOf("countUp"),
+            scopeNames = listOf(stable),
             procDecls = checked.procDecls,
             allPClassNames = checked.unit.allPClassNames,
             allProcAliasNames = checked.unit.allProcNames,
             librariesInUse = checked.librariesInUse,
-            procFunNames = julay.compiler.collectProcFunNames(checked.ast as RootNode),
+            procFunNames = julay.compiler.collectProcFunStableNames(checked.ast as RootNode),
         )
         assertNotNull(scope)
         val json = buildAlphabetJsonDocument(
@@ -687,8 +688,8 @@ class AlphabetJsonTest {
             json.contains(Regex("""\"name\": \"done\"[\s\S]*?\"modifier\": \"ordinary\"""")),
             "bare return done() must remain ordinary:\n$json",
         )
-        assertTrue(!json.contains("\"name\": \"countUp_call\""), json)
-        assertTrue(!json.contains("\"name\": \"countUp_ret\""), json)
+        assertTrue(!json.contains("\"name\": \"${stable}_call\""), json)
+        assertTrue(!json.contains("\"name\": \"${stable}_ret\""), json)
     }
 
     @Test

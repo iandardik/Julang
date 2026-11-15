@@ -145,7 +145,8 @@ fun callableProcFuns(
             homePfs[call]?.let { viaApi.putIfAbsent(call, it) }
         }
     }
-    return local + imported + viaApi
+    // Local bare names win over api-imported same bare names (RpcIn.claim vs RpcOut.claim).
+    return viaApi + imported + local
 }
 
 /** Defining module for a local or imported api short name in [module]'s scope. */

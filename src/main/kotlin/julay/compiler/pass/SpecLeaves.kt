@@ -322,7 +322,10 @@ fun collectApiCallsInComposition(
         when {
             leaf.name in apiAliases -> {
                 val api = apiAliases.getValue(leaf.name)
-                calls += api.apiCallNames()
+                // Stable ids for api-owned procfuns (`Api_bare`).
+                calls += api.apiCallNames().map {
+                    julay.compiler.sanitizeProcFunStableIdent("${api.apiName()}_$it")
+                }
                 flattenSpecLeaves(api.apiProcExpr(), leaf.name).forEach { walk(it) }
             }
             leaf.name in procAliases -> {
@@ -606,11 +609,18 @@ internal fun collectApiQualifiedProcFunCallsInProc(pc: ProcClassNode): List<Meth
  * Bare procfun names used as values (e.g. `handler = echoHandler` on a `~>` arg),
  * not call sites. Used to fold HttpServer-registered handlers into the alphabet.
  */
+/**
+ * Stable ids of procfun refs (`~>`) in [pc]. Prefers [SymbolValueExprNode.resolvedProcFunRefOrNull];
+ * falls back to matching [procFunNames] when the symbol equals a stable id (rare).
+ */
 internal fun collectProcFunRefNamesInProc(pc: ProcClassNode, procFunNames: Set<String>): Set<String> {
     val out = mutableSetOf<String>()
     fun walkExpr(expr: ExprNode) {
-        if (expr is SymbolValueExprNode && expr.symbol in procFunNames) {
-            out += expr.symbol
+        if (expr is SymbolValueExprNode) {
+            expr.resolvedProcFunRefOrNull()?.let { out += it.stableName() }
+                ?: run {
+                    if (expr.symbol in procFunNames) out += expr.symbol
+                }
         }
         expr.children.filterIsInstance<ExprNode>().forEach { walkExpr(it) }
     }
@@ -621,6 +631,7 @@ internal fun collectProcFunRefNamesInProc(pc: ProcClassNode, procFunNames: Set<S
 /**
  * Direct procfun callees / refs from [hostName], then the transitive closure through
  * nested calls inside those procfuns (e.g. `handleRpc` → `inRequestVoteRPC`).
+ * [procFunNames] and returned values are **stable ids**.
  */
 internal fun reachableProcFunNamesFromHosts(
     hostNames: Collection<String>,
@@ -630,9 +641,9 @@ internal fun reachableProcFunNamesFromHosts(
 ): Set<String> {
     fun directFrom(name: String): Set<String> {
         val pc = hostClasses[name] ?: procFunClasses[name] ?: return emptySet()
-        val bare = collectProcFunCallsInProc(pc).mapNotNull { it.resolvedProcFunOrNull()?.procFunName() }
+        val bare = collectProcFunCallsInProc(pc).mapNotNull { it.resolvedProcFunOrNull()?.stableName() }
         val qualified = collectApiQualifiedProcFunCallsInProc(pc)
-            .mapNotNull { it.resolvedProcFunOrNull()?.procFunName() }
+            .mapNotNull { it.resolvedProcFunOrNull()?.stableName() }
         val refs = collectProcFunRefNamesInProc(pc, procFunNames)
         return (bare + qualified + refs).filter { it in procFunNames }.toSet()
     }
@@ -658,7 +669,7 @@ private fun wholeRhsProcFunCall(
                     is FunCallExprNode -> {
                         val pf = expr.resolvedProcFunOrNull() ?: return@mapNotNull null
                         Triple(
-                            pf.procFunName(),
+                            pf.stableName(),
                             expr.callArgs(),
                             julay.program.type.transitRootVar(update.key),
                         )
@@ -666,7 +677,7 @@ private fun wholeRhsProcFunCall(
                     is MethodCallExprNode -> {
                         val pf = expr.resolvedProcFunOrNull() ?: return@mapNotNull null
                         Triple(
-                            pf.procFunName(),
+                            pf.stableName(),
                             expr.args,
                             julay.program.type.transitRootVar(update.key),
                         )
@@ -703,12 +714,13 @@ fun ProcFunNode.asSyntheticProcClass(): ProcClassNode {
     try {
         retVal.resolveType(returnType)
     } catch (_: RuntimeException) {}
+    val stable = stableName()
     val callCtor = ConstructorNode(
-        procFunCallCtor(name()),
+        procFunCallCtor(stable),
         procFunArgs(),
         emptyList(),
         programLocation(),
     )
     val body = argVars + listOf(retVal) + listOf(callCtor) + localDecls().filter { it !is ConstructorNode }
-    return ProcClassNode(name(), body, programLocation())
+    return ProcClassNode(stable, body, programLocation())
 }

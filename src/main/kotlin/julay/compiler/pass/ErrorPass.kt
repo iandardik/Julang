@@ -87,7 +87,7 @@ private fun RootNode.actionConsistencyErrors(
 ): List<CompileError> {
     val leafMap = leafActionMap(this, procs, librariesInUse)
     val alphabetResult = if (program != null) {
-        computeCompositionAlphabet(program, procDecls, leafMap, collectProcFunNames(this), this)
+        computeCompositionAlphabet(program, procDecls, leafMap, collectProcFunStableNames(this), this)
     } else {
         // No composition root (e.g. analyze whole CU): unique keys for internals only.
         val all = leafMap.values.flatten()
@@ -246,7 +246,7 @@ private fun RootNode.actionConsistencyErrors(
 
     val integrity = alphabetIntegrityErrors(
         alphabetResult,
-        collectProcFunNames(this),
+        collectProcFunStableNames(this),
         requireCompleteSync = requireCompleteSync,
         leafOffersByPclass = leafMap,
     )
@@ -308,7 +308,7 @@ private fun RootNode.actionConsistencyWarnings(
     requireCompleteSync: Boolean,
 ): List<CompileWarning> {
     val leafMap = leafActionMap(this, procs, librariesInUse)
-    val procFunNames = collectProcFunNames(this)
+    val procFunNames = collectProcFunStableNames(this)
     val alphabetResult = if (program != null) {
         computeCompositionAlphabet(program, procDecls, leafMap, procFunNames, this)
     } else {
@@ -374,7 +374,8 @@ private fun RootNode.actionConsistencyWarnings(
 }
 
 private fun RootNode.overlappingDeclNamesErrors(): List<CompileError> {
-    val decls = declNodes().filter { it !is CompileNode }
+    // Procfuns are unique per defining module (checked in ModuleLoader); other decls stay CU-global.
+    val decls = declNodes().filter { it !is CompileNode && it !is ProcFunNode }
     return decls.flatMap { refDecl ->
         decls
             .filter { decl -> refDecl != decl && refDecl.name() == decl.name() }
@@ -569,8 +570,8 @@ private fun ProcFunNode.errorPassProcFun(procs: Set<String>, librariesInUse: Set
         }
     val transitions = localDecls.filterIsInstance<TransitionNode>()
     val ctors = localDecls.filterIsInstance<ConstructorNode>()
-    val reservedCall = procFunCallCtor(name())
-    val reservedRet = procFunRetAction(name())
+    val reservedCall = procFunCallCtor(stableName())
+    val reservedRet = procFunRetAction(stableName())
     val reservedNames = setOf("initially", reservedCall, reservedRet, PROC_FUN_RET_VAL)
     val reservedNameClash = transitions.filter { it.transitionName() in reservedNames }.map {
         OneLocCompileError(

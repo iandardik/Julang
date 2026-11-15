@@ -50,8 +50,9 @@ internal fun ProcFunNode.toProcClassDecl(): ProcClassDecl {
         if (decl !is TransitionNode) return@flatMap emptyList()
         listOf(rewriteReturnToRetVal(decl, retType))
     }
-    val retTransition = procFunRetActionDecl(name(), retType, programLocation())
-    return ProcClassDecl(name(), stateVars, listOf(callCtor), userTransitions + retTransition)
+    val stable = stableName()
+    val retTransition = procFunRetActionDecl(stable, retType, programLocation())
+    return ProcClassDecl(stable, stateVars, listOf(callCtor), userTransitions + retTransition)
 }
 
 private fun ProcFunNode.buildCallCtor(
@@ -74,7 +75,7 @@ private fun ProcFunNode.buildCallCtor(
     val userCtorErrors = userCtor?.body()?.flatMap { it.errors() } ?: emptyList()
 
     return ActionDecl(
-        SymbolicAction(procFunCallCtor(name()), argVars),
+        SymbolicAction(procFunCallCtor(stableName()), argVars),
         guards = emptyList(),
         transits = argAssigns + inlineAssigns + userCtorTransits,
         modifier = TSAction.SyncRole.Default,

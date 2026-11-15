@@ -1,0 +1,37 @@
+import julay.funlib.exitProgram
+import julay.funlib.println
+import in_mod.echo
+import out_mod.Out
+
+/*
+ * Both modules define procfun echo — allowed via scoped stable ids.
+ * Bare echo is the imported inbound helper; Out.echo is the api-owned one.
+ */
+static proc Main {
+    var done : Boolean
+    var a : Int
+    var b : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            done := false
+            a := 0
+            b := 0
+    }
+
+    internal transition run() {
+        guard: ~done
+        transit:
+            a := echo(10)
+            b := Out.echo(10)
+            done := true
+        after:
+            println("in " + a)
+            println("out " + b)
+            exitProgram(0)
+    }
+}
+
+proc System := Main || Out
+
+compile System

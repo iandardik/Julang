@@ -2,6 +2,8 @@
 
 A **procfun** is a process-backed blocking call: it looks like a function at the call site, but desugars to a short-lived process with local state and transitions until a synthetic return edge yields a value to the caller.
 
+**Names:** bare procfun names are unique **per defining module** (not compilation-unit-global). The same bare name may appear in different modules (e.g. inbound `keyCount` and `RpcOut.keyCount`). Codegen, fuse/IR, and TLA+ use a **stable id**: `{Api}_{bare}` when the procfun is listed in exactly one home-module api’s `calls:`, otherwise `{module.path.with_underscores}_{bare}` (e.g. `run_RpcOut_keyCount`, TLA leaf `RpcOut_keyCount`). A procfun may appear in at most one api’s `calls:` in its home module. Callable `~>` refs compare by that stable id string.
+
 It is **not** the same as:
 
 | Construct | Role |

@@ -2,7 +2,7 @@ package julay.compiler.pass
 
 import julay.compiler.ObjClassBuiltinRegistry
 import julay.compiler.ast.*
-import julay.compiler.collectProcFunNames
+import julay.compiler.collectProcFunStableNames
 import julay.compiler.decl.ActionDecl
 import julay.compiler.decl.ProcClassDecl
 import julay.compiler.decl.ProcDecl
@@ -25,10 +25,10 @@ fun goCodegenPass(
 ): GoCodegenResult {
     val leafMap = leafActionMap(ast, program.allProcNames(procDecls), librariesInUse)
     val alphabet = computeCompositionAlphabet(
-        program, procDecls, leafMap, collectProcFunNames(ast), ast,
+        program, procDecls, leafMap, collectProcFunStableNames(ast), ast,
     )
-    val procFunNames = collectProcFunNames(ast)
-    val occurrences = alphabet.leafOccurrences.filter { it.pclassName !in procFunNames }
+    val procFunStableNames = collectProcFunStableNames(ast)
+    val occurrences = alphabet.leafOccurrences.filter { it.pclassName !in procFunStableNames }
     val distinctPclasses = occurrences.map { it.pclassName }.toSet()
 
     val procClasses = distinctPclasses.flatMap { proc ->
@@ -39,11 +39,11 @@ fun goCodegenPass(
     val allProcFunClasses = ast.procFunClassPass()
     val pclassNodes = ast.declNodes().filterIsInstance<ProcClassNode>().associateBy { it.name() }
     val procFunNodes = ast.declNodes().filterIsInstance<ProcFunNode>()
-        .associate { it.name() to it.asSyntheticProcClass() }
+        .associate { it.stableName() to it.asSyntheticProcClass() }
     val reachablePfNames = calledProcFunNamesUnder(
         program,
         procDecls,
-        procFunNames,
+        procFunStableNames,
         pclassNodes,
         procFunNodes,
     )

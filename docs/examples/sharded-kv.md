@@ -7,7 +7,7 @@ Multi-node key–value store under [`input/sharded_kv/`](../../input/sharded_kv/
 | Path | Role |
 |------|------|
 | `cluster.conf` | Node URLs (ids `1..n` by line order), ports **6001–6003** |
-| `node/` | `Store` hub + `serveHttp` RPC; binary `ShardNode` |
+| `node/` | `Store` hub + `rpc_in` / `rpc_out`; binary `ShardNode` |
 | `client/` | CLI with one `303 OWNER` redirect retry; binary `ShardClient` |
 | `specs/` | TLA+ model (`ShardSpec.tla` / `.cfg`) with perfect-network leaf |
 | `scripts/` | `compile.sh`, `start_cluster.sh`, `stop_cluster.sh`, `smoke_test.sh`, `reshard_test.sh` |

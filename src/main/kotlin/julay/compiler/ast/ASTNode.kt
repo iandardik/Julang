@@ -469,6 +469,13 @@ class ProcFunNode(
     private val loc: ProgramLoc,
 ) : DeclNode(listOf(args) + localDecls) {
     private var returnTypeResolution: TypeNameResolution = TypeNameResolution.Unresolved
+    /** Module that defined this procfun (dotted path). Stamped at load time. */
+    private var definingModulePath: String? = null
+    /**
+     * If this procfun appears in exactly one home-module api's `calls:`, that api name.
+     * Used for stable codegen/IR ids (`Api_bare`). Stamped at load time.
+     */
+    private var owningApiName: String? = null
 
     val returnType: Type
         get() = when (val resolution = returnTypeResolution) {
@@ -479,13 +486,34 @@ class ProcFunNode(
 
     override fun programLocation() = loc
     override fun name() = name
+    /** Source / bare name (unique only within [definingModulePath]). */
     internal fun procFunName() = name
+    /**
+     * Stable IR / codegen identity: `{Api}_{bare}` when api-owned, else `{module}_{bare}`
+     * with non-identifier characters in the module path replaced by underscores.
+     */
+    internal fun stableName(): String {
+        val api = owningApiName
+        if (api != null) return sanitizeProcFunStableIdent("${api}_$name")
+        val mod = definingModulePath ?: "unknown"
+        return sanitizeProcFunStableIdent("${mod}_$name")
+    }
+    internal fun definingModulePathOrNull(): String? = definingModulePath
+    internal fun owningApiNameOrNull(): String? = owningApiName
+    internal fun setDefiningModulePath(path: String) {
+        definingModulePath = path
+    }
+    internal fun setOwningApiName(api: String?) {
+        owningApiName = api
+    }
     internal fun procFunArgs(): ArgsNode = args
     internal fun procFunReturnTypeExpr(): TypeExpr = returnTypeExpr
     internal fun localDecls(): List<ProcClassDeclNode> = localDecls
     internal fun withLocalDecls(decls: List<ProcClassDeclNode>): ProcFunNode =
         ProcFunNode(name, args, returnTypeExpr, decls, loc).also {
             it.visibility = this.visibility
+            it.definingModulePath = this.definingModulePath
+            it.owningApiName = this.owningApiName
             when (val r = returnTypeResolution) {
                 is TypeNameResolution.Resolved -> it.resolveReturnType(r.type)
                 else -> {}
@@ -669,7 +697,7 @@ class FunCallExprNode(
                 "listOf(${argStrs.joinToString(", ")})"
             }
             val retTy = pf.returnType.toKotlinTypeString()
-            return "(hostProc.invokeProcFun(\"${pf.procFunName()}\", $argsList) as $retTy)"
+            return "(hostProc.invokeProcFun(\"${pf.stableName()}\", $argsList) as $retTy)"
         }
         resolvedBuiltin?.let { builtin ->
             if (builtin.namedFunArg) {
@@ -2357,7 +2385,7 @@ class MethodCallExprNode(
                 "listOf(${argStrs.joinToString(", ")})"
             }
             val retTy = pf.returnType.toKotlinTypeString()
-            return "(hostProc.invokeProcFun(\"${pf.procFunName()}\", $argsList) as $retTy)"
+            return "(hostProc.invokeProcFun(\"${pf.stableName()}\", $argsList) as $retTy)"
         }
         val base = baseExpr.toTransitString(symbolTypes, argSymbols)
         when (methodName) {
@@ -2559,12 +2587,20 @@ class SymbolValueExprNode(
     val symbol : String,
     private val loc : ProgramLoc
 ) : ExprNode(listOf()) {
+    /** When this symbol is a `~>` procfun ref, the resolved defining node. */
+    private var resolvedProcFunRef: ProcFunNode? = null
+
     override fun programLocation() = loc
+    internal fun resolveProcFunRef(pf: ProcFunNode) {
+        resolvedProcFunRef = pf
+    }
+    internal fun resolvedProcFunRefOrNull(): ProcFunNode? = resolvedProcFunRef
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
         if (symbol !in symbolTypes && symbol !in argSymbols) {
             try {
                 if (getType() is ProcFunRefType) {
-                    return "ctx.mkString(\"${symbol.escapeKotlinStringLiteral()}\")"
+                    val id = resolvedProcFunRef?.stableName() ?: symbol
+                    return "ctx.mkString(\"${id.escapeKotlinStringLiteral()}\")"
                 }
             } catch (_: RuntimeException) {
             }
@@ -2647,7 +2683,8 @@ class SymbolValueExprNode(
             }
         }
         if (symbolTypes[symbol] is ProcFunRefType) {
-            return "ctx.mkString(\"${symbol.escapeKotlinStringLiteral()}\")"
+            val id = resolvedProcFunRef?.stableName() ?: symbol
+            return "ctx.mkString(\"${id.escapeKotlinStringLiteral()}\")"
         }
         return when (type) {
             is BoolType -> "ctx.mkBool(${symbol.toKotlinIdent()})"
@@ -2661,7 +2698,8 @@ class SymbolValueExprNode(
         if (symbol !in symbolTypes) {
             try {
                 if (getType() is ProcFunRefType) {
-                    return "\"${symbol.escapeKotlinStringLiteral()}\""
+                    val id = resolvedProcFunRef?.stableName() ?: symbol
+                    return "\"${id.escapeKotlinStringLiteral()}\""
                 }
             } catch (_: RuntimeException) {
             }
@@ -2671,7 +2709,8 @@ class SymbolValueExprNode(
             val typeStr = type.toCodegenTypeVal()
             "(act.lookup(Variable(\"${symbol.escapeKotlinStringLiteral()}\", $typeStr)).value as ${type.toKotlinTypeString()})"
         } else if (type is ProcFunRefType) {
-            "\"${symbol.escapeKotlinStringLiteral()}\""
+            val id = resolvedProcFunRef?.stableName() ?: symbol
+            "\"${id.escapeKotlinStringLiteral()}\""
         } else {
             symbol.toKotlinIdent()
         }

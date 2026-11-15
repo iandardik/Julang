@@ -1,0 +1,13 @@
+procfun foo(x : Int) : Int {
+    internal transition go() {
+        return: x
+    }
+}
+
+procfun foo(x : Int) : Int {
+    internal transition go() {
+        return: x + 1
+    }
+}
+
+compile foo

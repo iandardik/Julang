@@ -32,7 +32,7 @@ fun jarSortReachabilityErrors(
 ): List<CompileError> {
     if (jarTargets.isEmpty()) return emptyList()
     val pclasses = ast.declNodes().filterIsInstance<ProcClassNode>().associateBy { it.name() }
-    val procFuns = ast.declNodes().filterIsInstance<ProcFunNode>().associateBy { it.name() }
+    val procFuns = ast.declNodes().filterIsInstance<ProcFunNode>().associateBy { it.stableName() }
     val errors = mutableListOf<CompileError>()
     for (target in jarTargets) {
         val leafNames = target.allProcNames(procDecls)

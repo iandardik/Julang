@@ -1,5 +1,4 @@
 import julay.funlib.serveHttp
-import julay.funlib.httpRequest
 import julay.funlib.portFromUrl
 import julay.funlib.parseInt
 import julay.funlib.split
@@ -7,8 +6,12 @@ import julay.funlib.length
 import julay.funlib.listOf
 import node.lib.fieldValue
 import node.lib.parseCfg
+import node.rpc_out.RpcOut
 
-export proc RpcIn := ServerStarter
+export api RpcIn {
+    proc: ServerStarter
+    calls: handleRpc, put, get, owners, claim, keyCount, moveBatch
+}
 
 static proc ServerStarter {
     constructor initially(args : List<String>) {
@@ -20,14 +23,16 @@ static proc ServerStarter {
 }
 
 procfun handleRpc(req : HttpServerRequest) : HttpServerResponse {
+    /* claim/keyCount/moveBatch: distinct from RpcOut.claim/keyCount/moveBatch
+     * (procfun names are compilation-global). */
     internal transition route() {
         return: when (req.path) {
-            "kv/put" -> inPut(req)
-            "kv/get" -> inGet(req)
-            "kv/owners" -> inOwners(req)
-            "rpc/claim" -> inClaim(req)
-            "rpc/keyCount" -> inKeyCount(req)
-            "rpc/moveBatch" -> inMoveBatch(req)
+            "kv/put" -> put(req)
+            "kv/get" -> get(req)
+            "kv/owners" -> owners(req)
+            "rpc/claim" -> claim(req)
+            "rpc/keyCount" -> keyCount(req)
+            "rpc/moveBatch" -> moveBatch(req)
             else -> HttpServerResponse {
                 body := "NOT_FOUND",
                 code := 404
@@ -36,7 +41,7 @@ procfun handleRpc(req : HttpServerRequest) : HttpServerResponse {
     }
 }
 
-procfun inOwners(req : HttpServerRequest) : HttpServerResponse {
+procfun owners(req : HttpServerRequest) : HttpServerResponse {
     var step : String := "call"
     var outBlob : String := ""
 
@@ -56,7 +61,7 @@ procfun inOwners(req : HttpServerRequest) : HttpServerResponse {
     }
 }
 
-procfun inKeyCount(req : HttpServerRequest) : HttpServerResponse {
+procfun keyCount(req : HttpServerRequest) : HttpServerResponse {
     var step : String := "call"
     var outN : Int := 0
 
@@ -76,7 +81,7 @@ procfun inKeyCount(req : HttpServerRequest) : HttpServerResponse {
     }
 }
 
-procfun inClaim(req : HttpServerRequest) : HttpServerResponse {
+procfun claim(req : HttpServerRequest) : HttpServerResponse {
     const reqK : String := fieldValue(split(req.body, "|")[1])
     const reqOwner : String := fieldValue(split(req.body, "|")[2])
     var step : String := "call"
@@ -95,7 +100,7 @@ procfun inClaim(req : HttpServerRequest) : HttpServerResponse {
     }
 }
 
-procfun inGet(req : HttpServerRequest) : HttpServerResponse {
+procfun get(req : HttpServerRequest) : HttpServerResponse {
     const reqK : String := fieldValue(split(req.body, "|")[1])
     var step : String := "lookup"
     var meUrl : String := ""
@@ -156,7 +161,7 @@ procfun inGet(req : HttpServerRequest) : HttpServerResponse {
  * Put with optional single reshard before local write.
  * peerAt is reused for: scan peer key counts, broadcast move claims, broadcast new-key claim.
  */
-procfun inPut(req : HttpServerRequest) : HttpServerResponse {
+procfun put(req : HttpServerRequest) : HttpServerResponse {
     const reqK : String := fieldValue(split(req.body, "|")[1])
     const reqV : String := fieldValue(split(req.body, "|")[2])
     var step : String := "lookup"
@@ -216,11 +221,7 @@ procfun inPut(req : HttpServerRequest) : HttpServerResponse {
         transit:
             let isSelf : Boolean := url = meUrl
             let peerCount : Int := if (phase = "scan" & ~isSelf) {
-                parseInt(fieldValue(httpRequest(HttpClientRequest {
-                    url := url + "/rpc/keyCount",
-                    method := "POST",
-                    body := ""
-                }).body))
+                RpcOut.keyCount(url)
             } else {
                 0
             }
@@ -244,11 +245,7 @@ procfun inPut(req : HttpServerRequest) : HttpServerResponse {
             bestPeerId := if (better) { id } else { bestPeerId }
             bestPeerCount := if (better) { peerCount } else { bestPeerCount }
             lastPeerCode := if ((phase = "broadcastMoves" | phase = "broadcastClaim") & ~isSelf) {
-                httpRequest(HttpClientRequest {
-                    url := url + "/rpc/claim",
-                    method := "POST",
-                    body := "k=" + claimKey + "|owner=" + claimTarget
-                }).code
+                RpcOut.claim(url, claimKey, claimTarget)
             } else {
                 0
             }
@@ -295,11 +292,7 @@ procfun inPut(req : HttpServerRequest) : HttpServerResponse {
     internal transition sendBatch() {
         guard: step = "sendBatch"
         transit:
-            lastPeerCode := httpRequest(HttpClientRequest {
-                url := bestPeerUrl + "/rpc/moveBatch",
-                method := "POST",
-                body := bestPeerUrl + "|" + moveBatch
-            }).code
+            lastPeerCode := RpcOut.moveBatch(bestPeerUrl, bestPeerUrl, moveBatch)
             let keys : List<String> := if (moveBatch = "") {
                 listOf()
             } else {
@@ -350,7 +343,7 @@ procfun inPut(req : HttpServerRequest) : HttpServerResponse {
     }
 }
 
-procfun inMoveBatch(req : HttpServerRequest) : HttpServerResponse {
+procfun moveBatch(req : HttpServerRequest) : HttpServerResponse {
     /* body: <ownerUrl>|<k=v;k=v;...>
      * Parse the current entry into curKey/curVal before putFromMove — Go evaluates
      * client arg bindings before guards, so split(parts[idx], ...) in the putFromMove

@@ -12,7 +12,7 @@ import julay.compiler.ast.RootNode
 import julay.compiler.ast.SymbolValueExprNode
 import julay.compiler.ast.exprReferencesSymbol
 import julay.compiler.ast.substituteExpr
-import julay.compiler.collectProcFunNames
+import julay.compiler.collectProcFunStableNames
 import julay.compiler.decl.ActionDecl
 import julay.compiler.decl.ProcClassDecl
 import julay.compiler.decl.ProcDecl
@@ -56,7 +56,7 @@ fun computeChannelDirections(
 ): ChannelDirectionResult {
     val leafMap = leafActionMap(ast, procs, librariesInUse)
     val alphabet = if (program != null) {
-        computeCompositionAlphabet(program, procDecls, leafMap, collectProcFunNames(ast), ast)
+        computeCompositionAlphabet(program, procDecls, leafMap, collectProcFunStableNames(ast), ast)
     } else {
         val all = leafMap.values.flatten()
         CompositionAlphabetResult(
@@ -71,7 +71,7 @@ fun computeChannelDirections(
     val pclasses = ast.declNodes()
         .flatMap { it.procClassPass(procs) }
         .associateBy { it.name } +
-        ast.procFunClassPass().associateBy { it.name }
+        ast.procFunClassPass().associateBy { it.name } // name is already stableName()
 
     val directions = mutableListOf<ActionChannelDirection>()
     val errors = mutableListOf<CompileError>()

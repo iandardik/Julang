@@ -73,6 +73,8 @@ private var typePassApiEnv: Map<String, ApiNode> = emptyMap()
 /** procfun name → api that lists it in calls: (first wins if overlapping). */
 private var typePassCallToApi: Map<String, String> = emptyMap()
 private var typePassInsideProcFun: Boolean = false
+private var typePassModulesByPath: Map<String, LoadedModule> = emptyMap()
+private var typePassCurrentModule: LoadedModule? = null
 /** True while typing leaf-spec bodies: sort types OK in state/args (specs/TLA only). */
 private var typePassAllowSortDomains: Boolean = false
 /** Proc/leaf-spec classes visible for peer state reads in leaf-spec bodies. */
@@ -249,6 +251,7 @@ fun RootNode.typePass(
     try {
         typePassInsideProcFun = false
         val modulesByPath = unit.modules.associateBy { it.modulePath }
+        typePassModulesByPath = modulesByPath
         typePassPeerClasses = unit.modules
             .flatMap { it.root.declNodes() }
             .mapNotNull { decl ->
@@ -265,11 +268,16 @@ fun RootNode.typePass(
             .associateBy { it.name() }
         val allProcFuns = unit.modules
             .flatMap { it.root.declNodes().filterIsInstance<ProcFunNode>() }
-            .associateBy { it.name() }
+            .associateBy { it.stableName() }
         val signatureErrors = allFuns.values.flatMap { it.typePassFunSignature(built) }
         val procFunSigErrors = allProcFuns.values.flatMap { it.typePassProcFunSignature(built) }
-        val recursionErrors = funRecursionErrors(allFuns) + procFunRecursionErrors(allProcFuns)
+        // Procfun recursion is per-module (bare names); cross-module same bare names are distinct.
+        val recursionErrors = funRecursionErrors(allFuns) + unit.modules.flatMap { mod ->
+            val local = mod.root.declNodes().filterIsInstance<ProcFunNode>().associateBy { it.name() }
+            procFunRecursionErrors(local)
+        }
         val funBodyErrors = unit.modules.flatMap { module ->
+            typePassCurrentModule = module
             val moduleApis = callableApis(module)
             typePassApiEnv = moduleApis
             typePassCallToApi = buildMap {
@@ -295,6 +303,7 @@ fun RootNode.typePass(
         // user funs) resolve in dependency modules, not only in the entry file.
         // Api.fn(...) only resolves for local/imported apis (not every transitively loaded api).
         val otherErrors = unit.modules.flatMap { module ->
+            typePassCurrentModule = module
             val moduleApis = callableApis(module)
             typePassApiEnv = moduleApis
             typePassCallToApi = buildMap {
@@ -1661,7 +1670,14 @@ private fun MethodCallExprNode.typePassMethodCall(
                     ),
                 )
             }
-            val procFun = procFunEnv[methodName]
+            // Resolve from the api's home module so RpcOut.claim ≠ RpcIn.claim.
+            val home = typePassCurrentModule?.let { cur ->
+                homeModuleForApi(apiBase, cur, typePassModulesByPath)
+            }
+            val procFun = home?.root?.declNodes()
+                ?.filterIsInstance<ProcFunNode>()
+                ?.firstOrNull { it.name() == methodName }
+                ?: procFunEnv[methodName]
                 ?: return listOf(
                     OneLocCompileError(
                         programLocation(),
@@ -2130,6 +2146,7 @@ private fun SymbolValueExprNode.typePassSymbol(
             }
         }
         procFunEnv[symbol]?.let { pf ->
+            resolveProcFunRef(pf)
             val refType = procFunRefTypeFromNode(pf)
             setInferredType(TypePassType.Inferred(refType))
             return emptyList()
@@ -2385,13 +2402,23 @@ private fun FunCallExprNode.typePassFunCall(
         resolveProcFun(procFun)
         typePassCallToApi[callName()]?.let { apiName ->
             if (!typePassInsideProcFun) {
-                return listOf(
-                    OneLocCompileError(
-                        programLocation(),
-                        "Procfun \"${callName()}\" is listed in api \"$apiName\" calls:; " +
-                            "call it as $apiName.${callName()}(...)",
-                    ),
-                )
+                // Only force Api.fn when the bare call resolves to that api's helper.
+                // An imported procfun with the same bare name is a different node.
+                val home = typePassCurrentModule?.let { cur ->
+                    homeModuleForApi(apiName, cur, typePassModulesByPath)
+                }
+                val apiOwned = home?.root?.declNodes()
+                    ?.filterIsInstance<ProcFunNode>()
+                    ?.firstOrNull { it.name() == callName() }
+                if (apiOwned == null || apiOwned === procFun) {
+                    return listOf(
+                        OneLocCompileError(
+                            programLocation(),
+                            "Procfun \"${callName()}\" is listed in api \"$apiName\" calls:; " +
+                                "call it as $apiName.${callName()}(...)",
+                        ),
+                    )
+                }
             }
         }
         if (callTypeArgs().isNotEmpty()) {

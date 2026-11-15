@@ -1,0 +1,6 @@
+/* Inbound-style helper: same bare name as out_mod.echo */
+export procfun echo(x : Int) : Int {
+    internal transition go() {
+        return: x + 1
+    }
+}

@@ -1,0 +1,16 @@
+export api Out {
+    proc: OutIdle
+    calls: echo
+}
+
+static proc OutIdle {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+}
+
+procfun echo(x : Int) : Int {
+    internal transition go() {
+        return: x * 2
+    }
+}

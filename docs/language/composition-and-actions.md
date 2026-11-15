@@ -55,6 +55,8 @@ Procfuns are **not** allowed in `||` (compile error). They are not composition p
 
 When emitting TLA+, a unique leaf class keeps its name. If class `X` appears more than once, every occurrence is renamed using the introducing assembly: `proc P := A || X` and `proc Q := B || X` composed together become `X_P` and `X_Q`. Same-parent ties (`proc P := X || X`) use `X_P_1`, `X_P_2`, …. Renamed state variables get `(* ... *)` comments. Julay invariants still write `X.n`; the compiler expands them per occurrence in TLA+.
 
+Procfun leaves use their **stable id** as the class name (`RpcOut_keyCount`, not bare `keyCount`), so two modules’ same-bare helpers stay distinct before occurrence renaming. User transitions inside a procfun keep source action names (still sync by action name with peers).
+
 ## APIs
 
 An **api** packages a resident parallel composition (`proc:`) with optional procfun entry points (`calls:`). Conceptually it is one composition unit:
@@ -112,6 +114,7 @@ transit:
 - Outside the api, listed procfuns **must** be called as `ApiName.fn(...)` (not bare `fn(...)`).
 - Inside other procfuns of the same module, bare calls to siblings remain allowed.
 - `ApiName.fn(...)` requires a **unique** occurrence of that api in the enclosing composition (error if missing or duplicated).
+- Procfuns listed in `calls:` get stable IR/TLA/Go ids `ApiName_fn` (see [Procfuns](procfun.md)); the same bare `fn` may exist in another module without colliding.
 
 ### Nesting
 

@@ -3,12 +3,16 @@ package julay.compiler.pass
 import julay.compiler.*
 import julay.compiler.ast.*
 import julay.compiler.decl.*
+import julay.compiler.sanitizeProcFunStableIdent
 
 fun ASTNode.procPass(): List<ProcDecl> = when (this) {
     is ProcNode -> listOf(ProcDecl(procNodeName(), procNodeValue().procPass(), ProcDeclType.Proc))
     is ApiNode -> {
         val procParts = apiProcExpr().procPass()
-        val callParts = apiCallNames().map { ProcDecl(it, listOf(), ProcDeclType.Proc) }
+        // Api-owned procfun leaves use stable ids (`Api_bare`), matching ProcFunNode.stableName().
+        val callParts = apiCallNames().map { bare ->
+            ProcDecl(sanitizeProcFunStableIdent("${apiName()}_$bare"), listOf(), ProcDeclType.Proc)
+        }
         listOf(ProcDecl(apiName(), procParts + callParts, ProcDeclType.Proc))
     }
     is SpecNode -> listOf(ProcDecl(specNodeName(), specNodeValue().procPass(), ProcDeclType.Spec))
@@ -30,7 +34,9 @@ fun ASTNode.resolvedProcPass(unit: CompilationUnit): List<ProcDecl> = when (this
     )
     is ApiNode -> {
         val procParts = apiProcExpr().resolvedProcPass(unit)
-        val callParts = apiCallNames().map { ProcDecl(it, listOf(), ProcDeclType.Proc) }
+        val callParts = apiCallNames().map { bare ->
+            ProcDecl(sanitizeProcFunStableIdent("${apiName()}_$bare"), listOf(), ProcDeclType.Proc)
+        }
         listOf(ProcDecl(apiName(), procParts + callParts, ProcDeclType.Proc))
     }
     is SpecNode -> listOf(

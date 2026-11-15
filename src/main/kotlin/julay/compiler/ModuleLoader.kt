@@ -265,7 +265,11 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
     val moduleSymbols = mutableMapOf<String, ResolvedSymbol>()
     loaded.values.forEach { registerModuleSymbols(it, moduleSymbols) }
 
-    val allDecls = loaded.values.filter { !it.isStub }.flatMap { it.root.declNodes() }
+    val loadedList = loaded.values.filter { !it.isStub }.toList()
+    errors += stampProcFunIdentity(loadedList)
+    errors += duplicateProcFunNameErrors(loadedList)
+
+    val allDecls = loadedList.flatMap { it.root.declNodes() }
     val mergedRoot = entryModule.root.withImportsAndDecls(entryModule.root.importNodes(), allDecls)
 
     val entryDeclNames = collectDeclNames(entryModule.root)
@@ -276,7 +280,7 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
     return CompilationUnit(
         entryPath = entryPath,
         root = mergedRoot,
-        modules = loaded.values.filter { !it.isStub }.toList(),
+        modules = loadedList,
         importTable = entryModule.importTable,
         moduleSymbols = moduleSymbols,
         entryDeclNames = entryDeclNames,

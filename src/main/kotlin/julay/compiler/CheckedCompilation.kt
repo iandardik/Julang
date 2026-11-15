@@ -3,7 +3,7 @@ package julay.compiler
 import julay.compiler.ast.ASTNode
 import julay.compiler.ast.CompileNode
 import julay.compiler.ast.RootNode
-import julay.compiler.collectProcFunNames
+import julay.compiler.collectProcFunStableNames
 import julay.compiler.decl.ProcDecl
 import julay.compiler.decl.ProcDeclType
 import julay.compiler.pass.errorPass
@@ -64,12 +64,17 @@ fun resolveCompileTargets(
     val jars = mutableListOf<ProcDecl>()
     val specs = mutableListOf<ProcDecl>()
     val procFunTla = mutableListOf<ProcDecl>()
-    val procFunNames = collectProcFunNames(ast)
+    val procFunsByBare = ast.declNodes().filterIsInstance<julay.compiler.ast.ProcFunNode>().groupBy { it.name() }
     val missing = mutableListOf<String>()
     for (name in names) {
-        if (name in procFunNames) {
-            // Standalone TLA/analyze of the procfun — not a JAR root.
-            procFunTla += ProcDecl(name, emptyList(), ProcDeclType.Proc)
+        val pfMatches = procFunsByBare[name]
+        if (pfMatches != null) {
+            if (pfMatches.size > 1) {
+                missing += name // ambiguous bare name across modules
+                continue
+            }
+            // Standalone TLA/analyze of the procfun — not a JAR root (use stable id).
+            procFunTla += ProcDecl(pfMatches.single().stableName(), emptyList(), ProcDeclType.Proc)
             continue
         }
         val decl = byName[name]
@@ -101,11 +106,18 @@ fun resolveCompileTlaTargets(
 ): List<ProcDecl>? {
     if (names.isEmpty()) return emptyList()
     val byName = procDecls.associateBy { it.name }
+    val procFunsByBare = unit.root.declNodes()
+        .filterIsInstance<julay.compiler.ast.ProcFunNode>()
+        .groupBy { it.name() }
     val procs = mutableListOf<ProcDecl>()
     val missing = mutableListOf<String>()
     val notProcs = mutableListOf<String>()
     for (name in names.distinct()) {
+        val pfMatches = procFunsByBare[name]
         when {
+            pfMatches != null && pfMatches.size == 1 ->
+                procs += ProcDecl(pfMatches.single().stableName(), emptyList(), ProcDeclType.Proc)
+            pfMatches != null -> missing += name
             name in procFunNames -> procs += ProcDecl(name, emptyList(), ProcDeclType.Proc)
             byName[name]?.type == ProcDeclType.Proc -> procs += byName.getValue(name)
             byName[name]?.type == ProcDeclType.Spec -> notProcs += name
@@ -160,7 +172,7 @@ fun prepareCheckedCompilation(
     val jarTargets = targets.jars
     val specTargets = targets.specs
     val fromCompileTla = resolveCompileTlaTargets(
-        unit, procDecls, compileTlaNames, collectProcFunNames(ast),
+        unit, procDecls, compileTlaNames, collectProcFunStableNames(ast),
     ) ?: run {
         println("Found compile errors, exiting.")
         return null

@@ -297,7 +297,7 @@ fun computeCompositionAlphabet(
     if (ast != null && procFunNames.isNotEmpty() && root.name !in procFunNames) {
         val pclasses = ast.declNodes().filterIsInstance<ProcClassNode>().associateBy { it.name() }
         val procFunClasses = ast.declNodes().filterIsInstance<ProcFunNode>()
-            .associate { it.name() to it.asSyntheticProcClass() }
+            .associate { it.stableName() to it.asSyntheticProcClass() }
         val alreadyStamped = leafOccurrences.map { it.pclassName }.toSet()
         val called = calledProcFunNamesUnder(root, procDecls, procFunNames, pclasses, procFunClasses)
             .filter { it !in alreadyStamped }

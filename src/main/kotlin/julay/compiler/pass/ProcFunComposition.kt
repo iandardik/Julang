@@ -6,7 +6,7 @@ import julay.compiler.OneLocCompileError
 import julay.compiler.OneLocCompileWarning
 import julay.compiler.ast.*
 import julay.compiler.collectApiNames
-import julay.compiler.collectProcFunNames
+import julay.compiler.collectProcFunStableNames
 import julay.compiler.decl.ProcDecl
 import julay.compiler.decl.ProcDeclType
 
@@ -90,7 +90,7 @@ fun RootNode.procFunHavocWarnings(
     procDecls: List<ProcDecl>,
 ): List<CompileWarning> {
     if (program == null || program.type != ProcDeclType.Spec) return emptyList()
-    val procFunNames = collectProcFunNames(this)
+    val procFunNames = collectProcFunStableNames(this)
     if (procFunNames.isEmpty()) return emptyList()
     val composed = composedProcFunNames(program, procDecls, procFunNames).toSet()
     val hostLeaves = collectLeafOccurrences(program, procDecls)
@@ -102,11 +102,11 @@ fun RootNode.procFunHavocWarnings(
     hostLeaves.forEach { host ->
         val pc = pclasses[host] ?: return@forEach
         collectProcFunCallsInProc(pc).forEach { call ->
-            val pf = call.resolvedProcFunOrNull()?.procFunName() ?: return@forEach
+            val pf = call.resolvedProcFunOrNull()?.stableName() ?: return@forEach
             if (pf in procFunNames && pf !in composed) missing += pf
         }
         collectApiQualifiedProcFunCallsInProc(pc).forEach { call ->
-            val pf = call.resolvedProcFunOrNull()?.procFunName() ?: return@forEach
+            val pf = call.resolvedProcFunOrNull()?.stableName() ?: return@forEach
             if (pf in procFunNames && pf !in composed) missing += pf
         }
     }
