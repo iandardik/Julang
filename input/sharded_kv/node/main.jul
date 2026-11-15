@@ -1,5 +1,6 @@
 import node.store.Store
 import node.rpc_in.RpcIn
 import node.rpc_out.RpcOut
+import node.shard.Shard
 
-export proc ShardNode := Store || RpcIn || RpcOut
+export proc ShardNode := Store || RpcIn || RpcOut || Shard

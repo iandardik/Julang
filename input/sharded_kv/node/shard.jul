@@ -1,0 +1,376 @@
+import julay.funlib.length
+import julay.funlib.listOf
+import node.lib.PutResult
+import node.lib.GetResult
+import node.lib.KvPair
+import node.lib.OwnerEntry
+import node.lib.PeerPick
+import node.rpc_out.RpcOut
+
+/*
+ * Shard domain: ownership, reshard, claim fan-out. No HTTP wire strings —
+ * RpcIn/RpcOut handle marshalling; Store holds maps.
+ */
+export api Shard {
+    proc: ShardIdle
+    calls: put, get, owners, applyClaim, applyMoveBatch, keyCount
+}
+
+static proc ShardIdle {
+    constructor initially(args : List<String>) {
+        transit:
+    }
+}
+
+procfun findLightestPeer(meUrl : String) : PeerPick {
+    var step : String := "clustersize"
+    var clusterSize : Int := 0
+    var peerIdx : Int := 1
+    var bestPeerUrl : String := ""
+    var bestPeerId : Int := 0
+    var bestPeerCount : Int := 0
+    var haveBest : Boolean := false
+
+    client transition getClusterSize(n : Int) {
+        guard: step = "clustersize"
+        transit:
+            clusterSize := n
+            peerIdx := 1
+            haveBest := false
+            bestPeerCount := 0
+            step := if (n = 0) { "done" } else { "peers" }
+    }
+
+    client transition peerAt(i : Int, url : String, id : Int) {
+        guard: step = "peers" & i = peerIdx & peerIdx <= clusterSize
+        transit:
+            let isSelf : Boolean := url = meUrl
+            let peerCount : Int := if (~isSelf) {
+                RpcOut.keyCount(url)
+            } else {
+                0
+            }
+            let better : Boolean := ~isSelf & (
+                ~haveBest
+                | peerCount < bestPeerCount
+                | (peerCount = bestPeerCount & id < bestPeerId)
+            )
+            haveBest := if (better) { true } else { haveBest }
+            bestPeerUrl := if (better) { url } else { bestPeerUrl }
+            bestPeerId := if (better) { id } else { bestPeerId }
+            bestPeerCount := if (better) { peerCount } else { bestPeerCount }
+            let nextPeerIdx : Int := peerIdx + 1
+            peerIdx := nextPeerIdx
+            step := if (nextPeerIdx > clusterSize) { "done" } else { "peers" }
+    }
+
+    internal transition done() {
+        guard: step = "done"
+        return: PeerPick {
+            haveBest := haveBest,
+            url := bestPeerUrl,
+            id := bestPeerId,
+            count := bestPeerCount
+        }
+    }
+}
+
+/* Fan-out claim to every peer except self. */
+procfun broadcastClaim(key : String, ownerUrl : String, meUrl : String) : Boolean {
+    var step : String := "clustersize"
+    var clusterSize : Int := 0
+    var peerIdx : Int := 1
+    var lastCode : Int := 0
+
+    client transition getClusterSize(n : Int) {
+        guard: step = "clustersize"
+        transit:
+            clusterSize := n
+            peerIdx := 1
+            step := if (n = 0) { "done" } else { "peers" }
+    }
+
+    client transition peerAt(i : Int, url : String, id : Int) {
+        guard: step = "peers" & i = peerIdx & peerIdx <= clusterSize
+        transit:
+            /* `id` is reply-only from Store; keep a use so Go emit stays clean. */
+            lastCode := if (url ~= meUrl) {
+                RpcOut.claim(url, key, ownerUrl)
+            } else {
+                id - id
+            }
+            let nextPeerIdx : Int := peerIdx + 1
+            peerIdx := nextPeerIdx
+            step := if (nextPeerIdx > clusterSize) { "done" } else { "peers" }
+    }
+
+    internal transition done() {
+        guard: step = "done"
+        return: true
+    }
+}
+
+/*
+ * Export up to 25% of keys (excluding exKey) to peerUrl, send moveBatch,
+ * then claim each moved key for that peer.
+ */
+procfun reshardToPeer(exKey : String, peerUrl : String, meUrl : String) : Boolean {
+    var step : String := "export"
+    var movedEntries : List<KvPair> := listOf<KvPair>()
+    var claimIdx : Int := 1
+    var lastCode : Int := 0
+    var claimed : Boolean := false
+
+    client transition exportReshard(
+        excludeKey : String,
+        newOwner : String,
+        entries : List<KvPair>,
+        nMoved : Int
+    ) {
+        guard: step = "export" & excludeKey = exKey & newOwner = peerUrl
+        transit:
+            movedEntries := entries
+            step := if (nMoved > 0) { "send" } else { "done" }
+    }
+
+    internal transition sendBatch() {
+        guard: step = "send"
+        transit:
+            lastCode := RpcOut.moveBatch(peerUrl, peerUrl, movedEntries)
+            claimIdx := 1
+            step := if (length(movedEntries) = 0) { "done" } else { "claim" }
+    }
+
+    internal transition claimMoved() {
+        guard: step = "claim" & claimIdx <= length(movedEntries)
+        transit:
+            claimed := broadcastClaim(movedEntries[claimIdx].k, peerUrl, meUrl)
+            let nextClaim : Int := claimIdx + 1
+            claimIdx := nextClaim
+            step := if (nextClaim > length(movedEntries)) { "done" } else { "claim" }
+    }
+
+    internal transition done() {
+        guard: step = "done"
+        return: true
+    }
+}
+
+procfun put(k : String, v : String) : PutResult {
+    var step : String := "lookup"
+    var meUrl : String := ""
+    var ownerUrl : String := ""
+    var myCount : Int := 0
+    var wasUnowned : Boolean := false
+    var pick : PeerPick := PeerPick {
+        haveBest := false,
+        url := "",
+        id := 0,
+        count := 0
+    }
+    var helperOk : Boolean := false
+
+    client transition getMe(url : String) {
+        guard: step = "lookup"
+        transit:
+            meUrl := url
+            step := "owner"
+    }
+
+    client transition ownerOf(ownKey : String, owner : String) {
+        guard: step = "owner" & ownKey = k
+        transit:
+            ownerUrl := owner
+            wasUnowned := owner = ""
+            step := if (owner = "" | owner = meUrl) { "count" } else { "redirect" }
+    }
+
+    client transition keyCount(n : Int) {
+        guard: step = "count"
+        transit:
+            myCount := n
+            step := "scan"
+    }
+
+    /* findLightestPeer must land in `pick` before decideReshard reads it. */
+    internal transition scanPeers() {
+        guard: step = "scan"
+        transit:
+            pick := findLightestPeer(meUrl)
+            step := "decide"
+    }
+
+    internal transition decideReshard() {
+        guard: step = "decide"
+        transit:
+            let shouldReshard : Boolean := pick.haveBest
+                & pick.count < myCount / 2
+                & myCount - pick.count >= 4
+            step := if (shouldReshard) { "reshard" } else { "put" }
+    }
+
+    internal transition doReshard() {
+        guard: step = "reshard"
+        transit:
+            helperOk := reshardToPeer(k, pick.url, meUrl)
+            step := "put"
+    }
+
+    client transition putLocal(putKey : String, putVal : String) {
+        guard: step = "put" & putKey = k & putVal = v
+        transit:
+            step := if (wasUnowned) { "claim" } else { "done" }
+    }
+
+    internal transition claimNew() {
+        guard: step = "claim"
+        transit:
+            helperOk := broadcastClaim(k, meUrl, meUrl)
+            step := "done"
+    }
+
+    internal transition respondOk() {
+        guard: step = "done"
+        return: PutResult { kind := "ok", ownerUrl := "" }
+    }
+
+    internal transition respondRedirect() {
+        guard: step = "redirect"
+        return: PutResult { kind := "redirect", ownerUrl := ownerUrl }
+    }
+}
+
+procfun get(k : String) : GetResult {
+    var step : String := "lookup"
+    var meUrl : String := ""
+    var ownerUrl : String := ""
+    var value : String := ""
+
+    client transition getMe(url : String) {
+        guard: step = "lookup"
+        transit:
+            meUrl := url
+            step := "owner"
+    }
+
+    client transition ownerOf(ownKey : String, owner : String) {
+        guard: step = "owner" & ownKey = k
+        transit:
+            ownerUrl := owner
+            step := if (owner = "") {
+                "missing"
+            } else {
+                if (owner = meUrl) { "getvalue" } else { "redirect" }
+            }
+    }
+
+    client transition getValue(getKey : String, getVal : String) {
+        guard: step = "getvalue" & getKey = k
+        transit:
+            value := getVal
+            step := "ok"
+    }
+
+    internal transition respondOk() {
+        guard: step = "ok"
+        return: GetResult { kind := "ok", value := value, ownerUrl := "" }
+    }
+
+    internal transition respondRedirect() {
+        guard: step = "redirect"
+        return: GetResult { kind := "redirect", value := "", ownerUrl := ownerUrl }
+    }
+
+    internal transition respondMissing() {
+        guard: step = "missing"
+        return: GetResult { kind := "missing", value := "", ownerUrl := "" }
+    }
+}
+
+/* Ownership directory as typed rows — RpcIn encodes the HTTP body. */
+procfun owners() : List<OwnerEntry> {
+    var step : String := "call"
+    var outEntries : List<OwnerEntry> := listOf<OwnerEntry>()
+
+    client transition ownersEntries(entries : List<OwnerEntry>) {
+        guard: step = "call"
+        transit:
+            step := "respond"
+            outEntries := entries
+    }
+
+    internal transition respond() {
+        guard: step = "respond"
+        return: outEntries
+    }
+}
+
+procfun keyCount() : Int {
+    var step : String := "call"
+    var outN : Int := 0
+
+    client transition keyCount(n : Int) {
+        guard: step = "call"
+        transit:
+            step := "respond"
+            outN := n
+    }
+
+    internal transition respond() {
+        guard: step = "respond"
+        return: outN
+    }
+}
+
+procfun applyClaim(k : String, owner : String) : Boolean {
+    var step : String := "call"
+
+    client transition applyClaim(claimKey : String, claimOwner : String) {
+        guard: step = "call" & claimKey = k & claimOwner = owner
+        transit: step := "done"
+    }
+
+    internal transition done() {
+        guard: step = "done"
+        return: true
+    }
+}
+
+procfun applyMoveBatch(owner : String, entries : List<KvPair>) : Boolean {
+    var step : String := "begin"
+    var idx : Int := 1
+    var curKey : String := ""
+    var curVal : String := ""
+
+    internal transition beginApply() {
+        guard: step = "begin"
+        transit:
+            idx := 1
+            step := if (length(entries) = 0) { "done" } else { "load" }
+    }
+
+    internal transition loadEntry() {
+        guard: step = "load" & idx <= length(entries)
+        transit:
+            curKey := entries[idx].k
+            curVal := entries[idx].v
+            step := "put"
+    }
+
+    client transition putFromMove(moveKey : String, moveVal : String, moveOwner : String) {
+        guard:
+            & step = "put"
+            & moveKey = curKey
+            & moveVal = curVal
+            & moveOwner = owner
+        transit:
+            let nextIdx : Int := idx + 1
+            idx := nextIdx
+            step := if (nextIdx > length(entries)) { "done" } else { "load" }
+    }
+
+    internal transition done() {
+        guard: step = "done"
+        return: true
+    }
+}

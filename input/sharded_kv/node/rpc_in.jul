@@ -6,8 +6,16 @@ import julay.funlib.length
 import julay.funlib.listOf
 import node.lib.fieldValue
 import node.lib.parseCfg
-import node.rpc_out.RpcOut
+import node.lib.PutResult
+import node.lib.GetResult
+import node.lib.KvPair
+import node.lib.OwnerEntry
+import node.shard.Shard
 
+/*
+ * Inbound HTTP adapters: parse request → Shard.*; encode results → response.
+ * No peer dials or ownership policy here.
+ */
 export api RpcIn {
     proc: ServerStarter
     calls: handleRpc, put, get, owners, claim, keyCount, moveBatch
@@ -22,9 +30,25 @@ static proc ServerStarter {
     }
 }
 
+fun parseKvBatch(entries : String) : List<KvPair> =
+    if (entries = "") {
+        listOf<KvPair>()
+    } else {
+        split(entries, ";").map(part -> KvPair {
+            k := split(part, "=")[1],
+            v := split(part, "=")[2]
+        })
+    }
+
+fun encodeOwnersBody(entries : List<OwnerEntry>) : String =
+    "owners=" + entries.fold("", (acc, e) ->
+        if (acc = "") {
+            e.k + "->" + e.owner
+        } else {
+            acc + "|" + e.k + "->" + e.owner
+        })
+
 procfun handleRpc(req : HttpServerRequest) : HttpServerResponse {
-    /* claim/keyCount/moveBatch: distinct from RpcOut.claim/keyCount/moveBatch
-     * (procfun names are compilation-global). */
     internal transition route() {
         return: when (req.path) {
             "kv/put" -> put(req)
@@ -43,19 +67,19 @@ procfun handleRpc(req : HttpServerRequest) : HttpServerResponse {
 
 procfun owners(req : HttpServerRequest) : HttpServerResponse {
     var step : String := "call"
-    var outBlob : String := ""
+    var entries : List<OwnerEntry> := listOf<OwnerEntry>()
 
-    client transition ownersBlob(blob : String) {
+    internal transition callDomain() {
         guard: step = "call"
         transit:
+            entries := Shard.owners()
             step := "respond"
-            outBlob := blob
     }
 
     internal transition respond() {
         guard: step = "respond"
         return: HttpServerResponse {
-            body := "owners=" + outBlob,
+            body := encodeOwnersBody(entries),
             code := 200
         }
     }
@@ -63,19 +87,19 @@ procfun owners(req : HttpServerRequest) : HttpServerResponse {
 
 procfun keyCount(req : HttpServerRequest) : HttpServerResponse {
     var step : String := "call"
-    var outN : Int := 0
+    var n : Int := 0
 
-    client transition keyCount(n : Int) {
+    internal transition callDomain() {
         guard: step = "call"
         transit:
+            n := Shard.keyCount()
             step := "respond"
-            outN := n
     }
 
     internal transition respond() {
         guard: step = "respond"
         return: HttpServerResponse {
-            body := "n=" + outN,
+            body := "n=" + n,
             code := 200
         }
     }
@@ -85,10 +109,13 @@ procfun claim(req : HttpServerRequest) : HttpServerResponse {
     const reqK : String := fieldValue(split(req.body, "|")[1])
     const reqOwner : String := fieldValue(split(req.body, "|")[2])
     var step : String := "call"
+    var ok : Boolean := false
 
-    client transition applyClaim(claimKey : String, claimOwner : String) {
-        guard: step = "call" & claimKey = reqK & claimOwner = reqOwner
-        transit: step := "respond"
+    internal transition callDomain() {
+        guard: step = "call"
+        transit:
+            ok := Shard.applyClaim(reqK, reqOwner)
+            step := "respond"
     }
 
     internal transition respond() {
@@ -102,54 +129,38 @@ procfun claim(req : HttpServerRequest) : HttpServerResponse {
 
 procfun get(req : HttpServerRequest) : HttpServerResponse {
     const reqK : String := fieldValue(split(req.body, "|")[1])
-    var step : String := "lookup"
-    var meUrl : String := ""
-    var ownerUrl : String := ""
-    var value : String := ""
-
-    client transition getMe(url : String) {
-        guard: step = "lookup"
-        transit:
-            meUrl := url
-            step := "owner"
+    var step : String := "call"
+    var result : GetResult := GetResult {
+        kind := "",
+        value := "",
+        ownerUrl := ""
     }
 
-    client transition ownerOf(ownKey : String, owner : String) {
-        guard: step = "owner" & ownKey = reqK
+    internal transition callDomain() {
+        guard: step = "call"
         transit:
-            ownerUrl := owner
-            step := if (owner = "") {
-                "missing"
-            } else {
-                if (owner = meUrl) { "getvalue" } else { "redirect" }
-            }
-    }
-
-    client transition getValue(getKey : String, getVal : String) {
-        guard: step = "getvalue" & getKey = reqK
-        transit:
-            value := getVal
-            step := "ok"
+            result := Shard.get(reqK)
+            step := "respond"
     }
 
     internal transition respondOk() {
-        guard: step = "ok"
+        guard: step = "respond" & result.kind = "ok"
         return: HttpServerResponse {
-            body := "v=" + value,
+            body := "v=" + result.value,
             code := 200
         }
     }
 
     internal transition respondRedirect() {
-        guard: step = "redirect"
+        guard: step = "respond" & result.kind = "redirect"
         return: HttpServerResponse {
-            body := "OWNER " + ownerUrl,
+            body := "OWNER " + result.ownerUrl,
             code := 303
         }
     }
 
     internal transition respondMissing() {
-        guard: step = "missing"
+        guard: step = "respond" & result.kind = "missing"
         return: HttpServerResponse {
             body := "MISSING",
             code := 404
@@ -157,177 +168,24 @@ procfun get(req : HttpServerRequest) : HttpServerResponse {
     }
 }
 
-/*
- * Put with optional single reshard before local write.
- * peerAt is reused for: scan peer key counts, broadcast move claims, broadcast new-key claim.
- */
 procfun put(req : HttpServerRequest) : HttpServerResponse {
     const reqK : String := fieldValue(split(req.body, "|")[1])
     const reqV : String := fieldValue(split(req.body, "|")[2])
-    var step : String := "lookup"
-    var meUrl : String := ""
-    var ownerUrl : String := ""
-    var myCount : Int := 0
-    var clusterSize : Int := 0
-    var peerIdx : Int := 1
-    var bestPeerUrl : String := ""
-    var bestPeerId : Int := 0
-    var bestPeerCount : Int := 0
-    var haveBest : Boolean := false
-    var doReshard : Boolean := false
-    var moveBatch : String := ""
-    var movedCount : Int := 0
-    var claimIdx : Int := 1
-    var claimKeys : List<String> := listOf()
-    var wasUnowned : Boolean := false
-    var phase : String := "scan"
-    var lastPeerCode : Int := 0
-
-    client transition getMe(url : String) {
-        guard: step = "lookup"
-        transit:
-            meUrl := url
-            step := "owner"
+    var step : String := "call"
+    var result : PutResult := PutResult {
+        kind := "",
+        ownerUrl := ""
     }
 
-    client transition ownerOf(ownKey : String, owner : String) {
-        guard: step = "owner" & ownKey = reqK
+    internal transition callDomain() {
+        guard: step = "call"
         transit:
-            ownerUrl := owner
-            wasUnowned := owner = ""
-            step := if (owner = "" | owner = meUrl) { "count" } else { "redirect" }
-    }
-
-    client transition keyCount(n : Int) {
-        guard: step = "count"
-        transit:
-            myCount := n
-            step := "clustersize"
-    }
-
-    client transition getClusterSize(n : Int) {
-        guard: step = "clustersize"
-        transit:
-            clusterSize := n
-            peerIdx := 1
-            haveBest := false
-            bestPeerCount := 0
-            phase := "scan"
-            step := "peers"
-    }
-
-    client transition peerAt(i : Int, url : String, id : Int) {
-        guard: step = "peers" & i = peerIdx & peerIdx <= clusterSize
-        transit:
-            let isSelf : Boolean := url = meUrl
-            let peerCount : Int := if (phase = "scan" & ~isSelf) {
-                RpcOut.keyCount(url)
-            } else {
-                0
-            }
-            let better : Boolean := phase = "scan" & ~isSelf & (
-                ~haveBest
-                | peerCount < bestPeerCount
-                | (peerCount = bestPeerCount & id < bestPeerId)
-            )
-            let claimTarget : String := if (phase = "broadcastMoves") {
-                bestPeerUrl
-            } else {
-                meUrl
-            }
-            let claimKey : String := if (phase = "broadcastMoves") {
-                claimKeys[claimIdx]
-            } else {
-                reqK
-            }
-            haveBest := if (better) { true } else { haveBest }
-            bestPeerUrl := if (better) { url } else { bestPeerUrl }
-            bestPeerId := if (better) { id } else { bestPeerId }
-            bestPeerCount := if (better) { peerCount } else { bestPeerCount }
-            lastPeerCode := if ((phase = "broadcastMoves" | phase = "broadcastClaim") & ~isSelf) {
-                RpcOut.claim(url, claimKey, claimTarget)
-            } else {
-                0
-            }
-            let nextPeerIdx : Int := peerIdx + 1
-            peerIdx := nextPeerIdx
-            step := if (nextPeerIdx > clusterSize) {
-                if (phase = "scan") {
-                    "decideReshard"
-                } else {
-                    if (phase = "broadcastMoves") {
-                        "nextClaimKey"
-                    } else {
-                        "done"
-                    }
-                }
-            } else {
-                "peers"
-            }
-    }
-
-    internal transition decideReshard() {
-        guard: step = "decideReshard"
-        transit:
-            let shouldReshard : Boolean := haveBest
-                & bestPeerCount < myCount / 2
-                & myCount - bestPeerCount >= 4
-            doReshard := shouldReshard
-            step := if (shouldReshard) { "export" } else { "put" }
-    }
-
-    client transition exportReshard(
-        excludeKey : String,
-        newOwner : String,
-        batch : String,
-        nMoved : Int
-    ) {
-        guard: step = "export" & excludeKey = reqK & newOwner = bestPeerUrl
-        transit:
-            moveBatch := batch
-            movedCount := nMoved
-            step := if (nMoved > 0) { "sendBatch" } else { "put" }
-    }
-
-    internal transition sendBatch() {
-        guard: step = "sendBatch"
-        transit:
-            lastPeerCode := RpcOut.moveBatch(bestPeerUrl, bestPeerUrl, moveBatch)
-            let keys : List<String> := if (moveBatch = "") {
-                listOf()
-            } else {
-                split(moveBatch, ";").map(entry -> split(entry, "=")[1])
-            }
-            claimKeys := keys
-            claimIdx := 1
-            peerIdx := 1
-            phase := "broadcastMoves"
-            step := if (length(keys) = 0) { "put" } else { "peers" }
-    }
-
-    internal transition nextClaimKey() {
-        guard: step = "nextClaimKey"
-        transit:
-            let nextClaim : Int := claimIdx + 1
-            claimIdx := nextClaim
-            peerIdx := 1
-            step := if (nextClaim > length(claimKeys)) {
-                "put"
-            } else {
-                "peers"
-            }
-    }
-
-    client transition putLocal(putKey : String, putVal : String) {
-        guard: step = "put" & putKey = reqK & putVal = reqV
-        transit:
-            peerIdx := 1
-            phase := "broadcastClaim"
-            step := if (wasUnowned) { "peers" } else { "done" }
+            result := Shard.put(reqK, reqV)
+            step := "respond"
     }
 
     internal transition respondOk() {
-        guard: step = "done"
+        guard: step = "respond" & result.kind = "ok"
         return: HttpServerResponse {
             body := "ok",
             code := 200
@@ -335,59 +193,34 @@ procfun put(req : HttpServerRequest) : HttpServerResponse {
     }
 
     internal transition respondRedirect() {
-        guard: step = "redirect"
+        guard: step = "respond" & result.kind = "redirect"
         return: HttpServerResponse {
-            body := "OWNER " + ownerUrl,
+            body := "OWNER " + result.ownerUrl,
             code := 303
         }
     }
 }
 
 procfun moveBatch(req : HttpServerRequest) : HttpServerResponse {
-    /* body: <ownerUrl>|<k=v;k=v;...>
-     * Parse the current entry into curKey/curVal before putFromMove — Go evaluates
-     * client arg bindings before guards, so split(parts[idx], ...) in the putFromMove
-     * guard would panic while step is still "begin" and parts is empty.
-     */
+    /* body: <ownerUrl>|<k=v;k=v;...> */
     const reqOwner : String := split(req.body, "|")[1]
-    const entries : String := if (length(split(req.body, "|")) < 2) { "" } else { split(req.body, "|")[2] }
-    var step : String := "begin"
-    var parts : List<String> := listOf()
-    var idx : Int := 1
-    var curKey : String := ""
-    var curVal : String := ""
-
-    internal transition beginApply() {
-        guard: step = "begin"
-        transit:
-            let parsed : List<String> := if (entries = "") { listOf() } else { split(entries, ";") }
-            parts := parsed
-            idx := 1
-            step := if (length(parsed) = 0) { "done" } else { "load" }
+    const entriesRaw : String := if (length(split(req.body, "|")) < 2) {
+        ""
+    } else {
+        split(req.body, "|")[2]
     }
+    var step : String := "call"
+    var ok : Boolean := false
 
-    internal transition loadEntry() {
-        guard: step = "load" & idx <= length(parts)
+    internal transition callDomain() {
+        guard: step = "call"
         transit:
-            curKey := split(parts[idx], "=")[1]
-            curVal := split(parts[idx], "=")[2]
-            step := "put"
-    }
-
-    client transition putFromMove(moveKey : String, moveVal : String, moveOwner : String) {
-        guard:
-            & step = "put"
-            & moveKey = curKey
-            & moveVal = curVal
-            & moveOwner = reqOwner
-        transit:
-            let nextIdx : Int := idx + 1
-            idx := nextIdx
-            step := if (nextIdx > length(parts)) { "done" } else { "load" }
+            ok := Shard.applyMoveBatch(reqOwner, parseKvBatch(entriesRaw))
+            step := "respond"
     }
 
     internal transition respond() {
-        guard: step = "done"
+        guard: step = "respond"
         return: HttpServerResponse {
             body := "ok",
             code := 200

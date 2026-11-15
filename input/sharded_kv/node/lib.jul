@@ -16,6 +16,35 @@ export type CfgPair {
     cluster : List<Node>
 }
 
+export type KvPair {
+    k : String
+    v : String
+}
+
+export type OwnerEntry {
+    k : String
+    owner : String
+}
+
+/* Domain results — RpcIn encodes these to HTTP. */
+export type PutResult {
+    kind : String
+    ownerUrl : String
+}
+
+export type GetResult {
+    kind : String
+    value : String
+    ownerUrl : String
+}
+
+export type PeerPick {
+    haveBest : Boolean
+    url : String
+    id : Int
+    count : Int
+}
+
 export fun isBlankOrComment(line : String) : Boolean =
     line = "" | startsWith(line, "#")
 

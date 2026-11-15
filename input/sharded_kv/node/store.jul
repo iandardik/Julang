@@ -4,24 +4,20 @@ import julay.funlib.listOf
 import julay.funlib.setOf
 import julay.funlib.mapOf
 import julay.funlib.splice
-import julay.funlib.split
 import node.lib.Node
 import node.lib.CfgPair
+import node.lib.KvPair
+import node.lib.OwnerEntry
 import node.lib.parseCfg
 
 export fun reshardMoveCount(store : Map<String, String>, excludeKey : String) : Int =
     length(store.keys.filter(x -> x ~= excludeKey).toList()) / 4
 
-export fun reshardBatch(store : Map<String, String>, excludeKey : String) : String =
+export fun reshardEntries(store : Map<String, String>, excludeKey : String) : List<KvPair> =
     let (candidates : List<String> := store.keys.filter(x -> x ~= excludeKey).toList())
     let (limit : Int := length(candidates) / 4)
     let (taken : List<String> := splice(candidates, 1, limit)) {
-        taken.fold("", (acc, key) ->
-            if (acc = "") {
-                key + "=" + store[key]
-            } else {
-                acc + ";" + key + "=" + store[key]
-            })
+        taken.map(key -> KvPair { k := key, v := store[key] })
     }
 
 /*
@@ -92,28 +88,22 @@ export static proc Store {
     }
 
     /*
-     * Client binds excludeKey + newOwner; hub replies with batch + nMoved.
-     * batch format: k1=v1;k2=v2;...
+     * Client binds excludeKey + newOwner; hub replies with entries + nMoved.
      * Drop moved keys from store; point local owners at newOwner (claim broadcast skips self).
      */
     service transition exportReshard(
         excludeKey : String,
         newOwner : String,
-        batch : String,
+        entries : List<KvPair>,
         nMoved : Int
     ) {
         guard:
             & nMoved = reshardMoveCount(store, excludeKey)
-            & batch = reshardBatch(store, excludeKey)
+            & entries = reshardEntries(store, excludeKey)
         transit:
-            /* Remove exactly the keys named in `batch` (same value as the guard).
+            /* Remove exactly the keys named in `entries` (same value as the guard).
              * Do not re-sample store.keys — map iteration order is not stable across calls. */
-            let takenList : List<String> := if (batch = "") {
-                listOf()
-            } else {
-                split(batch, ";").map(entry -> split(entry, "=")[1])
-            }
-            let takenSet : Set<String> := takenList.toSet()
+            let takenSet : Set<String> := entries.map(e -> e.k).toSet()
             let ownerKeys : Set<String> := owners.keys.filter(x -> x ~in takenSet) + takenSet
             store := store.keys.filter(x -> x ~in takenSet).associateWith(x -> store[x])
             owners := ownerKeys.associateWith(k ->
@@ -127,13 +117,12 @@ export static proc Store {
             owners[moveKey] := moveOwner
     }
 
-    service transition ownersBlob(blob : String) {
+    /* Client receives typed ownership rows; RpcIn encodes the HTTP body. */
+    service transition ownersEntries(entries : List<OwnerEntry>) {
         guard:
-            blob = owners.keys.toList().fold("", (acc, key) ->
-                if (acc = "") {
-                    key + "->" + owners[key]
-                } else {
-                    acc + "|" + key + "->" + owners[key]
-                })
+            entries = owners.keys.toList().map(key -> OwnerEntry {
+                k := key,
+                owner := owners[key]
+            })
     }
 }

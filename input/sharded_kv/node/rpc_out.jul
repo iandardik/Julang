@@ -1,22 +1,30 @@
 import julay.funlib.httpRequest
 import julay.funlib.parseInt
 import node.lib.fieldValue
+import node.lib.KvPair
 
 /*
- * Outbound peer RPCs for ShardNode. Thin wrappers over httpRequest —
- * no worker pool (unlike Raft RpcOut); handlers call these sequentially.
+ * Outbound peer RPCs for ShardNode. Encode typed args → HTTP bodies,
+ * dial, decode response bodies → typed returns. No worker pool.
  */
 export api RpcOut {
     proc: RpcOutIdle
     calls: keyCount, claim, moveBatch
 }
 
-/* Resident placeholder so RpcOut can be composed; work lives in calls. */
 static proc RpcOutIdle {
     constructor initially(args : List<String>) {
         transit:
     }
 }
+
+fun encodeKvBatch(entries : List<KvPair>) : String =
+    entries.fold("", (acc, e) ->
+        if (acc = "") {
+            e.k + "=" + e.v
+        } else {
+            acc + ";" + e.k + "=" + e.v
+        })
 
 procfun keyCount(peerUrl : String) : Int {
     internal transition go() {
@@ -38,12 +46,12 @@ procfun claim(peerUrl : String, key : String, owner : String) : Int {
     }
 }
 
-procfun moveBatch(peerUrl : String, ownerUrl : String, batch : String) : Int {
+procfun moveBatch(peerUrl : String, ownerUrl : String, entries : List<KvPair>) : Int {
     internal transition go() {
         return: httpRequest(HttpClientRequest {
             url := peerUrl + "/rpc/moveBatch",
             method := "POST",
-            body := ownerUrl + "|" + batch
+            body := ownerUrl + "|" + encodeKvBatch(entries)
         }).code
     }
 }

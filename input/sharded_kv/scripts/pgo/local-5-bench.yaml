@@ -1,0 +1,49 @@
+# Localhost PGo raftkvs (in-memory, 5 servers, 1 client).
+numServers: 5
+numClients: 1
+
+debug: false
+persist: false
+
+clientRequestTimeout: 2s
+
+fd:
+  pullInterval: 200ms
+  timeout: 100ms
+
+mailboxes:
+  receiveChanSize: 10000
+  dialTimeout: 50ms
+  readTimeout: 50ms
+  writeTimeout: 50ms
+
+leaderElection:
+  timeout: 150ms
+  timeoutOffset: 150ms
+
+appendEntriesSendInterval: 2ms
+
+sharedResourceTimeout: 3ms
+
+inputChanReadTimeout: 5ms
+
+servers:
+  1:
+    mailboxAddr: "127.0.0.1:8101"
+    monitorAddr: "127.0.0.1:9101"
+  2:
+    mailboxAddr: "127.0.0.1:8102"
+    monitorAddr: "127.0.0.1:9102"
+  3:
+    mailboxAddr: "127.0.0.1:8103"
+    monitorAddr: "127.0.0.1:9103"
+  4:
+    mailboxAddr: "127.0.0.1:8104"
+    monitorAddr: "127.0.0.1:9104"
+  5:
+    mailboxAddr: "127.0.0.1:8105"
+    monitorAddr: "127.0.0.1:9105"
+
+clients:
+  1:
+    mailboxAddr: "127.0.0.1:8119"
