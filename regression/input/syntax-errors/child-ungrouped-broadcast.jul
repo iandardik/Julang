@@ -1,0 +1,26 @@
+/*
+ * Flat multi-parent reuse: two BroadcastClaim leaves and two parents that both
+ * offer broadcastClaim — ambiguous without nesting (Put || BC) || (AMB || BC).
+ */
+proc Put {
+    constructor put() {}
+    transition broadcastClaim() {}
+    transition broadcastDone() {}
+    return putDone() {}
+}
+
+proc ApplyMoveBatch {
+    constructor moveBatch() {}
+    transition broadcastClaim() {}
+    transition broadcastDone() {}
+    return moveApplied() {}
+}
+
+proc BroadcastClaim {
+    constructor broadcastClaim() {}
+    return broadcastDone() {}
+}
+
+proc Sys := Put || ApplyMoveBatch || BroadcastClaim || BroadcastClaim
+
+compile Sys

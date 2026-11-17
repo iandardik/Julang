@@ -111,7 +111,7 @@ class CheckJulFileTest {
                 constructor initially(args : List<String>) { transit: }
                 service transition bump() { transit: }
             }
-            proc P := Host || Worker || Helper<Host> || Core
+            proc P := Host || Worker || Helper || Core
             """.trimIndent(),
         )
 

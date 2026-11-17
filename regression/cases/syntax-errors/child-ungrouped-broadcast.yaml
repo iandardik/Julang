@@ -1,0 +1,4 @@
+source: regression/input/syntax-errors/child-ungrouped-broadcast.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "dynamic-to-dynamic"

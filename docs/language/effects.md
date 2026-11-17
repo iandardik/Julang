@@ -3,7 +3,7 @@
 In Julay, side effects are not ambient language primitives. They come from:
 
 1. **Builtins** for HTTP serving and timers — `serveHttp`, `setTimer`, `cancelTimer` (import as `julay.funlib.<name>`).
-2. **Library functions** that perform effects — for example `println()`, `readln()`, `exitProgram(code)`, and outbound HTTP via `doHttpRequest` (or the stdlib `proc HttpRequest` bound as `HttpRequest<Parent>`). Call funlib from action bodies (`before:` / `after:` for void effects; `transit:` RHS for value-returning IO).
+2. **Library functions** that perform effects — for example `println()`, `readln()`, `exitProgram(code)`, and outbound HTTP via `doHttpRequest` (or the stdlib `proc HttpRequest` nested as `Parent || HttpRequest`). Call funlib from action bodies (`before:` / `after:` for void effects; `transit:` RHS for value-returning IO).
 
 Which functions are effectful is listed in [Standard library](standard-library.md). There is no `julay.proclib`; former `HttpServer` / `Timer` library procs are replaced by the builtins below.
 
@@ -11,7 +11,7 @@ Which functions are effectful is listed in [Standard library](standard-library.m
 
 | Builtin | Role | Notes |
 |---------|------|--------|
-| `serveHttp(port, Class.ctor ~> Class.action)` | Start an HTTP server; constructs `Class` per request via `ctor`, takes the response when `action` fires | Typically in a static starter’s `after:` — see [Parent-bound procs](children.md#http-handlers) |
+| `serveHttp(port, Class.ctor ~> Class.action)` | Start an HTTP server; constructs `Class` per request via `ctor`, takes the response when `action` fires | Typically in a static starter’s `after:` — see [Parent/child inference](children.md#http-handlers) |
 | `setTimer(name, ms)` | Arm a named timer; `name` must match a `timer transition` | Allowed in constructor `after:` |
 | `cancelTimer(name)` | Cancel a named timer | **Transition-only** (`before:` / `after:`) |
 
@@ -81,7 +81,7 @@ internal transition step() {
 
 `after:` is the former `effect:` clause (renamed).
 
-Dynamic procs terminate with a named **`return`** action (not `exitProc`, which is removed). See [Parent-bound procs](children.md#returns).
+Dynamic procs terminate with a named **`return`** action (not `exitProc`, which is removed). See [Parent/child inference](children.md#returns).
 
 ### IO in `transit:`
 

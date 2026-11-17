@@ -13,6 +13,7 @@ proc Worker {
     return done() {}
 }
 
-proc Sys := Boss || Other || Worker<Boss>
+/* Worker.start meets Other → parent Other; Worker.done meets Boss → conflicting parent. */
+proc Sys := Boss || Other || Worker
 
 compile Sys

@@ -60,6 +60,6 @@ static proc Main {
     }
 }
 
-proc CountUpMain := Main || CountUp<Main>
+proc CountUpMain := Main || CountUp
 
 compile CountUpMain

@@ -14,9 +14,16 @@ import node.shard.FindLightestPeer
 import node.shard.BroadcastClaim
 import node.shard.ReshardToPeer
 
-export proc ShardNode := Store || ServerStarter || HandleRpc
-    || Put<HandleRpc> || Get<HandleRpc> || Owners<HandleRpc> || KeyCount<HandleRpc>
-    || ApplyClaim<HandleRpc> || ApplyMoveBatch<HandleRpc>
-    || FindLightestPeer<Put> || BroadcastClaim<Put> || BroadcastClaim<ApplyMoveBatch>
-    || ReshardToPeer<Put>
-    || SendClaim<BroadcastClaim> || SendMoveBatch<ReshardToPeer> || SendKeyCount<FindLightestPeer>
+/*
+ * Parent↔child edges are inferred from nested || (ctor/return orientation).
+ * Outer SendClaim meets every still-external BroadcastClaim.goClaim.
+ */
+export proc ShardNode := Store || ServerStarter || (
+    HandleRpc
+    || (Put
+        || (FindLightestPeer || SendKeyCount)
+        || BroadcastClaim
+        || (ReshardToPeer || SendMoveBatch))
+    || Get || Owners || KeyCount || ApplyClaim
+    || (ApplyMoveBatch || BroadcastClaim)
+) || SendClaim

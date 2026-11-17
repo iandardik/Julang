@@ -442,11 +442,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 val parts = qn.parts()
                 ValueProcExprNode(parts.last(), parts, sourceLocation(ctx))
             }
-            ctx.LT() != null -> {
-                val ids = ctx.ID()
-                ChildBindingProcExprNode(ids[0].text, ids[1].text, sourceLocation(ctx))
-            }
-            else -> ValueProcExprNode(ctx.ID(0).text, null, sourceLocation(ctx))
+            else -> ValueProcExprNode(ctx.ID().text, null, sourceLocation(ctx))
         }
     }
 
@@ -953,12 +949,8 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 val parts = qn.parts()
                 ValueProcExprNode(parts.last(), parts, sourceLocation(ctx))
             }
-            ctx.LT() != null -> {
-                val ids = ctx.ID()
-                ChildBindingProcExprNode(ids[0].text, ids[1].text, sourceLocation(ctx))
-            }
-            ctx.ID() != null && ctx.ID().isNotEmpty() -> {
-                ValueProcExprNode(ctx.ID(0).text, null, sourceLocation(ctx))
+            ctx.ID() != null -> {
+                ValueProcExprNode(ctx.ID().text, null, sourceLocation(ctx))
             }
             else -> {
                 val compositeProcs = ctx.proc_expr().map { visit(it) }

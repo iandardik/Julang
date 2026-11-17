@@ -1,8 +1,8 @@
 import julay.funlib.doHttpRequest
 
 /*
- * Outbound HTTP as a child: the parent spawns it with httpRequest(req) and
- * receives the response through httpResponse(resp). Bind it as HttpRequest<Parent>.
+ * Outbound HTTP as a child: nest under the parent with `Parent || HttpRequest`
+ * (parenthood inferred from httpRequest ctor / httpResponse return sync).
  */
 export proc HttpRequest {
     var request : HttpClientRequest

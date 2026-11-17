@@ -37,7 +37,7 @@ Compact cheat sheet. For explanations, use the other chapters.
 import Module.Path
 proc Name { ... }
 static proc Name { ... }
-proc Name := Expr                          // may include Child<Parent>
+proc Name := Expr                          // nest children with || (parent inferred)
 type Name { ... }                           // record
 type Name := TypeExpr                       // typedef
 type Name                                   // uninterpreted
@@ -57,7 +57,7 @@ spec Name := System[v : T] { DynProc := { … } } // dynamic-proc slot model
 compile Name1, Name2, ...
 ```
 
-System atoms: `Name[v : T]` **creates** an index (lifts state); `{ const global x }` / `{ global y }` on create-index leave those vars scalar in TLA+ (`const global` also freezes them; does not affect the native binary). Inside `with`, only `Name[v]` **applies** a shared binder. Shorthand `(A || B)[n : T]` desugars to create-temps + `with` + applies — see [Specifications](specifications.md#indexes-create-with-and-apply). Child bindings: `Child<Parent>` in `||` / system expressions — see [Parent-bound procs](children.md).
+System atoms: `Name[v : T]` **creates** an index (lifts state); `{ const global x }` / `{ global y }` on create-index leave those vars scalar in TLA+ (`const global` also freezes them; does not affect the native binary). Inside `with`, only `Name[v]` **applies** a shared binder. Shorthand `(A || B)[n : T]` desugars to create-temps + `with` + applies — see [Specifications](specifications.md#indexes-create-with-and-apply). Parent/child edges are inferred from nested `||` — see [Parent/child inference](children.md).
 
 Leaf-spec actions: `transition name(args) also (aux : T) { … }` (leaf specs only). Bodies may read peer state `P.var` / `P[idx].var` (compile checks composition + indexing).
 
@@ -74,7 +74,7 @@ Pure / expression helpers: `length` · `max` · `min` · `parseInt` · `startsWi
 
 Effectful: `serveHttp` · `doHttpRequest` · `setTimer` · `cancelTimer` · `println` · `readln` · `readFile` · `exitProgram(code)` · `delaySeconds` · `delayMillis`  
 (`cancelTimer`: transitions only; `setTimer` / `serveHttp` also OK in constructor `after:`)  
-(`serveHttp(port, Class.ctor ~> Class.action)` — see [Parent-bound procs](children.md#http-handlers))
+(`serveHttp(port, Class.ctor ~> Class.action)` — see [Parent/child inference](children.md#http-handlers))
 
 Full tables: [Standard library](standard-library.md). Calling conventions: [Side effects](effects.md).
 

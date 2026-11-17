@@ -45,6 +45,6 @@ static proc Boss {
     }
 }
 
-export proc BossWorker := Boss || Worker<Boss>
+export proc BossWorker := Boss || Worker
 
 compile BossWorker

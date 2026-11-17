@@ -118,17 +118,6 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
                     withScopeId = withScopeId,
                 )
             }
-            is ChildBindingProcExprNode -> {
-                val name = n.childName()
-                out += SpecLeaf(
-                    name = name,
-                    occurrenceId = freshSpecOccurrenceId(name),
-                    introducingAssembly = intro.ifEmpty { name },
-                    tlaName = name,
-                    withScopeId = withScopeId,
-                    parentClass = n.parentName(),
-                )
-            }
             is WithSpecExprNode -> {
                 val scopeId = freshWithScopeId()
                 val binders = withBinders + (n.withBinderName() to n.withBinderType())
@@ -268,6 +257,7 @@ fun expandLeavesToPclasses(
     procAliases: Map<String, ProcNode>,
     specAliases: Map<String, SpecNode> = emptyMap(),
     leafSpecs: Map<String, LeafSpecNode> = emptyMap(),
+    alphabet: CompositionAlphabetResult? = null,
 ): List<SpecLeaf> {
     val out = mutableListOf<SpecLeaf>()
     val visiting = mutableSetOf<String>()
@@ -343,9 +333,9 @@ fun expandLeavesToPclasses(
         }
     }
     leaves.forEach { expand(it) }
-    return assignTlaLeafNames(
-        out.map { leaf -> if (leaf.name in leafSpecs) leaf else withDynProcSlot(leaf, pclasses[leaf.name]) },
-    )
+    val withSlots = out.map { leaf -> if (leaf.name in leafSpecs) leaf else withDynProcSlot(leaf, pclasses[leaf.name]) }
+    val withParents = if (alphabet != null) applyInferredParents(withSlots, alphabet) else withSlots
+    return assignTlaLeafNames(withParents)
 }
 
 /** Give a dynamic proc leaf its `DynProc` slot: `X[i]` unindexed, `X[n][i]` under a create-index. */

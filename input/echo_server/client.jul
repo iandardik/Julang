@@ -74,4 +74,4 @@ proc ClientLogic {
     }
 }
 
-export proc Client := ClientDispatcher || ClientLogic || HttpRequest<ClientLogic>
+export proc Client := ClientDispatcher || (ClientLogic || HttpRequest)

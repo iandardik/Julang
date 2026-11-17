@@ -1,14 +1,19 @@
-static proc Boss {
-    constructor initially(args : List<String>) {}
-    transition start() {}
-    transition done() {}
+/*
+ * Two dynamics offer the same non-ctor action with no orientation — illegal.
+ * (Replaces the old "B<A> without A in composition" case.)
+ */
+proc Put {
+    constructor put() {}
+    transition broadcastClaim() {}
+    return putDone() {}
 }
 
-proc Worker {
-    constructor start() {}
-    return done() {}
+proc ApplyMoveBatch {
+    constructor moveBatch() {}
+    transition broadcastClaim() {}
+    return moveApplied() {}
 }
 
-proc Sys := Worker<Boss>
+proc Sys := Put || ApplyMoveBatch
 
 compile Sys

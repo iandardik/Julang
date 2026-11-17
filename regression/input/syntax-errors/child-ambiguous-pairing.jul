@@ -15,6 +15,6 @@ proc WB {
     return done() {}
 }
 
-proc Sys := Boss || WA<Boss> || WB<Boss>
+proc Sys := Boss || WA || WB
 
 compile Sys

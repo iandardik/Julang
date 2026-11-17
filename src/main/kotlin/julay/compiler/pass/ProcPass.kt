@@ -15,7 +15,6 @@ fun ASTNode.procPass(): List<ProcDecl> = when (this) {
     }
     is ParamProcExprNode -> paramBody().procPass()
     is ValueProcExprNode -> listOf(ProcDecl(valueProcName(), listOf(), ProcDeclType.Proc))
-    is ChildBindingProcExprNode -> listOf(ProcDecl(childName(), listOf(), ProcDeclType.Proc, parentClass = parentName()))
     is CompositeProcExprNode -> children.flatMap { it.procPass() }
     else -> children.flatMap { it.procPass() }
 }
@@ -45,17 +44,6 @@ fun ASTNode.resolvedProcPass(unit: CompilationUnit): List<ProcDecl> = when (this
         )
         val flatName = resolved?.flatName ?: valueProcName()
         listOf(ProcDecl(flatName, listOf(), ProcDeclType.Proc))
-    }
-    is ChildBindingProcExprNode -> {
-        fun flat(name: String): String = resolveProcLeaf(
-            ValueProcExprNode(name, null, programLocation()),
-            unit.entryDeclNames,
-            unit.allPClassNames,
-            unit.allProcNames,
-            unit.importTable,
-            unit.moduleSymbols,
-        ).first?.flatName ?: name
-        listOf(ProcDecl(flat(childName()), listOf(), ProcDeclType.Proc, parentClass = flat(parentName())))
     }
     is CompositeProcExprNode -> children.flatMap { it.resolvedProcPass(unit) }
     else -> children.flatMap { it.resolvedProcPass(unit) }

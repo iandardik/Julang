@@ -1,6 +1,6 @@
-# Parent-bound procs (`B<A>`)
+# Parent/child inference
 
-Any dynamic proc may be given a parent at composition time with `B<A>`. Dynamic–dynamic synchronization is allowed only between a bound child occurrence and its parent (in both directions). This replaces the old `procfun` / `api` / expression-call model: request/response is an ordinary dynamic proc with a constructor (request) and a `return` action (reply).
+Parenthood is **inferred** at each binary `||` step. There is no `Child<Parent>` or `parentof` syntax: nesting *is* the binding. Dynamic–dynamic synchronization is allowed only between an inferred child occurrence and its parent (in both directions). This replaces the old `procfun` / `api` / expression-call model: request/response is an ordinary dynamic proc with a constructor (request) and a `return` action (reply).
 
 ## Declaring a dynamic proc
 
@@ -23,12 +23,11 @@ proc Worker {
 }
 ```
 
-- The declaration never names the parent. Parenthood is a property of the composition: `Worker<Boss>`.
-- Only dynamic procs may be bound as `B<A>` (static procs cannot).
+- The declaration never names the parent. Parenthood comes from who the child syncs with under `||`.
 - Dynamic procs have no `constructor initially`. They exist only by being spawned.
 - Every dynamic proc must have at least one `return` action. Static procs may have none.
 
-## Binding the parent
+## Inferring the parent
 
 ```jul
 static proc Boss {
@@ -38,17 +37,30 @@ static proc Boss {
     transition done(y : Int) { transit: last := y }
 }
 
-proc Sys := Boss || Worker<Boss>
+proc Sys := Boss || Worker
 ```
 
-A bare dynamic (`Boss || Worker`) is also legal: it has no parent link, so it may sync with statics (and act as a parent for others) but not dyn↔dyn with an unrelated dynamic.
+At the compose step where `start` / `done` meet, the compiler orients the edge:
 
-Rules for `B<A>`:
+1. **Constructor** on exactly one class → that class is the **child**; the peer is the **parent**.
+2. Else **return** on exactly one class → that class is the **child**.
+3. Else reuse a parent already inferred for that occurrence.
+4. Constructor↔constructor, or ≥2 dynamics with no orientation → **error**.
 
-- Intermediate compositions may be open: `proc D := Worker<Boss> || Other` is legal. A later `D || Boss` closes it.
-- Each **compiled program** (each proc/spec that produces an artifact) must have every `B<A>` parent present as a leaf class in its flattened composition.
-- One class may bind to several parents: `BroadcastClaim<Put> || BroadcastClaim<ApplyMoveBatch>`. Each binding is a separate occurrence (TLA leaves `BroadcastClaim_Put`, `BroadcastClaim_ApplyMoveBatch`).
-- `C<B>` names the **class** `B` and covers every occurrence of it. There is no nested `C<B<A>>` syntax. Each `C` instance still links to the specific `B` instance that spawned it.
+Nesting disambiguates multi-parent reuse:
+
+```jul
+(Put || BroadcastClaim) || (ApplyMoveBatch || BroadcastClaim)
+```
+
+Each `BroadcastClaim` seals `broadcastClaim` / `broadcastDone` with its own parent; the two leaves never compete. A later `SendClaim` can still meet every still-external `BroadcastClaim` action (covers-all occurrences of the parent class).
+
+Rules:
+
+- Open intermediate assemblies are fine; edges form when the child meets its parent under `||`.
+- Each **compiled program** must include every inferred parent class as a leaf in its flattened composition.
+- Same class under several parents → separate occurrences (TLA leaves `BroadcastClaim_Put`, `BroadcastClaim_ApplyMoveBatch`).
+- A child of class `B` that syncs with class `C` covers **every** open occurrence of `C` at that step.
 
 ## Returns
 
@@ -70,11 +82,11 @@ internal return finish() {
 
 ## Dynamic–dynamic sync
 
-Only between a parent-bound occurrence and its parent:
+Only between an inferred child occurrence and its parent:
 
 - Parent action ↔ child constructor (spawn).
 - Parent action ↔ child transition / return.
-- A bound child may still sync with **static** procs.
+- A child may still sync with **static** procs.
 - Unbound dynamics sync with statics and with their own children only.
 - Compile error if one parent action could pair with two different child classes (or a child class and a non-child partner).
 

@@ -1,4 +1,4 @@
 source: regression/input/syntax-errors/child-parent-missing.jul
 expectCompileFailure: true
 expectCompileOutputContains:
-  - "requires its parent"
+  - "dynamic-to-dynamic"

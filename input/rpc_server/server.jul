@@ -8,7 +8,7 @@ import lib.fieldValue
  * HandleRpc routes by path and spawns one child per RPC; the child syncs with
  * Protocol and returns its result to HandleRpc, which then returns the response.
  */
-export proc RpcIn := ServerInitializer || HandleRpc || IncrementRpc<HandleRpc> || GetRpc<HandleRpc> || AddRpc<HandleRpc>
+export proc RpcIn := ServerInitializer || (HandleRpc || IncrementRpc || GetRpc || AddRpc)
 
 static proc ServerInitializer {
     constructor initially(args : List<String>) {

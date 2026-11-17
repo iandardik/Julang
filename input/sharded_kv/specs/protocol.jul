@@ -16,9 +16,9 @@ import specs.net.Key
  * Put (HandleRpc in the JAR); PerfectNet delivers peer messages (RpcIn in the JAR)
  * and carries the go* sends (RpcOut children in the JAR).
  */
-spec VerifNode := Store || Put<ClientEnv> || KeyCount<PerfectNet> || ApplyClaim<PerfectNet>
-    || ApplyMoveBatch<PerfectNet> || FindLightestPeer<Put> || BroadcastClaim<Put>
-    || BroadcastClaim<ApplyMoveBatch> || ReshardToPeer<Put>
+spec VerifNode := Store
+    || (ClientEnv || (Put || FindLightestPeer || BroadcastClaim || ReshardToPeer))
+    || (PerfectNet || KeyCount || ApplyClaim || (ApplyMoveBatch || BroadcastClaim))
 
 spec NodeIndexed := VerifNode[n : NodeSet] {
     NodeSet := { "n1", "n2", "n3" }

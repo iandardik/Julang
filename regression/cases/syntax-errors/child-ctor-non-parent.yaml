@@ -1,4 +1,4 @@
 source: regression/input/syntax-errors/child-ctor-non-parent.jul
 expectCompileFailure: true
 expectCompileOutputContains:
-  - "may only sync with its parent"
+  - "cannot have parent"

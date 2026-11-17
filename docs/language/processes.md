@@ -27,7 +27,7 @@ static proc Counter {
 | Kind | Role |
 |------|------|
 | **`static proc`** | At most one occurrence in a composition. Exactly one constructor, named `initially`. Cannot be spawned. May not have `return` actions. Typical **`service` hub**. |
-| **`proc`** (dynamic) | Exists only by being spawned (no `initially`). Must have at least one `return` action. Syncs with statics; may be parent-bound as `B<A>` for dyn↔dyn sync with that parent. See [Parent-bound procs](children.md). |
+| **`proc`** (dynamic) | Exists only by being spawned (no `initially`). Must have at least one `return` action. Syncs with statics; dyn↔dyn only with an inferred parent under nested `||`. See [Parent/child inference](children.md). |
 
 You can also name a composed system:
 

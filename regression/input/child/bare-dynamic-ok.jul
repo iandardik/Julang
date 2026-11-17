@@ -2,7 +2,7 @@ import julay.funlib.exitProgram
 import julay.funlib.println
 
 /*
- * Bare dynamic (no B<A>) is legal: Worker syncs with static Boss as a hub peer.
+ * Bare dynamic is legal: Worker syncs with static Boss as a hub peer (parent inferred).
  */
 proc Worker {
     var acc : Int

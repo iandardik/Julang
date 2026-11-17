@@ -1,0 +1,4 @@
+source: regression/input/syntax-errors/child-sibling-parents.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "dynamic-to-dynamic"

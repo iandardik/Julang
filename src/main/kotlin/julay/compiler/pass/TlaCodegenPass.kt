@@ -88,12 +88,18 @@ fun tlaCodegenPass(
         .associateBy { it.name() }
 
     val compositionLeaves = compositionLeavesOfSpec(spec)
+    val procDecls = unit.modules.flatMap { it.root.resolvedProcPass(unit) }
+    val program = procDecls.firstOrNull { it.name == moduleName }
+        ?: ProcDecl(moduleName, compositionLeaves.map { ProcDecl(it.name, emptyList(), ProcDeclType.Proc) }, ProcDeclType.Spec)
+    val leafMap = leafActionMap(ast, program.allProcNames(procDecls).toSet(), emptySet())
+    val alphabet = computeCompositionAlphabet(program, procDecls, leafMap)
     val leaves = expandLeavesToPclasses(
         compositionLeaves,
         pclassNodes,
         procAliases,
         specAliases,
         leafSpecNodes,
+        alphabet = alphabet,
     )
 
     val recordNames = unit.modules.flatMap { m ->

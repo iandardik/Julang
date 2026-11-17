@@ -2581,18 +2581,6 @@ class ValueProcExprNode(
     }
 }
 
-/** Composition binding `Child<Parent>` — parent is named here, not in the child decl. */
-class ChildBindingProcExprNode(
-    private val childName: String,
-    private val parentName: String,
-    private val loc: ProgramLoc,
-) : ASTNode(listOf()) {
-    override fun programLocation() = loc
-    internal fun childName() = childName
-    internal fun parentName() = parentName
-    override fun toString(): String = "$childName<$parentName>"
-}
-
 /** HTTP handler reference `Class.ctor ~> Class.action`. */
 class HandlerRefExprNode(
     private val className: String,

@@ -72,7 +72,8 @@ wait_listen() {
 key_count() {
   local url="$1"
   local body
-  body="$(curl -sf -X POST --data-binary '' "$url/rpc/keyCount")"
+  # HandleRpc.keyCount binds fromUrl via bodyField(body, 1); empty body panics.
+  body="$(curl -sf -X POST --data-binary 'from=probe' "$url/rpc/keyCount")"
   echo "$body" | sed -E 's/^n=([0-9]+).*/\1/'
 }
 

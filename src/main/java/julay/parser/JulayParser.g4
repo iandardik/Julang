@@ -146,7 +146,6 @@ system_primary
 
 system_leaf
     : qualified_name
-    | ID LT ID GT
     | ID
     ;
 
@@ -303,7 +302,6 @@ when_pattern
 
 proc_expr
     : qualified_name
-    | ID LT ID GT
     | ID
     | LPAREN proc_expr RPAREN
     | proc_expr PARALLEL proc_expr

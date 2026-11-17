@@ -76,40 +76,6 @@ private fun validateProcExprsInNode(
             val (_, error) = ctx.resolve(node)
             return if (error != null) listOf(error) else emptyList()
         }
-        is ChildBindingProcExprNode -> {
-            val loc = node.programLocation()
-            val childNode = ValueProcExprNode(node.childName(), null, loc)
-            val parentNode = ValueProcExprNode(node.parentName(), null, loc)
-            val errors = mutableListOf<CompileError>()
-            ctx.resolve(childNode).second?.let { errors += it }
-            ctx.resolve(parentNode).second?.let { errors += it }
-            if (errors.isNotEmpty()) return errors
-            val child = ctx.declOf(childNode)
-            val parent = ctx.declOf(parentNode)
-            when {
-                child !is ProcClassNode ->
-                    errors += OneLocCompileError(
-                        loc,
-                        "\"${node.childName()}\" in \"$node\" must be a proc class",
-                    )
-                child.isStatic ->
-                    errors += OneLocCompileError(
-                        loc,
-                        "static proc \"${node.childName()}\" cannot be bound as ${node.childName()}<…>; " +
-                            "only dynamic procs may have a parent",
-                    )
-            }
-            if (parent !is ProcClassNode && parent !is LeafSpecNode) {
-                errors += OneLocCompileError(
-                    loc,
-                    "parent \"${node.parentName()}\" in \"$node\" must be a proc class",
-                )
-            }
-            if (banLeafSpecs && parent is LeafSpecNode) {
-                errors += OneLocCompileError(loc, "leaf spec \"${node.parentName()}\" cannot appear in a proc assembly")
-            }
-            errors
-        }
         else -> node.children.flatMap { validateProcExprsInNode(it, ctx, banLeafSpecs) }
     }
 }

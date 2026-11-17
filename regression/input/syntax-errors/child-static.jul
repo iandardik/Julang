@@ -1,13 +1,11 @@
-static proc Boss {
-    constructor initially(args : List<String>) {}
-    transition done() {}
+/*
+ * Constructor-to-constructor sync is illegal under parent inference.
+ */
+proc BroadcastClaim {
+    constructor broadcastClaim() {}
+    return broadcastDone() {}
 }
 
-static proc Bad {
-    constructor initially(args : List<String>) {}
-}
-
-/* Static procs cannot be parent-bound. */
-proc Sys := Boss || Bad<Boss>
+proc Sys := BroadcastClaim || BroadcastClaim
 
 compile Sys

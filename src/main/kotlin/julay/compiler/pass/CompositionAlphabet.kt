@@ -32,7 +32,7 @@ data class LeafActionId(
  * [occurrenceId] distinguishes multiple occurrences of the same proc class.
  * [introducingAssembly] is the named proc/assembly that introduced this leaf (for TLA naming).
  * [isStatic] is true for `static proc` classes (hub / static-static sync shapes).
- * [parentClass] is set on offers of a `B<A>` child occurrence (the parent class `A`).
+ * [parentClass] is inferred during binary `||` (ctor/return orientation): the parent class `A`.
  */
 data class AlphabetOffer(
     val pclassKey: String,
@@ -93,7 +93,7 @@ data class LeafOccurrence(
     val occurrenceId: String,
     /** Named assembly that introduced this occurrence (for TLA `{Class}_{Assembly}` renaming). */
     val introducingAssembly: String,
-    /** Parent proc class for a `B<A>` child occurrence. */
+    /** Inferred parent proc class for a child occurrence (from `||` sync orientation). */
     val parentClass: String? = null,
 )
 
@@ -181,7 +181,7 @@ fun collectLeafOccurrences(
                 pclassName = pclass,
                 occurrenceId = freshOccurrenceId(pclass),
                 introducingAssembly = introducingAssembly,
-                parentClass = pd.parentClass ?: resolved.parentClass,
+                parentClass = null,
             )
             return
         }
@@ -217,6 +217,7 @@ fun computeCompositionAlphabet(
     val channelKeys = mutableMapOf<LeafActionId, String>()
     val errors = mutableListOf<CompileError>()
     val leafOccurrences = mutableListOf<LeafOccurrence>()
+    val parentOfOcc = mutableMapOf<String, String>()
 
     fun recordKeys(offers: List<AlphabetOffer>) {
         offers.forEach { offer ->
@@ -229,10 +230,9 @@ fun computeCompositionAlphabet(
     fun stampLeafOffers(
         pclass: String,
         introducingAssembly: String,
-        parentClass: String?,
     ): List<AlphabetOffer> {
         val occurrenceId = freshOccurrenceId(pclass)
-        leafOccurrences += LeafOccurrence(pclass, occurrenceId, introducingAssembly, parentClass)
+        leafOccurrences += LeafOccurrence(pclass, occurrenceId, introducingAssembly, parentClass = null)
         val templates = leafOffersByPclass[pclass] ?: emptyList()
         val offers = templates.map { template ->
             val channelKey = when {
@@ -244,7 +244,7 @@ fun computeCompositionAlphabet(
                 occurrenceId = occurrenceId,
                 introducingAssembly = introducingAssembly,
                 channelKey = channelKey,
-                parentClass = parentClass,
+                parentClass = null,
             )
         }
         recordKeys(offers)
@@ -254,7 +254,7 @@ fun computeCompositionAlphabet(
     fun alphabetOf(pd: ProcDecl, introducingAssembly: String, scopeHint: String): List<AlphabetOffer> {
         val resolved = resolve(pd)
         if (resolved.components.isEmpty()) {
-            return stampLeafOffers(resolved.name, introducingAssembly, pd.parentClass ?: resolved.parentClass)
+            return stampLeafOffers(resolved.name, introducingAssembly)
         }
         val childAlphabets = resolved.components.map { child ->
             val childResolved = resolve(child)
@@ -269,7 +269,7 @@ fun computeCompositionAlphabet(
         var acc = childAlphabets[0]
         for (i in 1 until childAlphabets.size) {
             val scopeId = freshScopeId(if (i == 1) scopeHint.ifEmpty { resolved.name } else resolved.name)
-            val (composed, composeErrors) = composeAlphabets(acc, childAlphabets[i], scopeId)
+            val (composed, composeErrors) = composeAlphabets(acc, childAlphabets[i], scopeId, parentOfOcc)
             errors.addAll(composeErrors)
             acc = composed
         }
@@ -278,13 +278,17 @@ fun computeCompositionAlphabet(
     }
 
     val allOffers = alphabetOf(root, root.name, root.name)
+    val parentByOcc = allOffers.mapNotNull { o -> o.parentClass?.let { o.occurrenceId to it } }.toMap()
+    val stampedLeaves = leafOccurrences.map { lo ->
+        lo.copy(parentClass = parentByOcc[lo.occurrenceId] ?: lo.parentClass)
+    }
 
     val external = allOffers.filter { !it.isLocal && !it.compositionHidden }
     return CompositionAlphabetResult(
         external = external,
         allOffers = allOffers,
         channelKeys = channelKeys.toMap(),
-        leafOccurrences = leafOccurrences.toList(),
+        leafOccurrences = stampedLeaves,
         errors = errors,
     )
 }
@@ -299,6 +303,7 @@ fun composeAlphabets(
     left: List<AlphabetOffer>,
     right: List<AlphabetOffer>,
     scopeId: String,
+    parentOfOcc: MutableMap<String, String> = mutableMapOf(),
 ): Pair<List<AlphabetOffer>, List<CompileError>> {
     // Local (internal/timer) and already composition-hidden offers never re-sync at an outer step;
     // they pass through with their channel keys (binary sync scoping).
@@ -309,16 +314,26 @@ fun composeAlphabets(
 
     val errors = mutableListOf<CompileError>()
     val result = mutableListOf<AlphabetOffer>()
-    result.addAll(leftSettled)
-    result.addAll(rightSettled)
+    // Seed occurrence→parent from already-stamped offers (prior compose steps).
+    (left + right).forEach { o ->
+        val p = o.parentClass ?: return@forEach
+        parentOfOcc.putIfAbsent(o.occurrenceId, p)
+    }
+    fun withParents(offers: List<AlphabetOffer>): List<AlphabetOffer> =
+        offers.map { o ->
+            val p = parentOfOcc[o.occurrenceId] ?: o.parentClass
+            if (p != null && o.parentClass != p) o.copy(parentClass = p) else o
+        }
+    result.addAll(withParents(leftSettled))
+    result.addAll(withParents(rightSettled))
 
     val leftByName = leftExt.groupBy { it.name }
     val rightByName = rightExt.groupBy { it.name }
     val allNames = leftByName.keys + rightByName.keys
 
     for (name in allNames) {
-        val l = leftByName[name].orEmpty()
-        val r = rightByName[name].orEmpty()
+        val l = withParents(leftByName[name].orEmpty())
+        val r = withParents(rightByName[name].orEmpty())
         when {
             l.isEmpty() -> result.addAll(r)
             r.isEmpty() -> result.addAll(l)
@@ -366,15 +381,15 @@ fun composeAlphabets(
                     result.addAll(r)
                     continue
                 }
-                val parentChild = pairParentChild(name, l, r, scopeId, errors)
+                val parentChild = inferAndPairParentChild(name, l, r, scopeId, errors, parentOfOcc)
                 if (parentChild != null) {
                     result.addAll(parentChild)
                     continue
                 }
                 // Same class never syncs. Static ordinary duplicates are an immediate error
                 // (a later service cannot redeem them). Dynamic duplicates may still meet a
-                // child bound to their class (`C<B>` covers every `B` occurrence), so they are
-                // checked once the composition is closed ([actionShapeErrors]).
+                // child of their class (covers every occurrence), so they are checked once the
+                // composition is closed ([actionShapeErrors]).
                 val classes = both.map { it.pclassKey }.toSet()
                 if (classes.size == 1) {
                     if (hasOrdinary && both.any { it.isStatic }) {
@@ -395,10 +410,19 @@ fun composeAlphabets(
                     result.addAll(r)
                     continue
                 }
-                // Ordinary: dynamic procs only sync parent↔child (paired above). Unrelated
-                // dynamics stay open: each may still meet its own child later; leftovers are
-                // reported by [actionShapeErrors].
+                // All-dynamic with no orientable parent↔child edge: illegal.
                 if (both.all { !it.isStatic }) {
+                    val sample = both[0]
+                    val other = both.firstOrNull { it.pclassKey != sample.pclassKey } ?: sample
+                    errors.add(
+                        TwoLocsCompileError(
+                            sample.loc,
+                            other.loc,
+                            "Action \"$name\" has an illegal sync shape (dynamic-to-dynamic); " +
+                                "nest the child under its parent with `||` so a constructor or return " +
+                                "orients the parent↔child edge",
+                        ),
+                    )
                     result.addAll(l)
                     result.addAll(r)
                     continue
@@ -410,7 +434,7 @@ fun composeAlphabets(
                     result.addAll(r)
                     continue
                 }
-                // Ordinary: require matching signatures, then hide.
+                // Ordinary hub / two-static: require matching signatures, then hide.
                 val mismatch = findSignatureMismatch(l, r)
                 if (mismatch != null) {
                     errors.add(
@@ -430,61 +454,179 @@ fun composeAlphabets(
             }
         }
     }
-    return result to errors
+    // Propagate occurrence-level parents onto every offer of that occurrence.
+    val stamped = result.map { o ->
+        val p = parentOfOcc[o.occurrenceId] ?: return@map o
+        if (o.parentClass != p) o.copy(parentClass = p) else o
+    }
+    return stamped to errors
 }
 
+private data class ParentChildOrient(val childClass: String, val parentClass: String)
+
 /**
- * Pair each `B<A>` child offer on one side with every offer of class `A` on the other side.
- * One hidden key per (parent class, child class), so `C<B>` joins every `B` occurrence on one
- * channel while `B<A>` and `B<C>` stay separate. Unpaired offers pass through unchanged.
- * Returns null when no parent-child pair exists.
+ * Orient parent↔child from ctor/return/prior edge; stamp [AlphabetOffer.parentClass]; hide pairs.
+ * Child × every open parent-class offer (covers-all occurrences). Returns null when no
+ * orientable parent↔child edge applies (caller handles hub / error paths).
  */
-private fun pairParentChild(
+private fun inferAndPairParentChild(
     name: String,
     left: List<AlphabetOffer>,
     right: List<AlphabetOffer>,
     scopeId: String,
     errors: MutableList<CompileError>,
+    parentOfOcc: MutableMap<String, String>,
 ): List<AlphabetOffer>? {
-    fun isChildOf(child: AlphabetOffer, parent: AlphabetOffer) =
-        child.parentClass != null && child.parentClass == parent.pclassKey && child.pclassKey != parent.pclassKey
-    val pairs = left.flatMap { a ->
-        right.mapNotNull { b ->
-            when {
-                isChildOf(b, a) -> a to b
-                isChildOf(a, b) -> b to a
-                else -> null
+    val both = left + right
+    val orient = orientParentChild(name, both, errors, parentOfOcc) ?: return null
+    val stamped = stampInferredParent(both, orient, errors, parentOfOcc)
+    val childOffers = stamped.filter { it.pclassKey == orient.childClass }
+    val parentOffers = stamped.filter { it.pclassKey == orient.parentClass }
+    if (childOffers.isEmpty() || parentOffers.isEmpty()) return null
+    val keyed = mutableMapOf<LeafActionId, AlphabetOffer>()
+    for (parent in parentOffers) {
+        for (child in childOffers) {
+            if (!parent.signatureCompatible(child) || parent.isConstructor) {
+                errors.add(
+                    TwoLocsCompileError(
+                        parent.loc,
+                        child.loc,
+                        if (parent.isConstructor) {
+                            "Action \"$name\": parent \"${orient.parentClass}\" cannot offer a constructor " +
+                                "when syncing with child \"${orient.childClass}\""
+                        } else {
+                            "Expected action \"$name\" to have the same signature on both sides of composition"
+                        },
+                    ),
+                )
+                continue
+            }
+            val key = "$scopeId#$name#${orient.childClass}<${orient.parentClass}>"
+            keyed[parent.leafId] = parent.copy(channelKey = key, compositionHidden = true)
+            keyed[child.leafId] = child.copy(
+                channelKey = key,
+                compositionHidden = true,
+                parentClass = orient.parentClass,
+            )
+        }
+    }
+    if (keyed.isEmpty()) return null
+    return stamped.map { keyed[it.leafId] ?: it }
+}
+
+/** Infer child/parent class for this action meet, or null if not a parent↔child sync. */
+private fun orientParentChild(
+    name: String,
+    both: List<AlphabetOffer>,
+    errors: MutableList<CompileError>,
+    parentOfOcc: MutableMap<String, String>,
+): ParentChildOrient? {
+    val classes = both.map { it.pclassKey }.distinct()
+    if (classes.size < 2) return null
+
+    // Occurrence-level prior parents that point at a peer in this meet.
+    val prior = both.mapNotNull { o ->
+        val p = o.parentClass ?: parentOfOcc[o.occurrenceId] ?: return@mapNotNull null
+        if (p in classes && p != o.pclassKey) o.pclassKey to p else null
+    }.distinct()
+    if (prior.isNotEmpty()) {
+        val childClasses = prior.map { it.first }.distinct()
+        val parentClasses = prior.map { it.second }.distinct()
+        if (childClasses.size == 1 && parentClasses.size == 1) {
+            return ParentChildOrient(childClasses[0], parentClasses[0])
+        }
+        val sample = both.first()
+        val other = both.firstOrNull { it.pclassKey != sample.pclassKey } ?: sample
+        errors.add(
+            TwoLocsCompileError(
+                sample.loc,
+                other.loc,
+                "Action \"$name\" has conflicting inferred parents: " +
+                    prior.joinToString("; ") { "\"${it.first}\" under \"${it.second}\"" },
+            ),
+        )
+        return null
+    }
+
+    val ctorClasses = both.filter { it.isConstructor }.map { it.pclassKey }.distinct()
+    if (ctorClasses.size >= 2) {
+        val a = both.first { it.isConstructor }
+        val b = both.first { it.isConstructor && it.pclassKey != a.pclassKey }
+        errors.add(
+            TwoLocsCompileError(
+                a.loc,
+                b.loc,
+                "Action \"$name\" cannot sync constructor-to-constructor " +
+                    "(\"${a.pclassKey}\" and \"${b.pclassKey}\")",
+            ),
+        )
+        return null
+    }
+    if (ctorClasses.size == 1) {
+        val child = ctorClasses[0]
+        val parents = classes.filter { it != child }
+        if (parents.size == 1) return ParentChildOrient(child, parents[0])
+        if (parents.size > 1) {
+            val ctor = both.first { it.isConstructor }
+            errors.add(
+                OneLocCompileError(
+                    ctor.loc,
+                    "Child constructor \"$name\" of \"$child\" is ambiguous: could parent under " +
+                        parents.joinToString(" or ") { "\"$it\"" } + "; nest under one parent with `||`",
+                ),
+            )
+            return null
+        }
+    }
+
+    val returnClasses = both.filter { it.isReturn }.map { it.pclassKey }.distinct()
+    if (returnClasses.size == 1) {
+        val child = returnClasses[0]
+        val parents = classes.filter { it != child }
+        if (parents.size == 1) return ParentChildOrient(child, parents[0])
+    }
+    return null
+}
+
+private fun stampInferredParent(
+    offers: List<AlphabetOffer>,
+    orient: ParentChildOrient,
+    errors: MutableList<CompileError>,
+    parentOfOcc: MutableMap<String, String>,
+): List<AlphabetOffer> =
+    offers.map { o ->
+        if (o.pclassKey != orient.childClass) return@map o
+        val existing = o.parentClass ?: parentOfOcc[o.occurrenceId]
+        when {
+            existing == null -> {
+                parentOfOcc[o.occurrenceId] = orient.parentClass
+                o.copy(parentClass = orient.parentClass)
+            }
+            existing == orient.parentClass -> {
+                parentOfOcc[o.occurrenceId] = orient.parentClass
+                o.copy(parentClass = orient.parentClass)
+            }
+            else -> {
+                errors.add(
+                    OneLocCompileError(
+                        o.loc,
+                        "Proc \"${o.pclassKey}\" cannot have parent \"${orient.parentClass}\" " +
+                            "(already under \"$existing\"); nest under one parent with `||`",
+                    ),
+                )
+                o
             }
         }
     }
-    if (pairs.isEmpty()) return null
-    val keyed = mutableMapOf<LeafActionId, AlphabetOffer>()
-    for ((parent, child) in pairs) {
-        if (!parent.signatureCompatible(child) || parent.isConstructor) {
-            errors.add(
-                TwoLocsCompileError(
-                    parent.loc,
-                    child.loc,
-                    "Expected action \"$name\" to have the same signature on both sides of composition",
-                ),
-            )
-            continue
-        }
-        val key = "$scopeId#$name#${child.pclassKey}<${parent.pclassKey}>"
-        keyed[parent.leafId] = parent.copy(channelKey = key, compositionHidden = true)
-        keyed[child.leafId] = child.copy(channelKey = key, compositionHidden = true)
-    }
-    return (left + right).map { keyed[it.leafId] ?: it }
-}
 
-/** Exactly two classes where one is a `B<A>` child occurrence and the other is its parent `A`. */
+/** Exactly two classes where one offer's inferred parent is the other class. */
 private fun isParentChildPair(offers: List<AlphabetOffer>): Boolean {
     val classes = offers.map { it.pclassKey }.distinct()
     if (classes.size != 2) return false
     return offers.any { o -> o.parentClass != null && o.parentClass in classes && o.parentClass != o.pclassKey }
 }
 
-/** A child constructor may only sync with its parent. */
+/** A child constructor may only sync with its inferred parent. */
 private fun childCtorPeerError(name: String, offers: List<AlphabetOffer>): CompileError? {
     val ctor = offers.firstOrNull { it.isConstructor && it.parentClass != null } ?: return null
     val peer = offers.firstOrNull { it.pclassKey != ctor.pclassKey && it.pclassKey != ctor.parentClass } ?: return null
@@ -792,8 +934,8 @@ private fun canPair(a: AlphabetOffer, b: AlphabetOffer): Boolean = when {
 }
 
 /**
- * Compiled-artifact rule: every `B<A>` occurrence needs at least one occurrence of `A`
- * in the flattened composition.
+ * Compiled-artifact rule: every occurrence with an inferred parent needs that parent class
+ * present as a leaf in the flattened composition.
  */
 fun childParentPresenceErrors(alphabet: CompositionAlphabetResult, rootName: String): List<CompileError> {
     val classes = alphabet.leafOccurrences.map { it.pclassName }.toSet()
@@ -806,8 +948,22 @@ fun childParentPresenceErrors(alphabet: CompositionAlphabetResult, rootName: Str
                 ?: julay.compiler.SourceLoc(0 to 0)
             OneLocCompileError(
                 loc,
-                "Child \"${occ.pclassName}<${occ.parentClass}>\" in \"$rootName\" requires its parent " +
+                "Child \"${occ.pclassName}\" in \"$rootName\" requires its inferred parent " +
                     "\"${occ.parentClass}\" in the same composition",
             )
         }
+}
+
+/** Copy inferred parents from [alphabet] onto [leaves] by class occurrence order (L→R). */
+fun applyInferredParents(leaves: List<SpecLeaf>, alphabet: CompositionAlphabetResult): List<SpecLeaf> {
+    val parentsByClass = alphabet.leafOccurrences
+        .groupBy { it.pclassName }
+        .mapValues { (_, occs) -> occs.map { it.parentClass } }
+    val seen = mutableMapOf<String, Int>()
+    return leaves.map { leaf ->
+        val idx = seen.getOrDefault(leaf.name, 0)
+        seen[leaf.name] = idx + 1
+        val parent = parentsByClass[leaf.name]?.getOrNull(idx)
+        if (parent != null) leaf.copy(parentClass = parent) else leaf
+    }
 }

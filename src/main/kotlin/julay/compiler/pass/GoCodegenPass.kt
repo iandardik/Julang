@@ -571,14 +571,21 @@ private fun emitEnablementLocals(
         return sb.toString()
     }
 
-    // Bind equality args first (suffix with action name to avoid redeclarations across cases).
+    // Equality bindings are often body/index expressions that panic on OOB. Only evaluate
+    // them at enablement when the residual guard still mentions those args; otherwise the
+    // fire path rebinds via [emitLocalArgRebind] after the residual has passed.
+    val residualNeedsEq = eqArgs.any { arg ->
+        residualMentionsArg(decl, bound, arg, skipMembershipOf = emptySet())
+    }
     var bindCtx = ctx
-    for (arg in eqArgs) {
-        val rhs = findEqualityRhs(decl, arg) ?: continue
-        val local = "${arg.toGoSafeIdent()}_$safe"
-        sb.appendLine("\t\t$local := ${rhs.toGoString(bindCtx)}")
-        sb.appendLine("\t\t_ = $local") // may be unused if residual skips the binding conjunct
-        bindCtx = bindCtx.withArgBindings(mapOf(arg to local))
+    if (residualNeedsEq) {
+        for (arg in eqArgs) {
+            val rhs = findEqualityRhs(decl, arg) ?: continue
+            val local = "${arg.toGoSafeIdent()}_$safe"
+            sb.appendLine("\t\t$local := ${rhs.toGoString(bindCtx)}")
+            sb.appendLine("\t\t_ = $local")
+            bindCtx = bindCtx.withArgBindings(mapOf(arg to local))
+        }
     }
     // Membership: nested ChooseUniformFiltered (single arg first; multi-arg cartesian later)
     if (memArgs.size == 1) {
@@ -611,7 +618,7 @@ private fun emitEnablementLocals(
         sb.appendLine("\t\t\t}")
         sb.appendLine("\t\t}")
     } else {
-        // Multi membership or only equality: evaluate residual
+        // Multi membership or only equality: evaluate residual (without eager eq binds when unused)
         val guard = residualGuardGo(decl, bound, bindCtx)
         sb.appendLine("\t\tif ($guard) {")
         if (isTimer) {
@@ -626,6 +633,31 @@ private fun emitEnablementLocals(
         sb.appendLine("\t\t}")
     }
     return sb.toString()
+}
+
+/** True when a non-binding residual conjunct still mentions [arg]. */
+private fun residualMentionsArg(
+    decl: ActionDecl,
+    bound: BoundArgAnalysis,
+    arg: String,
+    skipMembershipOf: Set<String>,
+): Boolean {
+    for (g in decl.guards) {
+        for (c in collectGuardConjuncts(g)) {
+            if (bound.bindingConjuncts.containsKey(c.expr)) {
+                val e = unwrapParenGo(c.expr)
+                if (e is BinaryOpExprNode && e.op() == "in") {
+                    val memArg = (unwrapParenGo(e.lhsOperand()) as? SymbolValueExprNode)?.symbol
+                    if (memArg != null && memArg in skipMembershipOf) continue
+                    if (memArg != null && memArg in bound.membershipBound) continue
+                } else {
+                    continue
+                }
+            }
+            if (exprReferencesSymbol(c.expr, arg)) return true
+        }
+    }
+    return false
 }
 
 private fun emitSenderEnablement(

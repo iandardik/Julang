@@ -1,0 +1,19 @@
+/*
+ * Two dynamics both offering the same non-ctor action with no return/ctor
+ * orientation — illegal dyn↔dyn without a parent↔child edge.
+ */
+proc Put {
+    constructor put() {}
+    transition broadcastClaim() {}
+    return putDone() {}
+}
+
+proc ApplyMoveBatch {
+    constructor moveBatch() {}
+    transition broadcastClaim() {}
+    return moveApplied() {}
+}
+
+proc Sys := Put || ApplyMoveBatch
+
+compile Sys

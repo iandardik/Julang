@@ -7,7 +7,7 @@ Multi-node key–value store under [`input/sharded_kv/`](../../input/sharded_kv/
 | Path | Role |
 |------|------|
 | `cluster.conf` | Node URLs (ids `1..n` by line order), ports **6001–6003** |
-| `node/` | `Store` hub + Shard **child** workers + `rpc_in` / `rpc_out` children; JAR binds workers to `HandleRpc` / RpcOut |
+| `node/` | `Store` hub + Shard workers + `rpc_in` / `rpc_out` children; JAR nests workers under `HandleRpc` / peers |
 | `client/` | CLI with one `303 OWNER` redirect retry; binary `ShardClient` |
 | `specs/` | Same Shard children re-parented: `ClientEnv` / `PerfectNet` + `DynProc` slots; unindexed PerfectNet (4 bags) |
 | `scripts/` | `compile.sh`, `start_cluster.sh`, `stop_cluster.sh`, `smoke_test.sh`, `reshard_test.sh` |
@@ -55,6 +55,6 @@ input/sharded_kv/client/ShardClient http://127.0.0.1:6001 owners
 
 ## TLA+ sketch
 
-- Shard source is identical in JAR and TLA; only the composition changes. JAR: `Put<HandleRpc>`, `SendClaim<BroadcastClaim>`, …. TLA: `Put<ClientEnv>`, `KeyCount<PerfectNet>`, … with `DynProc` slots.
+- Shard source is identical in JAR and TLA; only the composition changes. JAR nests workers under `HandleRpc` / `Put` / …; TLA re-nests under `ClientEnv` / `PerfectNet` with `DynProc` slots (parenthood inferred from `||`).
 - Unindexed `PerfectNet` (network is not node state): bags for claims, move batches, key-count requests, and key-count replies. `goClaim` / `goMoveBatch` are fire-and-forget; only `goKeyCount` has a reply. The peer that receives a move batch takes ownership and broadcasts claims.
 - Invariants target `Store[n].store` / `Store[n].owners`. Each dynamic class gets a `Terminates` property under strong fairness.

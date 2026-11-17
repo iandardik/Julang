@@ -4,8 +4,6 @@ data class ProcDecl(
     val name: String,
     val components: List<ProcDecl>,
     val type: ProcDeclType,
-    /** For a `B<A>` leaf: the parent proc class `A` (flat name). */
-    val parentClass: String? = null,
 ) {
     /** Distinct leaf proc-class names under this assembly (order not significant). */
     fun allProcNames(procDecls: List<ProcDecl>): Set<String> =

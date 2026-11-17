@@ -55,17 +55,18 @@ Procfuns are **not** allowed in `||` (compile error). They are not composition p
 
 When emitting TLA+, a unique leaf class keeps its name. If class `X` appears more than once, every occurrence is renamed using the introducing assembly: `proc P := A || X` and `proc Q := B || X` composed together become `X_P` and `X_Q`. Same-parent ties (`proc P := X || X`) use `X_P_1`, `X_P_2`, …. Renamed state variables get `(* ... *)` comments. Julay invariants still write `X.n`; the compiler expands them per occurrence in TLA+.
 
-Child-class occurrences use the binding parent in the leaf name when needed (`BroadcastClaim_Put`, `BroadcastClaim_ApplyMoveBatch`). See [Parent-bound procs](children.md).
+Child-class occurrences use the inferred parent in the leaf name when needed (`BroadcastClaim_Put`, `BroadcastClaim_ApplyMoveBatch`). See [Parent/child inference](children.md).
 
-## Parent-bound procs and packaging
+## Parent/child procs and packaging
 
-Apis and procfuns are removed. Package components with ordinary `||`, and bind children with `B<A>`:
+Apis and procfuns are removed. Package components with ordinary `||`; parenthood is inferred from nesting:
 
 ```jul
-proc Sys := Boss || Worker<Boss>
+proc Sys := Boss || Worker
+proc Tree := (Put || BroadcastClaim) || (ApplyMoveBatch || BroadcastClaim)
 ```
 
-See [Parent-bound procs](children.md) for declarations, returns, parent checks, and HTTP `~>`.
+See [Parent/child inference](children.md) for declarations, returns, inference rules, and HTTP `~>`.
 
 ## Synchronization (language level)
 
@@ -102,7 +103,7 @@ For ordinary (non-`service`/`client`, non-`internal`, non-`timer`) multi-class o
 | **Two statics** | Exactly two static classes, no dynamics | Peer sync between two statics |
 | **Local / single class** | One class only | Unsynced / solo on that name (may warn on a binary target) |
 
-Illegal (except parent↔child): dynamic↔dynamic only, three or more statics, or two-or-more statics plus a dynamic. Parent↔child ordinary sync is the one allowed dynamic↔dynamic case — see [Parent-bound procs](children.md).
+Illegal (except parent↔child): dynamic↔dynamic only, three or more statics, or two-or-more statics plus a dynamic. Parent↔child ordinary sync is the one allowed dynamic↔dynamic case — see [Parent/child inference](children.md).
 
 **`service` / `client`** pairs skip these ordinary-shape checks: the service is the hub; any number of clients may sync with it (never with each other). Prefer tagging static hub APIs as `service` and callers as `client` when the hub must stay in the external alphabet (multiple handlers, printers, nested assemblies).
 
@@ -168,6 +169,6 @@ Liveness properties proved by TLC (including each dynamic proc's `Terminates` pr
 ## See also
 
 - [Processes](processes.md) — `static proc` vs dynamic
-- [Parent-bound procs](children.md) — `proc`, `B<A>`, returns, HTTP `~>`
+- [Parent/child inference](children.md) — nested `||`, returns, HTTP `~>`
 - [Compiler optimizations](compiler-optimizations.md) — compile-time direction analysis
 - [Creating libraries](creating-libraries.md)
