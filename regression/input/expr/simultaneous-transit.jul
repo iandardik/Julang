@@ -6,7 +6,7 @@ import julay.funlib.println
  * pre-transit state, then all updates are applied. So `y := x` after
  * `x := x + 1` still binds the old x.
  */
-proc SimultaneousTransitDemo {
+static proc SimultaneousTransitDemo {
     var x : Int
     var y : Int
     var peersLeft : Int

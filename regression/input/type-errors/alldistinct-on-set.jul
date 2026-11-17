@@ -1,6 +1,6 @@
 import julay.funlib.allDistinct
 import julay.funlib.setOf
-proc BadAllDistinct {
+static proc BadAllDistinct {
     var s : Set<Int>
     var ok : Boolean
 

@@ -2,7 +2,7 @@ import julay.funlib.parseInt
 import julay.funlib.exitProgram
 import julay.funlib.println
 
-proc ParseIntDep {
+static proc ParseIntDep {
     var n : Int
     var print : Boolean
 

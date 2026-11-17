@@ -13,7 +13,7 @@ class SpecGuaranteeFormsTest {
     fun trueGuaranteeOmitsInvariantFromCfg() {
         withCompiledSpecs(
             """
-            proc P {
+            static proc P {
                 var n : Int
                 constructor initially(args : List<String>) { transit: n := 0 }
             }
@@ -50,7 +50,7 @@ class SpecGuaranteeFormsTest {
     fun modelsFormMatchesNamedAgGuarantee() {
         withCompiledSpecs(
             """
-            proc Counter {
+            static proc Counter {
                 var n : Int
                 constructor initially(args : List<String>) { transit: n := 0 }
                 transition bump() { transit: n := n + 1 }
@@ -84,7 +84,7 @@ class SpecGuaranteeFormsTest {
     fun inlineGuaranteeEmitsSyntheticInvariant() {
         withCompiledSpecs(
             """
-            proc Counter {
+            static proc Counter {
                 var n : Int
                 constructor initially(args : List<String>) { transit: n := 0 }
                 transition bump() { transit: n := n + 1 }

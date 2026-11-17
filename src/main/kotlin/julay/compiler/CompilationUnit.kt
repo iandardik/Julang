@@ -73,7 +73,7 @@ fun emptyCompilationUnit(entryPath: Path): CompilationUnit {
 
 fun collectDeclNames(root: RootNode): Set<String> =
     root.declNodes()
-        .filter { it !is FunNode && it !is ProcFunNode && it !is CompileNode }
+        .filter { it !is FunNode && it !is CompileNode }
         .map { it.name() }
         .toSet()
 
@@ -85,28 +85,10 @@ fun collectLeafSpecNames(root: RootNode): Set<String> =
 
 fun collectProcAliasNames(root: RootNode): Set<String> =
     root.declNodes()
-        .filter { it is ProcNode || it is SpecNode || it is ApiNode || it is LeafSpecNode }
+        .filter { it is ProcNode || it is SpecNode || it is LeafSpecNode }
         .map { it.name() }
         .toSet()
 
-fun collectApiNames(root: RootNode): Set<String> =
-    root.declNodes().filterIsInstance<ApiNode>().map { it.name() }.toSet()
-
-fun collectProcFunNames(root: RootNode): Set<String> =
-    root.declNodes().filterIsInstance<ProcFunNode>().map { it.name() }.toSet()
-
-/** Map api name → listed call (procfun) names. */
-fun collectApiCalls(root: RootNode): Map<String, List<String>> =
-    root.declNodes().filterIsInstance<ApiNode>().associate { it.apiName() to it.apiCallNames() }
-
-fun callableApis(module: LoadedModule): Map<String, ApiNode> {
-    val local = module.root.declNodes().filterIsInstance<ApiNode>().associateBy { it.name() }
-    val imported = module.importTable.shortNames.mapNotNull { (name, symbol) ->
-        val decl = declFromResolvedSymbol(symbol)
-        if (decl is ApiNode) name to decl else null
-    }.toMap()
-    return local + imported
-}
 fun declFromResolvedSymbol(symbol: ResolvedSymbol): DeclNode? = when (symbol) {
     is ResolvedSymbol.LocalDecl -> symbol.decl
     is ResolvedSymbol.ImportedDecl -> symbol.decl
@@ -121,48 +103,6 @@ fun callableFuns(module: LoadedModule): Map<String, FunNode> {
         if (decl is FunNode) name to decl else null
     }.toMap()
     return local + imported
-}
-
-/**
- * Procfuns callable from [module]: locals, explicitly imported procfuns, and
- * every name in `calls:` of a local/imported api (resolved from that api's defining
- * module, including non-exported helpers — no separate procfun import required).
- */
-fun callableProcFuns(
-    module: LoadedModule,
-    modulesByPath: Map<String, LoadedModule> = emptyMap(),
-): Map<String, ProcFunNode> {
-    val local = module.root.declNodes().filterIsInstance<ProcFunNode>().associateBy { it.name() }
-    val imported = module.importTable.shortNames.mapNotNull { (name, symbol) ->
-        val decl = declFromResolvedSymbol(symbol)
-        if (decl is ProcFunNode) name to decl else null
-    }.toMap()
-    val viaApi = mutableMapOf<String, ProcFunNode>()
-    callableApis(module).forEach { (apiShortName, api) ->
-        val home = homeModuleForApi(apiShortName, module, modulesByPath) ?: return@forEach
-        val homePfs = home.root.declNodes().filterIsInstance<ProcFunNode>().associateBy { it.name() }
-        api.apiCallNames().forEach { call ->
-            homePfs[call]?.let { viaApi.putIfAbsent(call, it) }
-        }
-    }
-    // Local bare names win over api-imported same bare names (RpcIn.claim vs RpcOut.claim).
-    return viaApi + imported + local
-}
-
-/** Defining module for a local or imported api short name in [module]'s scope. */
-fun homeModuleForApi(
-    apiShortName: String,
-    module: LoadedModule,
-    modulesByPath: Map<String, LoadedModule>,
-): LoadedModule? {
-    val localApi = module.root.declNodes().filterIsInstance<ApiNode>().find { it.name() == apiShortName }
-    if (localApi != null) return module
-    val symbol = module.importTable.shortNames[apiShortName] ?: return null
-    return when (symbol) {
-        is ResolvedSymbol.ImportedDecl -> modulesByPath[symbol.modulePath]
-        is ResolvedSymbol.LocalDecl -> module
-        else -> null
-    }
 }
 
 fun callableFunBuiltins(module: LoadedModule): Map<String, FunBuiltin> =

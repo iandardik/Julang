@@ -21,7 +21,7 @@ class SoftSyncWarningTest {
         val file = dir.resolve("solo.jul")
         file.toFile().writeText(
             """
-            proc Solo {
+            static proc Solo {
                 constructor initially(args : List<String>) { transit: }
                 transition ping() { transit: }
             }
@@ -91,7 +91,7 @@ class SoftSyncWarningTest {
         val file = dir.resolve("solo.jul")
         file.toFile().writeText(
             """
-            proc Solo {
+            static proc Solo {
                 constructor initially(args : List<String>) { transit: }
                 transition ping() { transit: }
             }
@@ -128,99 +128,7 @@ class SoftSyncWarningTest {
         )
     }
 
-    @Test
-    fun serviceClientsOnFoldedProcfunDoNotWarnDeadlock() {
-        val dir = Files.createTempDirectory("julay-service-procfun-clients")
-        val file = dir.resolve("sync.jul")
-        file.toFile().writeText(
-            """
-            procfun helper() : Int {
-                client transition bump() {
-                    return: 0
-                }
-            }
-            proc Host {
-                var out : Int
-                constructor initially(args : List<String>) {
-                    transit: out := helper()
-                }
-            }
-            proc Core {
-                constructor initially(args : List<String>) { transit: }
-                service transition bump() { transit: }
-            }
-            proc P := Host || Core
-            compile P
-            """.trimIndent(),
-        )
 
-        val checked = prepareCheckedCompilation(file)
-        assertNotNull(checked)
-        val program = checked.jarTargets.single()
-        val components = program.allProcNames(checked.procDecls)
-        val warnings = checked.ast.warningPass(
-            components,
-            checked.librariesInUse,
-            program,
-            checked.procDecls,
-        )
-        assertFalse(
-            warnings.any { it.toString().contains("service with no clients") },
-            "folded procfun clients must count; got: $warnings",
-        )
-    }
-
-    @Test
-    fun serviceClientsViaHandlerRefAndNestedReturnFoldDoNotWarnDeadlock() {
-        val dir = Files.createTempDirectory("julay-handler-ref-fold")
-        val file = dir.resolve("http.jul")
-        file.toFile().writeText(
-            """
-            import julay.funlib.serveHttp
-
-            procfun nested() : HttpServerResponse {
-                client transition bump() {
-                    return: HttpServerResponse { body := "ok", code := 200 }
-                }
-            }
-
-            procfun handle(req : HttpServerRequest) : HttpServerResponse {
-                internal transition route() {
-                    return: nested()
-                }
-            }
-
-            static proc Starter {
-                constructor initially(args : List<String>) {
-                    after: serveHttp(8000, handle)
-                }
-            }
-
-            proc Core {
-                constructor initially(args : List<String>) { transit: }
-                service transition bump() { transit: }
-            }
-
-            proc P := Starter || Core
-            compile P
-            """.trimIndent(),
-        )
-
-        val checked = prepareCheckedCompilation(file)
-        assertNotNull(checked)
-        val program = checked.jarTargets.single()
-        val components = program.allProcNames(checked.procDecls)
-        val warnings = checked.ast.warningPass(
-            components,
-            checked.librariesInUse,
-            program,
-            checked.procDecls,
-        )
-        assertFalse(
-            warnings.any { it.toString().contains("service with no clients") },
-            "serveHttp handler ref + nested return: calls must fold clients; got: $warnings",
-        )
-    }
 
     @Test
     fun serviceWithNoClientsStillWarnsDeadlock() {
@@ -228,7 +136,7 @@ class SoftSyncWarningTest {
         val file = dir.resolve("solo.jul")
         file.toFile().writeText(
             """
-            proc Core {
+            static proc Core {
                 constructor initially(args : List<String>) { transit: }
                 service transition bump() { transit: }
             }
@@ -253,91 +161,6 @@ class SoftSyncWarningTest {
         )
     }
 
-    @Test
-    fun intermediateApiDanglingClientAnalyzesAlphabet() {
-        val dir = Files.createTempDirectory("julay-intermediate-client")
-        val file = dir.resolve("hb.jul")
-        file.toFile().writeText(
-            """
-            proc HeartbeatImpl {
-                constructor start() { transit: }
-                client transition staleTerm(term : Int) {
-                    guard: term = 0
-                    transit:
-                }
-            }
-            api Heartbeat {
-                proc: HeartbeatImpl
-            }
-            """.trimIndent(),
-        )
-
-        val checked = prepareCheckedCompilation(file)
-        assertNotNull(checked)
-        assertTrue(checked.jarTargets.isEmpty(), "no compile directive")
-
-        val roots = julay.compiler.maximalCompositionRoots(
-            checked.procDecls,
-            checked.unit.entryDeclNames,
-        )
-        assertEquals(listOf("Heartbeat"), roots.map { it.name })
-        val program = roots.single()
-        val components = program.allProcNames(checked.procDecls)
-        val ok = runErrorAndWarningPasses(
-            checked.ast,
-            components,
-            checked.librariesInUse,
-            program.name,
-            program = program,
-            procDecls = checked.procDecls,
-            requireCompleteSync = false,
-        )
-        assertTrue(ok, "unmatched client must not abort intermediate analyze")
-
-        val intermediateWarnings = checked.ast.warningPass(
-            components,
-            checked.librariesInUse,
-            program,
-            checked.procDecls,
-            requireCompleteSync = false,
-        )
-        assertTrue(
-            intermediateWarnings.none {
-                it.toString().contains("not synchronized") ||
-                    it.toString().contains("exactly two sync peers") ||
-                    it.toString().contains("no `service`")
-            },
-            "intermediate must not require complete sync; got: $intermediateWarnings",
-        )
-
-        val compileOk = runErrorAndWarningPasses(
-            checked.ast,
-            components,
-            checked.librariesInUse,
-            program.name,
-            program = program,
-            procDecls = checked.procDecls,
-            requireCompleteSync = true,
-        )
-        assertFalse(compileOk, "direct compile must still reject unmatched client")
-
-        val scope = resolveAnalyzeScope(
-            scopeNames = listOf("Heartbeat"),
-            procDecls = checked.procDecls,
-            allPClassNames = checked.unit.allPClassNames,
-            allProcAliasNames = checked.unit.allProcNames,
-            librariesInUse = checked.librariesInUse,
-        )
-        assertNotNull(scope)
-        val json = buildAlphabetJsonDocument(
-            checked.ast as RootNode,
-            scope,
-            checked.librariesInUse,
-            checked.procDecls,
-        )
-        assertTrue(json.contains("\"name\": \"staleTerm\""), json)
-        assertTrue(json.contains("\"modifier\": \"client\""), json)
-    }
 
     @Test
     fun tlaCompileAllowsPartialAlphabetsJarStillRejectsUnmatchedClient() {
@@ -345,11 +168,11 @@ class SoftSyncWarningTest {
         val file = dir.resolve("partial.jul")
         file.toFile().writeText(
             """
-            proc ClientOnly {
+            static proc ClientOnly {
                 constructor initially(args : List<String>) { transit: }
                 client transition bump() { transit: }
             }
-            proc OrdinarySolo {
+            static proc OrdinarySolo {
                 constructor initially(args : List<String>) { transit: }
                 transition tick() { transit: }
             }
@@ -380,7 +203,7 @@ class SoftSyncWarningTest {
         val jarFile = dir.resolve("jar.jul")
         jarFile.toFile().writeText(
             """
-            proc ClientOnly {
+            static proc ClientOnly {
                 constructor initially(args : List<String>) { transit: }
                 client transition bump() { transit: }
             }
@@ -409,7 +232,7 @@ class SoftSyncWarningTest {
         val file = dir.resolve("solo.jul")
         file.toFile().writeText(
             """
-            proc Core {
+            static proc Core {
                 constructor initially(args : List<String>) { transit: }
                 service transition bump() {
                     guard: true

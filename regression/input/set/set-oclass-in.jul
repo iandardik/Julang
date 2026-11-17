@@ -12,7 +12,7 @@ type Point {
 /*
  * Membership (`in`) with obj LHS against Set, List, and Map.
  */
-proc SetOclassInDemo {
+static proc SetOclassInDemo {
     var s : Set<Point>
     var xs : List<Point>
     var m : Map<Point, Int>

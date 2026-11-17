@@ -9,7 +9,7 @@ type Pair<A, B> {
     right : B
 }
 
-proc Worker {
+static proc Worker {
     var box : Box<Int>
     var nested : Box<Box<Int>>
     var pair : Pair<Int, Boolean>

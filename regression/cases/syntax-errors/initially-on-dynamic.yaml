@@ -1,0 +1,4 @@
+source: regression/input/syntax-errors/initially-on-dynamic.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Only static procs may declare constructor"

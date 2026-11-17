@@ -14,7 +14,7 @@ class CheckJulFileTest {
         val file = dir.resolve("bad.jul")
         file.toFile().writeText(
             """
-            proc Bad {
+            static proc Bad {
                 var x : NoSuchType
                 constructor initially(args : List<String>) { transit: }
             }
@@ -40,7 +40,7 @@ class CheckJulFileTest {
         // incomplete ordinary sync is allowed for intermediate assemblies.
         file.toFile().writeText(
             """
-            proc Solo {
+            static proc Solo {
                 constructor initially(args : List<String>) { transit: }
                 transition ping() { transit: }
             }
@@ -73,7 +73,7 @@ class CheckJulFileTest {
                 constructor initially(args : List<String>) { transit: }
                 transition ping() { transit: }
             }
-            proc B {
+            static proc B {
                 constructor initially(args : List<String>) { transit: }
                 transition ping() { transit: }
             }
@@ -92,24 +92,26 @@ class CheckJulFileTest {
         val file = dir.resolve("main.jul")
         file.toFile().writeText(
             """
-            procfun helper() : Int {
-                client transition bump() {
-                    return: 0
-                }
-            }
             static proc Host {
-                var out : Int
-                constructor initially(args : List<String>) {
-                    transit: out := helper()
-                }
-                transition startCore() { transit: }
-            }
-            proc Core {
                 constructor initially(args : List<String>) { transit: }
+                transition startCore() { transit: }
+                transition startHelper() { transit: }
+                transition helped() { transit: }
+            }
+            proc Worker {
                 constructor startCore() { transit: }
+                internal return stop() {}
+            }
+            proc Helper {
+                constructor startHelper() { transit: }
+                client transition bump() { transit: }
+                return helped() {}
+            }
+            static proc Core {
+                constructor initially(args : List<String>) { transit: }
                 service transition bump() { transit: }
             }
-            proc P := Host || Core
+            proc P := Host || Worker || Helper<Host> || Core
             """.trimIndent(),
         )
 
@@ -121,7 +123,7 @@ class CheckJulFileTest {
         )
         assertFalse(
             result.diagnostics.any { it.message.contains("service with no clients") },
-            "folded procfun clients should count; got: ${result.diagnostics}",
+            "child clients should count; got: ${result.diagnostics}",
         )
     }
 
@@ -132,7 +134,7 @@ class CheckJulFileTest {
         entry.toFile().writeText(
             """
             import gone.X
-            proc P {
+            static proc P {
                 constructor initially(args : List<String>) { transit: }
             }
             """.trimIndent(),
@@ -156,7 +158,7 @@ class CheckJulFileTest {
         midDir.resolve("mid.jul").toFile().writeText(
             """
             import gone.Y
-            export proc X {
+            export static proc X {
                 constructor initially(args : List<String>) { transit: }
             }
             """.trimIndent(),
@@ -201,7 +203,7 @@ class CheckJulFileTest {
         Files.createDirectories(midDir)
         midDir.resolve("mid.jul").toFile().writeText(
             """
-            export proc X {
+            export static proc X {
                 constructor initially(args : List<String>) { transit: }
                 transition ping() { transit: }
             }
@@ -230,7 +232,7 @@ class CheckJulFileTest {
         entry.toFile().writeText(
             """
             import gone.X
-            proc P {
+            static proc P {
                 constructor initially(args : List<String>) { transit: }
             }
             """.trimIndent(),

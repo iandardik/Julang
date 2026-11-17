@@ -1,7 +1,7 @@
 import julay.funlib.exitProgram
 import julay.funlib.setOf
 
-proc BadSet {
+static proc BadSet {
     var s : Set<Int>
 
     constructor initially(args : List<String>) {

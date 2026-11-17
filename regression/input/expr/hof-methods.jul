@@ -7,7 +7,7 @@ import julay.funlib.setOf
 
 fun double(n : Int) : Int = n + n
 
-proc HofTest {
+static proc HofTest {
     var step : String
     var xs : List<Int>
     var ys : List<Int>

@@ -8,7 +8,7 @@ type Peer {
     id : Int
 }
 
-proc Counter {
+static proc Counter {
     var cluster : List<Peer>
     var nextIndex : List<Int>
     var n : Int

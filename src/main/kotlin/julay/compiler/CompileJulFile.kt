@@ -1,21 +1,23 @@
 package julay.compiler
 
-import julay.compiler.ast.ApiNode
 import julay.compiler.ast.LeafSpecNode
 import julay.compiler.ast.ProcClassNode
-import julay.compiler.ast.ProcFunNode
 import julay.compiler.ast.ProcNode
 import julay.compiler.ast.SpecNode
 import julay.compiler.ast.ValueProcExprNode
 import julay.compiler.pass.compositionLeavesOfSpec
 import julay.compiler.pass.compileSpecToTla
-import julay.compiler.pass.asSyntheticProcClass
 import julay.compiler.pass.CompilerOptConfig
 import julay.compiler.pass.TlaOptConfig
+import julay.compiler.pass.childParentPresenceErrors
+import julay.compiler.pass.childSyncErrors
+import julay.compiler.pass.handlerRuntimeActions
+import julay.compiler.pass.lifecycleErrors
+import julay.compiler.pass.computeCompositionAlphabet
 import julay.compiler.pass.expandLeavesToPclasses
+import julay.compiler.pass.leafActionMap
 import julay.compiler.pass.peerCompositionErrors
-import julay.compiler.pass.procFunCompositionErrors
-import julay.compiler.pass.procFunHavocWarnings
+import julay.compiler.pass.unboundExternalActionsWarning
 import java.nio.file.Path
 
 fun compileJulFile(
@@ -85,12 +87,6 @@ fun compileJulFile(
     val procAliases = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<ProcNode>() }
         .associateBy { it.name() }
-    val apiAliases = unit.modules
-        .flatMap { it.root.declNodes().filterIsInstance<ApiNode>() }
-        .associateBy { it.name() }
-    val procFuns = unit.modules
-        .flatMap { it.root.declNodes().filterIsInstance<ProcFunNode>() }
-        .associate { it.stableName() to it.asSyntheticProcClass() }
 
     for (specDecl in specTargets) {
         val specNode = compositionSpecs[specDecl.name]
@@ -101,15 +97,14 @@ fun compileJulFile(
         }
         // TLA+ allows incomplete alphabets (unmatched clients, unilateral ordinary/session,
         // dual providers, etc.). SyncChannel completeness is JAR-only.
-        if (!runTlaStructuralPass(ast, specDecl, procDecls)) {
+        if (!runTlaStructuralPass(ast, specDecl, procDecls, librariesInUse)) {
             return
         }
         val leaves = expandLeavesToPclasses(
             compositionLeavesOfSpec(specNode),
-            pclasses + procFuns,
+            pclasses,
             procAliases,
             compositionSpecs,
-            apiAliases,
             leafSpecs,
         )
         val peerErrors = peerCompositionErrors(leaves, leafSpecs, pclasses)
@@ -122,7 +117,7 @@ fun compileJulFile(
     }
 
     for (proc in tlaProcTargets) {
-        if (!runTlaStructuralPass(ast, proc, procDecls)) {
+        if (!runTlaStructuralPass(ast, proc, procDecls, librariesInUse)) {
             return
         }
         // Synthetic plain-system spec: equivalent to <true> P <true> (no assume, no guarantee).
@@ -131,21 +126,29 @@ fun compileJulFile(
 }
 
 /**
- * Non-alphabet preflight for TLA+ targets: procfuns must not appear in `||`, and
- * call-site havoc warnings still print. Composition alphabet integrity is skipped.
+ * Preflight for TLA+ targets: parent/child rules are enforced, and one
+ * unbound-external-actions warning lists leftover env alphabet names. Other composition
+ * alphabet integrity (hard errors) is skipped — partial specs are allowed for TLA+.
  */
 private fun runTlaStructuralPass(
     ast: julay.compiler.ast.RootNode,
     program: julay.compiler.decl.ProcDecl,
     procDecls: List<julay.compiler.decl.ProcDecl>,
+    librariesInUse: Set<String> = emptySet(),
 ): Boolean {
-    val compositionErrors = ast.procFunCompositionErrors(procDecls)
-    if (compositionErrors.isNotEmpty()) {
-        compositionErrors.forEach { System.err.println(it) }
+    val leafMap = leafActionMap(ast, program.allProcNames(procDecls).toSet(), librariesInUse)
+    val alphabet = computeCompositionAlphabet(program, procDecls, leafMap)
+    val components = program.allProcNames(procDecls).toSet()
+    val lifecycle = ast.declNodes().filterIsInstance<julay.compiler.ast.ProcClassNode>()
+        .filter { it.name() in components }
+        .flatMap { it.lifecycleErrors() }
+    val childErrors = lifecycle + childSyncErrors(alphabet) + childParentPresenceErrors(alphabet, program.name)
+    if (childErrors.isNotEmpty()) {
+        childErrors.forEach { System.err.println(it) }
         System.err.println("Found errors while compiling \"${program.name}\"; exiting.")
         return false
     }
-    ast.procFunHavocWarnings(program, procDecls).forEach { System.err.println(it) }
+    unboundExternalActionsWarning(alphabet, ast.handlerRuntimeActions())?.let { System.err.println(it) }
     return true
 }
 

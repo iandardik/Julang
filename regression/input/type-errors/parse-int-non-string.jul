@@ -1,6 +1,6 @@
 import julay.funlib.parseInt
 
-proc Bad {
+static proc Bad {
     var n : Int
 
     constructor initially(args : List<String>) {

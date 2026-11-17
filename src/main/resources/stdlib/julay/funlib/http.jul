@@ -1,8 +1,29 @@
 import julay.funlib.doHttpRequest
 
-export procfun httpRequest(req : HttpClientRequest) : HttpClientResponse {
-    internal transition perform(r : HttpClientRequest) {
-        guard: r = req
-        return: doHttpRequest(r)
+/*
+ * Outbound HTTP as a child: the parent spawns it with httpRequest(req) and
+ * receives the response through httpResponse(resp). Bind it as HttpRequest<Parent>.
+ */
+export proc HttpRequest {
+    var request : HttpClientRequest
+    var response : HttpClientResponse
+    var done : Boolean
+
+    constructor httpRequest(req : HttpClientRequest) {
+        transit:
+            request := req
+            response := HttpClientResponse { code := 0, body := "" }
+            done := false
+    }
+
+    internal transition perform() {
+        guard: ~done
+        transit:
+            response := doHttpRequest(request)
+            done := true
+    }
+
+    return httpResponse(resp : HttpClientResponse) {
+        guard: done & resp = response
     }
 }

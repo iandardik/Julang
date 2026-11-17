@@ -6,7 +6,7 @@ type Point {
     y : Int
 }
 
-proc ListOClassDemo {
+static proc ListOClassDemo {
     var pts : List<Point>
     var done : Boolean
 

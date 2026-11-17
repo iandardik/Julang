@@ -6,7 +6,7 @@ type Node {
     url : String
 }
 
-proc Core {
+static proc Core {
     var cluster : List<Node>
     var seen : Int
 

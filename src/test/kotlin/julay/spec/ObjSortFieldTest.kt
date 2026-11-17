@@ -76,7 +76,7 @@ class ObjSortFieldTest {
         val result = typeCheck(
             """
             type Node
-            proc P {
+            static proc P {
                 var d : Node := "n1"
                 constructor initially(args : List<String>) { transit: d := "n1" }
             }
@@ -120,7 +120,7 @@ class ObjSortFieldTest {
         main.writeText(
             """
             import protocol.Sys
-            proc Peer {
+            static proc Peer {
                 var ack : Boolean := false
                 constructor initially(args : List<String>) {}
                 transition ping() { transit: ack := true }
@@ -178,7 +178,7 @@ class ObjSortFieldTest {
                 dest : NodeSet
                 msg : String
             }
-            proc Bad {
+            static proc Bad {
                 var m : VoteRequestMsg
                 constructor initially(args : List<String>) {
                     transit: m := VoteRequestMsg { dest := "n1", msg := "x" }
@@ -236,7 +236,7 @@ class ObjSortFieldTest {
                     transit: m := Msg { dest := "n1" }
                 }
             }
-            proc Bad {
+            static proc Bad {
                 var m : Msg
                 constructor initially(args : List<String>) {
                     transit: m := Msg { dest := "n1" }

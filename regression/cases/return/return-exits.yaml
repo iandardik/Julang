@@ -1,0 +1,6 @@
+source: regression/input/return/return-exits.jul
+programs:
+  - name: P
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/return-return-exits.stdout

@@ -1,7 +1,7 @@
 import julay.funlib.exitProgram
 import julay.funlib.mapOf
 
-proc BadMap {
+static proc BadMap {
     var mp : Map<String, Int>
 
     constructor initially(args : List<String>) {

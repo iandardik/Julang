@@ -3,7 +3,7 @@
 In Julay, side effects are not ambient language primitives. They come from:
 
 1. **Builtins** for HTTP serving and timers — `serveHttp`, `setTimer`, `cancelTimer` (import as `julay.funlib.<name>`).
-2. **Library functions** and **stdlib procfuns** that perform effects — for example `println()`, `readln()`, `exitProgram(code)`, `exitProc()`, and blocking HTTP client I/O via `httpRequest` (`import julay.funlib.httpRequest`). Call funlib from action bodies (`before:` / `after:` for void effects; `transit:` RHS for value-returning IO). `httpRequest` is spawn-and-await like any procfun call.
+2. **Library functions** that perform effects — for example `println()`, `readln()`, `exitProgram(code)`, and outbound HTTP via `doHttpRequest` (or the stdlib `proc HttpRequest` bound as `HttpRequest<Parent>`). Call funlib from action bodies (`before:` / `after:` for void effects; `transit:` RHS for value-returning IO).
 
 Which functions are effectful is listed in [Standard library](standard-library.md). There is no `julay.proclib`; former `HttpServer` / `Timer` library procs are replaced by the builtins below.
 
@@ -11,7 +11,7 @@ Which functions are effectful is listed in [Standard library](standard-library.m
 
 | Builtin | Role | Notes |
 |---------|------|--------|
-| `serveHttp(port, handler)` | Start an HTTP server on `port`; `handler` is a **procfun** name | Typically in a static starter’s `after:` |
+| `serveHttp(port, Class.ctor ~> Class.action)` | Start an HTTP server; constructs `Class` per request via `ctor`, takes the response when `action` fires | Typically in a static starter’s `after:` — see [Parent-bound procs](children.md#http-handlers) |
 | `setTimer(name, ms)` | Arm a named timer; `name` must match a `timer transition` | Allowed in constructor `after:` |
 | `cancelTimer(name)` | Cancel a named timer | **Transition-only** (`before:` / `after:`) |
 
@@ -21,7 +21,7 @@ import julay.funlib.serveHttp
 static proc ServerStarter {
     constructor initially(args : List<String>) {
         after:
-            serveHttp(8000, echoHandler)
+            serveHttp(8000, Echo.req ~> Echo.resp)
     }
 }
 ```
@@ -81,7 +81,7 @@ internal transition step() {
 
 `after:` is the former `effect:` clause (renamed).
 
-`exitProc()` cancels the **calling** proc’s coroutine after the current action finishes (prefer `after:` so state updates commit first). It is a **compile-time error inside procfun bodies** — procfuns must complete via `return:` (otherwise the host would get no return value, and TLA+ `Host_blocking` would stick). See [Procfuns](procfun.md).
+Dynamic procs terminate with a named **`return`** action (not `exitProc`, which is removed). See [Parent-bound procs](children.md#returns).
 
 ### IO in `transit:`
 
@@ -116,7 +116,7 @@ Semantics:
 1. Each `let` initializer is evaluated top-to-bottom against **pre-transit** state, plus earlier lets in this block. In **transitions**, lets **may** read state variables; in **constructors**, they must not (state is still undefined).
 2. Every assignment RHS is evaluated against pre-transit state plus lets textually **above** it.
 3. All assignments are then applied **simultaneously** (later lines do not observe earlier assigns).
-4. **In constructors only:** neither a let initializer nor an assignment RHS may reference any state variable (including self-updates — no `x := x + 1` or `let t := x`). Use constructor/procfun args, pure expressions, or earlier lets that do not read state. Inline `var`/`const` initializers likewise must not reference state.
+4. **In constructors only:** neither a let initializer nor an assignment RHS may reference any state variable (including self-updates — no `x := x + 1` or `let t := x`). Use constructor args, pure expressions, or earlier lets that do not read state. Inline `var`/`const` initializers likewise must not reference state.
 
 ```jul
 constructor initially(args : List<String>) {

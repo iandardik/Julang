@@ -1,0 +1,18 @@
+static proc Boss {
+    constructor initially(args : List<String>) {}
+    transition done() {}
+}
+
+static proc Other {
+    constructor initially(args : List<String>) {}
+    transition start() {}
+}
+
+proc Worker {
+    constructor start() {}
+    return done() {}
+}
+
+proc Sys := Boss || Other || Worker<Boss>
+
+compile Sys

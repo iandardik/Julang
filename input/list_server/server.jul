@@ -4,14 +4,21 @@ import julay.funlib.listOf
 static proc ServerStarter {
     constructor initially(args : List<String>) {
         after:
-            serveHttp(8000, listHandler)
+            serveHttp(8000, ListHandler.req ~> ListHandler.respond)
     }
 }
 
-procfun listHandler(req : HttpServerRequest) : HttpServerResponse {
-    const reqBody : String := req.body
-    var step : String := "A"
-    var list : List<String> := listOf()
+proc ListHandler {
+    const reqBody : String
+    var step : String
+    var list : List<String>
+
+    constructor req(r : HttpServerRequest) {
+        transit:
+            reqBody := r.body
+            step := "A"
+            list := listOf()
+    }
 
     client transition getAndAppend(e : String, lst : List<String>) {
         guard:
@@ -21,13 +28,13 @@ procfun listHandler(req : HttpServerRequest) : HttpServerResponse {
             list := lst + listOf(reqBody)
     }
 
-    internal transition respond() {
-        guard: step = "B"
-        return: HttpServerResponse {
-            body := list + "",
-            code := 200
-        }
+    return respond(resp : HttpServerResponse) {
+        guard:
+            step = "B" & resp = HttpServerResponse {
+                body := list + "",
+                code := 200
+            }
     }
 }
 
-export proc ServerLogic := ServerStarter
+export proc ServerLogic := ServerStarter || ListHandler

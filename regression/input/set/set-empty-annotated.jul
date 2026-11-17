@@ -2,7 +2,7 @@ import julay.funlib.length
 import julay.funlib.exitProgram
 import julay.funlib.setOf
 
-proc SetEmptyAnnotatedDemo {
+static proc SetEmptyAnnotatedDemo {
     var n : Int
     var done : Boolean
 

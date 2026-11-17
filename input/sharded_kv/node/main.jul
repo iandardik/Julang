@@ -1,6 +1,22 @@
 import node.store.Store
-import node.rpc_in.RpcIn
-import node.rpc_out.RpcOut
-import node.shard.Shard
+import node.rpc_in.ServerStarter
+import node.rpc_in.HandleRpc
+import node.rpc_out.SendClaim
+import node.rpc_out.SendMoveBatch
+import node.rpc_out.SendKeyCount
+import node.shard.Put
+import node.shard.Get
+import node.shard.Owners
+import node.shard.KeyCount
+import node.shard.ApplyClaim
+import node.shard.ApplyMoveBatch
+import node.shard.FindLightestPeer
+import node.shard.BroadcastClaim
+import node.shard.ReshardToPeer
 
-export proc ShardNode := Store || RpcIn || RpcOut || Shard
+export proc ShardNode := Store || ServerStarter || HandleRpc
+    || Put<HandleRpc> || Get<HandleRpc> || Owners<HandleRpc> || KeyCount<HandleRpc>
+    || ApplyClaim<HandleRpc> || ApplyMoveBatch<HandleRpc>
+    || FindLightestPeer<Put> || BroadcastClaim<Put> || BroadcastClaim<ApplyMoveBatch>
+    || ReshardToPeer<Put>
+    || SendClaim<BroadcastClaim> || SendMoveBatch<ReshardToPeer> || SendKeyCount<FindLightestPeer>

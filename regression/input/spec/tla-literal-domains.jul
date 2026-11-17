@@ -1,4 +1,4 @@
-proc Modes {
+static proc Modes {
     var payload : String
     var step : Int
     var role : String

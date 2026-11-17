@@ -186,11 +186,11 @@ class AlphabetJsonTest {
                 transition inner() { transit: }
                 transition outer() { transit: }
             }
-            proc B {
+            static proc B {
                 constructor initially(args : List<String>) { transit: }
                 transition inner() { transit: }
             }
-            proc C {
+            static proc C {
                 constructor initially(args : List<String>) { transit: }
                 transition outer() { transit: }
             }
@@ -236,11 +236,11 @@ class AlphabetJsonTest {
         val file = dir.resolve("main.jul")
         file.writeText(
             """
-            proc Hub {
+            static proc Hub {
                 constructor initially(args : List<String>) { transit: }
                 service transition w() { transit: }
             }
-            proc Cli {
+            static proc Cli {
                 constructor initially(args : List<String>) { transit: }
                 client transition w() { transit: }
             }
@@ -278,15 +278,15 @@ class AlphabetJsonTest {
         val file = dir.resolve("main.jul")
         file.writeText(
             """
-            proc Hub {
+            static proc Hub {
                 constructor initially(args : List<String>) { transit: }
                 service transition staleTerm(term : Int) { transit: }
             }
-            proc CliA {
+            static proc CliA {
                 constructor initially(args : List<String>) { transit: }
                 client transition staleTerm(term : Int) { transit: }
             }
-            proc CliB {
+            static proc CliB {
                 constructor initially(args : List<String>) { transit: }
                 client transition staleTerm(term : Int) { transit: }
             }
@@ -340,438 +340,12 @@ class AlphabetJsonTest {
         )
     }
 
-    @Test
-    fun compositionGraphOmitsNestedProcFunCallsOnComposite() {
-        val dir = Files.createTempDirectory("julay-procfun-graph")
-        val file = dir.resolve("main.jul")
-        file.writeText(
-            """
-            procfun clientAppendRPC(n : Int) : Int {
-                client transition noLeader() {
-                    return: 0
-                }
-                transition done() {
-                    return: n
-                }
-            }
 
-            proc RpcReqHandler {
-                var out : Int
-                constructor initially(args : List<String>) {
-                    transit: out := clientAppendRPC(1)
-                }
-            }
 
-            proc Peer {
-                constructor initially(args : List<String>) { transit: }
-                transition tick() { transit: }
-            }
 
-            proc RpcIn := RpcReqHandler || Peer
-            compile RpcIn
-            """.trimIndent(),
-        )
-        val checked = prepareCheckedCompilation(file)
-        assertNotNull(checked)
-        val scope = resolveAnalyzeScope(
-            scopeNames = listOf("RpcIn"),
-            procDecls = checked.procDecls,
-            allPClassNames = checked.unit.allPClassNames,
-            allProcAliasNames = checked.unit.allProcNames,
-            librariesInUse = checked.librariesInUse,
-            procFunNames = julay.compiler.collectProcFunStableNames(checked.ast as RootNode),
-        )
-        assertNotNull(scope)
-        val json = buildAlphabetJsonDocument(
-            checked.ast as RootNode,
-            scope,
-            checked.librariesInUse,
-            checked.procDecls,
-        )
-        val graphIdx = json.indexOf("\"compositionGraph\"")
-        val externalIdx = json.indexOf("\"external\"")
-        assertTrue(graphIdx >= 0 && externalIdx > graphIdx, json)
-        val graphBlock = json.substring(graphIdx, externalIdx)
-        assertTrue(graphBlock.contains("\"RpcReqHandler\""), graphBlock)
-        assertTrue(graphBlock.contains("\"Peer\""), graphBlock)
-        assertTrue(
-            !graphBlock.contains("\"clientAppendRPC\""),
-            "composite must not lift nested procfun call nodes:\n$graphBlock",
-        )
-        assertTrue(
-            !graphBlock.contains("\"actions\": []"),
-            "composite must not emit call edges:\n$graphBlock",
-        )
-    }
 
-    @Test
-    fun leafCompositionGraphIncludesBareProcFunCallEdge() {
-        val dir = Files.createTempDirectory("julay-leaf-procfun-graph")
-        val file = dir.resolve("main.jul")
-        file.writeText(
-            """
-            procfun clientAppendRPC(n : Int) : Int {
-                client transition noLeader() {
-                    return: 0
-                }
-                transition done() {
-                    return: n
-                }
-            }
 
-            proc RpcReqHandler {
-                var out : Int
-                constructor initially(args : List<String>) {
-                    transit: out := clientAppendRPC(1)
-                }
-            }
 
-            compile RpcReqHandler
-            """.trimIndent(),
-        )
-        val checked = prepareCheckedCompilation(file)
-        assertNotNull(checked)
-        val scope = resolveAnalyzeScope(
-            scopeNames = listOf("RpcReqHandler"),
-            procDecls = checked.procDecls,
-            allPClassNames = checked.unit.allPClassNames,
-            allProcAliasNames = checked.unit.allProcNames,
-            librariesInUse = checked.librariesInUse,
-            procFunNames = julay.compiler.collectProcFunStableNames(checked.ast as RootNode),
-        )
-        assertNotNull(scope)
-        val json = buildAlphabetJsonDocument(
-            checked.ast as RootNode,
-            scope,
-            checked.librariesInUse,
-            checked.procDecls,
-        )
-        val graphIdx = json.indexOf("\"compositionGraph\"")
-        val externalIdx = json.indexOf("\"external\"")
-        assertTrue(graphIdx >= 0 && externalIdx > graphIdx, json)
-        val graphBlock = json.substring(graphIdx, externalIdx)
-        assertTrue(
-            graphBlock.contains("\"nodes\": [\"RpcReqHandler\", \"main_clientAppendRPC\"]"),
-            "leaf diagram should be caller then callee (stable procfun id):\n$graphBlock",
-        )
-        assertTrue(
-            graphBlock.contains("\"a\": \"RpcReqHandler\"") &&
-                graphBlock.contains("\"b\": \"main_clientAppendRPC\"") &&
-                graphBlock.contains("\"actions\": []"),
-            "expected directed call edge RpcReqHandler→main_clientAppendRPC:\n$graphBlock",
-        )
-    }
-
-    @Test
-    fun leafCompositionGraphIncludesApiQualifiedProcFunCallEdge() {
-        val dir = Files.createTempDirectory("julay-leaf-api-call-graph")
-        val file = dir.resolve("main.jul")
-        file.writeText(
-            """
-            procfun startTimeout() : Boolean {
-                transition startTimeout() {
-                    return: true
-                }
-            }
-
-            proc TimeoutImpl {
-                constructor startTimeout() { transit: }
-            }
-
-            export api Timeout {
-                proc: TimeoutImpl
-                calls: startTimeout
-            }
-
-            proc Protocol {
-                var ok : Boolean
-                constructor initially(args : List<String>) {
-                    transit: ok := Timeout.startTimeout()
-                }
-            }
-
-            compile Protocol
-            """.trimIndent(),
-        )
-        val checked = prepareCheckedCompilation(file)
-        assertNotNull(checked)
-        val scope = resolveAnalyzeScope(
-            scopeNames = listOf("Protocol"),
-            procDecls = checked.procDecls,
-            allPClassNames = checked.unit.allPClassNames,
-            allProcAliasNames = checked.unit.allProcNames,
-            librariesInUse = checked.librariesInUse,
-            procFunNames = julay.compiler.collectProcFunStableNames(checked.ast as RootNode),
-        )
-        assertNotNull(scope)
-        val json = buildAlphabetJsonDocument(
-            checked.ast as RootNode,
-            scope,
-            checked.librariesInUse,
-            checked.procDecls,
-        )
-        val graphIdx = json.indexOf("\"compositionGraph\"")
-        val externalIdx = json.indexOf("\"external\"")
-        assertTrue(graphIdx >= 0 && externalIdx > graphIdx, json)
-        val graphBlock = json.substring(graphIdx, externalIdx)
-        assertTrue(graphBlock.contains("\"Protocol\""), graphBlock)
-        assertTrue(graphBlock.contains("\"Timeout_startTimeout\""), graphBlock)
-        assertTrue(
-            graphBlock.contains("\"a\": \"Protocol\"") &&
-                graphBlock.contains("\"b\": \"Timeout_startTimeout\"") &&
-                graphBlock.contains("\"actions\": []"),
-            "expected directed api-qualified call edge Protocol→Timeout_startTimeout:\n$graphBlock",
-        )
-    }
-
-    @Test
-    fun compositionGraphCompositeShowsOnlySyncSpine() {
-        // Nested helper under RpcReqHandler must not appear on the composite diagram.
-        val dir = Files.createTempDirectory("julay-graph-order")
-        val file = dir.resolve("main.jul")
-        file.writeText(
-            """
-            procfun helper(n : Int) : Int {
-                transition done() { return: n }
-            }
-
-            proc RpcReqHandler {
-                var out : Int
-                constructor initially(args : List<String>) {
-                    transit: out := helper(1)
-                }
-                transition ping() { transit: }
-            }
-            static proc ServerInitializer {
-                constructor initially(args : List<String>) { transit: }
-                transition setup() { transit: }
-            }
-            static proc HttpServer {
-                constructor initially(args : List<String>) { transit: }
-                transition setup() { transit: }
-                transition ping() { transit: }
-            }
-
-            proc RpcIn := RpcReqHandler || ServerInitializer || HttpServer
-            compile RpcIn
-            """.trimIndent(),
-        )
-        val checked = prepareCheckedCompilation(file)
-        assertNotNull(checked)
-        val scope = resolveAnalyzeScope(
-            scopeNames = listOf("RpcIn"),
-            procDecls = checked.procDecls,
-            allPClassNames = checked.unit.allPClassNames,
-            allProcAliasNames = checked.unit.allProcNames,
-            librariesInUse = checked.librariesInUse,
-            procFunNames = julay.compiler.collectProcFunStableNames(checked.ast as RootNode),
-        )
-        assertNotNull(scope, "RpcIn scope must resolve after ordinary/static sync rewrite")
-        val json = buildAlphabetJsonDocument(
-            checked.ast as RootNode,
-            scope,
-            checked.librariesInUse,
-            checked.procDecls,
-        )
-        val graphIdx = json.indexOf("\"compositionGraph\"")
-        val externalIdx = json.indexOf("\"external\"")
-        assertTrue(graphIdx >= 0 && externalIdx > graphIdx, json)
-        val graphBlock = json.substring(graphIdx, externalIdx)
-        val nodesMatch = Regex(""""nodes": \[([^\]]+)\]""").find(graphBlock)
-        assertNotNull(nodesMatch, graphBlock)
-        val nodes = nodesMatch!!.groupValues[1]
-            .split(",")
-            .map { it.trim().removeSurrounding("\"") }
-        assertTrue(
-            nodes.toSet() == setOf("ServerInitializer", "HttpServer", "RpcReqHandler"),
-            "composite sync spine only (no nested procfun):\n$graphBlock",
-        )
-        assertTrue(!nodes.contains("helper"), graphBlock)
-    }
-
-    @Test
-    fun calledProcFunFoldsIntoParentWithoutExplicitComposition() {
-        val dir = Files.createTempDirectory("julay-procfun-call-fold")
-        val file = dir.resolve("main.jul")
-        file.writeText(
-            """
-            procfun clientAppendRPC(n : Int) : Int {
-                client transition noLeader() {
-                    return: 0
-                }
-                transition done() {
-                    return: n
-                }
-            }
-
-            proc Handler {
-                var out : Int
-                constructor initially(args : List<String>) {
-                    transit: out := clientAppendRPC(1)
-                }
-            }
-
-            proc RpcIn := Handler
-            compile RpcIn
-            """.trimIndent(),
-        )
-        val checked = prepareCheckedCompilation(file)
-        assertNotNull(checked)
-        val scope = resolveAnalyzeScope(
-            scopeNames = listOf("RpcIn"),
-            procDecls = checked.procDecls,
-            allPClassNames = checked.unit.allPClassNames,
-            allProcAliasNames = checked.unit.allProcNames,
-            librariesInUse = checked.librariesInUse,
-            procFunNames = julay.compiler.collectProcFunStableNames(checked.ast as RootNode),
-        )
-        assertNotNull(scope)
-        val json = buildAlphabetJsonDocument(
-            checked.ast as RootNode,
-            scope,
-            checked.librariesInUse,
-            checked.procDecls,
-        )
-        assertTrue(json.contains("\"name\": \"noLeader\""), "called procfun should fold into parent:\n$json")
-        assertTrue(!json.contains("\"name\": \"clientAppendRPC_call\""), json)
-        assertTrue(!json.contains("\"name\": \"clientAppendRPC_ret\""), json)
-    }
-
-    @Test
-    fun standaloneProcFunShowsUserActionsInExternalAlphabet() {
-        val dir = Files.createTempDirectory("julay-procfun-alphabet")
-        val file = dir.resolve("main.jul")
-        file.writeText(
-            """
-            procfun countUp(n : Int) : Int {
-                var i : Int := 0
-                var result : Int := 0
-
-                internal transition step() {
-                    guard: i < n
-                    transit:
-                        result := i + 1
-                        i := i + 1
-                }
-
-                transition done() {
-                    guard: i = n
-                    return: result
-                }
-            }
-
-            compile countUp
-            """.trimIndent(),
-        )
-        val checked = prepareCheckedCompilation(file)
-        assertNotNull(checked)
-        val stable = "main_countUp"
-        val scope = resolveAnalyzeScope(
-            scopeNames = listOf(stable),
-            procDecls = checked.procDecls,
-            allPClassNames = checked.unit.allPClassNames,
-            allProcAliasNames = checked.unit.allProcNames,
-            librariesInUse = checked.librariesInUse,
-            procFunNames = julay.compiler.collectProcFunStableNames(checked.ast as RootNode),
-        )
-        assertNotNull(scope)
-        val json = buildAlphabetJsonDocument(
-            checked.ast as RootNode,
-            scope,
-            checked.librariesInUse,
-            checked.procDecls,
-        )
-        assertTrue(json.contains("\"name\": \"step\""), json)
-        assertTrue(json.contains("\"name\": \"done\""), json)
-        // Bare return must stay ordinary in the IR alphabet (not rewritten to source-internal).
-        assertTrue(
-            json.contains(Regex("""\"name\": \"done\"[\s\S]*?\"modifier\": \"ordinary\"""")),
-            "bare return done() must remain ordinary:\n$json",
-        )
-        assertTrue(!json.contains("\"name\": \"${stable}_call\""), json)
-        assertTrue(!json.contains("\"name\": \"${stable}_ret\""), json)
-    }
-
-    @Test
-    fun whenNestedProcFunCallDoesNotOrphanAndFoldsNoLeader() {
-        val dir = Files.createTempDirectory("julay-procfun-fold")
-        val file = dir.resolve("main.jul")
-        file.writeText(
-            """
-            procfun clientAppendRPC(n : Int) : Int {
-                client transition noLeader() {
-                    return: 0
-                }
-                transition done() {
-                    return: n
-                }
-            }
-
-            proc Handler {
-                var out : Int
-                var path : String
-
-                constructor initially(args : List<String>) {
-                    transit:
-                        path := "a"
-                        out := 0
-                }
-
-                transition dispatch() {
-                    transit:
-            out := when (path) {
-                "a" -> RpcIn.clientAppendRPC(1)
-                else -> 0
-            }
-                }
-            }
-
-            api RpcIn {
-                proc: Handler
-                calls: clientAppendRPC
-            }
-            compile RpcIn
-            """.trimIndent(),
-        )
-        val checked = prepareCheckedCompilation(file)
-        assertNotNull(checked)
-
-        // Api-listed calls need not be called by the interior (external entry points).
-        val components = checked.unit.allPClassNames + checked.librariesInUse
-        val ok = julay.compiler.runErrorAndWarningPasses(
-            checked.ast,
-            components,
-            checked.librariesInUse,
-            programName = null,
-            program = null,
-            procDecls = checked.procDecls,
-        )
-        assertTrue(ok, "api-listed procfun must not fail composition checks")
-
-        val scope = resolveAnalyzeScope(
-            scopeNames = listOf("RpcIn"),
-            procDecls = checked.procDecls,
-            allPClassNames = checked.unit.allPClassNames,
-            allProcAliasNames = checked.unit.allProcNames,
-            librariesInUse = checked.librariesInUse,
-        )
-        assertNotNull(scope)
-        val json = buildAlphabetJsonDocument(
-            checked.ast as RootNode,
-            scope,
-            checked.librariesInUse,
-            checked.procDecls,
-        )
-        assertTrue(json.contains("\"name\": \"noLeader\""), "noLeader should appear in alphabet:\n$json")
-        assertTrue(
-            !json.contains("\"name\": \"clientAppendRPC_call\""),
-            "synthetic call must stay out of IDE alphabet:\n$json",
-        )
-        assertTrue(
-            !json.contains("\"name\": \"clientAppendRPC_ret\""),
-            "synthetic ret must stay out of IDE alphabet:\n$json",
-        )
-    }
 
     @Test
     fun leafSShowsIncrementAsExternal() {
@@ -782,7 +356,7 @@ class AlphabetJsonTest {
             import julay.funlib.exitProgram
             import julay.funlib.println
 
-            proc S {
+            static proc S {
                 var x : Int
                 var print : Boolean
 

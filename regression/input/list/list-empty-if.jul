@@ -2,7 +2,7 @@ import julay.funlib.length
 import julay.funlib.exitProgram
 import julay.funlib.listOf
 
-proc ListEmptyIfDemo {
+static proc ListEmptyIfDemo {
     var xs : List<Int>
     var done : Boolean
 

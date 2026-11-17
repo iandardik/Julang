@@ -6,7 +6,7 @@ type Point {
     y : Int
 }
 
-proc Left {
+static proc Left {
     constructor initially(args : List<String>) {
         transit:
     }

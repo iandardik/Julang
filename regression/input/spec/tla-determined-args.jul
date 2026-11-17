@@ -3,7 +3,7 @@ type Rec {
     y : Int
 }
 
-proc Box {
+static proc Box {
     var n : Int
     var box : Rec
 

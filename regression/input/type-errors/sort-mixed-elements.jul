@@ -1,6 +1,6 @@
 type Bad
 
-proc P {
+static proc P {
     var n : Int
     constructor initially(args : List<String>) {
         transit: n := 0

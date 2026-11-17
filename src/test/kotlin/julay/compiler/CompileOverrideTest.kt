@@ -16,10 +16,10 @@ class CompileOverrideTest {
     fun cliCompileNamesOverrideSourceDirectives() {
         val checked = prepare(
             """
-            proc A {
+            static proc A {
                 constructor initially(args : List<String>) {}
             }
-            proc B {
+            static proc B {
                 constructor initially(args : List<String>) {}
             }
             compile B
@@ -35,10 +35,10 @@ class CompileOverrideTest {
     fun repeatedCliCompileNamesSelectMultipleTargets() {
         val checked = prepare(
             """
-            proc A {
+            static proc A {
                 constructor initially(args : List<String>) {}
             }
-            proc B {
+            static proc B {
                 constructor initially(args : List<String>) {}
             }
             invariant Inv := true
@@ -55,7 +55,7 @@ class CompileOverrideTest {
     fun cliCompileWorksWithoutSourceCompileDirective() {
         val checked = prepare(
             """
-            proc Solo {
+            static proc Solo {
                 constructor initially(args : List<String>) {}
             }
             """.trimIndent(),
@@ -68,10 +68,10 @@ class CompileOverrideTest {
     fun withoutCliCompileUsesSourceDirectives() {
         val checked = prepare(
             """
-            proc A {
+            static proc A {
                 constructor initially(args : List<String>) {}
             }
-            proc B {
+            static proc B {
                 constructor initially(args : List<String>) {}
             }
             compile A, B
@@ -84,7 +84,7 @@ class CompileOverrideTest {
     fun compileTlaAddsTlaTargetAlongsideSourceCompile() {
         val checked = prepare(
             """
-            proc Solo {
+            static proc Solo {
                 constructor initially(args : List<String>) {}
             }
             compile Solo
@@ -100,7 +100,7 @@ class CompileOverrideTest {
     fun compileTlaAloneWithoutSourceCompile() {
         val checked = prepare(
             """
-            proc Solo {
+            static proc Solo {
                 constructor initially(args : List<String>) {}
             }
             """.trimIndent(),
@@ -117,7 +117,7 @@ class CompileOverrideTest {
         val file = dir.resolve("main.jul")
         file.writeText(
             """
-            proc A {
+            static proc A {
                 constructor initially(args : List<String>) {}
             }
             invariant Inv := true
@@ -133,7 +133,7 @@ class CompileOverrideTest {
         val file = dir.resolve("main.jul")
         file.writeText(
             """
-            proc Solo {
+            static proc Solo {
                 var n : Int
                 constructor initially(args : List<String>) { transit: n := 0 }
                 transition bump() { transit: n := n + 1 }

@@ -1,5 +1,0 @@
-source: regression/input/procfun-scope/dup-same-module.jul
-expectCompileFailure: true
-expectCompileOutputContains:
-  - "Expected each procfun to have a unique name within module"
-  - "foo"

@@ -55,32 +55,11 @@ export fun fieldValue(line : String) : String =
  * Parse cluster.conf: trim lines, skip blanks/#, ids 1..n in order.
  * myIdx is the 1-based node id for this process.
  */
-export procfun parseCfg(cfgPath : String, myIdx : Int) : CfgPair {
-    var rawLines : List<String> := split(readFile(cfgPath), "\n")
-    var idx : Int := 1
-    var entryIdx : Int := 1
-    var meBuilder : Node := Node { id := 0, url := "" }
-    var clusterBuilder : List<Node> := listOf()
-
-    internal transition parseAndBuildCluster() {
-        guard: idx <= length(rawLines)
-        transit:
-            let line : String := trim(rawLines[idx])
-            let isEntry : Boolean := ~isBlankOrComment(line)
-            let isMyNode : Boolean := isEntry & entryIdx = myIdx
-            let nextNode : Node := Node { id := entryIdx, url := line }
-            meBuilder := if (isMyNode) { nextNode } else { meBuilder }
-            clusterBuilder := if (isEntry) {
-                clusterBuilder + listOf(nextNode)
-            } else {
-                clusterBuilder
-            }
-            entryIdx := if (isEntry) { entryIdx + 1 } else { entryIdx }
-            idx := idx + 1
+export fun parseCfg(cfgPath : String, myIdx : Int) : CfgPair =
+    let (entries : List<String> := split(readFile(cfgPath), "\n")
+        .map(line -> trim(line))
+        .filter(line -> ~isBlankOrComment(line)))
+    let (cluster : List<Node> := entries.fold(listOf<Node>(), (acc, line) ->
+        acc + listOf(Node { id := length(acc) + 1, url := line }))) {
+        CfgPair { me := cluster[myIdx], cluster := cluster }
     }
-
-    internal transition endParse() {
-        guard: idx = length(rawLines) + 1
-        return: CfgPair { me := meBuilder, cluster := clusterBuilder }
-    }
-}

@@ -20,7 +20,7 @@ static proc Counter {
 
 /* prints the current value of the counter every 5 seconds
 */
-proc PeriodicPrint {
+static proc PeriodicPrint {
     var localCounter : Int
     var step : String
 
@@ -55,14 +55,21 @@ proc PeriodicPrint {
 static proc ServerStarter {
     constructor initially(args : List<String>) {
         after:
-            serveHttp(8000, incHandler)
+            serveHttp(8000, IncHandler.req ~> IncHandler.respond)
     }
 }
 
-procfun incHandler(req : HttpServerRequest) : HttpServerResponse {
-    var localCounter : Int := -1
-    var step : String := "A"
-    var exit : Boolean := (req.body = "exit")
+proc IncHandler {
+    var localCounter : Int
+    var step : String
+    var exit : Boolean
+
+    constructor req(r : HttpServerRequest) {
+        transit:
+            localCounter := -1
+            step := "A"
+            exit := (r.body = "exit")
+    }
 
     client transition increment() {
         guard:   step = "A"
@@ -76,17 +83,8 @@ procfun incHandler(req : HttpServerRequest) : HttpServerResponse {
             step := "C"
     }
 
-    internal transition respond() {
-        guard: step = "C" & ~exit
-        return: HttpServerResponse {
-            body := localCounter + "",
-            code := 200
-        }
-    }
-
-    internal transition respondAndExit() {
-        guard: step = "C" & exit
-        return: HttpServerResponse {
+    return respond(resp : HttpServerResponse) {
+        guard: step = "C" & resp = HttpServerResponse {
             body := localCounter + "",
             code := 200
         }
@@ -94,7 +92,7 @@ procfun incHandler(req : HttpServerRequest) : HttpServerResponse {
 }
 
 proc Printer := PeriodicPrint
-proc ServerLogic := ServerStarter
+proc ServerLogic := ServerStarter || IncHandler
 proc CounterServerTest := Counter || Printer || ServerLogic
 
 compile CounterServerTest

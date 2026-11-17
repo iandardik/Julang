@@ -1,0 +1,3 @@
+procfun f(n : Int) : Int {
+    internal transition done() {}
+}

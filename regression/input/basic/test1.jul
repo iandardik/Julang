@@ -39,7 +39,7 @@ static proc S {
     }
 }
 
-proc T {
+static proc T {
     var x : Int
 
     constructor initially(args : List<String>) {

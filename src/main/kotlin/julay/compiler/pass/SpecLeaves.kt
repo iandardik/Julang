@@ -8,17 +8,33 @@ import java.util.ArrayDeque
  * A leaf in a spec system/assume expression.
  * [occurrenceId] distinguishes multiple occurrences of the same class; identity is not idempotent.
  */
+/** Reserved create-index delayed model: slot set indexing every dynamic proc leaf. */
+const val DYN_PROC_MODEL = "DynProc"
+
+/** Slot model used when no `DynProc := { ... }` is declared. */
+const val DEFAULT_DYN_PROC_MODEL = "{1, 2}"
+
 data class SpecLeaf(
     val name: String,
     val paramName: String? = null,
     val paramType: TypeExpr? = null,
+    /**
+     * Slot index (`DynProc`) for a dynamic leaf under a create-index: `X[n][i]`.
+     * Unindexed dynamic leaves use [paramName] / [paramType] for the slot instead (`X[i]`).
+     */
+    val instParamName: String? = null,
+    val instParamType: TypeExpr? = null,
     val occurrenceId: String = "",
     /** Named assembly that introduced this occurrence (for TLA `{Class}_{Assembly}` renaming). */
     val introducingAssembly: String = name,
     /** Assigned TLA identifier (may differ from [name] when renaming for ties). */
     val tlaName: String = name,
-    /** True when this leaf is a procfun call-site occurrence (not a `||` peer). */
-    val isProcFun: Boolean = false,
+    /** True for a dynamic (non-static) proc class: indexed by `DynProc` slots. */
+    val isDynamic: Boolean = false,
+    /** Parent proc class for a `B<A>` child occurrence. */
+    val parentClass: String? = null,
+    /** True when the `DynProc` slot is this leaf's only index ([paramName] is the slot binder). */
+    val slotIsParam: Boolean = false,
     /**
      * When non-null, this leaf's index was applied under `with (binder)`; leaves that share the
      * same [withScopeId] use one TLA binder (no per-leaf clash rename).
@@ -42,13 +58,21 @@ data class SpecLeaf(
     val typeModels: List<TypeModelNode> = emptyList(),
     /** Create-index / leaf-spec nullary fun overrides (`name := expr`); TLA-only. */
     val funModels: List<FunModelNode> = emptyList(),
+    /**
+     * Peeled `DynProc := {…}` model (not a domain type): cfg literals for the reusable
+     * dynamic-proc slot set; only set when the create-index declares DynProc.
+     */
+    val dynProcModel: TypeModelNode? = null,
 ) {
     val isParameterized: Boolean get() = paramName != null && paramType != null
+    val isDualIndexed: Boolean
+        get() = isParameterized && instParamName != null && instParamType != null
     /** True when this leaf is create-indexed and [varName] is not a `global` model var. */
     fun indexesState(varName: String): Boolean = isParameterized && varName !in globalVars
     fun identityKey(): String {
         val base = if (paramName != null) "$name[$paramName:${paramType}]" else name
-        return if (occurrenceId.isNotEmpty()) "$base#$occurrenceId" else base
+        val withInst = if (instParamName != null) "$base[${instParamName}:${instParamType}]" else base
+        return if (occurrenceId.isNotEmpty()) "$withInst#$occurrenceId" else withInst
     }
 }
 
@@ -94,6 +118,17 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
                     withScopeId = withScopeId,
                 )
             }
+            is ChildBindingProcExprNode -> {
+                val name = n.childName()
+                out += SpecLeaf(
+                    name = name,
+                    occurrenceId = freshSpecOccurrenceId(name),
+                    introducingAssembly = intro.ifEmpty { name },
+                    tlaName = name,
+                    withScopeId = withScopeId,
+                    parentClass = n.parentName(),
+                )
+            }
             is WithSpecExprNode -> {
                 val scopeId = freshWithScopeId()
                 val binders = withBinders + (n.withBinderName() to n.withBinderType())
@@ -106,16 +141,22 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
                 val inits = n.initExprs()
                 val typeModels = n.typeModels()
                 val funModels = n.funModels()
+                // DynProc is a reserved create-index slot set, not a domain type.
+                val dynProcModel = typeModels.firstOrNull { it.name() == DYN_PROC_MODEL }
+                val domainTypeModels = typeModels.filter { it.name() != DYN_PROC_MODEL }
                 fun withGlobals(child: SpecLeaf): SpecLeaf =
-                    if (globals.isEmpty() && inits.isEmpty() && typeModels.isEmpty() && funModels.isEmpty()) {
+                    if (globals.isEmpty() && inits.isEmpty() && domainTypeModels.isEmpty() &&
+                        funModels.isEmpty() && dynProcModel == null
+                    ) {
                         child
                     } else {
                         child.copy(
                             globalVars = child.globalVars + globals,
                             globalConstVars = child.globalConstVars + constGlobals,
                             initExprs = child.initExprs + inits,
-                            typeModels = child.typeModels + typeModels,
+                            typeModels = child.typeModels + domainTypeModels,
                             funModels = child.funModels + funModels,
+                            dynProcModel = child.dynProcModel ?: dynProcModel,
                         )
                     }
                 when {
@@ -215,18 +256,17 @@ fun compositionLeavesOfSpec(spec: SpecNode): List<SpecLeaf> {
 }
 
 /**
- * Expand named `proc` / `spec` / `api` aliases to their nested proc-class leaves (by occurrence).
+ * Expand named `proc` / `spec` aliases to their nested proc-class leaves (by occurrence).
  * Parameterization on an outer leaf is pushed down onto non-parameterized children.
  *
  * Nested AG specs contribute only their system expression (not assume/guarantee).
- * Api `calls:` are not expanded as SpecLeaves (call-site occurrences come from the call graph).
+ * Dynamic leaves get their `DynProc` slot index ([SpecLeaf.isDynamic]).
  */
 fun expandLeavesToPclasses(
     leaves: List<SpecLeaf>,
     pclasses: Map<String, ProcClassNode>,
     procAliases: Map<String, ProcNode>,
     specAliases: Map<String, SpecNode> = emptyMap(),
-    apiAliases: Map<String, ApiNode> = emptyMap(),
     leafSpecs: Map<String, LeafSpecNode> = emptyMap(),
 ): List<SpecLeaf> {
     val out = mutableListOf<SpecLeaf>()
@@ -238,6 +278,9 @@ fun expandLeavesToPclasses(
             globalVars = child.globalVars + outer.globalVars,
             globalConstVars = child.globalConstVars + outer.globalConstVars,
             initExprs = child.initExprs + outer.initExprs,
+            typeModels = child.typeModels + outer.typeModels,
+            funModels = child.funModels + outer.funModels,
+            dynProcModel = child.dynProcModel ?: outer.dynProcModel,
         )
         when {
             outer.isParameterized && !c.isParameterized ->
@@ -277,12 +320,6 @@ fun expandLeavesToPclasses(
     fun expand(leaf: SpecLeaf) {
         when {
             leaf.name in leafSpecs || leaf.name in pclasses -> out += filterGlobals(leaf)
-            leaf.name in apiAliases -> {
-                val api = apiAliases.getValue(leaf.name)
-                flattenSpecLeaves(api.apiProcExpr(), leaf.name).forEach { child ->
-                    expand(pushDown(leaf, child.copy(introducingAssembly = leaf.name)))
-                }
-            }
             leaf.name in procAliases -> {
                 val proc = procAliases.getValue(leaf.name)
                 flattenSpecLeaves(proc.procNodeValue(), leaf.name).forEach { child ->
@@ -306,50 +343,33 @@ fun expandLeavesToPclasses(
         }
     }
     leaves.forEach { expand(it) }
-    return assignTlaLeafNames(out)
+    return assignTlaLeafNames(
+        out.map { leaf -> if (leaf.name in leafSpecs) leaf else withDynProcSlot(leaf, pclasses[leaf.name]) },
+    )
 }
 
-/** Union of `calls:` from every api reachable by expanding [leaves]. */
-fun collectApiCallsInComposition(
-    leaves: List<SpecLeaf>,
-    apiAliases: Map<String, ApiNode>,
-    procAliases: Map<String, ProcNode>,
-    specAliases: Map<String, SpecNode>,
-): Set<String> {
-    val calls = linkedSetOf<String>()
-    val visiting = mutableSetOf<String>()
-    fun walk(leaf: SpecLeaf) {
-        when {
-            leaf.name in apiAliases -> {
-                val api = apiAliases.getValue(leaf.name)
-                // Stable ids for api-owned procfuns (`Api_bare`).
-                calls += api.apiCallNames().map {
-                    julay.compiler.sanitizeProcFunStableIdent("${api.apiName()}_$it")
-                }
-                flattenSpecLeaves(api.apiProcExpr(), leaf.name).forEach { walk(it) }
-            }
-            leaf.name in procAliases -> {
-                flattenSpecLeaves(procAliases.getValue(leaf.name).procNodeValue(), leaf.name)
-                    .forEach { walk(it) }
-            }
-            leaf.name in specAliases -> {
-                if (!visiting.add(leaf.name)) return
-                try {
-                    val spec = specAliases.getValue(leaf.name)
-                    val value = spec.specNodeValue()
-                    val children = when (value) {
-                        is AgSpecExprNode -> flattenSpecLeaves(value.systemExpr(), spec.specNodeName())
-                        else -> flattenSpecLeaves(value, spec.specNodeName())
-                    }
-                    children.forEach { walk(it) }
-                } finally {
-                    visiting.remove(leaf.name)
-                }
-            }
-        }
+/** Give a dynamic proc leaf its `DynProc` slot: `X[i]` unindexed, `X[n][i]` under a create-index. */
+private fun withDynProcSlot(leaf: SpecLeaf, pc: ProcClassNode?): SpecLeaf {
+    if (pc == null || pc.isStatic) return leaf
+    val slotType = TypeExpr.Simple(DYN_PROC_MODEL)
+    val stateNames = pc.localDecls().filterIsInstance<VarNode>().map { it.name }.toSet()
+    fun freeBinder(taken: Set<String>): String =
+        listOf("i", "j", "slot").firstOrNull { it !in taken && it !in stateNames } ?: "slot_"
+    return if (leaf.isParameterized) {
+        leaf.copy(
+            isDynamic = true,
+            instParamName = freeBinder(setOf(leaf.paramName!!)),
+            instParamType = slotType,
+        )
+    } else {
+        leaf.copy(
+            isDynamic = true,
+            paramName = freeBinder(emptySet()),
+            paramType = slotType,
+            withScopeId = null,
+            slotIsParam = true,
+        )
     }
-    leaves.forEach { walk(it) }
-    return calls
 }
 
 /**
@@ -359,10 +379,10 @@ fun collectApiCallsInComposition(
 fun assignTlaLeafNames(leaves: List<SpecLeaf>): List<SpecLeaf> {
     val countByClass = leaves.groupingBy { it.name }.eachCount()
     val preferred = leaves.map { leaf ->
-        val base = if (countByClass.getValue(leaf.name) == 1) {
-            leaf.name
-        } else {
-            "${leaf.name}_${leaf.introducingAssembly}"
+        val base = when {
+            countByClass.getValue(leaf.name) == 1 -> leaf.name
+            leaf.parentClass != null -> "${leaf.name}_${leaf.parentClass}"
+            else -> "${leaf.name}_${leaf.introducingAssembly}"
         }
         leaf to base
     }
@@ -386,341 +406,4 @@ fun assignTlaLeafNames(leaves: List<SpecLeaf>): List<SpecLeaf> {
         used += tlaName
         leaf.copy(tlaName = tlaName)
     }
-}
-
-/**
- * A whole-RHS procfun call in a host action transit (`x := countUp(2)`).
- * [occurrence] is filled after [assignTlaLeafNames].
- */
-data class ProcFunCallSite(
-    val hostName: String,
-    val hostActionName: String,
-    val isHostConstructor: Boolean,
-    val procFunName: String,
-    val callArgs: List<ExprNode>,
-    val assignVars: List<String>,
-    val occurrence: SpecLeaf,
-)
-
-/**
- * Raw call site before leaf naming; [occurrenceId] ties to the matching [SpecLeaf].
- */
-data class ProcFunCallSiteDraft(
-    val host: SpecLeaf,
-    val hostActionName: String,
-    val isHostConstructor: Boolean,
-    val procFunName: String,
-    val callArgs: List<ExprNode>,
-    val assignVars: List<String>,
-    val occurrenceId: String,
-)
-
-/**
- * Discover whole-RHS procfun call sites under host leaves (one draft per call).
- */
-fun discoverProcFunCallSiteDrafts(
-    hostLeaves: List<SpecLeaf>,
-    pclasses: Map<String, ProcClassNode>,
-): List<ProcFunCallSiteDraft> {
-    val out = mutableListOf<ProcFunCallSiteDraft>()
-    hostLeaves.forEach { host ->
-        val pc = pclasses[host.name] ?: return@forEach
-        collectWholeRhsProcFunCalls(pc).forEach { hit ->
-            out += ProcFunCallSiteDraft(
-                host = host,
-                hostActionName = hit.actionName,
-                isHostConstructor = hit.isCtor,
-                procFunName = hit.procFunName,
-                callArgs = hit.callArgs,
-                assignVars = hit.assignVars,
-                occurrenceId = freshSpecOccurrenceId(hit.procFunName),
-            )
-        }
-    }
-    return out
-}
-
-/** SpecLeaves for [drafts], inheriting each host's index binders. */
-fun procFunLeavesFromDrafts(drafts: List<ProcFunCallSiteDraft>): List<SpecLeaf> =
-    drafts.map { draft ->
-        SpecLeaf(
-            name = draft.procFunName,
-            paramName = draft.host.paramName,
-            paramType = draft.host.paramType,
-            occurrenceId = draft.occurrenceId,
-            introducingAssembly = draft.host.tlaName,
-            tlaName = draft.procFunName,
-            isProcFun = true,
-        )
-    }
-
-/**
- * Each whole-RHS textual procfun call site under a host leaf becomes its own SpecLeaf occurrence,
- * inheriting the host's index binders.
- */
-fun discoverProcFunOccurrenceLeaves(
-    hostLeaves: List<SpecLeaf>,
-    pclasses: Map<String, ProcClassNode>,
-): List<SpecLeaf> =
-    procFunLeavesFromDrafts(discoverProcFunCallSiteDrafts(hostLeaves, pclasses))
-
-/**
- * Build named [ProcFunCallSite]s after [assignTlaLeafNames] on host+procfun leaves.
- */
-fun resolveProcFunCallSites(
-    drafts: List<ProcFunCallSiteDraft>,
-    namedLeaves: List<SpecLeaf>,
-): List<ProcFunCallSite> {
-    val byOccId = namedLeaves.filter { it.isProcFun }.associateBy { it.occurrenceId }
-    val hostsByKey = namedLeaves.filter { !it.isProcFun }.associateBy { it.identityKey() }
-    return drafts.mapNotNull { draft ->
-        val occ = byOccId[draft.occurrenceId] ?: return@mapNotNull null
-        val host = hostsByKey[draft.host.identityKey()]
-            ?: namedLeaves.firstOrNull { !it.isProcFun && it.name == draft.host.name }
-            ?: return@mapNotNull null
-        ProcFunCallSite(
-            hostName = host.tlaName,
-            hostActionName = draft.hostActionName,
-            isHostConstructor = draft.isHostConstructor,
-            procFunName = draft.procFunName,
-            callArgs = draft.callArgs,
-            assignVars = draft.assignVars,
-            occurrence = occ,
-        )
-    }
-}
-
-/**
- * Resolve havoc call sites (procfun not in composition) — no child occurrence leaf.
- */
-fun resolveHavocProcFunCallSites(
-    drafts: List<ProcFunCallSiteDraft>,
-    namedHostLeaves: List<SpecLeaf>,
-): List<ProcFunCallSite> {
-    val hostsByKey = namedHostLeaves.filter { !it.isProcFun }.associateBy { it.identityKey() }
-    return drafts.mapNotNull { draft ->
-        val host = hostsByKey[draft.host.identityKey()]
-            ?: namedHostLeaves.firstOrNull { !it.isProcFun && it.name == draft.host.name }
-            ?: return@mapNotNull null
-        ProcFunCallSite(
-            hostName = host.tlaName,
-            hostActionName = draft.hostActionName,
-            isHostConstructor = draft.isHostConstructor,
-            procFunName = draft.procFunName,
-            callArgs = draft.callArgs,
-            assignVars = draft.assignVars,
-            occurrence = SpecLeaf(
-                name = draft.procFunName,
-                occurrenceId = draft.occurrenceId,
-                introducingAssembly = host.tlaName,
-                isProcFun = true,
-            ),
-        )
-    }
-}
-
-/**
- * Collect actions whose transit has exactly one whole-RHS procfun call (v1 coupling shape).
- * Used for TLA+ spawn-await coupling only — not for orphan / alphabet call detection.
- */
-internal fun collectWholeRhsProcFunCalls(pc: ProcClassNode): List<WholeRhsHit> {
-    val out = mutableListOf<WholeRhsHit>()
-    pc.localDecls().filterIsInstance<ConstructorNode>().forEach { ctor ->
-        val decl = ctor.constructors().single()
-        wholeRhsProcFunCall(decl)?.let { hit ->
-            out += hit.copy(actionName = decl.action.name, isCtor = true)
-        }
-    }
-    pc.localDecls().filterIsInstance<TransitionNode>().forEach { tr ->
-        val decl = tr.transitions().single()
-        wholeRhsProcFunCall(decl)?.let { hit ->
-            out += hit.copy(actionName = decl.action.name, isCtor = false)
-        }
-    }
-    return out
-}
-
-internal data class WholeRhsHit(
-    val actionName: String,
-    val isCtor: Boolean,
-    val procFunName: String,
-    val callArgs: List<ExprNode>,
-    val assignVars: List<String>,
-)
-
-/**
- * Walk transit RHS, `return:` exprs, and guards of every constructor/transition on [pc].
- */
-private fun forEachActionExpr(pc: ProcClassNode, walkExpr: (ExprNode) -> Unit) {
-    fun walkDecl(decl: julay.compiler.decl.ActionDecl) {
-        decl.guards.forEach(walkExpr)
-        decl.returnExpr?.let(walkExpr)
-        decl.transits.forEach { update ->
-            when (update) {
-                is julay.compiler.decl.TransitUpdate.Assign -> walkExpr(update.expr)
-                is julay.compiler.decl.TransitUpdate.IndexPut -> {
-                    walkExpr(update.index)
-                    walkExpr(update.value)
-                }
-                is julay.compiler.decl.TransitUpdate.Let -> walkExpr(update.init)
-            }
-        }
-        // before:/after: (e.g. serveHttp(port, handler)) and error: messages
-        decl.befores.forEach { stmt -> stmt.callArgs().forEach(walkExpr) }
-        decl.afters.forEach { stmt -> stmt.callArgs().forEach(walkExpr) }
-        decl.errors.forEach { arm ->
-            walkExpr(arm.condExpr())
-            walkExpr(arm.msgExpr())
-        }
-    }
-    pc.localDecls().filterIsInstance<ConstructorNode>().forEach { walkDecl(it.constructors().single()) }
-    pc.localDecls().filterIsInstance<TransitionNode>().forEach { walkDecl(it.transitions().single()) }
-}
-
-/**
- * All resolved bare procfun calls in constructor/transition transit RHS, `return:`, and guards.
- */
-internal fun collectProcFunCallsInProc(pc: ProcClassNode): List<FunCallExprNode> {
-    val out = mutableListOf<FunCallExprNode>()
-    fun walkExpr(expr: ExprNode) {
-        if (expr is FunCallExprNode && expr.resolvedProcFunOrNull() != null) {
-            out += expr
-        }
-        expr.children.filterIsInstance<ExprNode>().forEach { walkExpr(it) }
-    }
-    forEachActionExpr(pc, ::walkExpr)
-    return out
-}
-
-/** Api-qualified procfun calls (`Api.fn(...)`) in a proc. */
-internal fun collectApiQualifiedProcFunCallsInProc(pc: ProcClassNode): List<MethodCallExprNode> {
-    val out = mutableListOf<MethodCallExprNode>()
-    fun walkExpr(expr: ExprNode) {
-        if (expr is MethodCallExprNode && expr.resolvedProcFunOrNull() != null) {
-            out += expr
-        }
-        expr.children.filterIsInstance<ExprNode>().forEach { walkExpr(it) }
-    }
-    forEachActionExpr(pc, ::walkExpr)
-    return out
-}
-
-/**
- * Bare procfun names used as values (e.g. `handler = echoHandler` on a `~>` arg),
- * not call sites. Used to fold HttpServer-registered handlers into the alphabet.
- */
-/**
- * Stable ids of procfun refs (`~>`) in [pc]. Prefers [SymbolValueExprNode.resolvedProcFunRefOrNull];
- * falls back to matching [procFunNames] when the symbol equals a stable id (rare).
- */
-internal fun collectProcFunRefNamesInProc(pc: ProcClassNode, procFunNames: Set<String>): Set<String> {
-    val out = mutableSetOf<String>()
-    fun walkExpr(expr: ExprNode) {
-        if (expr is SymbolValueExprNode) {
-            expr.resolvedProcFunRefOrNull()?.let { out += it.stableName() }
-                ?: run {
-                    if (expr.symbol in procFunNames) out += expr.symbol
-                }
-        }
-        expr.children.filterIsInstance<ExprNode>().forEach { walkExpr(it) }
-    }
-    forEachActionExpr(pc, ::walkExpr)
-    return out
-}
-
-/**
- * Direct procfun callees / refs from [hostName], then the transitive closure through
- * nested calls inside those procfuns (e.g. `handleRpc` → `inRequestVoteRPC`).
- * [procFunNames] and returned values are **stable ids**.
- */
-internal fun reachableProcFunNamesFromHosts(
-    hostNames: Collection<String>,
-    procFunNames: Set<String>,
-    hostClasses: Map<String, ProcClassNode>,
-    procFunClasses: Map<String, ProcClassNode>,
-): Set<String> {
-    fun directFrom(name: String): Set<String> {
-        val pc = hostClasses[name] ?: procFunClasses[name] ?: return emptySet()
-        val bare = collectProcFunCallsInProc(pc).mapNotNull { it.resolvedProcFunOrNull()?.stableName() }
-        val qualified = collectApiQualifiedProcFunCallsInProc(pc)
-            .mapNotNull { it.resolvedProcFunOrNull()?.stableName() }
-        val refs = collectProcFunRefNamesInProc(pc, procFunNames)
-        return (bare + qualified + refs).filter { it in procFunNames }.toSet()
-    }
-
-    val result = linkedSetOf<String>()
-    val work = ArrayDeque<String>()
-    hostNames.forEach { host -> work.addAll(directFrom(host)) }
-    while (work.isNotEmpty()) {
-        val pf = work.removeFirst()
-        if (!result.add(pf)) continue
-        work.addAll(directFrom(pf))
-    }
-    return result
-}
-
-private fun wholeRhsProcFunCall(
-    decl: julay.compiler.decl.ActionDecl,
-): WholeRhsHit? {
-    val hits = decl.transits.mapNotNull { update ->
-        when (update) {
-            is julay.compiler.decl.TransitUpdate.Assign -> {
-                when (val expr = update.expr) {
-                    is FunCallExprNode -> {
-                        val pf = expr.resolvedProcFunOrNull() ?: return@mapNotNull null
-                        Triple(
-                            pf.stableName(),
-                            expr.callArgs(),
-                            julay.program.type.transitRootVar(update.key),
-                        )
-                    }
-                    is MethodCallExprNode -> {
-                        val pf = expr.resolvedProcFunOrNull() ?: return@mapNotNull null
-                        Triple(
-                            pf.stableName(),
-                            expr.args,
-                            julay.program.type.transitRootVar(update.key),
-                        )
-                    }
-                    else -> null
-                }
-            }
-            else -> null
-        }
-    }
-    if (hits.isEmpty()) return null
-    val names = hits.map { it.first }.distinct()
-    if (names.size != 1) return null
-    return WholeRhsHit(
-        actionName = "",
-        isCtor = false,
-        procFunName = names.single(),
-        callArgs = hits.first().second,
-        assignVars = hits.map { it.third },
-    )
-}
-
-/** Build a synthetic [ProcClassNode] view of a procfun for TLA leaf lookup. */
-fun ProcFunNode.asSyntheticProcClass(): ProcClassNode {
-    val argNodes = procFunArgs().children.filterIsInstance<ArgNode>()
-    val argVars = argNodes.map { arg ->
-        val vn = VarNode(arg.argName(), arg.argTypeExpr(), programLocation(), isConst = true)
-        try {
-            vn.resolveType(arg.type)
-        } catch (_: RuntimeException) {}
-        vn
-    }
-    val retVal = VarNode(PROC_FUN_RET_VAL, procFunReturnTypeExpr(), programLocation())
-    try {
-        retVal.resolveType(returnType)
-    } catch (_: RuntimeException) {}
-    val stable = stableName()
-    val callCtor = ConstructorNode(
-        procFunCallCtor(stable),
-        procFunArgs(),
-        emptyList(),
-        programLocation(),
-    )
-    val body = argVars + listOf(retVal) + listOf(callCtor) + localDecls().filter { it !is ConstructorNode }
-    return ProcClassNode(stable, body, programLocation())
 }

@@ -1,4 +1,4 @@
-proc S {
+static proc S {
     const x : Int
 
     constructor initially(args : List<String>) {

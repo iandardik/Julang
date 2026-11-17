@@ -33,7 +33,7 @@ static proc Server {
     }
 }
 
-proc User {
+static proc User {
     constructor initially(args : List<String>) {
         transit:
     }

@@ -8,7 +8,7 @@ type Msg {
     value : Int
 }
 
-proc Peer {
+static proc Peer {
     var dummy : Boolean := false
 
     constructor initially(args : List<String>) {

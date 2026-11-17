@@ -1,0 +1,4 @@
+source: regression/input/syntax-errors/child-ambiguous-pairing.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "ambiguous"

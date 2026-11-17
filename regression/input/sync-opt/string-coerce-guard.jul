@@ -30,7 +30,7 @@ static proc S {
     }
 }
 
-proc T {
+static proc T {
     constructor initially(args : List<String>) {
         transit:
     }

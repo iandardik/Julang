@@ -5,7 +5,7 @@ type Point {
     y : Int
 }
 
-proc Worker {
+static proc Worker {
     var pos : Point
     var steps : Int
 

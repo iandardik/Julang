@@ -4,7 +4,7 @@ import julay.funlib.println
 import julay.funlib.listOf
 import julay.funlib.splice
 
-proc ListSliceDemo {
+static proc ListSliceDemo {
     var xs : List<Int>
     var mid : List<Int>
     var emptyEq : List<Int>

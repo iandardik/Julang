@@ -1,5 +1,5 @@
 import julay.funlib.setOf
-proc BadEmptySet {
+static proc BadEmptySet {
     var n : Int
 
     constructor initially(args : List<String>) {

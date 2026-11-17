@@ -1,4 +1,4 @@
-proc Branchy {
+static proc Branchy {
     var n : Int
     var ok : Boolean
 

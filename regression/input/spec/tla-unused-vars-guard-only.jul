@@ -1,4 +1,4 @@
-proc Store {
+static proc Store {
     var n : Int
     var secret : Int
 

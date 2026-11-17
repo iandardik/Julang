@@ -57,7 +57,6 @@ abstract class ActionBodyNode(
     open fun befores() : List<CallStmtNode> = body.flatMap { it.befores() }
     open fun afters() : List<CallStmtNode> = body.flatMap { it.afters() }
     open fun errors() : List<ErrorArmNode> = body.flatMap { it.errors() }
-    open fun returns() : List<ExprNode> = body.flatMap { it.returns() }
 }
 
 abstract class ExprNode(children : List<ASTNode>) : ASTNode(children) {
@@ -154,29 +153,6 @@ class ProcNode(
     }
 }
 
-/**
- * Composition unit: resident [procExpr] peers plus optional [callNames] (procfuns).
- * Conceptually `proc Name := procExpr || call1 || …`; calls are not SyncChannel-started.
- */
-class ApiNode(
-    private val name: String,
-    private val procExpr: ASTNode,
-    private val callNames: List<String>,
-    private val loc: ProgramLoc,
-) : DeclNode(listOf(procExpr)) {
-    override fun programLocation() = loc
-    override fun name() = name
-    internal fun apiName() = name
-    internal fun apiProcExpr() = procExpr
-    internal fun apiCallNames() = callNames
-    override fun toString(): String {
-        val export = if (isExported) "export " else ""
-        val calls = if (callNames.isEmpty()) "" else {
-            "\n    calls: ${callNames.joinToString(", ")}"
-        }
-        return "${export}api $name {\n    proc: $procExpr$calls\n}"
-    }
-}
 
 class CompileNode(
     private val names: List<String>,
@@ -230,7 +206,10 @@ class LeafSpecNode(
     internal fun isParameterized(): Boolean = paramName != null
     /** View as a [ProcClassNode] for TLA / alphabet reuse. */
     internal fun asProcClass(): ProcClassNode =
-        ProcClassNode(name, localDecls, loc).also { it.visibility = this.visibility }
+        ProcClassNode(name, localDecls, loc, isStatic = isStaticSpec()).also { it.visibility = this.visibility }
+    /** A leaf spec booted by `initially` plays the role of a static proc. */
+    internal fun isStaticSpec(): Boolean =
+        localDecls.any { it is ConstructorNode && it.constructorName() == "initially" }
     override fun toString(): String {
         val body = (typeModels + funModels + localDecls).joinToString("\n") { "$it".prependIndent() }
         val export = if (isExported) "export " else ""
@@ -457,81 +436,6 @@ class FunNode(
     }
 }
 
-/**
- * Process-backed blocking function: args become consts, body has state + internal/client
- * steps and untagged `return:` transitions. Invoked via call expressions (not `||`).
- */
-class ProcFunNode(
-    private val name: String,
-    private val args: ArgsNode,
-    private val returnTypeExpr: TypeExpr,
-    private val localDecls: List<ProcClassDeclNode>,
-    private val loc: ProgramLoc,
-) : DeclNode(listOf(args) + localDecls) {
-    private var returnTypeResolution: TypeNameResolution = TypeNameResolution.Unresolved
-    /** Module that defined this procfun (dotted path). Stamped at load time. */
-    private var definingModulePath: String? = null
-    /**
-     * If this procfun appears in exactly one home-module api's `calls:`, that api name.
-     * Used for stable codegen/IR ids (`Api_bare`). Stamped at load time.
-     */
-    private var owningApiName: String? = null
-
-    val returnType: Type
-        get() = when (val resolution = returnTypeResolution) {
-            is TypeNameResolution.Resolved -> resolution.type
-            is TypeNameResolution.Unresolved ->
-                throw RuntimeException("Return type not resolved for procfun \"$name\"")
-        }
-
-    override fun programLocation() = loc
-    override fun name() = name
-    /** Source / bare name (unique only within [definingModulePath]). */
-    internal fun procFunName() = name
-    /**
-     * Stable IR / codegen identity: `{Api}_{bare}` when api-owned, else `{module}_{bare}`
-     * with non-identifier characters in the module path replaced by underscores.
-     */
-    internal fun stableName(): String {
-        val api = owningApiName
-        if (api != null) return sanitizeProcFunStableIdent("${api}_$name")
-        val mod = definingModulePath ?: "unknown"
-        return sanitizeProcFunStableIdent("${mod}_$name")
-    }
-    internal fun definingModulePathOrNull(): String? = definingModulePath
-    internal fun owningApiNameOrNull(): String? = owningApiName
-    internal fun setDefiningModulePath(path: String) {
-        definingModulePath = path
-    }
-    internal fun setOwningApiName(api: String?) {
-        owningApiName = api
-    }
-    internal fun procFunArgs(): ArgsNode = args
-    internal fun procFunReturnTypeExpr(): TypeExpr = returnTypeExpr
-    internal fun localDecls(): List<ProcClassDeclNode> = localDecls
-    internal fun withLocalDecls(decls: List<ProcClassDeclNode>): ProcFunNode =
-        ProcFunNode(name, args, returnTypeExpr, decls, loc).also {
-            it.visibility = this.visibility
-            it.definingModulePath = this.definingModulePath
-            it.owningApiName = this.owningApiName
-            when (val r = returnTypeResolution) {
-                is TypeNameResolution.Resolved -> it.resolveReturnType(r.type)
-                else -> {}
-            }
-        }
-    internal fun resolveReturnType(type: Type) {
-        returnTypeResolution = TypeNameResolution.Resolved(type)
-    }
-    override fun toString(): String {
-        val displayReturn = when (val resolution = returnTypeResolution) {
-            is TypeNameResolution.Resolved -> resolution.type
-            is TypeNameResolution.Unresolved -> returnTypeExpr
-        }
-        val body = localDecls.joinToString("\n") { "$it".prependIndent() }
-        val export = if (isExported) "export " else ""
-        return "${export}procfun $name($args) : $displayReturn {\n$body\n}"
-    }
-}
 
 class FunCallExprNode(
     private val name: String,
@@ -543,7 +447,6 @@ class FunCallExprNode(
 ) : ExprNode(args) {
     private var resolvedFun: FunNode? = resolved
     private var resolvedBuiltin: FunBuiltin? = null
-    private var resolvedProcFun: ProcFunNode? = null
     private var specializedBody: ExprNode? = null
     /** For named-fun HOFs like map: the unary user fun being applied. */
     private var namedFunArgNode: FunNode? = null
@@ -557,7 +460,6 @@ class FunCallExprNode(
     fun callTypeArgs(): List<TypeExpr> = typeArgs
     internal fun resolvedFunOrNull(): FunNode? = resolvedFun
     internal fun resolvedBuiltinOrNull(): FunBuiltin? = resolvedBuiltin
-    internal fun resolvedProcFunOrNull(): ProcFunNode? = resolvedProcFun
     internal fun namedFunArgNodeOrNull(): FunNode? = namedFunArgNode
     internal fun namedFunParamNameOrNull(): String? = namedFunParamName
     internal fun namedFunBodyOrNull(): ExprNode? = namedFunBody
@@ -565,17 +467,10 @@ class FunCallExprNode(
     internal fun resolveFun(funNode: FunNode) {
         resolvedFun = funNode
         resolvedBuiltin = null
-        resolvedProcFun = null
     }
     internal fun resolveBuiltin(builtin: FunBuiltin) {
         resolvedBuiltin = builtin
         resolvedFun = null
-        resolvedProcFun = null
-    }
-    internal fun resolveProcFun(procFun: ProcFunNode) {
-        resolvedProcFun = procFun
-        resolvedFun = null
-        resolvedBuiltin = null
     }
     internal fun resolveNamedFunArg(funNode: FunNode?, paramName: String, body: ExprNode, elemType: Type) {
         namedFunArgNode = funNode
@@ -625,9 +520,6 @@ class FunCallExprNode(
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
-        if (resolvedProcFun != null) {
-            throw RuntimeException("Procfun \"$name\" cannot be used in guards at $loc")
-        }
         resolvedBuiltin?.let { builtin ->
             if (builtin.namedFunArg) {
                 throw RuntimeException("Function \"${builtin.name}\" cannot be used in guards")
@@ -689,16 +581,6 @@ class FunCallExprNode(
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
-        resolvedProcFun?.let { pf ->
-            val argStrs = args.map { it.toTransitString(symbolTypes, argSymbols) }
-            val argsList = if (argStrs.isEmpty()) {
-                "emptyList()"
-            } else {
-                "listOf(${argStrs.joinToString(", ")})"
-            }
-            val retTy = pf.returnType.toKotlinTypeString()
-            return "(hostProc.invokeProcFun(\"${pf.stableName()}\", $argsList) as $retTy)"
-        }
         resolvedBuiltin?.let { builtin ->
             if (builtin.namedFunArg) {
                 return mapKotlinCodegen(symbolTypes, argSymbols)
@@ -711,7 +593,6 @@ class FunCallExprNode(
 
     override fun inferType(symbolEnv: Map<String, Type>): Type {
         instantiatedReturnType?.let { return it }
-        resolvedProcFun?.let { return it.returnType }
         resolvedBuiltin?.let { builtin ->
             return builtin.returnType
                 ?: throw RuntimeException("Function \"${builtin.name}\" returns no value at $loc")
@@ -832,12 +713,6 @@ class TransitionNode(
     override fun transitions(): List<ActionDecl> {
         val actionArgs = args.actionArgs()
         val guards = body.flatMap { it.guards() }
-        val returnExprs = body.flatMap { it.returns() }
-        val returnExpr = when (returnExprs.size) {
-            0 -> null
-            1 -> returnExprs[0]
-            else -> throw RuntimeException("Transition \"$name\" has multiple return: clauses at $loc")
-        }
         return listOf(
             ActionDecl(
                 SymbolicAction(
@@ -853,7 +728,6 @@ class TransitionNode(
                 body.flatMap { it.befores() },
                 body.flatMap { it.afters() },
                 body.flatMap { it.errors() },
-                returnExpr = returnExpr,
             )
         )
     }
@@ -926,16 +800,50 @@ class GuardNode(
     }
 }
 
-class ReturnNode(
-    private val expr: ExprNode,
+
+/** Named `return name(args) { guard / before }` that terminates a dynamic proc. */
+class ReturnActionNode(
+    private val modifier: TSAction.SyncRole,
+    private val name: String,
+    private val args: ArgsNode,
+    private val body: List<ActionBodyNode>,
     private val loc: ProgramLoc,
-) : ActionBodyNode(listOf(), listOf(expr)) {
+) : ProcClassDeclNode(listOf(args) + body) {
     override fun programLocation() = loc
-    internal fun returnExpr() = expr
-    override fun returns(): List<ExprNode> = listOf(expr)
+    override fun transitions(): List<ActionDecl> {
+        val actionArgs = args.actionArgs()
+        val guards = body.flatMap { it.guards() }
+        return listOf(
+            ActionDecl(
+                SymbolicAction(
+                    name,
+                    actionArgs,
+                    isInternal = modifier == TSAction.SyncRole.Internal,
+                ),
+                guards,
+                emptyList(),
+                modifier,
+                loc,
+                body.flatMap { it.befores() },
+                emptyList(),
+                emptyList(),
+                isReturnAction = true,
+            )
+        )
+    }
+    internal fun returnActionName() = name
+    internal fun body(): List<ActionBodyNode> = body
+    internal fun returnArgs(): ArgsNode = args
+    internal fun modifier(): TSAction.SyncRole = modifier
     override fun toString(): String {
-        val exprStr = "$expr".prependIndent()
-        return "return:\n$exprStr"
+        val modifierStr = when (modifier) {
+            TSAction.SyncRole.Internal -> "internal "
+            TSAction.SyncRole.Service -> "service "
+            TSAction.SyncRole.Client -> "client "
+            else -> ""
+        }
+        val bodyStr = body.joinToString("\n") { "$it".prependIndent() }
+        return "${modifierStr}return $name($args) {\n$bodyStr\n}"
     }
 }
 
@@ -2330,8 +2238,6 @@ class MethodCallExprNode(
     private var hofBody: ExprNode? = null
     private var hofParamNames: List<String>? = null
     private var hofParamTypes: List<Type>? = null
-    private var resolvedProcFun: ProcFunNode? = null
-    private var resolvedApiName: String? = null
 
     override fun programLocation() = loc
 
@@ -2339,34 +2245,17 @@ class MethodCallExprNode(
         hofBody = body
         hofParamNames = paramNames
         hofParamTypes = paramTypes
-        resolvedProcFun = null
-        resolvedApiName = null
-    }
-
-    internal fun resolveApiProcFun(apiName: String, procFun: ProcFunNode) {
-        resolvedApiName = apiName
-        resolvedProcFun = procFun
-        hofBody = null
-        hofParamNames = null
-        hofParamTypes = null
     }
 
     internal fun hofBodyOrNull(): ExprNode? = hofBody
     internal fun hofParamNamesOrNull(): List<String>? = hofParamNames
     internal fun hofParamTypesOrNull(): List<Type>? = hofParamTypes
-    internal fun resolvedProcFunOrNull(): ProcFunNode? = resolvedProcFun
-    internal fun resolvedApiNameOrNull(): String? = resolvedApiName
 
     override fun toZ3GuardString(
         symbolTypes: Map<String, Type>,
         argSymbols: Set<String>,
         forceString: Boolean,
     ): String {
-        if (resolvedProcFun != null) {
-            throw RuntimeException(
-                "Api procfun call \"$resolvedApiName.$methodName\" cannot be used in guards at $loc",
-            )
-        }
         if (exprReferencesAnyArg(this, argSymbols)) {
             throw RuntimeException(
                 "Method \"$methodName\" cannot be used in guards when it depends on action arguments at $loc",
@@ -2377,16 +2266,6 @@ class MethodCallExprNode(
     }
 
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
-        resolvedProcFun?.let { pf ->
-            val argStrs = args.map { it.toTransitString(symbolTypes, argSymbols) }
-            val argsList = if (argStrs.isEmpty()) {
-                "emptyList()"
-            } else {
-                "listOf(${argStrs.joinToString(", ")})"
-            }
-            val retTy = pf.returnType.toKotlinTypeString()
-            return "(hostProc.invokeProcFun(\"${pf.stableName()}\", $argsList) as $retTy)"
-        }
         val base = baseExpr.toTransitString(symbolTypes, argSymbols)
         when (methodName) {
             "toSet" -> return "$base.toSet()"
@@ -2435,17 +2314,13 @@ class MethodCallExprNode(
     }
 
     override fun inferType(symbolEnv: Map<String, Type>): Type {
-        resolvedProcFun?.let { return it.returnType }
         // HOF path — type should already be set via setInferredType during typePass
         return getType()
     }
 
     override fun toString(): String {
         val argStr = args.joinToString(", ")
-        return when (val api = resolvedApiName) {
-            null -> "$baseExpr.$methodName($argStr)"
-            else -> "$api.$methodName($argStr)"
-        }
+        return "$baseExpr.$methodName($argStr)"
     }
 }
 
@@ -2587,24 +2462,8 @@ class SymbolValueExprNode(
     val symbol : String,
     private val loc : ProgramLoc
 ) : ExprNode(listOf()) {
-    /** When this symbol is a `~>` procfun ref, the resolved defining node. */
-    private var resolvedProcFunRef: ProcFunNode? = null
-
     override fun programLocation() = loc
-    internal fun resolveProcFunRef(pf: ProcFunNode) {
-        resolvedProcFunRef = pf
-    }
-    internal fun resolvedProcFunRefOrNull(): ProcFunNode? = resolvedProcFunRef
     override fun toZ3GuardString(symbolTypes : Map<String,Type>, argSymbols : Set<String>, forceString : Boolean): String {
-        if (symbol !in symbolTypes && symbol !in argSymbols) {
-            try {
-                if (getType() is ProcFunRefType) {
-                    val id = resolvedProcFunRef?.stableName() ?: symbol
-                    return "ctx.mkString(\"${id.escapeKotlinStringLiteral()}\")"
-                }
-            } catch (_: RuntimeException) {
-            }
-        }
         val type = symbolTypes[symbol]?.codegenErasure()
         if (forceString) {
             return when (type) {
@@ -2682,10 +2541,6 @@ class SymbolValueExprNode(
                 else -> throw RuntimeException("Invalid type: $type")
             }
         }
-        if (symbolTypes[symbol] is ProcFunRefType) {
-            val id = resolvedProcFunRef?.stableName() ?: symbol
-            return "ctx.mkString(\"${id.escapeKotlinStringLiteral()}\")"
-        }
         return when (type) {
             is BoolType -> "ctx.mkBool(${symbol.toKotlinIdent()})"
             is IntType -> "ctx.mkInt(${symbol.toKotlinIdent()})"
@@ -2695,22 +2550,10 @@ class SymbolValueExprNode(
         }
     }
     override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String {
-        if (symbol !in symbolTypes) {
-            try {
-                if (getType() is ProcFunRefType) {
-                    val id = resolvedProcFunRef?.stableName() ?: symbol
-                    return "\"${id.escapeKotlinStringLiteral()}\""
-                }
-            } catch (_: RuntimeException) {
-            }
-        }
         val type = symbolTypes.getValue(symbol)
         return if (symbol in argSymbols) {
             val typeStr = type.toCodegenTypeVal()
             "(act.lookup(Variable(\"${symbol.escapeKotlinStringLiteral()}\", $typeStr)).value as ${type.toKotlinTypeString()})"
-        } else if (type is ProcFunRefType) {
-            val id = resolvedProcFunRef?.stableName() ?: symbol
-            "\"${id.escapeKotlinStringLiteral()}\""
         } else {
             symbol.toKotlinIdent()
         }
@@ -2736,6 +2579,39 @@ class ValueProcExprNode(
     override fun toString(): String {
         return fullQualifiedName()
     }
+}
+
+/** Composition binding `Child<Parent>` — parent is named here, not in the child decl. */
+class ChildBindingProcExprNode(
+    private val childName: String,
+    private val parentName: String,
+    private val loc: ProgramLoc,
+) : ASTNode(listOf()) {
+    override fun programLocation() = loc
+    internal fun childName() = childName
+    internal fun parentName() = parentName
+    override fun toString(): String = "$childName<$parentName>"
+}
+
+/** HTTP handler reference `Class.ctor ~> Class.action`. */
+class HandlerRefExprNode(
+    private val className: String,
+    private val ctorName: String,
+    private val respClassName: String,
+    private val actionName: String,
+    private val loc: ProgramLoc,
+) : ExprNode(listOf()) {
+    override fun programLocation() = loc
+    internal fun handlerClass() = className
+    internal fun handlerCtor() = ctorName
+    internal fun handlerRespClass() = respClassName
+    internal fun handlerAction() = actionName
+    override fun inferType(symbolEnv: Map<String, Type>): Type = HandlerRefType
+    override fun toZ3GuardString(symbolTypes: Map<String, Type>, argSymbols: Set<String>, forceString: Boolean): String =
+        throw RuntimeException("Handler reference $this cannot be used in guards")
+    override fun toTransitString(symbolTypes: Map<String, Type>, argSymbols: Set<String>): String =
+        throw RuntimeException("Handler reference $this has no Kotlin form")
+    override fun toString(): String = "$className.$ctorName ~> $respClassName.$actionName"
 }
 
 class CompositeProcExprNode(

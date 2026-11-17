@@ -4,17 +4,17 @@ Compact cheat sheet. For explanations, use the other chapters.
 
 ## Keywords
 
-`proc` `static` `procfun` `type` `fun` `import` `export` `compile` `spec` `invariant`  
-`var` `const` `constructor` `transition`  
+`proc` `static` `type` `fun` `import` `export` `compile` `spec` `invariant`  
+`var` `const` `constructor` `transition` `return`  
 `service` `client` `internal` `timer`  
-`guard` `before` `transit` `error` `after` `return`  
+`guard` `before` `transit` `error` `after`  
 `also` `with` `this` `global` `init`  
 `forall` `exists` `if` `else` `let` `when` `in` `to`  
 `true` `false` `listOf` `setOf` `mapOf`
 
 `let` has two forms: expression `let (name : Type := init) body` (braces optional; [Types and expressions](types-and-expressions.md#expression-let)) and transit statement `let name : Type := expr` ([Side effects](effects.md#transit-statement-let)).
 
-`this.x` in a proc/procfun/leaf-spec action body always means state variable `x` (even when an action arg is also named `x`); bare names still prefer args. See [Processes](processes.md#this-vs-action-args).
+`this.x` in a proc / leaf-spec action body always means state variable `x` (even when an action arg is also named `x`); bare names still prefer args. See [Processes](processes.md#this-vs-action-args).
 
 `to` is only legal inside `mapOf(...)`. `listOf` / `setOf` / `mapOf` require `import julay.funlib.<name>`.
 
@@ -36,8 +36,8 @@ Compact cheat sheet. For explanations, use the other chapters.
 ```text
 import Module.Path
 proc Name { ... }
-proc Name := Expr
-procfun name(...) : Type { ... }
+static proc Name { ... }
+proc Name := Expr                          // may include Child<Parent>
 type Name { ... }                           // record
 type Name := TypeExpr                       // typedef
 type Name                                   // uninterpreted
@@ -53,10 +53,11 @@ spec Name := with (v : T) { System }       // shared apply-binder scope
 spec Name := System[v : T] { const global x } // create-index; x unindexed & immutable in TLA+
 spec Name := System[v : T] { const global x; init: expr } // extra Init conjuncts (const-global)
 spec Name := System[v : T] { global y }       // create-index; y unindexed (mutable) in TLA+
+spec Name := System[v : T] { DynProc := { … } } // dynamic-proc slot model
 compile Name1, Name2, ...
 ```
 
-System atoms: `Name[v : T]` **creates** an index (lifts state); `{ const global x }` / `{ global y }` on create-index leave those vars scalar in TLA+ (`const global` also freezes them; does not affect the native binary). Inside `with`, only `Name[v]` **applies** a shared binder. Shorthand `(A || B)[n : T]` desugars to create-temps + `with` + applies — see [Specifications](specifications.md#indexes-create-with-and-apply).
+System atoms: `Name[v : T]` **creates** an index (lifts state); `{ const global x }` / `{ global y }` on create-index leave those vars scalar in TLA+ (`const global` also freezes them; does not affect the native binary). Inside `with`, only `Name[v]` **applies** a shared binder. Shorthand `(A || B)[n : T]` desugars to create-temps + `with` + applies — see [Specifications](specifications.md#indexes-create-with-and-apply). Child bindings: `Child<Parent>` in `||` / system expressions — see [Parent-bound procs](children.md).
 
 Leaf-spec actions: `transition name(args) also (aux : T) { … }` (leaf specs only). Bodies may read peer state `P.var` / `P[idx].var` (compile checks composition + indexing).
 
@@ -64,18 +65,16 @@ Leaf-spec actions: `transition name(args) also (aux : T) { … }` (leaf specs on
 
 `Guarantee` may be a named invariant, an inline Boolean formula (`true` / `false` included), or `true` meaning no guarantee. Plain `spec := System` equals `<true> System <true>` / `--compile-tla`.
 
-`compile` targets: **proc** → native binary (fails if the assembly reaches an uninterpreted type); **spec** (composition or leaf) → `.tla` / `.cfg`; **procfun** → standalone TLA/analyze (not a binary root). Leaf specs must not appear in `proc Name := …` assemblies.
-
-Procfuns cannot appear in `||`. List them in an [api](composition-and-actions.md#apis)'s `calls:` for TLA coupling. Parent **alphabets** always include called procfuns' non-synthetic actions. See [Procfuns](procfun.md).
+`compile` targets: **proc** → native binary (fails if the assembly reaches an uninterpreted type); **spec** (composition or leaf) → `.tla` / `.cfg`. Leaf specs must not appear in `proc Name := …` assemblies. Only `static proc` may declare `constructor initially`. Dynamic procs must have at least one named `return` action.
 
 ## Funlib (`import julay.funlib.<name>`)
 
 Pure / expression helpers: `length` · `max` · `min` · `parseInt` · `startsWith` · `split` · `trim` · `portFromUrl`  
 (`split` / `trim` / `portFromUrl`: not for guards)
 
-Effectful: `serveHttp` · `setTimer` · `cancelTimer` · `println` · `readln` · `readFile` · `exitProgram(code)` · `exitProc` · `delaySeconds` · `delayMillis`  
+Effectful: `serveHttp` · `doHttpRequest` · `setTimer` · `cancelTimer` · `println` · `readln` · `readFile` · `exitProgram(code)` · `delaySeconds` · `delayMillis`  
 (`cancelTimer`: transitions only; `setTimer` / `serveHttp` also OK in constructor `after:`)  
-(`exitProc`: ordinary procs / leaf-spec actions only — **compile error inside procfuns**)
+(`serveHttp(port, Class.ctor ~> Class.action)` — see [Parent-bound procs](children.md#http-handlers))
 
 Full tables: [Standard library](standard-library.md). Calling conventions: [Side effects](effects.md).
 

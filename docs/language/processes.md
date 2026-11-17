@@ -26,8 +26,8 @@ static proc Counter {
 
 | Kind | Role |
 |------|------|
-| **`static proc`** | At most one occurrence in a composition. Exactly one constructor, named `initially`. Cannot be spawned by another class’s constructor. Typical **`service` hub** for a public API, or one side of a **two-static** ordinary sync. |
-| **`proc`** (dynamic) | May appear multiple times; may declare additional constructors used for spawning after `initially`. Often a **`client`** of a static service hub; dynamic↔dynamic sync on ordinary actions is illegal. |
+| **`static proc`** | At most one occurrence in a composition. Exactly one constructor, named `initially`. Cannot be spawned. May not have `return` actions. Typical **`service` hub**. |
+| **`proc`** (dynamic) | Exists only by being spawned (no `initially`). Must have at least one `return` action. Syncs with statics; may be parent-bound as `B<A>` for dyn↔dyn sync with that parent. See [Parent-bound procs](children.md). |
 
 You can also name a composed system:
 
@@ -56,7 +56,7 @@ constructor initially(args : List<String>) {
 }
 ```
 
-Compiled binaries pass command-line arguments into `args`. After `initially`, execution continues through user-defined actions. Dynamic procs may declare **additional constructors** for spawning (for example a handler constructed per request)—those run after the program has already started via `initially`. Static procs may not be spawned that way.
+Compiled binaries pass command-line arguments into `args`. After `initially`, execution continues through user-defined actions. Only static procs declare `initially`. Dynamic procs are spawned when a parent (or static peer) syncs with one of their constructors; they terminate by taking a named `return` action.
 
 There are **no sessions**: sticky pairwise session affinity and session teardown builtins are gone. Use **`service` / `client`** for hub APIs that stay in the external alphabet, and **ordinary** (untagged) syncs for composition-private peer meetings under `||`. Keep `static proc`, `internal`, and `timer`.
 

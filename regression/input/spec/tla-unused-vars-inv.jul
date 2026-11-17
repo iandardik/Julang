@@ -1,4 +1,4 @@
-proc Counter {
+static proc Counter {
     var n : Int
     var watched : Int
 

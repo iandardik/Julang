@@ -1,0 +1,4 @@
+source: regression/input/syntax-errors/procfun-removed.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Syntax error"

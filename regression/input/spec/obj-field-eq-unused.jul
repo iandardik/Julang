@@ -3,7 +3,7 @@ type NodeLike {
     url : String
 }
 
-proc Store {
+static proc Store {
     var node : NodeLike
 
     constructor initially(args : List<String>) {

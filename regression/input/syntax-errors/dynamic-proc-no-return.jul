@@ -1,0 +1,13 @@
+static proc Boss {
+    constructor initially(args : List<String>) {}
+    transition start() {}
+}
+
+proc Worker {
+    constructor start() {}
+    internal transition step() {}
+}
+
+proc Sys := Boss || Worker
+
+compile Sys

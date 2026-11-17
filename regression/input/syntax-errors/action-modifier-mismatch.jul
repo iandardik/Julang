@@ -1,4 +1,4 @@
-proc A {
+static proc A {
     var x : Int
 
     constructor initially(args : List<String>) {
@@ -12,7 +12,7 @@ proc A {
     }
 }
 
-proc B {
+static proc B {
     var y : Int
 
     constructor initially(args : List<String>) {

@@ -1,5 +1,5 @@
 import julay.funlib.mapOf
-proc BadBracket {
+static proc BadBracket {
     var xs : List<Int>
 
     constructor initially(args : List<String>) {

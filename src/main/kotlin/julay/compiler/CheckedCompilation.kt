@@ -3,7 +3,6 @@ package julay.compiler
 import julay.compiler.ast.ASTNode
 import julay.compiler.ast.CompileNode
 import julay.compiler.ast.RootNode
-import julay.compiler.collectProcFunStableNames
 import julay.compiler.decl.ProcDecl
 import julay.compiler.decl.ProcDeclType
 import julay.compiler.pass.errorPass
@@ -34,7 +33,7 @@ data class CheckedCompilation(
 )
 
 /**
- * Resolve compile target names into JAR, spec, and standalone-procfun TLA targets.
+ * Resolve compile target names into JAR and spec targets.
  * When [overrideNames] is non-empty, those names are used and source `compile`
  * directives are ignored; otherwise names come from `compile` directives.
  * Returns null if any name is unknown (errors already printed).
@@ -42,8 +41,6 @@ data class CheckedCompilation(
 data class ResolvedCompileTargets(
     val jars: List<ProcDecl>,
     val specs: List<ProcDecl>,
-    /** Procfuns named by `compile` — emit standalone TLA (not JAR). */
-    val procFunTla: List<ProcDecl>,
 )
 
 fun resolveCompileTargets(
@@ -63,20 +60,8 @@ fun resolveCompileTargets(
     val byName = procDecls.associateBy { it.name }
     val jars = mutableListOf<ProcDecl>()
     val specs = mutableListOf<ProcDecl>()
-    val procFunTla = mutableListOf<ProcDecl>()
-    val procFunsByBare = ast.declNodes().filterIsInstance<julay.compiler.ast.ProcFunNode>().groupBy { it.name() }
     val missing = mutableListOf<String>()
     for (name in names) {
-        val pfMatches = procFunsByBare[name]
-        if (pfMatches != null) {
-            if (pfMatches.size > 1) {
-                missing += name // ambiguous bare name across modules
-                continue
-            }
-            // Standalone TLA/analyze of the procfun — not a JAR root (use stable id).
-            procFunTla += ProcDecl(pfMatches.single().stableName(), emptyList(), ProcDeclType.Proc)
-            continue
-        }
         val decl = byName[name]
         when {
             decl?.type == ProcDeclType.Spec -> specs += decl
@@ -91,7 +76,7 @@ fun resolveCompileTargets(
         println("Unknown compile name(s): ${missing.joinToString(", ")}")
         return null
     }
-    return ResolvedCompileTargets(jars, specs, procFunTla)
+    return ResolvedCompileTargets(jars, specs)
 }
 
 /**
@@ -102,23 +87,14 @@ fun resolveCompileTlaTargets(
     unit: CompilationUnit,
     procDecls: List<ProcDecl>,
     names: List<String>,
-    procFunNames: Set<String> = emptySet(),
 ): List<ProcDecl>? {
     if (names.isEmpty()) return emptyList()
     val byName = procDecls.associateBy { it.name }
-    val procFunsByBare = unit.root.declNodes()
-        .filterIsInstance<julay.compiler.ast.ProcFunNode>()
-        .groupBy { it.name() }
     val procs = mutableListOf<ProcDecl>()
     val missing = mutableListOf<String>()
     val notProcs = mutableListOf<String>()
     for (name in names.distinct()) {
-        val pfMatches = procFunsByBare[name]
         when {
-            pfMatches != null && pfMatches.size == 1 ->
-                procs += ProcDecl(pfMatches.single().stableName(), emptyList(), ProcDeclType.Proc)
-            pfMatches != null -> missing += name
-            name in procFunNames -> procs += ProcDecl(name, emptyList(), ProcDeclType.Proc)
             byName[name]?.type == ProcDeclType.Proc -> procs += byName.getValue(name)
             byName[name]?.type == ProcDeclType.Spec -> notProcs += name
             name in unit.allPClassNames -> procs += ProcDecl(name, emptyList(), ProcDeclType.Proc)
@@ -171,13 +147,10 @@ fun prepareCheckedCompilation(
     }
     val jarTargets = targets.jars
     val specTargets = targets.specs
-    val fromCompileTla = resolveCompileTlaTargets(
-        unit, procDecls, compileTlaNames, collectProcFunStableNames(ast),
-    ) ?: run {
+    val tlaProcTargets = resolveCompileTlaTargets(unit, procDecls, compileTlaNames) ?: run {
         println("Found compile errors, exiting.")
         return null
     }
-    val tlaProcTargets = (fromCompileTla + targets.procFunTla).distinctBy { it.name }
 
     val jarSortErrors = jarSortReachabilityErrors(jarTargets, ast, procDecls)
     if (jarSortErrors.isNotEmpty()) {

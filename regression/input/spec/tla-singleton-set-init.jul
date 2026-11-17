@@ -1,6 +1,6 @@
 type Ids
 
-proc Box {
+static proc Box {
     const xs : Set<Int>
     var n : Int
 

@@ -3,7 +3,7 @@ type Message {
     msgType : String
 }
 
-proc Net {
+static proc Net {
     var messages : Set<Message> := setOf()
 
     constructor initially(args : List<String>) {}

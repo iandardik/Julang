@@ -1,22 +1,183 @@
+import julay.funlib.setOf
+import node.lib.PutResult
+
 /*
- * Perfect network (verification-only): claim delivery is an immediate rendezvous
- * with SpecShard.applyClaim — no message bags, drops, or reorder.
+ * Perfect network (verification-only). Replaces RpcIn/RpcOut in ShardSpec: the
+ * Shard children sync the same actions here that spawn RpcOut / HandleRpc
+ * children in the JAR. Send enqueues; deliver dequeues (reorder OK). No drop model.
+ *
+ *   goClaim     → claimMsgs       → claim          (spawns ApplyClaim)
+ *   goMoveBatch → moveBatchMsgs   → moveBatch      (spawns ApplyMoveBatch)
+ *   goKeyCount  → keyCountReqs    → keyCount       (spawns KeyCount)
+ *   keyCountDone → keyCountReplies → keyCountReply (FindLightestPeer)
+ *
+ * Unindexed: the network is not node state. `also (n : NodeSet)` is the node the
+ * action runs on (unified with the `with (n)` index of the node it syncs with).
  */
 export type NodeSet := String
 export type Key := String
 
-export spec PerfectNet[n : NodeSet] {
+type ClaimMsg {
+    src : NodeSet
+    dest : NodeSet
+    k : String
+    owner : String
+}
+
+type MoveBatchMsg {
+    src : NodeSet
+    dest : NodeSet
+    owner : String
+    k : String
+    v : String
+}
+
+type KeyCountReq {
+    src : NodeSet
+    dest : NodeSet
+}
+
+type KeyCountReplyMsg {
+    src : NodeSet
+    dest : NodeSet
+    count : Int
+}
+
+export spec PerfectNet {
     NodeSet := { "n1", "n2", "n3" }
     Key := { "a", "b", "c", "d", "e", "f", "g", "h" }
 
-    var lastClaimKey : Key := "a"
-    var lastClaimOwner : NodeSet := "n1"
+    var claimMsgs : Set<ClaimMsg> := setOf()
+    var moveBatchMsgs : Set<MoveBatchMsg> := setOf()
+    var keyCountReqs : Set<KeyCountReq> := setOf()
+    var keyCountReplies : Set<KeyCountReplyMsg> := setOf()
 
     constructor initially(args : List<String>) {}
 
-    transition applyClaim(k : Key, owner : NodeSet) {
+    transition goClaim(peerUrl : String, key : String, owner : String) also (n : NodeSet, dest : NodeSet) {
+        guard: peerUrl = dest
         transit:
-            lastClaimKey := k
-            lastClaimOwner := owner
+            claimMsgs := claimMsgs + setOf(ClaimMsg {
+                src := n,
+                dest := dest,
+                k := key,
+                owner := owner
+            })
+    }
+
+    /* Spawns ApplyClaim on n. */
+    transition claim(claimKey : String, claimOwner : String) also (n : NodeSet, src : NodeSet) {
+        guard:
+            ClaimMsg {
+                src := src,
+                dest := n,
+                k := claimKey,
+                owner := claimOwner
+            } in claimMsgs
+        transit:
+            claimMsgs := claimMsgs - setOf(ClaimMsg {
+                src := src,
+                dest := n,
+                k := claimKey,
+                owner := claimOwner
+            })
+    }
+
+    transition goMoveBatch(
+        peerUrl : String,
+        ownerUrl : String,
+        key : String,
+        val : String
+    ) also (n : NodeSet, dest : NodeSet) {
+        guard: peerUrl = dest
+        transit:
+            moveBatchMsgs := moveBatchMsgs + setOf(MoveBatchMsg {
+                src := n,
+                dest := dest,
+                owner := ownerUrl,
+                k := key,
+                v := val
+            })
+    }
+
+    /* Spawns ApplyMoveBatch on n. */
+    transition moveBatch(moveOwner : String, moveKey : String, moveVal : String) also (n : NodeSet, src : NodeSet) {
+        guard:
+            MoveBatchMsg {
+                src := src,
+                dest := n,
+                owner := moveOwner,
+                k := moveKey,
+                v := moveVal
+            } in moveBatchMsgs
+        transit:
+            moveBatchMsgs := moveBatchMsgs - setOf(MoveBatchMsg {
+                src := src,
+                dest := n,
+                owner := moveOwner,
+                k := moveKey,
+                v := moveVal
+            })
+    }
+
+    transition goKeyCount(peerUrl : String, fromUrl : String) also (n : NodeSet, dest : NodeSet) {
+        guard: peerUrl = dest & fromUrl = n
+        transit:
+            keyCountReqs := keyCountReqs + setOf(KeyCountReq {
+                src := n,
+                dest := dest
+            })
+    }
+
+    /* Spawns KeyCount on n; its return keyCountDone enqueues the reply. */
+    transition keyCount(fromUrl : String) also (n : NodeSet, src : NodeSet) {
+        guard:
+            & fromUrl = src
+            & KeyCountReq { src := src, dest := n } in keyCountReqs
+        transit:
+            keyCountReqs := keyCountReqs - setOf(KeyCountReq { src := src, dest := n })
+    }
+
+    transition keyCountDone(toUrl : String, replyCount : Int) also (n : NodeSet, dest : NodeSet) {
+        guard: toUrl = dest
+        transit:
+            keyCountReplies := keyCountReplies + setOf(KeyCountReplyMsg {
+                src := n,
+                dest := dest,
+                count := replyCount
+            })
+    }
+
+    /* Delivers to the FindLightestPeer on n waiting for src. */
+    transition keyCountReply(replyFrom : String, count : Int) also (n : NodeSet, src : NodeSet) {
+        guard:
+            & replyFrom = src
+            & KeyCountReplyMsg { src := src, dest := n, count := count } in keyCountReplies
+        transit:
+            keyCountReplies := keyCountReplies - setOf(KeyCountReplyMsg {
+                src := src,
+                dest := n,
+                count := count
+            })
+    }
+}
+
+/* Client load for one node: a bounded number of puts, each awaited via putDone. */
+export spec ClientEnv[n : NodeSet] {
+    var pending : Int := 0
+    var issued : Int := 0
+
+    constructor initially(args : List<String>) {}
+
+    transition put(putK : String, putV : String) also (k : Key) {
+        guard: issued < 2 & putK = k & putV = "v"
+        transit:
+            issued := issued + 1
+            pending := pending + 1
+    }
+
+    transition putDone(result : PutResult) {
+        guard: pending > 0
+        transit: pending := pending - 1
     }
 }

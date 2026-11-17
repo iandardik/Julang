@@ -1,0 +1,4 @@
+source: regression/input/syntax-errors/static-proc-return.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "cannot have a return action"

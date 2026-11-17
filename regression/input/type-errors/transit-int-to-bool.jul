@@ -1,4 +1,4 @@
-proc S {
+static proc S {
     var flag : Boolean
 
     constructor initially(args : List<String>) {

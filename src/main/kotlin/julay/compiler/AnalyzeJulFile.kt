@@ -55,7 +55,6 @@ fun analyzeJulFile(
         allPClassNames = unit.allPClassNames,
         allProcAliasNames = unit.allProcNames,
         librariesInUse = librariesInUse,
-        procFunNames = collectProcFunStableNames(ast),
     ) ?: return
 
     printAnalyzeViews(

@@ -1,0 +1,4 @@
+source: regression/input/syntax-errors/dynamic-proc-no-return.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "must have at least one return action"

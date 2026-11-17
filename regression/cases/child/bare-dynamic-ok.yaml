@@ -1,0 +1,7 @@
+source: regression/input/child/bare-dynamic-ok.jul
+programs:
+  - name: BareDynamicOk
+    run:
+      timeoutMs: 60000
+      expectStdoutContains:
+        - "bare-done=5"

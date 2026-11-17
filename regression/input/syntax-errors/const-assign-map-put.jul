@@ -1,5 +1,5 @@
 import julay.funlib.mapOf
-proc S {
+static proc S {
     const mp : Map<String, Int>
 
     constructor initially(args : List<String>) {

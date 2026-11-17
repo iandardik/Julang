@@ -3,13 +3,19 @@ import julay.funlib.serveHttp
 static proc ServerStarter {
     constructor initially(args : List<String>) {
         after:
-            serveHttp(8000, incHandler)
+            serveHttp(8000, IncHandler.req ~> IncHandler.respond)
     }
 }
 
-export procfun incHandler(req : HttpServerRequest) : HttpServerResponse {
-    var localCounter : Int := -1
-    var step : String := "A"
+export proc IncHandler {
+    var localCounter : Int
+    var step : String
+
+    constructor req(r : HttpServerRequest) {
+        transit:
+            localCounter := -1
+            step := "A"
+    }
 
     client transition increment() {
         guard: step = "A"
@@ -23,13 +29,13 @@ export procfun incHandler(req : HttpServerRequest) : HttpServerResponse {
             step := "C"
     }
 
-    internal transition respond() {
-        guard: step = "C"
-        return: HttpServerResponse {
-            body := localCounter + "",
-            code := 200
-        }
+    return respond(resp : HttpServerResponse) {
+        guard:
+            step = "C" & resp = HttpServerResponse {
+                body := localCounter + "",
+                code := 200
+            }
     }
 }
 
-export proc ServerLogic := ServerStarter
+export proc ServerLogic := ServerStarter || IncHandler

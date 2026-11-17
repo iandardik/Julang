@@ -10,7 +10,7 @@ type Line {
     end : Point
 }
 
-proc Worker {
+static proc Worker {
     var segment : Line
     var steps : Int
 

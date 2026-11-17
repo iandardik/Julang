@@ -17,7 +17,7 @@ static proc Protocol {
     }
 }
 
-proc Handler {
+static proc Handler {
     constructor initially(args : List<String>) {
         transit:
     }

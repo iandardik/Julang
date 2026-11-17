@@ -2,7 +2,7 @@ import julay.funlib.listOf
 
 type Node
 
-proc Peer {
+static proc Peer {
     const cluster : List<String>
     var state : String
 

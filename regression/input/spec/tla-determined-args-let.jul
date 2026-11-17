@@ -1,4 +1,4 @@
-proc Box {
+static proc Box {
     var n : Int
     var flag : Boolean
 

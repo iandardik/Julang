@@ -1,4 +1,4 @@
-proc Printer {
+static proc Printer {
     var n : Int
     var msg : String
     var done : Boolean

@@ -65,7 +65,10 @@ class CompositionOccurrenceTest {
     }
 
     @Test
-    fun danglingWOnTwoXCopiesIsComposeError() {
+    fun danglingWOnTwoXCopiesIsShapeError() {
+        // Dynamic same-class duplicates stay open through compose (a later child
+        // binding C<X> may cover every X occurrence); the closed composition
+        // reports them via actionShapeErrors.
         val leafMap = mapOf(
             "A" to listOf(offer("A", "other", static = true)),
             "B" to listOf(offer("B", "other", static = true)),
@@ -75,16 +78,17 @@ class CompositionOccurrenceTest {
         val bx = ProcDecl("BX", listOf(ProcDecl("B", emptyList(), ProcDeclType.Proc), ProcDecl("X", emptyList(), ProcDeclType.Proc)), ProcDeclType.Proc)
         val root = ProcDecl("P", listOf(ax, bx), ProcDeclType.Proc)
         val result = computeCompositionAlphabet(root, listOf(root, ax, bx), leafMap)
+        val shapeErrs = actionShapeErrors(result.allOffers)
         assertTrue(
-            result.errors.any { it.toString().contains("Multiple occurrences of \"X\"") },
-            "expected same-class ordinary error; got ${result.errors}",
+            shapeErrs.any { it.toString().contains("Multiple occurrences of \"X\"") },
+            "expected same-class ordinary shape error; got $shapeErrs",
         )
     }
 
     @Test
-    fun sameClassOrdinaryIsComposeError() {
-        val left = listOf(offer("X", "w").copy(occurrenceId = "x1"))
-        val right = listOf(offer("X", "w").copy(occurrenceId = "x2"))
+    fun sameClassStaticOrdinaryIsComposeError() {
+        val left = listOf(offer("X", "w", static = true).copy(occurrenceId = "x1"))
+        val right = listOf(offer("X", "w", static = true).copy(occurrenceId = "x2"))
         val (composed, errs) = composeAlphabets(left, right, "scope")
         assertTrue(errs.any { it.toString().contains("Multiple occurrences of \"X\"") })
         assertEquals(2, composed.size)
@@ -112,41 +116,6 @@ class CompositionOccurrenceTest {
         assertTrue(actionShapeErrors(result.allOffers).isEmpty(), actionShapeErrors(result.allOffers).toString())
     }
 
-    @Test
-    fun composedProcFunFoldsNonSyntheticOffersIntoParent() {
-        val leafMap = mapOf(
-            "Handler" to listOf(offer("Handler", "dispatch")),
-            "clientAppendRPC" to listOf(
-                offer("clientAppendRPC", "clientAppendRPC_call").copy(isConstructor = true),
-                offer("clientAppendRPC", "noLeader"),
-                offer("clientAppendRPC", "committed"),
-                offer("clientAppendRPC", "clientAppendRPC_ret"),
-                offer("clientAppendRPC", "step", internal = true),
-            ),
-        )
-        val root = ProcDecl(
-            "RpcIn",
-            listOf(
-                ProcDecl("Handler", emptyList(), ProcDeclType.Proc),
-                ProcDecl("clientAppendRPC", emptyList(), ProcDeclType.Proc),
-            ),
-            ProcDeclType.Proc,
-        )
-        val result = computeCompositionAlphabet(
-            root,
-            listOf(root),
-            leafMap,
-            procFunNames = setOf("clientAppendRPC"),
-        )
-        assertTrue(result.errors.isEmpty(), result.errors.toString())
-        assertTrue(result.external.any { it.name == "noLeader" })
-        assertTrue(result.external.any { it.name == "committed" })
-        assertTrue(result.external.none { it.name == "clientAppendRPC_call" })
-        assertTrue(result.external.none { it.name == "clientAppendRPC_ret" })
-        assertTrue(result.allOffers.none { it.name == "clientAppendRPC_call" })
-        assertTrue(result.allOffers.none { it.name == "clientAppendRPC_ret" })
-        assertTrue(result.allOffers.any { it.name == "step" && it.sourceInternal })
-    }
 
     @Test
     fun tlaNamesUseIntroducingAssembly() {

@@ -2,7 +2,7 @@ import julay.funlib.length
 import julay.funlib.listOf
 import julay.funlib.splice
 
-proc SpliceClash {
+static proc SpliceClash {
     var xs : List<Int>
     var n : Int
 

@@ -1,0 +1,6 @@
+static proc S {
+    constructor initially(args : List<String>) {}
+    return quit() {}
+}
+
+compile S

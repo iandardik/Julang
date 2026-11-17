@@ -95,7 +95,6 @@ internal fun analyzeTlaLiteralDomains(
                     walkLits(update.init, offer.leaf.name, ::varSite, ::fieldSite, inWrite = false)
             }
         }
-        offer.decl.returnExpr?.let { walkLits(it, offer.leaf.name, ::varSite, ::fieldSite, inWrite = false) }
     }
     usedFuns.forEach { walkLits(it.funBody(), "", ::varSite, ::fieldSite, inWrite = false) }
     invClosure.forEach { walkLits(it.invariantFormula(), "", ::varSite, ::fieldSite, inWrite = false) }

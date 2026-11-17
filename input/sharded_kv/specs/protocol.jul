@@ -1,76 +1,43 @@
-import julay.funlib.mapOf
+import node.store.Store
+import node.shard.Put
+import node.shard.KeyCount
+import node.shard.ApplyClaim
+import node.shard.ApplyMoveBatch
+import node.shard.FindLightestPeer
+import node.shard.BroadcastClaim
+import node.shard.ReshardToPeer
 import specs.net.PerfectNet
+import specs.net.ClientEnv
 import specs.net.NodeSet
 import specs.net.Key
 
 /*
- * Spec-only shard model (create-indexed). `also (self : NodeSet)` is this node's id.
- * Maps use String keys/values (typedef Key/NodeSet are nominal and do not unify with Map keys).
+ * TLA assembly: the same Shard children as ShardNode, re-parented. ClientEnv spawns
+ * Put (HandleRpc in the JAR); PerfectNet delivers peer messages (RpcIn in the JAR)
+ * and carries the go* sends (RpcOut children in the JAR).
  */
-export spec SpecShard {
-    var store : Map<String, String>
-    var owners : Map<String, String>
+spec VerifNode := Store || Put<ClientEnv> || KeyCount<PerfectNet> || ApplyClaim<PerfectNet>
+    || ApplyMoveBatch<PerfectNet> || FindLightestPeer<Put> || BroadcastClaim<Put>
+    || BroadcastClaim<ApplyMoveBatch> || ReshardToPeer<Put>
 
-    constructor initially(args : List<String>) {
-        transit:
-            store := mapOf()
-            owners := mapOf()
-    }
-
-    transition putLocal(k : String, v : String) also (self : NodeSet) {
-        guard: k ~in owners
-        transit:
-            store[k] := v
-            owners[k] := self
-    }
-
-    transition putUpdate(k : String, v : String) also (self : NodeSet) {
-        guard: k in owners & owners[k] = self
-        transit:
-            store[k] := v
-    }
-
-    transition applyClaim(k : String, owner : NodeSet) {
-        transit:
-            owners[k] := owner
-    }
-
-    transition getLocal(k : String, v : String) also (self : NodeSet) {
-        guard:
-            & k in store
-            & k in owners
-            & owners[k] = self
-            & v = store[k]
-    }
-
-    transition moveOne(k : String, newOwner : NodeSet) also (self : NodeSet) {
-        guard:
-            & k in store
-            & owners[k] = self
-            & newOwner ~= self
-        transit:
-            store := store.keys.filter(x -> x ~= k).associateWith(x -> store[x])
-            owners[k] := newOwner
-    }
-}
-
-invariant AtMostOneStore := forall k : Key, forall n1 : NodeSet, forall n2 : NodeSet,
-    (k in SpecShard[n1].store & k in SpecShard[n2].store) => n1 = n2
-
-invariant OwnerHasValue := forall n : NodeSet, forall k : Key,
-    (k in SpecShard[n].owners & SpecShard[n].owners[k] = n) => k in SpecShard[n].store
-
-invariant OwnersAgree := forall n1 : NodeSet, forall n2 : NodeSet, forall k : Key,
-    (k in SpecShard[n1].owners & k in SpecShard[n2].owners) =>
-        SpecShard[n1].owners[k] = SpecShard[n2].owners[k]
-
-spec ShardIndexed := SpecShard[n : NodeSet] {
+spec NodeIndexed := VerifNode[n : NodeSet] {
     NodeSet := { "n1", "n2", "n3" }
     Key := { "a", "b", "c", "d", "e", "f", "g", "h" }
+    DynProc := { "i1", "i2" }
 }
 
-spec ShardSys := with (n : NodeSet) {
-    ShardIndexed[n] || PerfectNet[n]
-}
+spec ShardSys := (with (n : NodeSet) {
+    NodeIndexed[n] || ClientEnv[n]
+}) || PerfectNet
+
+invariant AtMostOneStore := forall k : Key, forall n1 : NodeSet, forall n2 : NodeSet,
+    (k in Store[n1].store & k in Store[n2].store) => n1 = n2
+
+invariant OwnerHasValue := forall n : NodeSet, forall k : Key,
+    (k in Store[n].owners & Store[n].owners[k] = n) => k in Store[n].store
+
+invariant OwnersAgree := forall n1 : NodeSet, forall n2 : NodeSet, forall k : Key,
+    (k in Store[n1].owners & k in Store[n2].owners) =>
+        Store[n1].owners[k] = Store[n2].owners[k]
 
 export spec ShardSpec := ShardSys |= (AtMostOneStore & OwnerHasValue & OwnersAgree)

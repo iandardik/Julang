@@ -6,7 +6,7 @@ import julay.funlib.println
  * Previously, codegen snapshotted after: args before sequential inits, so reading
  * the just-assigned var threw "read before it was initialized".
  */
-proc S {
+static proc S {
     var msg : String
 
     constructor initially(args : List<String>) {

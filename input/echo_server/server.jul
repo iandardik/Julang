@@ -1,22 +1,29 @@
 import julay.funlib.serveHttp
 import julay.funlib.println
 
-procfun echoHandler(req : HttpServerRequest) : HttpServerResponse {
-    internal transition respond() {
+proc EchoHandler {
+    var body : String
+
+    constructor req(r : HttpServerRequest) {
+        transit: body := r.body
+    }
+
+    return respond(resp : HttpServerResponse) {
+        guard:
+            resp = HttpServerResponse {
+                body := body + " is a good point!",
+                code := 200
+            }
         before:
-            println("Req: '" + req.body + "', I responded: '" + req.body + " is a good point!" + "'")
-        return: HttpServerResponse {
-            body := req.body + " is a good point!",
-            code := 200
-        }
+            println("Req: '" + body + "', I responded: '" + body + " is a good point!" + "'")
     }
 }
 
 static proc ServerStarter {
     constructor initially(args : List<String>) {
         after:
-            serveHttp(8000, echoHandler)
+            serveHttp(8000, EchoHandler.req ~> EchoHandler.respond)
     }
 }
 
-export proc Server := ServerStarter
+export proc Server := ServerStarter || EchoHandler

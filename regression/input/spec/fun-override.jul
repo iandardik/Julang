@@ -4,7 +4,7 @@ type Idx
 
 export fun bigConst() : Int = 99
 
-proc Box {
+static proc Box {
     var n : Int
 
     constructor start() {

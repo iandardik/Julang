@@ -2,7 +2,7 @@ import julay.funlib.exitProgram
 import julay.funlib.listOf
 import julay.funlib.splice
 
-proc BadSlice {
+static proc BadSlice {
     var xs : List<Int>
     var ys : List<Int>
 

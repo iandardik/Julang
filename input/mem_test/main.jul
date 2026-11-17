@@ -1,7 +1,7 @@
 import julay.funlib.delaySeconds
 import julay.funlib.println
 
-proc PeriodicPrint {
+static proc PeriodicPrint {
     var step : String
 
     constructor initially(args : List<String>) {

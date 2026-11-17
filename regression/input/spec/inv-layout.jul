@@ -1,6 +1,6 @@
 type NodeSet
 
-proc Node {
+static proc Node {
     var state : String
     var currentTerm : Int
 

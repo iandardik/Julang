@@ -4,7 +4,7 @@ type Box<T> {
 
 fun constFn<T>(x : Int) : T = x
 
-proc Worker {
+static proc Worker {
     var n : Int
 
     constructor initially(args : List<String>) {

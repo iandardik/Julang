@@ -39,8 +39,6 @@ internal fun analyzeTlaRelevantVars(
     offers: List<TlaActionOffer>,
     usedFuns: Collection<FunNode>,
     invClosure: List<InvariantNode>,
-    procFunLeafNames: Set<String> = emptySet(),
-    callSites: List<ProcFunCallSite> = emptyList(),
     initExprs: List<Pair<String, ExprNode>> = emptyList(),
 ): TlaRelevantVars {
     val varsByLeaf = pclasses.mapValues { (_, pc) ->
@@ -48,14 +46,6 @@ internal fun analyzeTlaRelevantVars(
     }
     val lists = collectEmittedOfferLists(offers, pclasses)
     val relevant = mutableSetOf<Pair<String, String>>()
-    // Procfun leaves are always written by *_call / *_ret handshake; keep every state var.
-    procFunLeafNames.forEach { leafName ->
-        varsByLeaf[leafName].orEmpty().forEach { relevant += leafName to it }
-    }
-    callSites.forEach { site ->
-        site.assignVars.forEach { relevant += site.hostName to it }
-        site.callArgs.forEach { collectStateReads(it, site.hostName, varsByLeaf, emptySet(), relevant) }
-    }
 
     fun offerHasRelevantUpdate(offer: TlaActionOffer): Boolean {
         if (offer.isConstructor) return true
@@ -89,7 +79,6 @@ internal fun analyzeTlaRelevantVars(
                 offer.decl.errors.forEach { arm ->
                     collectStateReads(arm.condExpr(), offer.leaf.name, varsByLeaf, bound, relevant)
                 }
-                offer.decl.returnExpr?.let { collectStateReads(it, offer.leaf.name, varsByLeaf, bound, relevant) }
             }
         }
         invClosure.forEach { collectStateReads(it.invariantFormula(), null, varsByLeaf, emptySet(), relevant) }

@@ -3,7 +3,7 @@ import julay.funlib.min
 import julay.funlib.exitProgram
 import julay.funlib.println
 
-proc S {
+static proc S {
     var x : Int
     var print : Boolean
     var done : Boolean

@@ -28,18 +28,15 @@ name_id
 
 decl
     : EXPORT? proc
-    | EXPORT? api_decl
     | EXPORT? type_decl
     | compile_decl
     | EXPORT? spec
     | EXPORT? invariant_decl
     | EXPORT? fun_decl
-    | EXPORT? procfun_decl
     ;
 
 typeExpr
-    : typeDomain PROCFUN_ARROW typeExpr
-    | typeDomain
+    : typeDomain
     ;
 
 typeDomain
@@ -62,24 +59,6 @@ typeParams
 
 fun_decl
     : FUN ID typeParams? args COLON typeExpr EQ expr
-    ;
-
-procfun_decl
-    : PROCFUN ID args COLON typeExpr LCURLY procfun_body* RCURLY
-    ;
-
-procfun_body
-    : var
-    | constructor
-    | transition
-    ;
-
-api_decl
-    : API ID LCURLY PROC COLON proc_expr (CALLS COLON api_call_list)? RCURLY
-    ;
-
-api_call_list
-    : ID (COMMA ID)*
     ;
 
 proc
@@ -167,6 +146,7 @@ system_primary
 
 system_leaf
     : qualified_name
+    | ID LT ID GT
     | ID
     ;
 
@@ -178,6 +158,7 @@ proc_body
     : var
     | constructor
     | transition
+    | return_action
     ;
 
 field
@@ -194,6 +175,15 @@ constructor
 
 transition
     : (INTERNAL | TIMER | SERVICE | CLIENT)? TRANSITION ID args (ALSO args)? LCURLY action_body* RCURLY
+    ;
+
+return_action
+    : (INTERNAL | SERVICE | CLIENT)? RETURN ID args LCURLY return_body* RCURLY
+    ;
+
+return_body
+    : guard
+    | before
     ;
 
 args
@@ -217,11 +207,6 @@ action_body
     | transit
     | error
     | after
-    | return_clause
-    ;
-
-return_clause
-    : RETURN COLON expr
     ;
 
 guard
@@ -269,6 +254,7 @@ expr
     | field_access
     | record_literal
     | fun_call
+    | handler_ref
     | NOT expr
     // Prefix & / | are no-ops (TLA+ style formatting); same precedence as ~
     | AND expr
@@ -317,9 +303,14 @@ when_pattern
 
 proc_expr
     : qualified_name
+    | ID LT ID GT
     | ID
     | LPAREN proc_expr RPAREN
     | proc_expr PARALLEL proc_expr
+    ;
+
+handler_ref
+    : ID DOT ID PROCFUN_ARROW ID DOT ID
     ;
 
 literal

@@ -4,7 +4,7 @@ type Point {
     label : String
 }
 
-proc Worker {
+static proc Worker {
     var pos : Point
 
     constructor initially(args : List<String>) {

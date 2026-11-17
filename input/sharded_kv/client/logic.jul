@@ -1,4 +1,4 @@
-import julay.funlib.httpRequest
+import julay.funlib.doHttpRequest
 import julay.funlib.length
 import julay.funlib.split
 import julay.funlib.startsWith
@@ -13,7 +13,7 @@ import julay.funlib.println
  *
  * On 303 OWNER <url>, retries once against that URL.
  */
-proc ShardClientLogic {
+static proc ShardClientLogic {
     const command : String
     const key : String
     const value : String
@@ -55,7 +55,7 @@ proc ShardClientLogic {
     internal transition doRequest() {
         guard: step = "send"
         transit:
-            let resp : HttpClientResponse := httpRequest(HttpClientRequest {
+            let resp : HttpClientResponse := doHttpRequest(HttpClientRequest {
                 url := targetUrl + path,
                 method := "POST",
                 body := reqBody

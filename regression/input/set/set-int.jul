@@ -3,7 +3,7 @@ import julay.funlib.println
 import julay.funlib.exitProgram
 import julay.funlib.setOf
 
-proc SetIntDemo {
+static proc SetIntDemo {
     var s : Set<Int>
     var n : Int
     var print : Boolean

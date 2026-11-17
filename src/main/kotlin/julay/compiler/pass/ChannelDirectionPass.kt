@@ -12,7 +12,6 @@ import julay.compiler.ast.RootNode
 import julay.compiler.ast.SymbolValueExprNode
 import julay.compiler.ast.exprReferencesSymbol
 import julay.compiler.ast.substituteExpr
-import julay.compiler.collectProcFunStableNames
 import julay.compiler.decl.ActionDecl
 import julay.compiler.decl.ProcClassDecl
 import julay.compiler.decl.ProcDecl
@@ -56,7 +55,7 @@ fun computeChannelDirections(
 ): ChannelDirectionResult {
     val leafMap = leafActionMap(ast, procs, librariesInUse)
     val alphabet = if (program != null) {
-        computeCompositionAlphabet(program, procDecls, leafMap, collectProcFunStableNames(ast), ast)
+        computeCompositionAlphabet(program, procDecls, leafMap)
     } else {
         val all = leafMap.values.flatten()
         CompositionAlphabetResult(
@@ -70,8 +69,7 @@ fun computeChannelDirections(
 
     val pclasses = ast.declNodes()
         .flatMap { it.procClassPass(procs) }
-        .associateBy { it.name } +
-        ast.procFunClassPass().associateBy { it.name } // name is already stableName()
+        .associateBy { it.name }
 
     val directions = mutableListOf<ActionChannelDirection>()
     val errors = mutableListOf<CompileError>()
@@ -98,6 +96,7 @@ private data class Participant(
     val decl: ActionDecl,
     val isConstructor: Boolean,
     val loc: ProgramLoc,
+    val parentClass: String? = null,
 )
 
 private fun deduceChannelGroup(
@@ -116,10 +115,16 @@ private fun deduceChannelGroup(
             decl = decl,
             isConstructor = offer.isConstructor,
             loc = offer.loc,
+            parentClass = offer.parentClass,
         )
     }
     if (participants.isEmpty()) {
         return ChannelDirectionResult(emptyList(), emptyList())
+    }
+
+    // Constructor peers are spawned by the firing side, never waiting on a channel.
+    if (participants.any { it.isConstructor } && participants.any { !it.isConstructor }) {
+        return deduceChannelGroup(offers.filter { !it.isConstructor }, pclasses)
     }
 
     val actionName = offers.first().name
@@ -299,6 +304,9 @@ private fun breakTie(
     val aStatic = a.isStatic
     val bStatic = b.isStatic
     return when {
+        // Child sends, so one child class keeps one direction under every parent it is bound to.
+        a.parentClass == b.className -> ab
+        b.parentClass == a.className -> ba
         aStatic && !bStatic -> ba // dynamic sends
         !aStatic && bStatic -> ab
         else -> {
@@ -576,7 +584,6 @@ fun actionBodyReferencesArg(decl: ActionDecl, argName: String): Boolean {
         calls.any { call -> call.callArgs().any { exprReferencesSymbol(it, argName) } }
     if (callsRef(decl.befores) || callsRef(decl.afters)) return true
     if (decl.errors.any { arm -> errorArmRefsArg(arm, argName) }) return true
-    if (decl.returnExpr?.let { exprReferencesSymbol(it, argName) } == true) return true
     return decl.transits.any { update ->
         when (update) {
             is TransitUpdate.Assign -> exprReferencesSymbol(update.expr, argName)

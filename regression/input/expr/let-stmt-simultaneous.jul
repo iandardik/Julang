@@ -5,7 +5,7 @@ import julay.funlib.println
  * Transit lets see pre-state only. After `let t := y` and `y := t + 1`,
  * a later `x := y` still binds the old y (simultaneous assignment).
  */
-proc LetStmtSimultaneousDemo {
+static proc LetStmtSimultaneousDemo {
     var x : Int
     var y : Int
     var print : Boolean

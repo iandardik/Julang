@@ -1,0 +1,38 @@
+/*
+ * A return action clears the leaf's constructed flag; Terminates checks it eventually fires.
+ */
+static proc Boss {
+    var spawned : Boolean
+
+    constructor initially(args : List<String>) {
+        transit: spawned := false
+    }
+
+    transition start() {
+        guard: ~spawned
+        transit: spawned := true
+    }
+}
+
+proc Leaf {
+    var phase : String
+
+    constructor start() {
+        transit: phase := "live"
+    }
+
+    internal transition step() {
+        guard: phase = "live"
+        transit: phase := "done"
+    }
+
+    internal return die() {
+        guard: phase = "done"
+    }
+}
+
+invariant Inv := true
+
+spec ReturnSpec := <true> Boss || Leaf <Inv>
+
+compile ReturnSpec

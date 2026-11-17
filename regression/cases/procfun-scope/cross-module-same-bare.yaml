@@ -1,8 +1,0 @@
-source: regression/input/procfun-scope/sys.jul
-programs:
-  - name: System
-    run:
-      timeoutMs: 60000
-      expectStdoutContains:
-        - "in 11"
-        - "out 20"

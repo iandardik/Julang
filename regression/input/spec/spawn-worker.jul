@@ -1,4 +1,6 @@
-proc Server {
+type DynProc
+
+static proc Server {
     var ready : Boolean
 
     constructor initially(args : List<String>) {
@@ -14,21 +16,17 @@ proc Server {
 proc Worker {
     var id : Int
 
-    constructor initially(args : List<String>) {
-        transit: id := 0
-    }
-
     constructor spawnWorker(id : Int) {
         transit: id := id
     }
 
-    transition work() {
+    internal return work() {
         guard: id >= 0
     }
 }
 
-invariant G := forall i : Int, Worker[i].id >= 0
+invariant G := forall i : DynProc, Worker[i].id >= 0
 
-spec SpawnWorker := <true> Server || Worker[i : Int] <G>
+spec SpawnWorker := <true> Server || Worker <G>
 
 compile SpawnWorker

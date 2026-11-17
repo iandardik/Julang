@@ -33,7 +33,7 @@ static proc Protocol {
     }
 }
 
-proc Handler {
+static proc Handler {
     var got : Int
 
     constructor initially(args : List<String>) {

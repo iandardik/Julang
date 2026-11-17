@@ -4,7 +4,7 @@ import julay.funlib.println
  * `x in Int` is an unbounded type domain — not a finite membership bind.
  */
 
-proc Driver {
+static proc Driver {
     var done : Boolean
 
     constructor initially(args : List<String>) {

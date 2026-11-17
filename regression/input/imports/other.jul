@@ -1,11 +1,11 @@
-proc Helper {
+static proc Helper {
     var x : Int
     constructor initially(args : List<String>) {
         transit: x := 0
     }
 }
 
-export proc Visible {
+export static proc Visible {
     var y : Int
     constructor initially(args : List<String>) {
         transit: y := 0

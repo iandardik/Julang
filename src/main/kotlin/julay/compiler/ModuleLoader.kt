@@ -217,7 +217,6 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
                 moduleProcNames,
                 moduleImportTable,
                 moduleSymbolsSnapshot,
-                collectProcFunNames(root),
                 moduleLeafSpecNames,
             ),
         )
@@ -266,8 +265,6 @@ fun loadCompilationUnit(entryPath: Path, extraLibraryPaths: List<Path> = emptyLi
     loaded.values.forEach { registerModuleSymbols(it, moduleSymbols) }
 
     val loadedList = loaded.values.filter { !it.isStub }.toList()
-    errors += stampProcFunIdentity(loadedList)
-    errors += duplicateProcFunNameErrors(loadedList)
 
     val allDecls = loadedList.flatMap { it.root.declNodes() }
     val mergedRoot = entryModule.root.withImportsAndDecls(entryModule.root.importNodes(), allDecls)

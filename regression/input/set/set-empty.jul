@@ -2,7 +2,7 @@ import julay.funlib.length
 import julay.funlib.exitProgram
 import julay.funlib.setOf
 
-proc SetEmptyDemo {
+static proc SetEmptyDemo {
     var s : Set<Int>
     var done : Boolean
 

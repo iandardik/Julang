@@ -2,7 +2,7 @@ import julay.funlib.exitProgram
 import julay.funlib.println
 import julay.funlib.listOf
 
-proc S {
+static proc S {
     var x : Int
     var nested : List<List<Int>>
     var print : Boolean

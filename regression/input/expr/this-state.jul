@@ -5,7 +5,7 @@ import julay.funlib.println
  * `this.x` always means process state, even when an action arg is also named `x`.
  * Bare `x` still refers to the arg (args shadow state).
  */
-proc ThisStateDemo {
+static proc ThisStateDemo {
     var counter : Int
     var print : Boolean
 

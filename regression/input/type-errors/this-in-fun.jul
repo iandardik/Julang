@@ -1,6 +1,6 @@
 fun add(x : Int) : Int = this.x + 1
 
-proc S {
+static proc S {
     var x : Int
 
     constructor initially(args : List<String>) {

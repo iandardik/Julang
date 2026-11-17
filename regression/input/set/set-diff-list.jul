@@ -1,6 +1,6 @@
 import julay.funlib.listOf
 import julay.funlib.setOf
-proc BadSetOp {
+static proc BadSetOp {
     var s : Set<Int>
 
     constructor initially(args : List<String>) {

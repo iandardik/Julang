@@ -1,6 +1,6 @@
 import julay.funlib.exitProgram
 
-proc S {
+static proc S {
     var x : Int
 
     constructor initially(args : List<String>) {

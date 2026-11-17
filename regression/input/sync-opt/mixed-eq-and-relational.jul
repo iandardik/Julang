@@ -5,7 +5,7 @@ import julay.funlib.println
  * Mixed equality + relational — residual relational arg cannot bind for Go channels.
  */
 
-proc P {
+static proc P {
     constructor initially(args : List<String>) {
         transit:
     }

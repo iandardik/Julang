@@ -1,0 +1,9 @@
+import julay.funlib.exitProc
+
+static proc S {
+    constructor initially(args : List<String>) {
+        after: exitProc()
+    }
+}
+
+compile S

@@ -40,7 +40,7 @@ class EmptyConcatGuardElisionTest {
                             exitProgram(0)
                     }
                 }
-                proc T {
+                static proc T {
                     constructor initially(args : List<String>) {
                         transit:
                     }
@@ -109,7 +109,7 @@ class EmptyConcatGuardElisionTest {
                             exitProgram(0)
                     }
                 }
-                proc T {
+                static proc T {
                     constructor initially(args : List<String>) {
                         transit:
                     }

@@ -1,6 +1,6 @@
 type Ids
 
-proc Box {
+static proc Box {
     const cluster : Set<Int>
     var nextIndex : Map<Int, Int>
     var n : Int

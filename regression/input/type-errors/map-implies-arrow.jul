@@ -1,5 +1,5 @@
 import julay.funlib.listOf
-proc Worker {
+static proc Worker {
     var mp : Map<String, Int>
 
     constructor initially(args : List<String>) {

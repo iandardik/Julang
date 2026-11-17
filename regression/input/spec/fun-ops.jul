@@ -12,7 +12,7 @@ fun entryTermAt(log : List<Entry>, idx : Int) : Int =
 fun bumpTerm(t : Int) : Int =
     entryTermAt(listOf(Entry { term := t, value := "" }), 1) + 1
 
-proc LogNode {
+static proc LogNode {
     var log : List<Entry>
     var currentTerm : Int
 

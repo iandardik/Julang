@@ -1,7 +1,7 @@
 import julay.funlib.println
 import julay.funlib.exitProgram
 
-proc S {
+static proc S {
     var done : Boolean
 
     constructor initially(args : List<String>) {

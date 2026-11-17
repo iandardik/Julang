@@ -241,6 +241,8 @@ fun mergeSpecTypeModels(
     val out = domains.toMutableMap()
     val errors = mutableListOf<CompileError>()
     typeModels.forEach { model ->
+        // Reserved create-index concurrency bound — not a domain type.
+        if (model.name() == DYN_PROC_MODEL) return@forEach
         when (val built = buildDomainModel(model, out[model.name()], recordNames)) {
             is DomainModelBuildResult.Ok -> {
                 val prev = out[model.name()]

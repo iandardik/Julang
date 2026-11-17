@@ -4,7 +4,7 @@ type Msg {
     term : Int
 }
 
-proc Mail {
+static proc Mail {
     var msgs : Set<Msg>
     var seen : Int
 

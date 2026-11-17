@@ -109,7 +109,7 @@ class LeafSpecTest {
             spec A {
                 constructor initially(args : List<String>) {}
             }
-            proc Peer {
+            static proc Peer {
                 constructor initially(args : List<String>) {}
             }
             proc E := A || Peer
@@ -195,7 +195,7 @@ class LeafSpecTest {
         val result = typeCheck(
             """
             type Node
-            proc Peer {
+            static proc Peer {
                 var self : String := ""
                 constructor initially(args : List<String>) { transit: self := "n1" }
                 transition ping() { transit: self := self }
@@ -218,7 +218,7 @@ class LeafSpecTest {
     fun alsoArgsOnProcIsError() {
         val result = typeCheck(
             """
-            proc Bad {
+            static proc Bad {
                 constructor initially(args : List<String>) {}
                 transition send() also (m : Int) { transit: }
             }
@@ -242,7 +242,7 @@ class LeafSpecTest {
         file.writeText(
             """
             type Node
-            proc Counter {
+            static proc Counter {
                 var count : Int := 0
                 constructor initially(args : List<String>) { transit: count := 0 }
                 transition bump() { guard: count >= 0 transit: count := count + 1 }
@@ -305,7 +305,7 @@ class LeafSpecTest {
         val result = typeCheck(
             """
             type Node
-            proc Counter {
+            static proc Counter {
                 var n : Int := 0
                 constructor initially(args : List<String>) { transit: n := 0 }
                 transition bump() { transit: n := n + 1 }
@@ -326,7 +326,7 @@ class LeafSpecTest {
         val result = typeCheck(
             """
             type Node
-            proc Counter {
+            static proc Counter {
                 var n : Int := 0
                 constructor initially(args : List<String>) { transit: n := 0 }
                 transition bump() { transit: n := n + 1 }

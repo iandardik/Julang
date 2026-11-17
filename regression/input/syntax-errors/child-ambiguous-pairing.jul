@@ -1,0 +1,20 @@
+static proc Boss {
+    constructor initially(args : List<String>) {}
+    transition startA() {}
+    transition startB() {}
+    transition done() {}
+}
+
+proc WA {
+    constructor startA() {}
+    return done() {}
+}
+
+proc WB {
+    constructor startB() {}
+    return done() {}
+}
+
+proc Sys := Boss || WA<Boss> || WB<Boss>
+
+compile Sys

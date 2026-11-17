@@ -200,7 +200,7 @@ class SpecTlaTlcSmokeTest {
             )
             val spawnDef = tlaText.substringAfter("spawnWorker(i, id_) ==").substringBefore("\n\n")
             assertTrue(
-                !spawnDef.trimStart().startsWith("\\E i \\in Int :"),
+                !spawnDef.trimStart().startsWith("\\E i \\in DynProc :"),
                 "index quantification should be in Next, not inside spawnWorker;\n$tlaText",
             )
             assertTrue(
@@ -208,12 +208,12 @@ class SpecTlaTlcSmokeTest {
                 "expected Worker_constructed' flip in spawnWorker;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("\\E i, id_ \\in Int : spawnWorker(i, id_)"),
-                "expected Next to quantify index then args;\n$tlaText",
+                tlaText.contains("\\E i \\in DynProc : \\E id_ \\in Int : spawnWorker(i, id_)"),
+                "expected Next to quantify the DynProc slot then args;\n$tlaText",
             )
-            assertFalse(
-                tlaText.contains("work(i) ==") || Regex("""\\/\s+.*\bwork\b""").containsMatchIn(tlaText),
-                "guard-only work should be omitted from defs/Next;\n$tlaText",
+            assertTrue(
+                tlaText.contains("Worker_constructed' = [Worker_constructed EXCEPT ![i] = FALSE]"),
+                "internal return work should clear Worker_constructed;\n$tlaText",
             )
             assertTrue(
                 tlaText.contains("\\* State variables for Server with initially constructor logic") &&
@@ -221,7 +221,7 @@ class SpecTlaTlcSmokeTest {
                 "expected Init state-var comments; Server initially is folded, Worker keeps Next ctors;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("/\\ id = [i \\in Int |-> 0]") &&
+                tlaText.contains("/\\ id = [i \\in DynProc |-> 0]") &&
                     tlaText.contains("/\\ ready = FALSE") &&
                     !tlaText.contains("Worker_id"),
                 "id is a unique state var so stays bare (indexed Init); spawn arg is id_; ready is bare;\n$tlaText",
@@ -232,9 +232,8 @@ class SpecTlaTlcSmokeTest {
                 "Server's sole unsynced initially is folded into Init;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("\\* initially constructor on Worker") &&
-                    tlaText.contains("Worker_initially(i) =="),
-                "expected disambiguation comment for Worker initially;\n$tlaText",
+                tlaText.contains("WorkerTerminates == \\A i \\in DynProc : (Worker_constructed[i] ~> ~Worker_constructed[i])"),
+                "expected WorkerTerminates for the dynamic Worker;\n$tlaText",
             )
             assertTrue(
                 spawnDef.contains("\\* Server transition logic") &&
@@ -243,19 +242,10 @@ class SpecTlaTlcSmokeTest {
                     spawnDef.indexOf("\\* Worker constructor logic"),
                 "expected per-proc transition-type logic comments in spawnWorker;\n$spawnDef",
             )
-            val afterInit = tlaText.substringAfter("Init ==")
-            val workerInitIdx = afterInit.indexOf("Worker_initially(i) ==")
-            val spawnIdx = afterInit.indexOf("spawnWorker(i, id_) ==")
-            assertTrue(
-                workerInitIdx >= 0 && spawnIdx >= 0 && workerInitIdx < spawnIdx,
-                "Worker initially def should appear after Init and before spawnWorker;\n$tlaText",
-            )
             val nextBody = tlaAfterNext(tlaText).substringBefore("\n\n")
-            val nextWorker = nextBody.indexOf("Worker_initially")
-            val nextSpawn = nextBody.indexOf("spawnWorker")
             assertTrue(
-                nextWorker >= 0 && nextSpawn >= 0 && nextWorker < nextSpawn,
-                "Worker initially should lead Next before spawnWorker;\n$nextBody",
+                nextBody.indexOf("spawnWorker") in 0 until nextBody.indexOf("work(i)"),
+                "spawnWorker should lead Next before work;\n$nextBody",
             )
             tla.copyTo(File(work, "SpawnWorker.tla"), overwrite = true)
             cfg.copyTo(File(work, "SpawnWorker.cfg"), overwrite = true)
@@ -1745,132 +1735,41 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
-    fun exitProcSetsSelfKilledInTla() {
+    fun returnClearsConstructedAndEmitsTerminates() {
         assumeTlcPresent()
-        val work = Files.createTempDirectory("julay-spec-exit-proc").toFile()
+        val work = Files.createTempDirectory("julay-spec-return").toFile()
         try {
-            val source = File("regression/input/spec/exit-proc.jul")
+            val source = File("regression/input/spec/return-clears.jul")
             assertTrue(source.exists(), "missing ${source.path}")
             compileJulFile(source.toPath(), keepBuild = false)
-            val tla = File("ExitProcSpec.tla")
-            val cfg = File("ExitProcSpec.cfg")
-            assertTrue(tla.exists(), "expected ExitProcSpec.tla")
-            assertTrue(cfg.exists(), "expected ExitProcSpec.cfg")
+            val tla = File("ReturnSpec.tla")
+            val cfg = File("ReturnSpec.cfg")
+            assertTrue(tla.exists(), "expected ReturnSpec.tla")
+            assertTrue(cfg.exists(), "expected ReturnSpec.cfg")
             val tlaText = tla.readText()
+            val dieDef = tlaText.substringAfter("die(i) ==").substringBefore("\n\n")
             assertTrue(
-                tlaText.contains("Leaf_killed"),
-                "expected Leaf_killed for exitProc caller;\n$tlaText",
-            )
-            val dieDef = tlaText.substringAfter("die ==").substringBefore("\n\n")
-            assertTrue(
-                dieDef.contains("Leaf_killed' = TRUE"),
-                "expected exitProc action to set Leaf_killed;\n$dieDef",
+                dieDef.contains("Leaf_constructed' = [Leaf_constructed EXCEPT ![i] = FALSE]"),
+                "expected return action to clear Leaf_constructed;\n$dieDef",
             )
             assertTrue(
-                tlaText.contains("~Leaf_killed"),
-                "expected ~Leaf_killed enablement gates;\n$tlaText",
+                tlaText.contains("LeafTerminates == \\A i \\in DynProc : (Leaf_constructed[i] ~> ~Leaf_constructed[i])"),
+                "expected LeafTerminates property;\n$tlaText",
             )
-            tla.copyTo(File(work, "ExitProcSpec.tla"), overwrite = true)
-            cfg.copyTo(File(work, "ExitProcSpec.cfg"), overwrite = true)
+            assertTrue(
+                tlaText.contains("Spec == Init /\\ [][Next]_vars /\\ Fairness"),
+                "expected Fairness conjunct in Spec;\n$tlaText",
+            )
+            assertTrue(cfg.readText().contains("PROPERTY LeafTerminates"), "expected Terminates in cfg")
+            tla.copyTo(File(work, "ReturnSpec.tla"), overwrite = true)
+            cfg.copyTo(File(work, "ReturnSpec.cfg"), overwrite = true)
             tla.delete()
             cfg.delete()
-            assertTlcHealthyStart(work, "ExitProcSpec")
+            assertTlcHealthyStart(work, "ReturnSpec")
         } finally {
             work.deleteRecursively()
-            File("ExitProcSpec.tla").delete()
-            File("ExitProcSpec.cfg").delete()
-        }
-    }
-
-    @Test
-    fun procfunCountUpEmitsTerminatedAndTlcParses() {
-        assumeTlcPresent()
-        val work = Files.createTempDirectory("julay-spec-procfun").toFile()
-        try {
-            val source = File("regression/input/spec/procfun-count-up.jul")
-            assertTrue(source.exists(), "missing ${source.path}")
-            compileJulFile(source.toPath(), keepBuild = false)
-            val tla = File("CountUpSpec.tla")
-            val cfg = File("CountUpSpec.cfg")
-            assertTrue(tla.exists(), "expected CountUpSpec.tla")
-            assertTrue(cfg.exists(), "expected CountUpSpec.cfg")
-            val tlaText = tla.readText()
-            val cfgText = cfg.readText()
-            assertTrue(
-                tlaText.contains("countUp_terminated") || tlaText.contains("terminated"),
-                "expected terminated state for procfun;\n$tlaText",
-            )
-            assertTrue(
-                tlaText.contains("Terminates ==") && tlaText.contains("~>"),
-                "expected Terminates == (... ~> ...);\n$tlaText",
-            )
-            assertTrue(
-                cfgText.contains("PROPERTY") && cfgText.contains("Terminates"),
-                "expected PROPERTY …Terminates in cfg;\n$cfgText",
-            )
-            assertTrue(tlaText.contains("initially_call"), "expected initially_call;\n$tlaText")
-            assertTrue(tlaText.contains("initially_ret"), "expected initially_ret;\n$tlaText")
-            assertTrue(tlaText.contains("Main_blocking"), "expected Main_blocking;\n$tlaText")
-            assertTrue(tlaText.contains("returnTo_initially"), "expected returnTo_initially;\n$tlaText")
-            assertTrue(tlaText.contains("call_countUp"), "expected call_countUp flag;\n$tlaText")
-            assertFalse(tlaText.contains("__invoke"), "should not emit __invoke;\n$tlaText")
-            assertFalse(tlaText.contains("initially_invoke"), "legacy initially_invoke should be gone;\n$tlaText")
-            assertTrue(
-                tlaText.contains("out' =") &&
-                    (tlaText.contains("retVal") || tlaText.contains("result")),
-                "expected out coupled to procfun retVal;\n$tlaText",
-            )
-            assertTrue(
-                tlaText.contains("calls the procfun countUp before executing"),
-                "expected initially_call comment;\n$tlaText",
-            )
-            assertTrue(
-                tlaText.contains("The guards for initially appear in initially_call"),
-                "expected initially_ret comment;\n$tlaText",
-            )
-            tla.copyTo(File(work, "CountUpSpec.tla"), overwrite = true)
-            cfg.copyTo(File(work, "CountUpSpec.cfg"), overwrite = true)
-            tla.delete()
-            cfg.delete()
-            assertTlcHealthyStart(work, "CountUpSpec")
-        } finally {
-            work.deleteRecursively()
-            File("CountUpSpec.tla").delete()
-            File("CountUpSpec.cfg").delete()
-        }
-    }
-
-    @Test
-    fun procfunIndexedInheritsParentIndexAndTlcParses() {
-        assumeTlcPresent()
-        val work = Files.createTempDirectory("julay-spec-procfun-idx").toFile()
-        try {
-            val source = File("regression/input/spec/procfun-count-up-indexed.jul")
-            assertTrue(source.exists(), "missing ${source.path}")
-            compileJulFile(source.toPath(), keepBuild = false)
-            val tla = File("CountUpIndexed.tla")
-            val cfg = File("CountUpIndexed.cfg")
-            assertTrue(tla.exists(), "expected CountUpIndexed.tla")
-            assertTrue(cfg.exists(), "expected CountUpIndexed.cfg")
-            val tlaText = tla.readText()
-            assertTrue(
-                tlaText.contains("Terminates ==") && tlaText.contains("~>"),
-                "expected indexed Terminates property;\n$tlaText",
-            )
-            assertTrue(
-                tlaText.contains("countUp_terminated") &&
-                    tlaText.contains("|-> FALSE"),
-                "expected terminated indexed Init;\n$tlaText",
-            )
-            tla.copyTo(File(work, "CountUpIndexed.tla"), overwrite = true)
-            cfg.copyTo(File(work, "CountUpIndexed.cfg"), overwrite = true)
-            tla.delete()
-            cfg.delete()
-            assertTlcHealthyStart(work, "CountUpIndexed")
-        } finally {
-            work.deleteRecursively()
-            File("CountUpIndexed.tla").delete()
-            File("CountUpIndexed.cfg").delete()
+            File("ReturnSpec.tla").delete()
+            File("ReturnSpec.cfg").delete()
         }
     }
 

@@ -43,7 +43,7 @@ On that top-level binary target:
 - Dangling `client` with no `service` → **error** (except folded procfun clients waiting for a parent hub).
 - Action-shape and static-occurrence errors are hard failures (see below).
 
-TLA+ compile skips composition-alphabet checks entirely, so partial specs are allowed.
+TLA+ compile skips composition-alphabet **integrity errors**, so partial specs are allowed. It still emits **one warning** listing every unbound (still-external) action name after composition (open env alphabet for TLC).
 
 `analyze`, IDE alphabet panels, and `check` without a `compile` directive do not require incomplete ordinary wiring to be resolved yet.
 
@@ -55,123 +55,17 @@ Procfuns are **not** allowed in `||` (compile error). They are not composition p
 
 When emitting TLA+, a unique leaf class keeps its name. If class `X` appears more than once, every occurrence is renamed using the introducing assembly: `proc P := A || X` and `proc Q := B || X` composed together become `X_P` and `X_Q`. Same-parent ties (`proc P := X || X`) use `X_P_1`, `X_P_2`, …. Renamed state variables get `(* ... *)` comments. Julay invariants still write `X.n`; the compiler expands them per occurrence in TLA+.
 
-Procfun leaves use their **stable id** as the class name (`RpcOut_keyCount`, not bare `keyCount`), so two modules’ same-bare helpers stay distinct before occurrence renaming. User transitions inside a procfun keep source action names (still sync by action name with peers).
+Child-class occurrences use the binding parent in the leaf name when needed (`BroadcastClaim_Put`, `BroadcastClaim_ApplyMoveBatch`). See [Parent-bound procs](children.md).
 
-## APIs
+## Parent-bound procs and packaging
 
-An **api** packages a resident parallel composition (`proc:`) with optional procfun entry points (`calls:`). Conceptually it is one composition unit:
-
-```jul
-api RpcOut := <proc-field> || <call₁> || <call₂> || …
-```
-
-Operationally, only `proc:` leaves are started as composition peers; `calls` participate in alphabet and TLA coupling, and are still spawn-awaited when invoked.
-
-### Syntax
+Apis and procfuns are removed. Package components with ordinary `||`, and bind children with `B<A>`:
 
 ```jul
-export api RpcOut {
-    proc: RpcOutClient
-    calls: rpcOutClientCaller, outRequestVoteRPC, outAppendEntriesRPC
-}
+proc Sys := Boss || Worker<Boss>
 ```
 
-- `proc:` — required; parallel composition of **procs and/or apis** only (procfun names are illegal here, as in any `||`).
-- `calls:` — optional; comma-separated procfun names owned by this api.
-
-### Author mental model
-
-As the api author, treat everything in the api as one parallel composition: the `proc:` peers plus each `calls` procfun. Matching actions sync under the service/client or ordinary composition rules above. Incomplete wiring is allowed at declaration time:
-
-```jul
-export api RpcOut {
-    proc: RpcOutClient
-    calls: rpcOutClientCaller
-}
-```
-
-This is legal. `rpcOutClientCaller`'s actions that do not meet a peer inside the api remain **external actions of `RpcOut`** (visible in `analyze -s RpcOut` and the VS Code alphabet panel). A parent may still compose a partner that syncs those actions. `compile RpcOut` yields the usual unsynced ordinary **warning** (same as proc assemblies), not a hard error.
-
-### Consumer mental model
-
-Consumers treat an api as:
-
-1. A process-like unit to compose: `… || RpcOut || …`
-2. Qualified call entry points: `RpcOut.outRequestVoteRPC(...)`
-
-```jul
-import node.rpc_out.RpcOut
-
-// compose
-proc System := Client || RpcOut
-
-// call — no separate import of outRequestVoteRPC required
-transit:
-    let ok : Boolean := RpcOut.outRequestVoteRPC(peer, payload)
-```
-
-- `import path.Api` is enough to compose that api and to call every procfun listed in its `calls:` as `Api.fn(...)`. Those procfuns need not be `export`ed (and usually should not be — the api is the public surface).
-- Outside the api, listed procfuns **must** be called as `ApiName.fn(...)` (not bare `fn(...)`).
-- Inside other procfuns of the same module, bare calls to siblings remain allowed.
-- `ApiName.fn(...)` requires a **unique** occurrence of that api in the enclosing composition (error if missing or duplicated).
-- Procfuns listed in `calls:` get stable IR/TLA/Go ids `ApiName_fn` (see [Procfuns](procfun.md)); the same bare `fn` may exist in another module without colliding.
-
-### Nesting
-
-Apis may appear in other apis' `proc:` fields and in ordinary `||`:
-
-```jul
-export api RaftNode {
-    proc: RaftNodeMain || RaftCore || RpcOut || RpcIn
-}
-```
-
-Nested api `calls` stay in the nested scope; a parent does not automatically re-export child calls.
-
-### Specs and TLA+
-
-Apis are valid systems wherever procs are:
-
-```jul
-api RpcOut1 {
-    proc: RpcOutClient
-    calls: rpcOutClientCaller
-}
-spec RpcOutSpec1 := RpcOut1
-// TLA models RpcOutClient || rpcOutClientCaller (caller coupled)
-
-api RpcOut2 {
-    proc: RpcOutClient
-}
-spec RpcOutSpec2 := RpcOut2
-// TLA models RpcOutClient only
-
-spec WithInv := RpcOut1 |= SomeInv
-spec AG := <Env> RpcOut1 <Guarantees>
-```
-
-| Situation | TLA |
-|-----------|-----|
-| Procfun listed in `calls` of an api in the composition | **Coupled** |
-| Procfun called but not listed in any composed api's `calls` | **Havoc** + warning |
-| Procfun name written in `\|\|` | **Compile error** |
-
-### Parallel composition may only use procs and apis
-
-```jul
-// ERROR
-proc Bad := Main || countUp
-```
-
-Use an api instead:
-
-```jul
-api CountUpApi {
-    proc: Main
-    calls: countUp
-}
-spec CountUpSpec := CountUpApi
-```
+See [Parent-bound procs](children.md) for declarations, returns, parent checks, and HTTP `~>`.
 
 ## Synchronization (language level)
 
@@ -208,7 +102,7 @@ For ordinary (non-`service`/`client`, non-`internal`, non-`timer`) multi-class o
 | **Two statics** | Exactly two static classes, no dynamics | Peer sync between two statics |
 | **Local / single class** | One class only | Unsynced / solo on that name (may warn on a binary target) |
 
-Illegal: dynamic↔dynamic only, three or more statics, or two-or-more statics plus a dynamic.
+Illegal (except parent↔child): dynamic↔dynamic only, three or more statics, or two-or-more statics plus a dynamic. Parent↔child ordinary sync is the one allowed dynamic↔dynamic case — see [Parent-bound procs](children.md).
 
 **`service` / `client`** pairs skip these ordinary-shape checks: the service is the hub; any number of clients may sync with it (never with each other). Prefer tagging static hub APIs as `service` and callers as `client` when the hub must stay in the external alphabet (multiple handlers, printers, nested assemblies).
 
@@ -255,9 +149,25 @@ Different classes declare the same action name. For a shared hub API, mark the r
 
 Leave **ordinary** (untagged) syncs for two-static peers or composition-private pairs that should not remain in the external alphabet.
 
+## Fairness
+
+Generated TLA+ specs assume **strong fairness** for every action the system controls: internal actions, timers, returns, and synchronizations between procs. Environment-driven actions (inbound HTTP requests, `readln`, and any action left unsynchronized in the composed spec) have no fairness, because the outside world is never obligated to act.
+
+For local actions, this matches the Go runtime: a proc's `select` chooses uniformly at random among its ready cases, so an action that is enabled infinitely often is taken with probability 1.
+
+For synchronizations, it is an idealization. In Go, a sync fires only when one side is parked waiting on the other. A proc that always has some local action ready never parks. So if *both* sides of a sync always have local work, the sync can be starved indefinitely, even though TLC assumes it eventually fires.
+
+```jul
+proc A { var n : Int := 0  internal transition tick() { transit: n := n + 1 }  transition ping() { } }
+proc B { var m : Int := 0  internal transition tock() { transit: m := m + 1 }  transition ping() { } }
+A || B   // TLC: ping eventually fires.  Go: ping may never fire.
+```
+
+Liveness properties proved by TLC (including each dynamic proc's `Terminates` property) hold for the Go program only if no synchronization the property depends on is starved this way. In practice, avoid procs that spin on internal actions while also waiting on a sync.
+
 ## See also
 
 - [Processes](processes.md) — `static proc` vs dynamic
-- [Procfuns](procfun.md) — call-site alphabet folding; packaging via [apis](#apis)
+- [Parent-bound procs](children.md) — `proc`, `B<A>`, returns, HTTP `~>`
 - [Compiler optimizations](compiler-optimizations.md) — compile-time direction analysis
 - [Creating libraries](creating-libraries.md)

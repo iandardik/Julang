@@ -1,4 +1,4 @@
-proc WhenCase {
+static proc WhenCase {
     var mode : String
     var n : Int
 

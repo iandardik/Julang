@@ -31,21 +31,15 @@ fun RootNode.specTypePass(
     val leafSpecNodes = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<LeafSpecNode>() }
         .associateBy { it.name() }
-    val modulesByPath = unit.modules.associateBy { it.modulePath }
-    val procFunPclasses = unit.modules.flatMap { mod ->
-        callableProcFuns(mod, modulesByPath).values
-    }.associate { it.name() to it.asSyntheticProcClass() }
+
     val pclassNodes = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<ProcClassNode>() }
-        .associateBy { it.name() } + leafSpecNodes.mapValues { it.value.asProcClass() } + procFunPclasses
+        .associateBy { it.name() } + leafSpecNodes.mapValues { it.value.asProcClass() }
     val procAliases = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<ProcNode>() }
         .associateBy { it.name() }
     val specAliases = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<SpecNode>() }
-        .associateBy { it.name() }
-    val apiAliases = unit.modules
-        .flatMap { it.root.declNodes().filterIsInstance<ApiNode>() }
         .associateBy { it.name() }
 
     val errors = mutableListOf<CompileError>()
@@ -61,7 +55,6 @@ fun RootNode.specTypePass(
                 leafSpecNodes,
                 procAliases,
                 specAliases,
-                apiAliases,
                 unit,
                 registry,
                 allowUnindexedSpec,
@@ -97,7 +90,6 @@ private fun typePassSpec(
     leafSpecNodes: Map<String, LeafSpecNode>,
     procAliases: Map<String, ProcNode>,
     specAliases: Map<String, SpecNode>,
-    apiAliases: Map<String, ApiNode>,
     unit: CompilationUnit,
     registry: ObjClassRegistry,
     allowUnindexedSpec: Boolean,
@@ -135,7 +127,6 @@ private fun typePassSpec(
         }
 
     fun checkLeaves(leaves: List<SpecLeaf>, role: String) {
-        val procFunNames = collectProcFunStableNames(unit.root)
         leaves.forEach { leaf ->
             val known = leaf.name in pclassNodes ||
                 leaf.name in leafSpecNodes ||
@@ -143,7 +134,6 @@ private fun typePassSpec(
                 leaf.name in unit.allLeafSpecNames ||
                 leaf.name in unit.allProcNames ||
                 leaf.name in unit.entryDeclNames ||
-                leaf.name in procFunNames ||
                 unit.importTable.shortNames.containsKey(leaf.name)
             if (!known) {
                 errors += OneLocCompileError(
@@ -166,7 +156,6 @@ private fun typePassSpec(
             pclassNodes,
             procAliases,
             specAliases,
-            apiAliases,
             leafSpecNodes,
         )
         expanded.forEach { leaf ->
@@ -177,14 +166,8 @@ private fun typePassSpec(
                 return@forEach
             }
             val pc = pclassNodes[leaf.name] ?: return@forEach
-            if (pc.isInitiallyOnly()) {
-                if (leaf.isParameterized) {
-                    warnings += OneLocCompileWarning(
-                        spec.programLocation(),
-                        "proc \"${leaf.name}\" only has constructor initially, so indexing is unnecessary",
-                    )
-                }
-            } else if (!leaf.isParameterized) {
+            // Initially-only procs may still be create-indexed (e.g. per-node static hubs).
+            if (!pc.isInitiallyOnly() && !leaf.isParameterized) {
                 val msg =
                     "proc \"${leaf.name}\" can have multiple instances and must be indexed in this spec " +
                         "(e.g. ${leaf.name}[i : Type]); pass --allow-unindexed-spec to warn instead"
@@ -206,9 +189,9 @@ private fun typePassSpec(
             checkLeaves(systemLeaves, "system")
             checkIndexing(assumeLeaves)
             checkIndexing(systemLeaves)
-            errors += globalDeclErrors(value, pclassNodes, leafSpecNodes, procAliases, specAliases, apiAliases)
+            errors += globalDeclErrors(value, pclassNodes, leafSpecNodes, procAliases, specAliases)
             errors += initClauseErrors(
-                value, pclassNodes, leafSpecNodes, procAliases, specAliases, apiAliases, registry,
+                value, pclassNodes, leafSpecNodes, procAliases, specAliases, registry,
                 moduleFunEnv, moduleFunBuiltinEnv,
             )
 
@@ -219,7 +202,6 @@ private fun typePassSpec(
                     pclassNodes,
                     procAliases,
                     specAliases,
-                    apiAliases,
                     leafSpecNodes,
                 )
                 val systemPclasses = expandedSystem.mapNotNull { leaf ->
@@ -263,9 +245,9 @@ private fun typePassSpec(
             val systemLeaves = annotateDeclParams(flattenSpecLeaves(value))
             checkLeaves(systemLeaves, "system")
             checkIndexing(systemLeaves)
-            errors += globalDeclErrors(value, pclassNodes, leafSpecNodes, procAliases, specAliases, apiAliases)
+            errors += globalDeclErrors(value, pclassNodes, leafSpecNodes, procAliases, specAliases)
             errors += initClauseErrors(
-                value, pclassNodes, leafSpecNodes, procAliases, specAliases, apiAliases, registry,
+                value, pclassNodes, leafSpecNodes, procAliases, specAliases, registry,
                 moduleFunEnv, moduleFunBuiltinEnv,
             )
         }
@@ -296,7 +278,6 @@ private fun globalDeclErrors(
     leafSpecNodes: Map<String, LeafSpecNode>,
     procAliases: Map<String, ProcNode>,
     specAliases: Map<String, SpecNode>,
-    apiAliases: Map<String, ApiNode>,
 ): List<CompileError> {
     val errors = mutableListOf<CompileError>()
     fun walk(n: ASTNode) {
@@ -324,7 +305,6 @@ private fun globalDeclErrors(
                     pclassNodes,
                     procAliases,
                     specAliases,
-                    apiAliases,
                     leafSpecNodes,
                 )
                 val declared = expanded.flatMap { leaf ->
@@ -523,7 +503,6 @@ private fun initClauseErrors(
     leafSpecNodes: Map<String, LeafSpecNode>,
     procAliases: Map<String, ProcNode>,
     specAliases: Map<String, SpecNode>,
-    apiAliases: Map<String, ApiNode>,
     registry: ObjClassRegistry,
     funEnv: Map<String, FunNode>,
     funBuiltinEnv: Map<String, FunBuiltin>,
@@ -536,7 +515,6 @@ private fun initClauseErrors(
                 pclassNodes,
                 procAliases,
                 specAliases,
-                apiAliases,
                 leafSpecNodes,
             )
             val constNames = n.globalConstVarNames().toSet()

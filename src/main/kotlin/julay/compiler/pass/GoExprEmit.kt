@@ -53,7 +53,6 @@ fun Type.toGoTypeString(): String = when (this) {
             throw RuntimeException("uninterpreted type \"$name\" cannot reach Go codegen")
     }
     is TypeVar -> throw RuntimeException("TypeVar \"$name\" must not reach Go codegen")
-    is ProcFunRefType -> "string"
     else -> throw RuntimeException("Unsupported Go type: $this")
 }
 
@@ -101,6 +100,7 @@ fun ExprNode.toGoString(ctx: GoEmitCtx): String = when (this) {
     is FieldAccessOnExprNode -> fieldAccessOnExprToGo(ctx)
     is FunCallExprNode -> funCallToGo(ctx)
     is MethodCallExprNode -> methodCallToGo(ctx)
+    is HandlerRefExprNode -> "\"$this\""
     is LambdaExprNode ->
         throw RuntimeException("Lambda cannot be emitted as a standalone Go expression at ${programLocation()}")
     is QuantifiedExprNode ->
@@ -125,13 +125,6 @@ private fun SymbolValueExprNode.symbolToGo(ctx: GoEmitCtx): String {
     ctx.argBindings[symbol]?.let { return it }
     if (symbol in ctx.stateVars) {
         return "${ctx.procRecv}.$symbol"
-    }
-    try {
-        if (getType() is ProcFunRefType) {
-            val id = resolvedProcFunRefOrNull()?.stableName() ?: symbol
-            return "\"${id.escapeGoStringLiteral()}\""
-        }
-    } catch (_: RuntimeException) {
     }
     // Fall back to bare ident (ctor args, etc.)
     return symbol.toGoSafeIdent()
@@ -431,11 +424,6 @@ private fun FieldAccessOnExprNode.fieldAccessOnExprToGo(ctx: GoEmitCtx): String 
 }
 
 private fun FunCallExprNode.funCallToGo(ctx: GoEmitCtx): String {
-    resolvedProcFunOrNull()?.let { pf ->
-        val argStrs = callArgs().map { it.toGoString(ctx) }
-        val argsJoined = argStrs.joinToString(", ")
-        return "run_${pf.stableName()}($argsJoined)"
-    }
     resolvedBuiltinOrNull()?.let { builtin ->
         val argStrs = callArgs().map { it.toGoString(ctx) }
         return goBuiltinCall(builtin.name, argStrs, callArgs(), ctx)
@@ -453,10 +441,6 @@ private fun FunCallExprNode.funCallToGo(ctx: GoEmitCtx): String {
 }
 
 private fun MethodCallExprNode.methodCallToGo(ctx: GoEmitCtx): String {
-    resolvedProcFunOrNull()?.let { pf ->
-        val argStrs = args.map { it.toGoString(ctx) }
-        return "run_${pf.stableName()}(${argStrs.joinToString(", ")})"
-    }
     val base = baseExpr.toGoString(ctx)
     when (methodName) {
         "toSet" -> return "($base).ToSet()"
@@ -535,7 +519,6 @@ fun goBuiltinCall(
     "startsWith" -> "strings.HasPrefix(${argStrs[0]}, ${argStrs[1]})"
     "println" -> "julay.Println(${argStrs[0]})"
     "exitProgram" -> "julay.ExitProgram(${argStrs[0]})"
-    "exitProc" -> "return"
     "readln" -> "julay.Readln()"
     "readFile" ->
         "func() string { __b, __err := os.ReadFile(${argStrs[0]}); if __err != nil { panic(__err) }; return string(__b) }()"
@@ -553,21 +536,15 @@ fun goBuiltinCall(
     }
     "cancelTimer" -> "${ctx.procRecv}.timers.CancelTimer(${argStrs[0]})"
     "serveHttp" -> {
-        // serveHttp(port, handler) — bind run_<stableId> at compile time
-        val handlerFn = if (argExprs.size >= 2) {
-            val a = argExprs[1]
-            when (a) {
-                is SymbolValueExprNode -> {
-                    val id = a.resolvedProcFunRefOrNull()?.stableName() ?: a.symbol
-                    "run_$id"
-                }
-                is LiteralValueExprNode -> "run_${a.literalText()}"
-                else -> "run_${argStrs.getOrNull(1)?.trim('"') ?: "handler"}"
-            }
-        } else {
-            "run_${argStrs.getOrNull(1)?.trim('"') ?: "handler"}"
-        }
-        "julay.ServeHttp(${argStrs[0]}, $handlerFn)"
+        // serveHttp(port, A.snd ~> A.rcv): per request spawn A via snd(req); A's rcv writes the response.
+        val h = argExprs.getOrNull(1) as? HandlerRefExprNode
+            ?: throw RuntimeException("serveHttp expects a handler `A.snd ~> A.rcv`")
+        val cls = h.handlerClass()
+        "julay.ServeHttp(${argStrs[0]}, func(__req julay.HttpServerRequest) julay.HttpServerResponse { " +
+            "__resp := make(chan julay.HttpServerResponse, 1); " +
+            "__h := new${cls}_${h.handlerCtor().toGoSafeIdent()}(__req); " +
+            "__h.${goHttpReplyField(h.handlerAction())} = __resp; " +
+            "julay.AddProc(); go __h.run(); return <-__resp })"
     }
     "map" -> throw RuntimeException("map HOF requires MethodCall / named-fun path in Go codegen")
     else -> {
@@ -606,9 +583,11 @@ fun Type.goZeroLiteral(): String = when (this) {
     is SetType -> "julay.EmptySet[${elementType.toGoTypeString()}]()"
     is MapType -> "julay.EmptyMap[${keyType.toGoTypeString()}, ${valueType.toGoTypeString()}]()"
     is DomainType -> carrierType.goZeroLiteral()
-    is ProcFunRefType -> "\"\""
     else -> "/* zero for $this */"
 }
 
 /** Stable mangled name helper (re-export for codegen). */
 fun mangleGoTypeName(type: Type): String = mangleTypeForName(type)
+
+/** Struct field on a handler proc holding the HTTP runtime's response channel for [action]. */
+fun goHttpReplyField(action: String): String = "http_${action.toGoSafeIdent()}"

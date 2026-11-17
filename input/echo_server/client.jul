@@ -1,4 +1,4 @@
-import julay.funlib.httpRequest
+import julay.funlib.HttpRequest
 import julay.funlib.length
 import julay.funlib.parseInt
 import julay.funlib.exitProgram
@@ -43,27 +43,35 @@ static proc ClientDispatcher {
 }
 
 proc ClientLogic {
-    var done : Boolean
-    var respText : String
+    var reqNum : Int
+    var step : String
 
     constructor startReq(num : Int) {
         transit:
-            respText := httpRequest(HttpClientRequest {
-                url := "http://localhost:8000",
-                method := "POST",
-                body := "ReqNum: " + num
-            }).body
-            done := false
-        after:
-            println("response: " + respText)
+            reqNum := num
+            step := "send"
     }
 
-    transition gotResp() {
+    transition httpRequest(req : HttpClientRequest) {
         guard:
-            ~done
-        transit:
-            done := true
+            step = "send" & req = HttpClientRequest {
+                url := "http://localhost:8000",
+                method := "POST",
+                body := "ReqNum: " + reqNum
+            }
+        transit: step := "wait"
+    }
+
+    transition httpResponse(resp : HttpClientResponse) {
+        guard: step = "wait"
+        transit: step := "reply"
+        after:
+            println("response: " + resp.body)
+    }
+
+    return gotResp() {
+        guard: step = "reply"
     }
 }
 
-export proc Client := ClientDispatcher || ClientLogic
+export proc Client := ClientDispatcher || ClientLogic || HttpRequest<ClientLogic>

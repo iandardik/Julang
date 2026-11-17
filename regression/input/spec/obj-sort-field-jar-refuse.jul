@@ -8,7 +8,7 @@ type Outer {
     inner : Inner
 }
 
-proc Bad {
+static proc Bad {
     var o : Outer
     constructor initially(args : List<String>) {
         transit: o := Outer { inner := Inner { d := "n1" } }

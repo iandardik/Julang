@@ -6,7 +6,7 @@ import julay.funlib.println
  * Receiver is the static hub.
  */
 
-proc Sender {
+static proc Sender {
     constructor initially(args : List<String>) {
         transit:
     }

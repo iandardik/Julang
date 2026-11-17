@@ -1,0 +1,6 @@
+proc P {
+    constructor initially(args : List<String>) {}
+    return done() {}
+}
+
+compile P

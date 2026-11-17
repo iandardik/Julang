@@ -1,6 +1,6 @@
 type Node
 
-proc P {
+static proc P {
     var x : Node
 
     constructor initially(args : List<String>) {

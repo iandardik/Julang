@@ -5,33 +5,107 @@ import lib.fieldValue
 
 /*
  * Inbound HTTP → RPC router (same shape as Raft RpcIn / handleRpc).
+ * HandleRpc routes by path and spawns one child per RPC; the child syncs with
+ * Protocol and returns its result to HandleRpc, which then returns the response.
  */
-export proc RpcIn := ServerInitializer
+export proc RpcIn := ServerInitializer || HandleRpc || IncrementRpc<HandleRpc> || GetRpc<HandleRpc> || AddRpc<HandleRpc>
 
 static proc ServerInitializer {
     constructor initially(args : List<String>) {
         after:
-            serveHttp(8000, handleRpc)
+            serveHttp(8000, HandleRpc.req ~> HandleRpc.resp)
     }
 }
 
-procfun handleRpc(req : HttpServerRequest) : HttpServerResponse {
-    internal transition route() {
-        return: when (req.path) {
-            "rpc/increment" -> inIncrementRPC(req)
-            "rpc/get" -> inGetRPC(req)
-            "rpc/add" -> inAddRPC(req)
-            else -> HttpServerResponse {
-                body := "NOT_FOUND",
-                code := 404
+proc HandleRpc {
+    const path : String
+    const body : String
+    var step : String
+    var respBody : String
+    var respCode : Int
+
+    constructor req(r : HttpServerRequest) {
+        transit:
+            path := r.path
+            body := r.body
+            step := "route"
+            respBody := ""
+            respCode := 0
+    }
+
+    transition goIncrement() {
+        guard: step = "route" & path = "rpc/increment"
+        transit: step := "wait"
+    }
+
+    transition goGet() {
+        guard: step = "route" & path = "rpc/get"
+        transit: step := "wait"
+    }
+
+    // Body: delta=<int>  (pipe-delimited like Raft; single field for now)
+    transition goAdd(delta : Int) {
+        guard:
+            & step = "route"
+            & path = "rpc/add"
+            & delta = parseInt(fieldValue(split(body, "|")[1]))
+        transit: step := "wait"
+    }
+
+    internal transition notFound() {
+        guard:
+            & step = "route"
+            & path ~= "rpc/increment"
+            & path ~= "rpc/get"
+            & path ~= "rpc/add"
+        transit:
+            step := "done"
+            respBody := "NOT_FOUND"
+            respCode := 404
+    }
+
+    transition incremented(v : Int) {
+        guard: step = "wait"
+        transit:
+            step := "done"
+            respBody := "v=" + v
+            respCode := 200
+    }
+
+    transition got(v : Int) {
+        guard: step = "wait"
+        transit:
+            step := "done"
+            respBody := "v=" + v
+            respCode := 200
+    }
+
+    transition added(v : Int) {
+        guard: step = "wait"
+        transit:
+            step := "done"
+            respBody := "v=" + v
+            respCode := 200
+    }
+
+    return resp(r : HttpServerResponse) {
+        guard:
+            step = "done" & r = HttpServerResponse {
+                body := respBody,
+                code := respCode
             }
-        }
     }
 }
 
-procfun inIncrementRPC(req : HttpServerRequest) : HttpServerResponse {
-    var step : String := "call"
-    var result : Int := -1
+proc IncrementRpc {
+    var step : String
+    var result : Int
+
+    constructor goIncrement() {
+        transit:
+            step := "call"
+            result := -1
+    }
 
     client transition increment(newVal : Int) {
         guard: step = "call"
@@ -40,18 +114,20 @@ procfun inIncrementRPC(req : HttpServerRequest) : HttpServerResponse {
             result := newVal
     }
 
-    internal transition respond() {
-        guard: step = "respond"
-        return: HttpServerResponse {
-            body := "v=" + result,
-            code := 200
-        }
+    return incremented(v : Int) {
+        guard: step = "respond" & v = result
     }
 }
 
-procfun inGetRPC(req : HttpServerRequest) : HttpServerResponse {
-    var step : String := "call"
-    var result : Int := -1
+proc GetRpc {
+    var step : String
+    var result : Int
+
+    constructor goGet() {
+        transit:
+            step := "call"
+            result := -1
+    }
 
     client transition getCounter(counterVal : Int) {
         guard: step = "call"
@@ -60,20 +136,22 @@ procfun inGetRPC(req : HttpServerRequest) : HttpServerResponse {
             result := counterVal
     }
 
-    internal transition respond() {
-        guard: step = "respond"
-        return: HttpServerResponse {
-            body := "v=" + result,
-            code := 200
-        }
+    return got(v : Int) {
+        guard: step = "respond" & v = result
     }
 }
 
-procfun inAddRPC(req : HttpServerRequest) : HttpServerResponse {
-    // Body: delta=<int>  (pipe-delimited like Raft; single field for now)
-    const deltaVal : Int := parseInt(fieldValue(split(req.body, "|")[1]))
-    var step : String := "call"
-    var result : Int := -1
+proc AddRpc {
+    const deltaVal : Int
+    var step : String
+    var result : Int
+
+    constructor goAdd(delta : Int) {
+        transit:
+            deltaVal := delta
+            step := "call"
+            result := -1
+    }
 
     client transition add(delta : Int, newVal : Int) {
         guard:
@@ -84,11 +162,7 @@ procfun inAddRPC(req : HttpServerRequest) : HttpServerResponse {
             result := newVal
     }
 
-    internal transition respond() {
-        guard: step = "respond"
-        return: HttpServerResponse {
-            body := "v=" + result,
-            code := 200
-        }
+    return added(v : Int) {
+        guard: step = "respond" & v = result
     }
 }

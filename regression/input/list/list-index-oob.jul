@@ -2,7 +2,7 @@ import julay.funlib.exitProgram
 import julay.funlib.listOf
 
 // Reading index 0 must fail at runtime (lists are 1-based).
-proc ListIndexOob {
+static proc ListIndexOob {
     var xs : List<Int>
     var n : Int
 

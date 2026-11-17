@@ -3,7 +3,7 @@ package julay.compiler
 import julay.program.type.ListType
 import julay.program.type.MapType
 import julay.program.type.ObjClassType
-import julay.program.type.ProcFunRefType
+import julay.program.type.HandlerRefType
 import julay.program.type.SetType
 import julay.program.type.StringType
 import julay.program.type.IntType
@@ -211,18 +211,6 @@ object FunBuiltinRegistry {
         z3Codegen = { _ -> throw RuntimeException("Function \"exitProgram\" cannot be used in guards") },
     )
 
-    private val exitProcBuiltin = FunBuiltin(
-        name = "exitProc",
-        arity = 0,
-        returnType = null,
-        checkArgs = { argTypes ->
-            if (argTypes.isEmpty()) null
-            else "Expected function \"exitProc\" to take 0 argument(s) but got ${argTypes.size}"
-        },
-        kotlinCodegen = { _ -> "hostProc.requestSilentKill()" },
-        z3Codegen = { _ -> throw RuntimeException("Function \"exitProc\" cannot be used in guards") },
-    )
-
     private val readlnBuiltin = FunBuiltin(
         name = "readln",
         arity = 0,
@@ -313,8 +301,8 @@ object FunBuiltinRegistry {
                 argTypes.size != 2 -> "Expected function \"serveHttp\" to take 2 argument(s) but got ${argTypes.size}"
                 argTypes[0] !is IntType ->
                     "Expected first argument of \"serveHttp\" to have an Int type but got ${argTypes[0]}"
-                argTypes[1] !is StringType && argTypes[1] !is ProcFunRefType ->
-                    "Expected second argument of \"serveHttp\" to be a procfun name but got ${argTypes[1]}"
+                argTypes[1] !is HandlerRefType ->
+                    "Expected second argument of \"serveHttp\" to be a handler `Class.ctor ~> Class.action` but got ${argTypes[1]}"
                 else -> null
             }
         },
@@ -447,7 +435,6 @@ object FunBuiltinRegistry {
         doHttpRequestBuiltin.name to doHttpRequestBuiltin,
         printlnBuiltin.name to printlnBuiltin,
         exitProgramBuiltin.name to exitProgramBuiltin,
-        exitProcBuiltin.name to exitProcBuiltin,
         readlnBuiltin.name to readlnBuiltin,
         delaySecondsBuiltin.name to delaySecondsBuiltin,
         delayMillisBuiltin.name to delayMillisBuiltin,

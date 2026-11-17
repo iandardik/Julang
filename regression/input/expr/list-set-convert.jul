@@ -4,7 +4,7 @@ import julay.funlib.listOf
 import julay.funlib.setOf
 import julay.funlib.allDistinct
 
-proc ConvertTest {
+static proc ConvertTest {
     var step : String
     var xs : List<Int>
     var s : Set<Int>

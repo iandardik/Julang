@@ -3,42 +3,26 @@ import julay.funlib.portFromUrl
 import julay.funlib.parseInt
 import julay.funlib.split
 import julay.funlib.length
-import julay.funlib.listOf
 import node.lib.fieldValue
 import node.lib.parseCfg
 import node.lib.PutResult
 import node.lib.GetResult
-import node.lib.KvPair
 import node.lib.OwnerEntry
-import node.shard.Shard
 
 /*
- * Inbound HTTP adapters: parse request → Shard.*; encode results → response.
+ * Inbound HTTP adapters: parse request → spawn a Shard child; encode its result → response.
  * No peer dials or ownership policy here.
+ * Peer routes claim / moveBatch / keyCount spawn the same children that PerfectNet
+ * delivers to in verification (specs/net.jul).
  */
-export api RpcIn {
-    proc: ServerStarter
-    calls: handleRpc, put, get, owners, claim, keyCount, moveBatch
-}
-
-static proc ServerStarter {
+export static proc ServerStarter {
     constructor initially(args : List<String>) {
         after:
-            serveHttp(portFromUrl(parseCfg(args[1], parseInt(args[2])).me.url), handleRpc)
+            serveHttp(portFromUrl(parseCfg(args[1], parseInt(args[2])).me.url), HandleRpc.req ~> HandleRpc.resp)
         error:
             (length(args) ~= 2) -> "usage: ShardNode <config_file> <node_id>"
     }
 }
-
-fun parseKvBatch(entries : String) : List<KvPair> =
-    if (entries = "") {
-        listOf<KvPair>()
-    } else {
-        split(entries, ";").map(part -> KvPair {
-            k := split(part, "=")[1],
-            v := split(part, "=")[2]
-        })
-    }
 
 fun encodeOwnersBody(entries : List<OwnerEntry>) : String =
     "owners=" + entries.fold("", (acc, e) ->
@@ -48,182 +32,140 @@ fun encodeOwnersBody(entries : List<OwnerEntry>) : String =
             acc + "|" + e.k + "->" + e.owner
         })
 
-procfun handleRpc(req : HttpServerRequest) : HttpServerResponse {
-    internal transition route() {
-        return: when (req.path) {
-            "kv/put" -> put(req)
-            "kv/get" -> get(req)
-            "kv/owners" -> owners(req)
-            "rpc/claim" -> claim(req)
-            "rpc/keyCount" -> keyCount(req)
-            "rpc/moveBatch" -> moveBatch(req)
-            else -> HttpServerResponse {
-                body := "NOT_FOUND",
-                code := 404
+fun bodyField(body : String, idx : Int) : String =
+    fieldValue(split(body, "|")[idx])
+
+export proc HandleRpc {
+    const path : String
+    const body : String
+    var step : String
+    var respBody : String
+    var respCode : Int
+
+    constructor req(r : HttpServerRequest) {
+        transit:
+            path := r.path
+            body := r.body
+            step := "route"
+            respBody := ""
+            respCode := 0
+    }
+
+    /* body: k=<k>|v=<v> */
+    transition put(putK : String, putV : String) {
+        guard:
+            & step = "route"
+            & path = "kv/put"
+            & putK = bodyField(body, 1)
+            & putV = bodyField(body, 2)
+        transit: step := "wait"
+    }
+
+    /* body: k=<k> */
+    transition get(getK : String) {
+        guard: step = "route" & path = "kv/get" & getK = bodyField(body, 1)
+        transit: step := "wait"
+    }
+
+    transition owners() {
+        guard: step = "route" & path = "kv/owners"
+        transit: step := "wait"
+    }
+
+    /* body: from=<url> */
+    transition keyCount(fromUrl : String) {
+        guard: step = "route" & path = "rpc/keyCount" & fromUrl = bodyField(body, 1)
+        transit: step := "wait"
+    }
+
+    /* body: k=<k>|owner=<url>; fire-and-forget */
+    transition claim(claimKey : String, claimOwner : String) {
+        guard:
+            & step = "route"
+            & path = "rpc/claim"
+            & claimKey = bodyField(body, 1)
+            & claimOwner = bodyField(body, 2)
+        transit:
+            step := "done"
+            respBody := "ok"
+            respCode := 200
+    }
+
+    /* body: <ownerUrl>|<k>=<v>; fire-and-forget */
+    transition moveBatch(moveOwner : String, moveKey : String, moveVal : String) {
+        guard:
+            & step = "route"
+            & path = "rpc/moveBatch"
+            & length(split(body, "|")) >= 2
+            & moveOwner = split(body, "|")[1]
+            & moveKey = split(split(body, "|")[2], "=")[1]
+            & moveVal = split(split(body, "|")[2], "=")[2]
+        transit:
+            step := "done"
+            respBody := "ok"
+            respCode := 200
+    }
+
+    internal transition notFound() {
+        guard:
+            & step = "route"
+            & path ~= "kv/put"
+            & path ~= "kv/get"
+            & path ~= "kv/owners"
+            & path ~= "rpc/keyCount"
+            & path ~= "rpc/claim"
+            & path ~= "rpc/moveBatch"
+        transit:
+            step := "done"
+            respBody := "NOT_FOUND"
+            respCode := 404
+    }
+
+    transition putDone(result : PutResult) {
+        guard: step = "wait"
+        transit:
+            step := "done"
+            respBody := if (result.kind = "ok") { "ok" } else { "OWNER " + result.ownerUrl }
+            respCode := if (result.kind = "ok") { 200 } else { 303 }
+    }
+
+    transition getDone(result : GetResult) {
+        guard: step = "wait"
+        transit:
+            step := "done"
+            respBody := when (result.kind) {
+                "ok" -> "v=" + result.value
+                "redirect" -> "OWNER " + result.ownerUrl
+                else -> "MISSING"
             }
-        }
+            respCode := when (result.kind) {
+                "ok" -> 200
+                "redirect" -> 303
+                else -> 404
+            }
     }
-}
 
-procfun owners(req : HttpServerRequest) : HttpServerResponse {
-    var step : String := "call"
-    var entries : List<OwnerEntry> := listOf<OwnerEntry>()
-
-    internal transition callDomain() {
-        guard: step = "call"
+    transition ownersDone(rows : List<OwnerEntry>) {
+        guard: step = "wait"
         transit:
-            entries := Shard.owners()
-            step := "respond"
+            step := "done"
+            respBody := encodeOwnersBody(rows)
+            respCode := 200
     }
 
-    internal transition respond() {
-        guard: step = "respond"
-        return: HttpServerResponse {
-            body := encodeOwnersBody(entries),
-            code := 200
-        }
-    }
-}
-
-procfun keyCount(req : HttpServerRequest) : HttpServerResponse {
-    var step : String := "call"
-    var n : Int := 0
-
-    internal transition callDomain() {
-        guard: step = "call"
+    transition keyCountDone(toUrl : String, replyCount : Int) {
+        guard: step = "wait"
         transit:
-            n := Shard.keyCount()
-            step := "respond"
+            step := "done"
+            respBody := "n=" + replyCount
+            respCode := 200
     }
 
-    internal transition respond() {
-        guard: step = "respond"
-        return: HttpServerResponse {
-            body := "n=" + n,
-            code := 200
-        }
-    }
-}
-
-procfun claim(req : HttpServerRequest) : HttpServerResponse {
-    const reqK : String := fieldValue(split(req.body, "|")[1])
-    const reqOwner : String := fieldValue(split(req.body, "|")[2])
-    var step : String := "call"
-    var ok : Boolean := false
-
-    internal transition callDomain() {
-        guard: step = "call"
-        transit:
-            ok := Shard.applyClaim(reqK, reqOwner)
-            step := "respond"
-    }
-
-    internal transition respond() {
-        guard: step = "respond"
-        return: HttpServerResponse {
-            body := "ok",
-            code := 200
-        }
-    }
-}
-
-procfun get(req : HttpServerRequest) : HttpServerResponse {
-    const reqK : String := fieldValue(split(req.body, "|")[1])
-    var step : String := "call"
-    var result : GetResult := GetResult {
-        kind := "",
-        value := "",
-        ownerUrl := ""
-    }
-
-    internal transition callDomain() {
-        guard: step = "call"
-        transit:
-            result := Shard.get(reqK)
-            step := "respond"
-    }
-
-    internal transition respondOk() {
-        guard: step = "respond" & result.kind = "ok"
-        return: HttpServerResponse {
-            body := "v=" + result.value,
-            code := 200
-        }
-    }
-
-    internal transition respondRedirect() {
-        guard: step = "respond" & result.kind = "redirect"
-        return: HttpServerResponse {
-            body := "OWNER " + result.ownerUrl,
-            code := 303
-        }
-    }
-
-    internal transition respondMissing() {
-        guard: step = "respond" & result.kind = "missing"
-        return: HttpServerResponse {
-            body := "MISSING",
-            code := 404
-        }
-    }
-}
-
-procfun put(req : HttpServerRequest) : HttpServerResponse {
-    const reqK : String := fieldValue(split(req.body, "|")[1])
-    const reqV : String := fieldValue(split(req.body, "|")[2])
-    var step : String := "call"
-    var result : PutResult := PutResult {
-        kind := "",
-        ownerUrl := ""
-    }
-
-    internal transition callDomain() {
-        guard: step = "call"
-        transit:
-            result := Shard.put(reqK, reqV)
-            step := "respond"
-    }
-
-    internal transition respondOk() {
-        guard: step = "respond" & result.kind = "ok"
-        return: HttpServerResponse {
-            body := "ok",
-            code := 200
-        }
-    }
-
-    internal transition respondRedirect() {
-        guard: step = "respond" & result.kind = "redirect"
-        return: HttpServerResponse {
-            body := "OWNER " + result.ownerUrl,
-            code := 303
-        }
-    }
-}
-
-procfun moveBatch(req : HttpServerRequest) : HttpServerResponse {
-    /* body: <ownerUrl>|<k=v;k=v;...> */
-    const reqOwner : String := split(req.body, "|")[1]
-    const entriesRaw : String := if (length(split(req.body, "|")) < 2) {
-        ""
-    } else {
-        split(req.body, "|")[2]
-    }
-    var step : String := "call"
-    var ok : Boolean := false
-
-    internal transition callDomain() {
-        guard: step = "call"
-        transit:
-            ok := Shard.applyMoveBatch(reqOwner, parseKvBatch(entriesRaw))
-            step := "respond"
-    }
-
-    internal transition respond() {
-        guard: step = "respond"
-        return: HttpServerResponse {
-            body := "ok",
-            code := 200
-        }
+    return resp(r : HttpServerResponse) {
+        guard:
+            step = "done" & r = HttpServerResponse {
+                body := respBody,
+                code := respCode
+            }
     }
 }

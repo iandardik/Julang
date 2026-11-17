@@ -1,6 +1,6 @@
 import julay.funlib.listOf
 import julay.funlib.length
-proc BadEmptyBracket {
+static proc BadEmptyBracket {
     var n : Int
 
     constructor initially(args : List<String>) {

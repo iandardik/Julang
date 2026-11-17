@@ -4,7 +4,7 @@ import julay.funlib.listOf
 
 /* prints the current value of the list every 5 seconds
 */
-proc PeriodicPrint {
+static proc PeriodicPrint {
     var list : List<String>
     var step : String
 

@@ -3,7 +3,7 @@ import julay.optional.Optional
 import julay.optional.some
 import julay.optional.none
 
-proc OptionalDemo {
+static proc OptionalDemo {
     var opt : Optional<Int>
     var steps : Int
 

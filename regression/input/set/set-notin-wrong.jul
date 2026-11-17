@@ -1,4 +1,4 @@
-proc BadNotIn {
+static proc BadNotIn {
     var b : Boolean
 
     constructor initially(args : List<String>) {

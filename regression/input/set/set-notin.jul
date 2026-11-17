@@ -7,7 +7,7 @@ import julay.funlib.setOf
 /*
  * Not-membership (`~in`) against Set, List, and Map.
  */
-proc SetNotInDemo {
+static proc SetNotInDemo {
     var s : Set<Int>
     var xs : List<Int>
     var m : Map<String, Int>

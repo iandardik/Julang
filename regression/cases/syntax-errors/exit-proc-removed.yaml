@@ -1,0 +1,4 @@
+source: regression/input/syntax-errors/exit-proc-removed.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "Unknown library julay.funlib.exitProc"

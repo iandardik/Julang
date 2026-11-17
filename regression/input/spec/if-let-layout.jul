@@ -1,4 +1,4 @@
-proc Nest {
+static proc Nest {
     var x : Int
     var y : Int
 

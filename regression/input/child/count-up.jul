@@ -1,0 +1,65 @@
+import julay.funlib.exitProgram
+import julay.funlib.println
+
+/*
+ * Main spawns a CountUp child with countUp(3); the child counts to n and returns
+ * its result through the parent-synced return action counted(r).
+ */
+proc CountUp {
+    var n : Int
+    var i : Int
+    var result : Int
+
+    constructor countUp(target : Int) {
+        transit:
+            n := target
+            i := 0
+            result := 0
+    }
+
+    internal transition step() {
+        guard: i < n
+        transit:
+            result := i + 1
+            i := i + 1
+    }
+
+    return counted(r : Int) {
+        guard: i = n & r = result
+    }
+}
+
+static proc Main {
+    var out : Int
+    var phase : String
+
+    constructor initially(args : List<String>) {
+        transit:
+            out := 0
+            phase := "spawn"
+    }
+
+    transition countUp(target : Int) {
+        guard: phase = "spawn" & target = 3
+        transit: phase := "wait"
+    }
+
+    transition counted(r : Int) {
+        guard: phase = "wait"
+        transit:
+            out := r
+            phase := "print"
+    }
+
+    internal transition finish() {
+        guard: phase = "print"
+        transit: phase := "done"
+        after:
+            println(out + "")
+            exitProgram(0)
+    }
+}
+
+proc CountUpMain := Main || CountUp<Main>
+
+compile CountUpMain

@@ -274,6 +274,15 @@ spec S := Counter[n : Node] {
 }
 ```
 
+**`ProcfunInst`** is a reserved create-index model (not a domain type). When present, api `calls:` procfuns under that index become dual-indexed `[n][i]` with `i ∈ ProcfunInst` — a **reusable in-flight concurrency bound** (not a lifetime spawn cap). Runtime still spawns per call; see [Procfuns — TLA+](procfun.md#tla--verification).
+
+```jul
+spec NodeIndexed := (Store || Shard)[n : NodeSet] {
+    NodeSet := { "n1", "n2", "n3" }
+    ProcfunInst := { "i1", "i2" }
+}
+```
+
 Elements must be homogeneous String, non-negative Int, or Boolean literals. Uninterpreted types are illegal as ordinary **proc** state / action args. They **are** allowed on record fields and in **leaf-spec state** (and leaf-spec parameters as domain binders). A JAR `compile` target that reaches an uninterpreted type (including via nested records) is refused — see [Types and expressions](types-and-expressions.md#typedefs-and-uninterpreted-types). Fixtures: [`regression/input/spec/obj-sort-field.jul`](../../regression/input/spec/obj-sort-field.jul). A type may be `export`ed and `import`ed from another module (same rules as other decls); see [Modules](modules.md).
 
 See [`input/inc_server/main.jul`](../../input/inc_server/main.jul) and [`regression/input/spec/`](../../regression/input/spec/).

@@ -1,0 +1,4 @@
+source: regression/input/syntax-errors/child-static.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - "only dynamic procs may have a parent"

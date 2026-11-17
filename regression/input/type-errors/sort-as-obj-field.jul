@@ -4,7 +4,7 @@ type Peer {
     id : Node
 }
 
-proc P {
+static proc P {
     var p : Peer
 
     constructor initially(args : List<String>) {

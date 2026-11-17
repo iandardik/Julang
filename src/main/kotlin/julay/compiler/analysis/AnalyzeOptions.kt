@@ -57,15 +57,13 @@ fun resolveAnalyzeScope(
     allPClassNames: Set<String>,
     allProcAliasNames: Set<String>,
     librariesInUse: Set<String>,
-    procFunNames: Set<String> = emptySet(),
 ): ResolvedAnalyzeScope? {
     val roots = if (scopeNames.isEmpty()) {
-        defaultScopeRoots(procDecls, allProcAliasNames, allPClassNames, procFunNames)
+        defaultScopeRoots(procDecls, allProcAliasNames, allPClassNames)
     } else {
         val unknown = scopeNames.filter { name ->
             procDecls.none { it.name == name } &&
                 name !in allPClassNames &&
-                name !in procFunNames &&
                 !(name in librariesInUse && LibraryRegistry.isKotlinLibrary(name))
         }
         if (unknown.isNotEmpty()) {
@@ -76,7 +74,7 @@ fun resolveAnalyzeScope(
     }
 
     val leafSets = roots.map { root ->
-        resolveNameToLeaves(root, procDecls, allPClassNames, librariesInUse, procFunNames)
+        resolveNameToLeaves(root, procDecls, allPClassNames, librariesInUse)
     }
 
     return ResolvedAnalyzeScope(rootNames = roots, leafSets = leafSets)
@@ -86,11 +84,10 @@ fun defaultScopeRoots(
     procDecls: List<ProcDecl>,
     allProcAliasNames: Set<String>,
     allPClassNames: Set<String>,
-    procFunNames: Set<String> = emptySet(),
 ): List<String> {
     val specs = procDecls.filter { it.type == ProcDeclType.Spec }.map { it.name }
     val procs = procDecls.filter { it.type == ProcDeclType.Proc }.map { it.name }
-    return (specs + procs + allProcAliasNames + allPClassNames + procFunNames).distinct().sorted()
+    return (specs + procs + allProcAliasNames + allPClassNames).distinct().sorted()
 }
 
 private fun resolveNameToLeaves(
@@ -98,12 +95,10 @@ private fun resolveNameToLeaves(
     procDecls: List<ProcDecl>,
     allPClassNames: Set<String>,
     librariesInUse: Set<String>,
-    procFunNames: Set<String> = emptySet(),
 ): Set<String> {
     val decl = procDecls.firstOrNull { it.name == name }
     return when {
         decl != null -> decl.allProcNames(procDecls)
-        name in procFunNames -> setOf(name)
         name in allPClassNames ||
             (name in librariesInUse && LibraryRegistry.isKotlinLibrary(name)) ->
             setOf(name)

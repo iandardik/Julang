@@ -49,15 +49,15 @@ export static proc Store {
         guard: url = me.url
     }
 
-    service transition getClusterSize(n : Int) {
-        guard: n = length(cluster)
+    service transition getClusterSize(clusterN : Int) {
+        guard: clusterN = length(cluster)
     }
 
-    /* Client binds i; hub replies with url/id. */
-    service transition peerAt(i : Int, url : String, id : Int) {
+    /* Client binds peerI; hub replies with peerUrl/peerId. */
+    service transition peerAt(peerI : Int, atUrl : String, atId : Int) {
         guard:
-            & url = cluster[i].url
-            & id = cluster[i].id
+            & atUrl = cluster[peerI].url
+            & atId = cluster[peerI].id
     }
 
     /* Client binds ownKey; hub replies with owner ("" if unowned). */
@@ -70,8 +70,9 @@ export static proc Store {
         guard: getVal = store[getKey]
     }
 
-    service transition keyCount(n : Int) {
-        guard: n = store.length
+    /* Bound by Shard clients; named apart from PerfectNet/Shard wire `keyCount`. */
+    service transition storeKeyCount(countN : Int) {
+        guard: countN = store.length
     }
 
     /* Client binds putKey and putVal. */

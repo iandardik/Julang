@@ -191,7 +191,7 @@ class SpecInvariantExprTest {
             import julay.funlib.allDistinct
             import julay.funlib.listOf
             type N
-            proc Worker {
+            static proc Worker {
                 var n : Int
                 var xs : List<Int>
                 constructor initially(args : List<String>) {
@@ -249,7 +249,7 @@ class SpecInvariantExprTest {
             $importBlock
             type Point { x : Int }
             type N
-            proc Worker {
+            static proc Worker {
                 var n : Int
                 var log : List<String>
                 var table : Map<String, Int>
@@ -279,7 +279,7 @@ class SpecInvariantExprTest {
         type Point { x : Int }
         type N
 
-        proc Worker {
+        static proc Worker {
             var n : Int
             var log : List<String>
             var table : Map<String, Int>

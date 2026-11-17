@@ -5,7 +5,7 @@ fun double(n : Real) : Real = n + n
 
 fun id<T>(x : T) : T = x
 
-proc S {
+static proc S {
     var x : Real
     var print : Boolean
 

@@ -1,2 +1,0 @@
-source: regression/input/syntax-errors/procfun-duplicate-composition.jul
-expectCompileFailure: true

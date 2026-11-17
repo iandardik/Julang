@@ -2,7 +2,6 @@ package julay.compiler.pass
 
 import julay.compiler.ObjClassBuiltinRegistry
 import julay.compiler.ast.*
-import julay.compiler.collectProcFunStableNames
 import julay.compiler.decl.ActionDecl
 import julay.compiler.decl.ProcClassDecl
 import julay.compiler.decl.ProcDecl
@@ -24,39 +23,32 @@ fun goCodegenPass(
     librariesInUse: Set<String> = emptySet(),
 ): GoCodegenResult {
     val leafMap = leafActionMap(ast, program.allProcNames(procDecls), librariesInUse)
-    val alphabet = computeCompositionAlphabet(
-        program, procDecls, leafMap, collectProcFunStableNames(ast), ast,
-    )
-    val procFunStableNames = collectProcFunStableNames(ast)
-    val occurrences = alphabet.leafOccurrences.filter { it.pclassName !in procFunStableNames }
+    val alphabet = computeCompositionAlphabet(program, procDecls, leafMap)
+    val occurrences = alphabet.leafOccurrences
     val distinctPclasses = occurrences.map { it.pclassName }.toSet()
 
     val procClasses = distinctPclasses.flatMap { proc ->
         ast.procClassPass(setOf(proc))
     }
-    // Only emit procfuns reachable from this compile target (not every procfun in the
-    // loaded module graph — e.g. ShardClient must not pull in ShardNode HTTP handlers).
-    val allProcFunClasses = ast.procFunClassPass()
-    val pclassNodes = ast.declNodes().filterIsInstance<ProcClassNode>().associateBy { it.name() }
-    val procFunNodes = ast.declNodes().filterIsInstance<ProcFunNode>()
-        .associate { it.stableName() to it.asSyntheticProcClass() }
-    val reachablePfNames = calledProcFunNamesUnder(
-        program,
-        procDecls,
-        procFunStableNames,
-        pclassNodes,
-        procFunNodes,
-    )
-    val procFunClasses = allProcFunClasses.filter { it.name in reachablePfNames }
-    val procClassByName = (procClasses + procFunClasses).associateBy { it.name }
+    val procClassByName = procClasses.associateBy { it.name }
+    val parentClassesOf: Map<String, Set<String>> = occurrences
+        .filter { it.parentClass != null }
+        .groupBy({ it.pclassName }, { it.parentClass!! })
+        .mapValues { it.value.toSet() }
 
     val directionResult = computeChannelDirections(
         ast, program.allProcNames(procDecls), program, librariesInUse, procDecls,
     )
-    // One Go channel per distinct composition channelKey (not merely per action name).
+    // Parent↔child syncs use one channel per parent instance (canonical key per child class + action).
+    val parentChildKeys = parentChildChannelKeys(alphabet)
     val directions = directionResult.directions
+        .map { d -> parentChildKeys[d.channelKey]?.let { d.copy(channelKey = it.key) } ?: d }
+        .distinctBy { Triple(it.channelKey, it.senderClass, it.receiverClass) }
+    val parentChannels = parentChildKeys.values.distinct()
+    // One Go channel per distinct composition channelKey (not merely per action name).
     val directionsByChannelKey = directions.groupBy { it.channelKey }
-    val channelKeysByLeaf = alphabet.channelKeys
+    val channelKeysByLeaf = alphabet.channelKeys.mapValues { (_, k) -> parentChildKeys[k]?.key ?: k }
+    val handlerReplies = collectHandlerReplies(ast, distinctPclasses)
 
     val objClassDecls = ast.resolvedObjClassDecls()
         .filterNot { ObjClassBuiltinRegistry.isBuiltin(it.name) }
@@ -101,7 +93,9 @@ fun goCodegenPass(
             bodySb.appendLine("\tReply chan reply_$an")
         }
         bodySb.appendLine("}")
-        bodySb.appendLine("var ch_$an = make(chan msg_$an)")
+        if (parentChannels.none { it.key == key }) {
+            bodySb.appendLine("var ch_$an = make(chan msg_$an)")
+        }
         bodySb.appendLine()
     }
 
@@ -127,17 +121,15 @@ fun goCodegenPass(
     }
 
     // --- proc classes ---
+    val emittedKeys = emittedChannels.toSet()
+    val linkage = GoLinkage(
+        parentChannels.filter { it.key in emittedKeys },
+        parentClassesOf,
+        handlerReplies,
+    )
     for (pc in procClasses) {
         bodySb.append(
-            emitProcClass(pc, directions, channelKeysByLeaf, dynamicCtorNames, procClassByName),
-        )
-        bodySb.appendLine()
-    }
-
-    // --- procfuns ---
-    for (pf in procFunClasses) {
-        bodySb.append(
-            emitProcFun(pf, directions, channelKeysByLeaf, dynamicCtorNames, procClassByName),
+            emitProcClass(pc, directions, channelKeysByLeaf, dynamicCtorNames, procClassByName, linkage),
         )
         bodySb.appendLine()
     }
@@ -148,12 +140,9 @@ fun goCodegenPass(
     val started = linkedSetOf<String>()
     for (occ in occurrences) {
         val pc = procClassByName[occ.pclassName] ?: continue
-        val initially = pc.constructors.firstOrNull { it.action.name == "initially" }
-            ?: pc.constructors.firstOrNull()
-            ?: continue
-        val key = "${pc.name}_${initially.action.name}"
-        if (!started.add(key) && pc.isStatic) continue
-        if (pc.isStatic && started.count { it.startsWith("${pc.name}_") } > 1) continue
+        if (!pc.isStatic) continue
+        val initially = pc.constructors.firstOrNull { it.action.name == "initially" } ?: continue
+        if (!started.add(pc.name)) continue
         bodySb.appendLine("\tjulay.AddProc()")
         bodySb.appendLine("\tgo new${pc.name}_${initially.action.name.toGoSafeIdent()}(args).run()")
     }
@@ -184,6 +173,52 @@ fun goCodegenPass(
 
 private enum class CaseRole { Local, Timer, Sender, Receiver }
 
+/** A parent↔child channel: owned by each [parentClass] instance, shared with its [childClass] children. */
+private data class ParentChildChannel(val key: String, val parentClass: String, val childClass: String)
+
+/** Program-wide wiring for parent/child channels and HTTP handler replies. */
+private data class GoLinkage(
+    val parentChannels: List<ParentChildChannel>,
+    /** Child class → parent classes it is bound to (`B<A>`). */
+    val parentClassesOf: Map<String, Set<String>>,
+    /** Handler class → response action names (`A.snd ~> A.rcv`). */
+    val handlerReplies: Map<String, Set<String>>,
+) {
+    fun ownedBy(pc: String) = parentChannels.filter { it.parentClass == pc }
+    fun sharedTo(pc: String) = parentChannels.filter { it.childClass == pc }
+    fun isParentChild(key: String) = parentChannels.any { it.key == key }
+}
+
+/**
+ * Composition channel keys where a `B<A>` child meets its parent `A`, mapped to one canonical
+ * key per (child, action) so `B<A> || B<C>` share one child field and Go message type; each
+ * child instance has exactly one parent, which hands over its own channel at spawn.
+ */
+private fun parentChildChannelKeys(alphabet: CompositionAlphabetResult): Map<String, ParentChildChannel> {
+    val out = linkedMapOf<String, ParentChildChannel>()
+    alphabet.allOffers.filter { it.compositionHidden && !it.isLocal }.groupBy { it.channelKey }
+        .forEach { (key, offers) ->
+            val child = offers.firstOrNull { o ->
+                o.parentClass != null && offers.any { it.pclassKey == o.parentClass && it.pclassKey != o.pclassKey }
+            } ?: return@forEach
+            val parent = child.parentClass!!
+            out[key] = ParentChildChannel("pc#${child.pclassKey}#${child.name}", parent, child.pclassKey)
+        }
+    return out
+}
+
+/** `serveHttp(port, A.snd ~> A.rcv)` targets among [classes]: class → rcv actions. */
+private fun collectHandlerReplies(ast: RootNode, classes: Set<String>): Map<String, Set<String>> =
+    ast.handlerRefs().filter { it.handlerClass() in classes }
+        .groupBy({ it.handlerClass() }, { it.handlerAction() })
+        .mapValues { it.value.toSet() }
+
+/** Go expression for channel [key] inside a proc method (`p.ch_X` for parent↔child, else global). */
+private fun goChannelRef(key: String, linkage: GoLinkage): String {
+    val id = key.toGoSafeIdent()
+    return if (linkage.isParentChild(key)) "p.ch_$id" else "ch_$id"
+}
+
 private data class CaseEmit(
     val name: String,
     val decl: ActionDecl,
@@ -211,6 +246,7 @@ private fun emitProcClass(
     channelKeysByLeaf: Map<LeafActionId, String>,
     dynamicCtorNames: Map<String, List<String>>,
     procClassByName: Map<String, ProcClassDecl>,
+    linkage: GoLinkage,
 ): String {
     val hasTimers = pc.transitions.any {
         it.isTimer || it.modifier == TSAction.SyncRole.Timer
@@ -231,17 +267,25 @@ private fun emitProcClass(
         val safe = key.toGoSafeIdent()
         sb.appendLine("\treply_$safe chan reply_$safe")
     }
+    val channelFields = (linkage.ownedBy(pc.name) + linkage.sharedTo(pc.name)).map { it.key }.distinct()
+    for (key in channelFields) {
+        val safe = key.toGoSafeIdent()
+        sb.appendLine("\tch_$safe chan msg_$safe")
+    }
+    for (action in linkage.handlerReplies[pc.name].orEmpty()) {
+        sb.appendLine("\t${goHttpReplyField(action)} chan julay.HttpServerResponse")
+    }
     sb.appendLine("}")
     sb.appendLine()
 
     // constructors
     for (ctor in pc.constructors) {
-        sb.append(emitConstructor(pc, ctor, hasTimers, replyOwned))
+        sb.append(emitConstructor(pc, ctor, hasTimers, replyOwned, linkage.ownedBy(pc.name).map { it.key }.distinct()))
         sb.appendLine()
     }
 
     // run loop
-    sb.append(emitRunLoop(pc, directions, channelKeysByLeaf, dynamicCtorNames, procClassByName, hasTimers))
+    sb.append(emitRunLoop(pc, directions, channelKeysByLeaf, dynamicCtorNames, procClassByName, hasTimers, linkage))
     return sb.toString()
 }
 
@@ -250,6 +294,7 @@ private fun emitConstructor(
     ctor: ActionDecl,
     hasTimers: Boolean,
     replyOwned: List<String>,
+    ownedChannels: List<String>,
 ): String {
     val stateVars = pc.stateVars.map { it.name }.toSet()
     val argBindings = ctor.action.args.associate { it.name to it.name.toGoSafeIdent() }
@@ -267,6 +312,10 @@ private fun emitConstructor(
     for (key in replyOwned) {
         val safe = key.toGoSafeIdent()
         sb.appendLine("\t\treply_$safe: make(chan reply_$safe, 1),")
+    }
+    for (key in ownedChannels) {
+        val safe = key.toGoSafeIdent()
+        sb.appendLine("\t\tch_$safe: make(chan msg_$safe),")
     }
     sb.appendLine("\t}")
     // binding for constructor args that come from equality in guard (usually equality to param)
@@ -318,10 +367,11 @@ private fun emitRunLoop(
     channelKeysByLeaf: Map<LeafActionId, String>,
     dynamicCtorNames: Map<String, List<String>>,
     procClassByName: Map<String, ProcClassDecl>,
-    hasTimers: Boolean,
+    @Suppress("UNUSED_PARAMETER") hasTimers: Boolean,
+    linkage: GoLinkage,
 ): String {
     val stateVars = pc.stateVars.map { it.name }.toSet()
-    val runtimeTransitions = pc.transitions.filterNot { it.action.name == procFunRetAction(pc.name) }
+    val runtimeTransitions = pc.transitions
 
     val sb = StringBuilder()
     sb.appendLine("func (p *${pc.name}) run() {")
@@ -378,13 +428,13 @@ private fun emitRunLoop(
             CaseRole.Sender -> {
                 val dir = c.dir!!
                 val bound = computeBoundArgs(decl)
-                sb.append(emitSenderEnablement(safe, decl, dir, bound, baseCtx))
+                sb.append(emitSenderEnablement(safe, decl, dir, bound, baseCtx, linkage))
             }
             CaseRole.Receiver -> {
                 // Receiver enablement: residual guard only (no sender-owned args yet)
                 val dir = c.dir!!
                 val bound = computeBoundArgs(decl, availableFromOther = dir.senderBoundArgs.toSet())
-                sb.append(emitReceiverEnablement(safe, decl, dir, bound, baseCtx))
+                sb.append(emitReceiverEnablement(safe, decl, dir, bound, baseCtx, linkage))
             }
         }
     }
@@ -402,13 +452,13 @@ private fun emitRunLoop(
             CaseRole.Local -> {
                 sb.appendLine("\t\tcase <-case_$safe:")
                 sb.append(emitLocalArgRebind(decl, safe, stateVars))
-                sb.append(emitFireBody(pc, decl, c.dir, CaseRole.Local, stateVars, dynamicCtorNames, procClassByName))
+                sb.append(emitFireBody(pc, decl, c.dir, CaseRole.Local, stateVars, dynamicCtorNames, procClassByName, linkage))
             }
             CaseRole.Timer -> {
                 sb.appendLine("\t\tcase <-case_$safe:")
                 sb.appendLine("\t\t\tp.timers.ClearFired(\"${c.name.escapeGoStringLiteral()}\")")
                 sb.append(emitLocalArgRebind(decl, safe, stateVars))
-                sb.append(emitFireBody(pc, decl, c.dir, CaseRole.Timer, stateVars, dynamicCtorNames, procClassByName))
+                sb.append(emitFireBody(pc, decl, c.dir, CaseRole.Timer, stateVars, dynamicCtorNames, procClassByName, linkage))
             }
             CaseRole.Sender -> {
                 val dir = c.dir!!
@@ -421,7 +471,7 @@ private fun emitRunLoop(
                         sb.appendLine("\t\t\t${arg.toGoSafeIdent()} := replyMsg_$safe.${arg.toGoExportedIdent()}")
                     }
                 }
-                sb.append(emitFireBody(pc, decl, dir, CaseRole.Sender, stateVars, dynamicCtorNames, procClassByName))
+                sb.append(emitFireBody(pc, decl, dir, CaseRole.Sender, stateVars, dynamicCtorNames, procClassByName, linkage))
             }
             CaseRole.Receiver -> {
                 val dir = c.dir!!
@@ -433,6 +483,7 @@ private fun emitRunLoop(
                 }
                 for (arg in dir.senderBoundArgs) {
                     sb.appendLine("\t\t\t${arg.toGoSafeIdent()} := payload_$safe.${arg.toGoExportedIdent()}")
+                    sb.appendLine("\t\t\t_ = ${arg.toGoSafeIdent()}")
                 }
                 // Materialize receiver-bound args (including reply args) for body + reply channel.
                 val bound = computeBoundArgs(decl, availableFromOther = dir.senderBoundArgs.toSet())
@@ -446,6 +497,7 @@ private fun emitRunLoop(
                         arg in bound.equalityBound -> {
                             val rhs = findEqualityRhs(decl, arg) ?: continue
                             sb.appendLine("\t\t\t${arg.toGoSafeIdent()} := ${rhs.toGoString(recvCtx)}")
+                            sb.appendLine("\t\t\t_ = ${arg.toGoSafeIdent()}")
                         }
                         arg in bound.membershipBound -> {
                             val setExpr = findMembershipSet(decl, arg) ?: continue
@@ -475,7 +527,7 @@ private fun emitRunLoop(
                     }
                     sb.appendLine("\t\t\tpayload_$safe.Reply <- reply_$chanId{$fields}")
                 }
-                sb.append(emitFireBody(pc, decl, dir, CaseRole.Receiver, stateVars, dynamicCtorNames, procClassByName))
+                sb.append(emitFireBody(pc, decl, dir, CaseRole.Receiver, stateVars, dynamicCtorNames, procClassByName, linkage))
             }
         }
     }
@@ -582,6 +634,7 @@ private fun emitSenderEnablement(
     dir: ActionChannelDirection,
     bound: BoundArgAnalysis,
     ctx: GoEmitCtx,
+    linkage: GoLinkage,
 ): String {
     val chanId = dir.channelKey.toGoSafeIdent()
     val sb = StringBuilder()
@@ -609,6 +662,15 @@ private fun emitSenderEnablement(
             }
         }
     }
+    // Args both sides bind by equality stay local to each side; the body may still read them.
+    val localEq = decl.action.args.map { it.name }
+        .filter { it !in dir.senderBoundArgs && it !in dir.replyArgs && it in bound.equalityBound }
+    for (arg in localEq) {
+        val rhs = findEqualityRhs(decl, arg) ?: continue
+        sb.appendLine("\t\t${arg.toGoSafeIdent()} := ${rhs.toGoString(bindCtx)}")
+        sb.appendLine("\t\t_ = ${arg.toGoSafeIdent()}")
+        bindCtx = bindCtx.withArgBindings(mapOf(arg to arg.toGoSafeIdent()))
+    }
     val guard = residualGuardGo(decl, bound, bindCtx)
     val memOk = dir.senderBoundArgs.filter { it in bound.membershipBound }
         .joinToString(" && ") { "ok_${safe}_$it" }
@@ -624,7 +686,7 @@ private fun emitSenderEnablement(
         }
     }
     sb.appendLine("\t\t\tpayload_$safe = msg_$chanId{$fields}")
-    sb.appendLine("\t\t\tch_send_$safe = ch_$chanId")
+    sb.appendLine("\t\t\tch_send_$safe = ${goChannelRef(dir.channelKey, linkage)}")
     sb.appendLine("\t\t}")
     return sb.toString()
 }
@@ -635,6 +697,7 @@ private fun emitReceiverEnablement(
     dir: ActionChannelDirection,
     bound: BoundArgAnalysis,
     ctx: GoEmitCtx,
+    linkage: GoLinkage,
 ): String {
     val chanId = dir.channelKey.toGoSafeIdent()
     val sb = StringBuilder()
@@ -643,7 +706,7 @@ private fun emitReceiverEnablement(
     val guard = residualGuardGo(decl, bound, ctx, skipArgs = dir.senderBoundArgs.toSet())
     sb.appendLine("\t\tif ($guard) {")
     sb.appendLine("\t\t\tenabledAny = true")
-    sb.appendLine("\t\t\tcase_$safe = ch_$chanId")
+    sb.appendLine("\t\t\tcase_$safe = ${goChannelRef(dir.channelKey, linkage)}")
     sb.appendLine("\t\t}")
     return sb.toString()
 }
@@ -671,6 +734,7 @@ private fun emitFireBody(
     stateVars: Set<String>,
     dynamicCtorNames: Map<String, List<String>>,
     procClassByName: Map<String, ProcClassDecl>,
+    linkage: GoLinkage,
 ): String {
     val argNames = decl.action.args.map { it.name }
     val argBindings = argNames.associateWith { it.toGoSafeIdent() }
@@ -689,11 +753,6 @@ private fun emitFireBody(
     for (stmt in decl.befores) {
         sb.appendLine("\t\t\t${stmt.toGoStmtString(ctx)}")
     }
-    // return (procfun)
-    if (decl.returnExpr != null) {
-        sb.appendLine("\t\t\treturn ${decl.returnExpr.toGoString(ctx)}")
-        return sb.toString()
-    }
     // transit
     val stateVarTypes = pc.stateVars.associate { it.name to it.type }
     val transit = emitTransitBody(decl, ctx, sequential = false, stateVarTypes).trimEnd()
@@ -704,15 +763,39 @@ private fun emitFireBody(
     for (stmt in decl.afters) {
         sb.appendLine("\t\t\t${stmt.toGoStmtString(ctx)}")
     }
-    // spawn if transition name matches a dynamic ctor
+    // spawn if transition name matches a dynamic ctor (children only from their parents)
     val spawnTargets = dynamicCtorNames[decl.action.name].orEmpty()
         .filter { it != pc.name || !pc.isStatic }
+        .filter { target ->
+            val parents = linkage.parentClassesOf[target]
+            // Parent-bound procs (`B<A>`) are only spawned by a declared parent;
+            // unbound dynamics may be spawned by any peer that syncs their ctor.
+            parents == null || parents.isEmpty() || pc.name in parents
+        }
     for (childClass in spawnTargets) {
         val child = procClassByName[childClass] ?: continue
         val ctor = child.constructors.firstOrNull { it.action.name == decl.action.name } ?: continue
         val args = ctor.action.args.joinToString(", ") { it.name.toGoSafeIdent() }
+        val shared = linkage.ownedBy(pc.name).filter { it.childClass == childClass }.map { it.key }.distinct()
         sb.appendLine("\t\t\tjulay.AddProc()")
-        sb.appendLine("\t\t\tgo new${childClass}_${ctor.action.name.toGoSafeIdent()}($args).run()")
+        if (shared.isEmpty()) {
+            sb.appendLine("\t\t\tgo new${childClass}_${ctor.action.name.toGoSafeIdent()}($args).run()")
+        } else {
+            val v = "__child_${childClass.toGoSafeIdent()}"
+            sb.appendLine("\t\t\t$v := new${childClass}_${ctor.action.name.toGoSafeIdent()}($args)")
+            for (key in shared) {
+                val safe = key.toGoSafeIdent()
+                sb.appendLine("\t\t\t$v.ch_$safe = p.ch_$safe")
+            }
+            sb.appendLine("\t\t\tgo $v.run()")
+        }
+    }
+    if (decl.action.name in linkage.handlerReplies[pc.name].orEmpty()) {
+        val resp = decl.action.args.firstOrNull()?.name?.toGoSafeIdent()
+        if (resp != null) sb.appendLine("\t\t\tp.${goHttpReplyField(decl.action.name)} <- $resp")
+    }
+    if (decl.isReturn) {
+        sb.appendLine("\t\t\treturn")
     }
     return sb.toString()
 }
@@ -904,209 +987,4 @@ private fun elementTypeOfCollection(expr: ExprNode): Type? = try {
     }
 } catch (_: RuntimeException) {
     null
-}
-
-private fun emitProcFun(
-    pc: ProcClassDecl,
-    directions: List<ActionChannelDirection>,
-    channelKeysByLeaf: Map<LeafActionId, String>,
-    dynamicCtorNames: Map<String, List<String>>,
-    procClassByName: Map<String, ProcClassDecl>,
-): String {
-    // Procfuns are lowered to a class with call ctor + transitions + return.
-    // Emit as: func run_Name(args...) RetType { p := ...; select loop; }
-    val callCtor = pc.constructors.firstOrNull() ?: return ""
-    val retTransition = pc.transitions.firstOrNull { it.returnExpr != null }
-    val retType = retTransition?.returnExpr?.let {
-        try {
-            it.getType().toGoTypeString()
-        } catch (_: RuntimeException) {
-            "any"
-        }
-    } ?: "any"
-
-    val params = callCtor.action.args.joinToString(", ") { arg ->
-        "${arg.name.toGoSafeIdent()} ${arg.type.toGoTypeString()}"
-    }
-    val hasTimers = pc.transitions.any { it.isTimer || it.modifier == TSAction.SyncRole.Timer }
-    val replyOwned = directions.filter {
-        it.senderClass == pc.name && it.replyArgs.isNotEmpty()
-    }.map { it.channelKey }.distinct()
-
-    val sb = StringBuilder()
-    sb.appendLine("func run_${pc.name}($params) $retType {")
-    sb.appendLine("\tp := &${pc.name}{")
-    if (hasTimers) sb.appendLine("\t\ttimers: julay.NewProcTimers(),")
-    for (key in replyOwned) {
-        val safe = key.toGoSafeIdent()
-        sb.appendLine("\t\treply_$safe: make(chan reply_$safe, 1),")
-    }
-    sb.appendLine("\t}")
-    // Apply call ctor transit (binds params into state)
-    val stateVars = pc.stateVars.map { it.name }.toSet()
-    val argBindings = callCtor.action.args.associate { it.name to it.name.toGoSafeIdent() }
-    val ctx = GoEmitCtx(stateVars = stateVars, argBindings = argBindings)
-    val stateVarTypes = pc.stateVars.associate { it.name to it.type }
-    val callTransit = emitTransitBody(callCtor, ctx, sequential = true, stateVarTypes).trimEnd()
-    if (callTransit.isNotEmpty()) {
-        sb.appendLine(callTransit.prependIndent("\t"))
-    }
-
-    // Sync-capable loop (same shapes as proc run), but return: exits the function.
-    sb.appendLine("\tfor {")
-    val runtimeTransitions = pc.transitions.filterNot { it.action.name == procFunRetAction(pc.name) }
-    val cases = mutableListOf<CaseEmit>()
-    for (tr in runtimeTransitions) {
-        val isTimer = tr.isTimer || tr.modifier == TSAction.SyncRole.Timer
-        val isInternal = tr.modifier == TSAction.SyncRole.Internal
-        val offerKey = channelKeyForOffer(pc.name, tr.action.name, channelKeysByLeaf)
-        val dirs = directions.filter { it.actionName == tr.action.name }
-        val asSender = dirs.firstOrNull {
-            it.senderClass == pc.name && !it.isLocal && it.channelKey == offerKey
-        } ?: dirs.firstOrNull { it.senderClass == pc.name && !it.isLocal }
-        val asReceiver = dirs.firstOrNull {
-            it.receiverClass == pc.name && !it.isLocal && it.channelKey == offerKey
-        } ?: dirs.firstOrNull { it.receiverClass == pc.name && !it.isLocal }
-        val asLocal = dirs.firstOrNull { it.isLocal && it.senderClass == pc.name }
-            ?: if (isInternal || isTimer || tr.returnExpr != null) {
-                ActionChannelDirection(
-                    actionName = tr.action.name,
-                    senderClass = pc.name,
-                    receiverClass = null,
-                    senderBoundArgs = tr.action.args.map { it.name },
-                    replyArgs = emptyList(),
-                    isLocal = true,
-                    channelKey = offerKey,
-                )
-            } else null
-        when {
-            isTimer -> cases += CaseEmit(tr.action.name, tr, CaseRole.Timer, asLocal)
-            asSender != null -> cases += CaseEmit(tr.action.name, tr, CaseRole.Sender, asSender)
-            asReceiver != null -> cases += CaseEmit(tr.action.name, tr, CaseRole.Receiver, asReceiver)
-            else -> cases += CaseEmit(tr.action.name, tr, CaseRole.Local, asLocal)
-        }
-    }
-    sb.appendLine("\t\tenabledAny := false")
-    for (c in cases) {
-        val safe = c.name.toGoSafeIdent()
-        val decl = c.decl
-        val baseCtx = GoEmitCtx(stateVars = stateVars).withGuard(true)
-        when (c.role) {
-            CaseRole.Local, CaseRole.Timer -> {
-                val bound = computeBoundArgs(decl)
-                sb.append(emitEnablementLocals(safe, decl, bound, baseCtx, c.role == CaseRole.Timer))
-            }
-            CaseRole.Sender -> {
-                val dir = c.dir!!
-                val bound = computeBoundArgs(decl)
-                sb.append(emitSenderEnablement(safe, decl, dir, bound, baseCtx))
-            }
-            CaseRole.Receiver -> {
-                val dir = c.dir!!
-                val bound = computeBoundArgs(decl, availableFromOther = dir.senderBoundArgs.toSet())
-                sb.append(emitReceiverEnablement(safe, decl, dir, bound, baseCtx))
-            }
-        }
-    }
-    sb.appendLine("\t\tif !enabledAny {")
-    sb.appendLine("\t\t\tpanic(\"procfun ${pc.name}: no enabled transition\")")
-    sb.appendLine("\t\t}")
-    sb.appendLine("\t\tselect {")
-    for (c in cases) {
-        val safe = c.name.toGoSafeIdent()
-        val decl = c.decl
-        when (c.role) {
-            CaseRole.Local -> {
-                sb.appendLine("\t\tcase <-case_$safe:")
-                sb.append(emitLocalArgRebind(decl, safe, stateVars))
-                if (decl.returnExpr != null) {
-                    val bound = computeBoundArgs(decl)
-                    val rctx = GoEmitCtx(
-                        stateVars = stateVars,
-                        argBindings = bound.boundArgs.associateWith { it.toGoSafeIdent() },
-                    )
-                    sb.appendLine("\t\t\treturn ${decl.returnExpr.toGoString(rctx)}")
-                } else {
-                    sb.append(emitFireBody(pc, decl, c.dir, CaseRole.Local, stateVars, dynamicCtorNames, procClassByName))
-                }
-            }
-            CaseRole.Timer -> {
-                sb.appendLine("\t\tcase <-case_$safe:")
-                sb.appendLine("\t\t\tp.timers.ClearFired(\"${c.name.escapeGoStringLiteral()}\")")
-                sb.append(emitLocalArgRebind(decl, safe, stateVars))
-                sb.append(emitFireBody(pc, decl, c.dir, CaseRole.Timer, stateVars, dynamicCtorNames, procClassByName))
-            }
-            CaseRole.Sender -> {
-                val dir = c.dir!!
-                val chanId = dir.channelKey.toGoSafeIdent()
-                sb.appendLine("\t\tcase ch_send_$safe <- payload_$safe:")
-                if (dir.replyArgs.isNotEmpty()) {
-                    sb.appendLine("\t\t\treplyMsg_$safe := <-p.reply_$chanId")
-                    for (arg in dir.replyArgs) {
-                        sb.appendLine("\t\t\t${arg.toGoSafeIdent()} := replyMsg_$safe.${arg.toGoExportedIdent()}")
-                    }
-                }
-                sb.append(emitFireBody(pc, decl, dir, CaseRole.Sender, stateVars, dynamicCtorNames, procClassByName))
-            }
-            CaseRole.Receiver -> {
-                val dir = c.dir!!
-                val chanId = dir.channelKey.toGoSafeIdent()
-                if (dir.senderBoundArgs.isEmpty() && dir.replyArgs.isEmpty()) {
-                    sb.appendLine("\t\tcase <-case_$safe:")
-                } else {
-                    sb.appendLine("\t\tcase payload_$safe := <-case_$safe:")
-                }
-                for (arg in dir.senderBoundArgs) {
-                    sb.appendLine("\t\t\t${arg.toGoSafeIdent()} := payload_$safe.${arg.toGoExportedIdent()}")
-                }
-                val bound = computeBoundArgs(decl, availableFromOther = dir.senderBoundArgs.toSet())
-                val recvCtx = GoEmitCtx(
-                    stateVars = stateVars,
-                    argBindings = (dir.senderBoundArgs + bound.boundArgs).associateWith { it.toGoSafeIdent() },
-                )
-                for (arg in (bound.boundArgs - dir.senderBoundArgs.toSet())) {
-                    when {
-                        arg in bound.equalityBound -> {
-                            val rhs = findEqualityRhs(decl, arg) ?: continue
-                            sb.appendLine("\t\t\t${arg.toGoSafeIdent()} := ${rhs.toGoString(recvCtx)}")
-                        }
-                        arg in bound.membershipBound -> {
-                            val setExpr = findMembershipSet(decl, arg) ?: continue
-                            sb.appendLine(
-                                "\t\t\t${arg.toGoSafeIdent()}, _ := julay.ChooseUniformFiltered(" +
-                                    "(${setExpr.toGoString(recvCtx)}).Elements(), " +
-                                    "func(__cand any) bool { return true })",
-                            )
-                        }
-                    }
-                }
-                if (dir.replyArgs.isNotEmpty()) {
-                    val fields = dir.replyArgs.joinToString(", ") { arg ->
-                        "${arg.toGoExportedIdent()}: ${arg.toGoSafeIdent()}"
-                    }
-                    sb.appendLine("\t\t\tpayload_$safe.Reply <- reply_$chanId{$fields}")
-                }
-                sb.append(emitFireBody(pc, decl, dir, CaseRole.Receiver, stateVars, dynamicCtorNames, procClassByName))
-            }
-        }
-    }
-    sb.appendLine("\t\t}")
-    sb.appendLine("\t}")
-    sb.appendLine("}")
-
-    // Also need the struct type if not already emitted — procfun classes get a struct
-    val structSb = StringBuilder()
-    structSb.appendLine("type ${pc.name} struct {")
-    for (v in pc.stateVars) {
-        structSb.appendLine("\t${v.name} ${v.type.toGoTypeString()}")
-    }
-    if (hasTimers) structSb.appendLine("\ttimers *julay.ProcTimers")
-    for (key in replyOwned) {
-        val safe = key.toGoSafeIdent()
-        structSb.appendLine("\treply_$safe chan reply_$safe")
-    }
-    structSb.appendLine("}")
-    structSb.appendLine()
-    structSb.append(sb)
-    return structSb.toString()
 }

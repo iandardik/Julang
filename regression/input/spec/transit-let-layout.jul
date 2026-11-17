@@ -1,7 +1,7 @@
 import julay.funlib.length
 import julay.funlib.startsWith
 
-proc TransitLet {
+static proc TransitLet {
     var flag : Boolean
     var n : Int
 

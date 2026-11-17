@@ -3,7 +3,7 @@ import julay.funlib.println
 
 fun bstr(b : Boolean) : String = if (b) "T" else "F"
 
-proc S {
+static proc S {
     var out : String
     var print : Boolean
 

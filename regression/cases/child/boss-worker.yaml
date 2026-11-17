@@ -1,0 +1,7 @@
+source: regression/input/child/boss-worker.jul
+programs:
+  - name: BossWorker
+    run:
+      timeoutMs: 60000
+      expectStdoutContains:
+        - "done=10"

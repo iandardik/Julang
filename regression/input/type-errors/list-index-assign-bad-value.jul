@@ -1,5 +1,5 @@
 import julay.funlib.listOf
-proc ListIndexAssignBadValue {
+static proc ListIndexAssignBadValue {
     var xs : List<Int>
 
     constructor initially(args : List<String>) {

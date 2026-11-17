@@ -17,7 +17,6 @@ fun ASTNode.errorPass(
     is RootNode -> errorPassRoot(procs, librariesInUse, program, procDecls, requireCompleteSync)
     is ProcClassNode -> errorPassProcClass(procs, librariesInUse)
     is LeafSpecNode -> errorPassLeafSpec(procs, librariesInUse)
-    is ProcFunNode -> errorPassProcFun(procs, librariesInUse)
     is ObjClassNode -> errorPassObjClass(procs, librariesInUse)
     is ConstructorNode -> errorPassConstructor(procs, librariesInUse)
     is TransitionNode -> errorPassTransition(procs, librariesInUse)
@@ -75,8 +74,7 @@ private fun RootNode.errorPassRoot(
         computeChannelDirections(
             this, procs, program, librariesInUse, procDecls,
         ).errors +
-        overlappingDeclNamesErrors() +
-        procFunCompositionErrors(procDecls)
+        overlappingDeclNamesErrors()
 
 private fun RootNode.actionConsistencyErrors(
     procs: Set<String>,
@@ -87,7 +85,7 @@ private fun RootNode.actionConsistencyErrors(
 ): List<CompileError> {
     val leafMap = leafActionMap(this, procs, librariesInUse)
     val alphabetResult = if (program != null) {
-        computeCompositionAlphabet(program, procDecls, leafMap, collectProcFunStableNames(this), this)
+        computeCompositionAlphabet(program, procDecls, leafMap)
     } else {
         // No composition root (e.g. analyze whole CU): unique keys for internals only.
         val all = leafMap.values.flatten()
@@ -246,14 +244,16 @@ private fun RootNode.actionConsistencyErrors(
 
     val integrity = alphabetIntegrityErrors(
         alphabetResult,
-        collectProcFunStableNames(this),
         requireCompleteSync = requireCompleteSync,
         leafOffersByPclass = leafMap,
     )
+    // Parent/child pairing rules always apply; parent presence only on compiled artifacts.
+    val childErrors = childSyncErrors(alphabetResult) +
+        if (program != null && requireCompleteSync) childParentPresenceErrors(alphabetResult, program.name) else emptyList()
 
     val spawnErrors = spawningStaticErrors(procs)
 
-    return alphabetResult.errors + localMixErrors + consistencyErrors + integrity + spawnErrors
+    return alphabetResult.errors + localMixErrors + consistencyErrors + integrity + childErrors + spawnErrors
 }
 
 /**
@@ -308,21 +308,18 @@ private fun RootNode.actionConsistencyWarnings(
     requireCompleteSync: Boolean,
 ): List<CompileWarning> {
     val leafMap = leafActionMap(this, procs, librariesInUse)
-    val procFunNames = collectProcFunStableNames(this)
     val alphabetResult = if (program != null) {
-        computeCompositionAlphabet(program, procDecls, leafMap, procFunNames, this)
+        computeCompositionAlphabet(program, procDecls, leafMap)
     } else {
         null
     }
 
     // Sync-completeness (client / ordinary peer wiring, lone services) is
-    // only required on the top-level `compile` target — not intermediate apis/procs.
+    // only required on the top-level `compile` target — not intermediate procs.
     if (!requireCompleteSync) {
-        return procFunHavocWarnings(program, procDecls)
+        return emptyList()
     }
 
-    // Prefer composition alphabet (includes call-folded procfun clients). Flat leaf scans
-    // miss helpers and falsely warn that services have no clients.
     val serviceDeadlock = if (alphabetResult != null) {
         alphabetResult.allOffers
             .filter { !it.isConstructor && !it.isLocal }
@@ -348,7 +345,7 @@ private fun RootNode.actionConsistencyWarnings(
     }
 
     val syncWarnings = if (alphabetResult != null) {
-        unsyncedOrdinaryWarnings(alphabetResult.external)
+        unsyncedOrdinaryWarnings(alphabetResult.external, handlerRuntimeActions())
     } else {
         unsyncedOrdinaryWarnings(
             collectActionOffers(procs, librariesInUse).map { offer ->
@@ -370,12 +367,11 @@ private fun RootNode.actionConsistencyWarnings(
         )
     }
 
-    return serviceDeadlock + syncWarnings + procFunHavocWarnings(program, procDecls)
+    return serviceDeadlock + syncWarnings
 }
 
 private fun RootNode.overlappingDeclNamesErrors(): List<CompileError> {
-    // Procfuns are unique per defining module (checked in ModuleLoader); other decls stay CU-global.
-    val decls = declNodes().filter { it !is CompileNode && it !is ProcFunNode }
+    val decls = declNodes().filter { it !is CompileNode }
     return decls.flatMap { refDecl ->
         decls
             .filter { decl -> refDecl != decl && refDecl.name() == decl.name() }
@@ -393,7 +389,7 @@ private fun LeafSpecNode.errorPassLeafSpec(
     procs: Set<String>,
     librariesInUse: Set<String>,
 ): List<CompileError> {
-    val pcErrors = asProcClass().errorPassProcClass(procs, librariesInUse)
+    val pcErrors = asProcClass().errorPassProcClass(procs, librariesInUse, isLeafSpec = true)
     val paramName = leafSpecParamName() ?: return pcErrors
     val forbidden = setOf(paramName)
     val transitionAssign = localDecls()
@@ -420,9 +416,14 @@ private fun LeafSpecNode.errorPassLeafSpec(
     return pcErrors + transitionAssign + ctorAssign
 }
 
-private fun ProcClassNode.errorPassProcClass(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
+private fun ProcClassNode.errorPassProcClass(
+    procs: Set<String>,
+    librariesInUse: Set<String>,
+    isLeafSpec: Boolean = false,
+): List<CompileError> {
     val localDecls = localDecls()
     val staticCtorErrors = staticConstructorErrors()
+    val lifecycleErrors = if (isLeafSpec) emptyList() else lifecycleErrors()
     val repeatStateVarNameErrors = localDecls
         .filterIsInstance<VarNode>()
         .groupBy { it.name }
@@ -476,15 +477,6 @@ private fun ProcClassNode.errorPassProcClass(procs: Set<String>, librariesInUse:
     val constAssignInTransitionErrors = localDecls
         .filterIsInstance<TransitionNode>()
         .flatMap { transNode -> constAssignmentErrors(transNode, constVarNames) }
-    val returnInProcErrors = localDecls
-        .filterIsInstance<TransitionNode>()
-        .filter { it.body().any { b -> b.returns().isNotEmpty() } }
-        .map {
-            OneLocCompileError(
-                it.programLocation(),
-                "return: is only allowed inside a procfun",
-            )
-        }
     val atLeastOneConstructorErrors = assertOrCompileError(
         localDecls.flatMap { it.constructors() }.isNotEmpty(),
         OneLocCompileError(programLocation(), "Expected \"${procClassNodeName()}\" to have at least one constructor"),
@@ -515,7 +507,7 @@ private fun ProcClassNode.errorPassProcClass(procs: Set<String>, librariesInUse:
     }
     return children.flatMap { it.errorPass(procs, librariesInUse) } + staticCtorErrors +
         repeatStateVarNameErrors + ctorsCompleteAssgnErrors +
-        constAssignInTransitionErrors + returnInProcErrors + atLeastOneConstructorErrors +
+        constAssignInTransitionErrors + lifecycleErrors + atLeastOneConstructorErrors +
         constructorBeforeErrors + stateInAssignErrors + ctorTransActionNotMutexErrors
 }
 
@@ -542,144 +534,39 @@ private fun ProcClassNode.staticConstructorErrors(): List<CompileError> {
     }
 }
 
-private fun ProcFunNode.errorPassProcFun(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {
-    val localDecls = localDecls()
-    val argNames = try {
-        procFunArgs().actionArgs().map { it.name }.toSet()
-    } catch (_: RuntimeException) {
-        emptySet()
-    }
-    val varNodes = localDecls.filterIsInstance<VarNode>()
-    val redeclArgErrors = varNodes.filter { it.name in argNames }.map {
-        OneLocCompileError(
-            it.programLocation(),
-            "Procfun parameter \"${it.name}\" cannot be redeclared as a state variable",
-        )
-    }
-    val repeatStateVarNameErrors = varNodes
-        .groupBy { it.name }
-        .flatMap { (_, nodes) ->
-            if (nodes.size == 1) emptyList()
-            else listOf(
-                TwoLocsCompileError(
-                    nodes[0].programLocation(),
-                    nodes[1].programLocation(),
-                    "Expected state variables to have unique names",
-                ),
+/**
+ * Static vs dynamic lifecycle: children are dynamic; only static procs declare `initially`;
+ * dynamic procs need at least one `return` action; static procs have none.
+ */
+internal fun ProcClassNode.lifecycleErrors(): List<CompileError> {
+    val name = procClassNodeName()
+    val returns = localDecls().filterIsInstance<ReturnActionNode>()
+    val errors = mutableListOf<CompileError>()
+    if (isStatic) {
+        returns.forEach {
+            errors += OneLocCompileError(
+                it.programLocation(),
+                "Static proc \"$name\" cannot have a return action \"${it.returnActionName()}\"",
             )
         }
-    val transitions = localDecls.filterIsInstance<TransitionNode>()
-    val ctors = localDecls.filterIsInstance<ConstructorNode>()
-    val reservedCall = procFunCallCtor(stableName())
-    val reservedRet = procFunRetAction(stableName())
-    val reservedNames = setOf("initially", reservedCall, reservedRet, PROC_FUN_RET_VAL)
-    val reservedNameClash = transitions.filter { it.transitionName() in reservedNames }.map {
-        OneLocCompileError(
-            it.programLocation(),
-            "Name \"${it.transitionName()}\" is reserved in a procfun",
-        )
-    } + ctors.filter { it.constructorName() in reservedNames }.map {
-        OneLocCompileError(
-            it.programLocation(),
-            "Name \"${it.constructorName()}\" is reserved in a procfun",
-        )
-    } + varNodes.filter { it.name in reservedNames }.map {
-        OneLocCompileError(
-            it.programLocation(),
-            "Name \"${it.name}\" is reserved in a procfun",
-        )
-    }
-    val returnTransitions = transitions.filter { it.body().any { b -> b.returns().isNotEmpty() } }
-    val needReturn = assertOrCompileError(
-        returnTransitions.isNotEmpty(),
-        OneLocCompileError(programLocation(), "Expected procfun \"${name()}\" to have at least one return transition"),
-    )
-    // Any modifier except service; return: may appear on any such transition.
-    val modifierErrors = transitions.flatMap { trans ->
-        val mod = trans.modifier()
-        assertOrCompileError(
-            mod != TSAction.SyncRole.Service,
-            OneLocCompileError(
-                trans.programLocation(),
-                "Procfun transitions cannot be tagged service",
-            ),
-        )
-    }
-    val returnClauseErrors = returnTransitions.flatMap { trans ->
-        val hasTransit = trans.body().any { it.transits().isNotEmpty() || it is TransitNode }
-        val hasError = trans.body().any { it.errors().isNotEmpty() }
-        val hasAfter = trans.body().any { it.afters().isNotEmpty() }
-        assertOrCompileError(
-            !hasTransit,
-            OneLocCompileError(
-                trans.programLocation(),
-                "Return transitions cannot have a transit: block",
-            ),
-        ) + assertOrCompileError(
-            !hasError,
-            OneLocCompileError(
-                trans.programLocation(),
-                "Return transitions cannot have an error: block",
-            ),
-        ) + assertOrCompileError(
-            !hasAfter,
-            OneLocCompileError(
-                trans.programLocation(),
-                "Return transitions cannot have an after: block; use before: instead",
-            ),
-        )
-    }
-    val returnOutsideProcFunOnOrdinary = emptyList<CompileError>() // checked: return only on procfun via structure
-    val inlinedVars = varNodes.filter { it.initExpr != null }.map { it.name }.toSet()
-    val stateVarNames = varNodes.map { it.name }.toSet()
-    // Args are initialized by the call; inline inits cover some vars; optional ctor covers the rest.
-    val ctorErrors = when {
-        ctors.size > 1 -> listOf(
-            OneLocCompileError(programLocation(), "Procfun \"${name()}\" may have at most one constructor"),
-        )
-        else -> ctors.flatMap { ctor ->
-            val assigned = ctor.transitVars().map { transitRootVar(it.first) }.toSet()
-            val double = assigned.intersect(inlinedVars)
-            val missing = stateVarNames - inlinedVars - assigned
-            double.map {
-                OneLocCompileError(
-                    ctor.programLocation(),
-                    "Variable \"$it\" is initialized inline and cannot also be assigned in the constructor",
+    } else {
+        localDecls().filterIsInstance<ConstructorNode>()
+            .filter { it.constructorName() == "initially" }
+            .forEach {
+                errors += OneLocCompileError(
+                    it.programLocation(),
+                    "Only static procs may declare constructor \"initially\"; " +
+                        "declare \"$name\" as `static proc` or give it a spawning constructor",
                 )
-            } + assertOrCompileError(
-                missing.isEmpty(),
-                OneLocCompileError(
-                    ctor.programLocation(),
-                    "Expected constructor to assign every non-inline state variable; missing $missing",
-                ),
+            }
+        if (returns.isEmpty()) {
+            errors += OneLocCompileError(
+                programLocation(),
+                "Dynamic proc \"$name\" must have at least one return action",
             )
         }
     }
-    val noCtorMissing = if (ctors.isEmpty()) {
-        val missing = stateVarNames - inlinedVars
-        assertOrCompileError(
-            missing.isEmpty(),
-            OneLocCompileError(
-                programLocation(),
-                "Procfun \"${name()}\" state variables must be initialized inline or in a constructor; missing $missing",
-            ),
-        )
-    } else emptyList()
-    val constVarNames = varNodes.filter { it.isConst }.map { it.name }.toSet() + argNames
-    val constAssignErrors = transitions.flatMap { constAssignmentErrors(it, constVarNames) }
-    val returnInOrdinaryProc = emptyList<CompileError>()
-    val userStateVarNames = varNodes.map { it.name }.toSet()
-    val constructorBeforeErrors = ctors.flatMap { constructorBeforeBlockErrors(it) }
-    val stateInAssignErrors =
-        inlineInitStateRefErrors(varNodes, userStateVarNames, argNames) +
-            ctors.flatMap { ctor ->
-                val ctorArgNames = ctor.actionArgs().map { it.name }.toSet() + argNames
-                actionBodyConstructorStateInAssignErrors(ctor.body(), userStateVarNames, ctorArgNames)
-            }
-    return children.flatMap { it.errorPass(procs, librariesInUse) } + redeclArgErrors +
-        repeatStateVarNameErrors + reservedNameClash + needReturn + modifierErrors + returnClauseErrors +
-        ctorErrors + noCtorMissing + constAssignErrors + returnOutsideProcFunOnOrdinary + returnInOrdinaryProc +
-        constructorBeforeErrors + stateInAssignErrors
+    return errors
 }
 
 private fun constAssignmentErrors(transNode: TransitionNode, constVarNames: Set<String>): List<CompileError> {

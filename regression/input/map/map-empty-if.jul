@@ -2,7 +2,7 @@ import julay.funlib.length
 import julay.funlib.exitProgram
 import julay.funlib.mapOf
 
-proc MapEmptyIfDemo {
+static proc MapEmptyIfDemo {
     var mp : Map<String, Int>
     var done : Boolean
 

@@ -1,0 +1,50 @@
+import julay.funlib.exitProgram
+import julay.funlib.println
+
+/*
+ * Bare dynamic (no B<A>) is legal: Worker syncs with static Boss as a hub peer.
+ */
+proc Worker {
+    var acc : Int
+
+    constructor start(x : Int) {
+        transit: acc := x
+    }
+
+    internal transition step() {
+        guard: acc < 5
+        transit: acc := acc + 1
+    }
+
+    return done(y : Int) {
+        guard: acc >= 5 & y = acc
+    }
+}
+
+static proc Boss {
+    var last : Int := 0
+    var started : Boolean := false
+
+    constructor initially(args : List<String>) {}
+
+    transition start(x : Int) {
+        guard: ~started & x = 1
+        transit: started := true
+    }
+
+    transition done(y : Int) {
+        guard: started
+        transit: last := y
+    }
+
+    internal transition finish() {
+        guard: last = 5
+        after:
+            println("bare-done=" + last)
+            exitProgram(0)
+    }
+}
+
+export proc BareDynamicOk := Boss || Worker
+
+compile BareDynamicOk

@@ -170,9 +170,6 @@ private fun resolveCompileTargetsCollecting(
     val missing = mutableListOf<String>()
     for (name in names) {
         when {
-            name in collectProcFunNames(ast) -> {
-                // Standalone TLA target — not a JAR; ignore for check's jar/spec lists.
-            }
             byName[name]?.type == ProcDeclType.Spec -> specs += byName.getValue(name)
             name in unit.allLeafSpecNames ->
                 specs += byName[name] ?: ProcDecl(name, emptyList(), ProcDeclType.Spec)

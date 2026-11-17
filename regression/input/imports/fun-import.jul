@@ -5,7 +5,7 @@ import julay.funlib.println
 
 fun double(n : Int) : Int = add(id(n), id(n))
 
-proc S {
+static proc S {
     var x : Int
     var print : Boolean
 

@@ -17,7 +17,7 @@ class SpecIndexingTest {
     fun multiInstanceUnindexedIsError() {
         val result = typeCheck(
             """
-            proc Worker {
+            static proc Worker {
                 var id : Int
                 constructor initially(args : List<String>) { transit: id := 0 }
                 constructor spawnWorker(id : Int) { transit: id := id }
@@ -33,7 +33,7 @@ class SpecIndexingTest {
     fun multiInstanceUnindexedWarnsWithFlag() {
         val result = typeCheck(
             """
-            proc Worker {
+            static proc Worker {
                 var id : Int
                 constructor initially(args : List<String>) { transit: id := 0 }
                 constructor spawnWorker(id : Int) { transit: id := id }
@@ -47,20 +47,20 @@ class SpecIndexingTest {
     }
 
     @Test
-    fun initiallyOnlyIndexedWarns() {
+    fun initiallyOnlyIndexedIsOk() {
         val result = typeCheck(
             """
-            proc Counter {
+            static proc Counter {
                 var n : Int
                 constructor initially(args : List<String>) { transit: n := 0 }
                 transition bump() { transit: n := n + 1 }
             }
-            spec Needless := Counter[i : Int]
+            spec IndexedOk := Counter[i : Int]
             """.trimIndent(),
         )
         assertTrue(result.errors.isEmpty(), result.toString())
         assertTrue(
-            result.warnings.any { it.toString().contains("indexing is unnecessary") },
+            result.warnings.none { it.toString().contains("indexing is unnecessary") },
             result.toString(),
         )
     }
@@ -69,7 +69,7 @@ class SpecIndexingTest {
     fun initiallyOnlyUnindexedIsOk() {
         val result = typeCheck(
             """
-            proc Counter {
+            static proc Counter {
                 var n : Int
                 constructor initially(args : List<String>) { transit: n := 0 }
                 transition bump() { transit: n := n + 1 }
@@ -85,12 +85,12 @@ class SpecIndexingTest {
     fun compositionIndexCoversNestedLeaves() {
         val result = typeCheck(
             """
-            proc A {
+            static proc A {
                 var x : Int
                 constructor initially(args : List<String>) { transit: x := 0 }
                 constructor makeA(x : Int) { transit: x := x }
             }
-            proc B {
+            static proc B {
                 var y : Int
                 constructor initially(args : List<String>) { transit: y := 0 }
                 constructor makeB(y : Int) { transit: y := y }
@@ -109,7 +109,7 @@ class SpecIndexingTest {
     fun multiInstanceIndexedIsOk() {
         val result = typeCheck(
             """
-            proc Worker {
+            static proc Worker {
                 var id : Int
                 constructor initially(args : List<String>) { transit: id := 0 }
                 constructor spawnWorker(id : Int) { transit: id := id }
@@ -126,7 +126,7 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            proc Worker {
+            static proc Worker {
                 var id : Int
                 constructor initially(args : List<String>) { transit: id := 0 }
                 constructor spawnWorker(id : Int) { transit: id := id }
@@ -147,7 +147,7 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            proc Worker {
+            static proc Worker {
                 var id : Int
                 constructor initially(args : List<String>) { transit: id := 0 }
                 constructor spawnWorker(id : Int) { transit: id := id }
@@ -168,7 +168,7 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            proc Worker {
+            static proc Worker {
                 var id : Int
                 constructor initially(args : List<String>) { transit: id := 0 }
                 constructor spawnWorker(id : Int) { transit: id := id }
@@ -189,7 +189,7 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            proc Worker {
+            static proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
@@ -213,7 +213,7 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            proc Worker {
+            static proc Worker {
                 var cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
@@ -237,7 +237,7 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            proc Worker {
+            static proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
@@ -254,7 +254,7 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            proc Worker {
+            static proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
@@ -272,7 +272,7 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            proc Worker {
+            static proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
@@ -290,7 +290,7 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            proc Worker {
+            static proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
@@ -311,7 +311,7 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            proc Worker {
+            static proc Worker {
                 const cluster : List<String>
                 var extra : Int
                 constructor initially(args : List<String>) {
@@ -340,7 +340,7 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            proc Worker {
+            static proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
@@ -364,7 +364,7 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            proc Worker {
+            static proc Worker {
                 const cluster : List<String>
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
@@ -385,7 +385,7 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            proc Worker {
+            static proc Worker {
                 const me : String
                 const cluster : List<String>
                 constructor initially(args : List<String>) {
@@ -408,7 +408,7 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            proc Worker {
+            static proc Worker {
                 const cluster : List<String>
                 var extra : Int
                 constructor initially(args : List<String>) {
@@ -436,7 +436,7 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            proc Worker {
+            static proc Worker {
                 var log : List<String>
                 constructor initially(args : List<String>) { transit: log := args }
             }
@@ -456,7 +456,7 @@ class SpecIndexingTest {
             """
             import julay.funlib.max
             type N
-            proc Worker {
+            static proc Worker {
                 var log : List<String>
                 var commitIndex : Int
                 constructor initially(args : List<String>) {
@@ -480,7 +480,7 @@ class SpecIndexingTest {
         val result = typeCheck(
             """
             type N
-            proc Worker {
+            static proc Worker {
                 var n : Int
                 constructor initially(args : List<String>) { transit: n := 0 }
             }

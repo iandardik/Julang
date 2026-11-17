@@ -47,12 +47,12 @@ How-to: [Getting started](../getting-started.md). Specs: [Specifications](specif
 
 ## Chapters
 
-1. [Processes](processes.md) — state, `initially`, `static proc` vs dynamic, constructors vs transitions
-2. [Composition and actions](composition-and-actions.md) — `||`, **service/client**, ordinary composition-private syncs, **apis**, action shapes
-3. [Compiler optimizations](compiler-optimizations.md) — compile-time direction analysis; TLA+ `--disable-tla-opt`
-4. [Types and expressions](types-and-expressions.md)
-5. [Collections](collections.md) — `List` / `Map` / `Set`, methods, lambdas
-6. [Procfuns](procfun.md) — process-backed blocking calls
+1. [Processes](processes.md) — state, `initially`, `static proc` vs dynamic, constructors vs transitions, returns
+2. [Composition and actions](composition-and-actions.md) — `||`, **service/client**, ordinary composition-private syncs, action shapes, fairness
+3. [Parent-bound procs](children.md) — `B<A>`, returns, HTTP `~>`
+4. [Compiler optimizations](compiler-optimizations.md) — compile-time direction analysis; TLA+ `--disable-tla-opt`
+5. [Types and expressions](types-and-expressions.md)
+6. [Collections](collections.md) — `List` / `Map` / `Set`, methods, lambdas
 7. [Modules](modules.md) — `import` and search path
 8. [Side effects](effects.md) — `serveHttp` / timers / funlib; `before` / `after` / transit IO
 9. [Standard library](standard-library.md) — builtins and funlib (including which have effects)

@@ -1,7 +1,7 @@
 import julay.funlib.exitProgram
 import julay.funlib.setOf
 
-proc AssociateWithDemo {
+static proc AssociateWithDemo {
     var s : Set<Int>
     var mp : Map<Int, Int>
     var steps : Int

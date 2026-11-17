@@ -3,7 +3,7 @@ type Point {
     y : Int
 }
 
-proc S {
+static proc S {
     var p : Point
 
     constructor initially(args : List<String>) {

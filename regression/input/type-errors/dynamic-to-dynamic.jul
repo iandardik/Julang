@@ -1,28 +1,19 @@
-import julay.funlib.println
-
-/*
- * Two dynamic procs syncing is an illegal shape.
- */
+static proc Boss {
+    constructor initially(args : List<String>) {}
+    transition startA() {}
+    transition startB() {}
+}
 
 proc A {
-    constructor initially(args : List<String>) {
-        transit:
-    }
-
-    transition ping() {
-    }
+    constructor startA() {}
+    return ping() {}
 }
 
 proc B {
-    constructor initially(args : List<String>) {
-        transit:
-    }
-
-    transition ping() {
-        after: println("pong")
-    }
+    constructor startB() {}
+    return ping() {}
 }
 
-proc DynToDyn := A || B
+proc Sys := Boss || A || B
 
-compile DynToDyn
+compile Sys

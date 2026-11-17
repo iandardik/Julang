@@ -1,6 +1,6 @@
 fun bad(n : Int) : Int = n + x
 
-proc S {
+static proc S {
     var x : Int
 
     constructor initially(args : List<String>) {

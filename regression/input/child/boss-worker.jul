@@ -1,0 +1,50 @@
+import julay.funlib.exitProgram
+import julay.funlib.println
+
+/*
+ * Exemplar: static Boss spawns child Worker via start, Worker steps then returns done.
+ */
+proc Worker {
+    var acc : Int
+
+    constructor start(x : Int) {
+        transit: acc := x
+    }
+
+    internal transition step() {
+        guard: acc < 10
+        transit: acc := acc + 1
+    }
+
+    return done(y : Int) {
+        guard: acc >= 10 & y = acc
+    }
+}
+
+static proc Boss {
+    var last : Int := 0
+    var started : Boolean := false
+
+    constructor initially(args : List<String>) {}
+
+    transition start(x : Int) {
+        guard: ~started & x = 1
+        transit: started := true
+    }
+
+    transition done(y : Int) {
+        guard: started
+        transit: last := y
+    }
+
+    internal transition finish() {
+        guard: last = 10
+        after:
+            println("done=" + last)
+            exitProgram(0)
+    }
+}
+
+export proc BossWorker := Boss || Worker<Boss>
+
+compile BossWorker

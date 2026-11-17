@@ -1,6 +1,6 @@
 import julay.funlib.startsWith
 
-proc StartsWithP {
+static proc StartsWithP {
     var msg : String
     var ok : Boolean
 

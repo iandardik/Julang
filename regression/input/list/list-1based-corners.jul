@@ -5,7 +5,7 @@ import julay.funlib.listOf
 import julay.funlib.splice
 
 // Corner cases for 1-based indexing and inclusive splice.
-proc ListOneBasedCorners {
+static proc ListOneBasedCorners {
     var xs : List<Int>
     var first : Int
     var last : Int

@@ -2,7 +2,7 @@ import julay.optional.Optional
 import julay.optional.some
 import julay.optional.none
 
-proc Box {
+static proc Box {
     var opt : Optional<Int>
     var n : Int
 

@@ -25,7 +25,7 @@ class SortImportTest {
         main.writeText(
             """
             import mod.nodes.NodeSet
-            proc Counter {
+            static proc Counter {
                 var n : Int
                 constructor initially(args : List<String>) { transit: n := 0 }
                 transition bump() { transit: n := n + 1 }
@@ -50,7 +50,7 @@ class SortImportTest {
         modDir.resolve("nodes.jul").writeText(
             """
             type NodeSet
-            export proc Dummy {
+            export static proc Dummy {
                 constructor initially(args : List<String>) {}
             }
             """.trimIndent(),
@@ -59,7 +59,7 @@ class SortImportTest {
         main.writeText(
             """
             import mod.nodes.NodeSet
-            proc Counter {
+            static proc Counter {
                 var n : Int
                 constructor initially(args : List<String>) { transit: n := 0 }
             }

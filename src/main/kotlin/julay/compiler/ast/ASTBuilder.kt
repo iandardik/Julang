@@ -49,12 +49,6 @@ internal fun unescapeJulayStringContent(raw: String): String =
     }
 
 private fun parseTypeExpr(ctx: JulayParser.TypeExprContext): TypeExpr {
-    if (ctx.PROCFUN_ARROW() != null) {
-        val domainCtx = ctx.typeDomain()
-        val ret = parseTypeExpr(ctx.typeExpr())
-        val args = parseTypeDomainArgs(domainCtx)
-        return TypeExpr.ProcFunRef(args, ret)
-    }
     return parseTypeDomain(ctx.typeDomain())
 }
 
@@ -130,13 +124,11 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     override fun visitDecl(ctx: JulayParser.DeclContext?): ASTNode {
         val decl = oneChoice(
             ctx!!.proc(),
-            ctx.api_decl(),
             ctx.type_decl(),
             ctx.compile_decl(),
             ctx.spec(),
             ctx.invariant_decl(),
             ctx.fun_decl(),
-            ctx.procfun_decl(),
         )
         val node = visit(decl)
         if (node is DeclNode && ctx.EXPORT() != null) {
@@ -205,31 +197,6 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         return FunNode(name, typeParams, args, returnType, body, sourceLocation(ctx))
     }
 
-    override fun visitProcfun_decl(ctx: JulayParser.Procfun_declContext?): ASTNode {
-        val name = ctx!!.ID().text
-        val args = visit(ctx.args()).let { argsNode ->
-            if (argsNode !is ArgsNode) {
-                throw RuntimeException("Expected ArgsNode but got $argsNode")
-            }
-            argsNode
-        }
-        val returnType = parseTypeExpr(ctx.typeExpr())
-        val localDecls = ctx.procfun_body()
-            .map { visit(it) }
-            .map {
-                if (it !is ProcClassDeclNode) {
-                    throw RuntimeException("Expected ProcClassDeclNode but got $it")
-                }
-                it
-            }
-        return ProcFunNode(name, args, returnType, localDecls, sourceLocation(ctx))
-    }
-
-    override fun visitProcfun_body(ctx: JulayParser.Procfun_bodyContext?): ASTNode {
-        val body = oneChoice(ctx!!.`var`(), ctx.constructor(), ctx.transition())
-        return visit(body)
-    }
-
     override fun visitFun_call(ctx: JulayParser.Fun_callContext?): ASTNode {
         val name = ctx!!.ID().text
         val typeArgs = ctx.typeArgs()?.typeExpr()?.map { parseTypeExpr(it) } ?: emptyList()
@@ -293,17 +260,15 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                     }
                     it
                 }
-            return ProcClassNode(name, localDecls, sourceLocation(ctx), isStatic = ctx.STATIC() != null)
+            return ProcClassNode(
+                name,
+                localDecls,
+                sourceLocation(ctx),
+                isStatic = ctx.STATIC() != null,
+            )
         }
         val value = visit(ctx.proc_expr())
         return ProcNode(name, value, sourceLocation(ctx))
-    }
-
-    override fun visitApi_decl(ctx: JulayParser.Api_declContext?): ASTNode {
-        val name = ctx!!.ID().text
-        val procExpr = visit(ctx.proc_expr())
-        val callNames = ctx.api_call_list()?.ID()?.map { it.text } ?: emptyList()
-        return ApiNode(name, procExpr, callNames, sourceLocation(ctx))
     }
 
     override fun visitCompile_decl(ctx: JulayParser.Compile_declContext?): ASTNode {
@@ -477,7 +442,11 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 val parts = qn.parts()
                 ValueProcExprNode(parts.last(), parts, sourceLocation(ctx))
             }
-            else -> ValueProcExprNode(ctx.ID().text, null, sourceLocation(ctx))
+            ctx.LT() != null -> {
+                val ids = ctx.ID()
+                ChildBindingProcExprNode(ids[0].text, ids[1].text, sourceLocation(ctx))
+            }
+            else -> ValueProcExprNode(ctx.ID(0).text, null, sourceLocation(ctx))
         }
     }
 
@@ -491,7 +460,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     }
 
     override fun visitProc_body(ctx: JulayParser.Proc_bodyContext?): ASTNode {
-        val body = oneChoice(ctx!!.`var`(), ctx.constructor(), ctx.transition())
+        val body = oneChoice(ctx!!.`var`(), ctx.constructor(), ctx.transition(), ctx.return_action())
         return visit(body)
     }
 
@@ -605,17 +574,50 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             ctx.transit(),
             ctx.error(),
             ctx.after(),
-            ctx.return_clause(),
         )
         return visit(body)
     }
 
-    override fun visitReturn_clause(ctx: JulayParser.Return_clauseContext?): ASTNode {
-        val expr = visit(ctx!!.expr())
-        if (expr !is ExprNode) {
-            throw RuntimeException("Expected return expression")
+    override fun visitReturn_action(ctx: JulayParser.Return_actionContext?): ASTNode {
+        val isInternal = ctx!!.INTERNAL() != null
+        val isService = ctx.SERVICE() != null
+        val isClient = ctx.CLIENT() != null
+        assert(!isService || !isClient, "A return cannot be both service and client")
+        assert(!isService || !isInternal, "A return cannot be both service and internal")
+        assert(!isClient || !isInternal, "A return cannot be both client and internal")
+        val modifier = when {
+            isInternal -> TSAction.SyncRole.Internal
+            isService -> TSAction.SyncRole.Service
+            isClient -> TSAction.SyncRole.Client
+            else -> TSAction.SyncRole.Default
         }
-        return ReturnNode(expr, sourceLocation(ctx))
+        val name = ctx.ID().text
+        val args = visit(ctx.args()).let { argsNode ->
+            if (argsNode !is ArgsNode) {
+                throw RuntimeException("Expected ArgsNode but got $argsNode")
+            }
+            argsNode
+        }
+        val body = ctx.return_body()
+            .map { visit(it) }
+            .map {
+                if (it !is ActionBodyNode) {
+                    throw RuntimeException("Expected ActionBodyNode but got $it")
+                }
+                it
+            }
+        return ReturnActionNode(modifier, name, args, body, sourceLocation(ctx))
+    }
+
+    override fun visitReturn_body(ctx: JulayParser.Return_bodyContext?): ASTNode {
+        val body = oneChoice(ctx!!.guard(), ctx.before())
+        return visit(body)
+    }
+
+    override fun visitHandler_ref(ctx: JulayParser.Handler_refContext?): ASTNode {
+        val ids = ctx!!.ID().map { it.text }
+        require(ids.size == 4) { "handler ref requires Class.ctor ~> Class.action" }
+        return HandlerRefExprNode(ids[0], ids[1], ids[2], ids[3], sourceLocation(ctx))
     }
 
     override fun visitGuard(ctx: JulayParser.GuardContext?): ASTNode {
@@ -788,6 +790,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             ctx.field_access() != null -> visit(ctx.field_access())
             ctx.record_literal() != null -> visit(ctx.record_literal())
             ctx.fun_call() != null -> visit(ctx.fun_call())
+            ctx.handler_ref() != null -> visit(ctx.handler_ref())
             // Prefix & / | have no semantic effect (TLA+ style guard formatting)
             (ctx.AND() != null || ctx.OR() != null) && ctx.expr().size == 1 -> {
                 val innerNode = visit(ctx.expr(0))
@@ -950,8 +953,12 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 val parts = qn.parts()
                 ValueProcExprNode(parts.last(), parts, sourceLocation(ctx))
             }
-            ctx.ID() != null -> {
-                ValueProcExprNode(ctx.ID().text, null, sourceLocation(ctx))
+            ctx.LT() != null -> {
+                val ids = ctx.ID()
+                ChildBindingProcExprNode(ids[0].text, ids[1].text, sourceLocation(ctx))
+            }
+            ctx.ID() != null && ctx.ID().isNotEmpty() -> {
+                ValueProcExprNode(ctx.ID(0).text, null, sourceLocation(ctx))
             }
             else -> {
                 val compositeProcs = ctx.proc_expr().map { visit(it) }

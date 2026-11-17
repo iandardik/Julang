@@ -9,7 +9,7 @@ fun double(n : Int) : Int = n + n
 
 fun addOne(n : Int) : Int = n + 1
 
-proc MapListSetTest {
+static proc MapListSetTest {
     var step : String
     var xs : List<Int>
     var ys : List<Int>

@@ -2,7 +2,7 @@ import julay.funlib.exitProgram
 import julay.funlib.println
 import julay.funlib.readln
 
-proc FrontEnd {
+static proc FrontEnd {
     var state : String
     var keyReq : String
     var valReq : String

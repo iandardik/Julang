@@ -184,7 +184,6 @@ private class RelevantFieldCollector(
                 }
             }
         }
-        offer.decl.returnExpr?.let { walkExpr(it, env, inComparison = false) }
     }
 
     fun walkFun(funNode: FunNode) {

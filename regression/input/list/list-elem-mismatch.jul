@@ -1,7 +1,7 @@
 import julay.funlib.exitProgram
 import julay.funlib.listOf
 
-proc BadList {
+static proc BadList {
     var xs : List<Int>
 
     constructor initially(args : List<String>) {

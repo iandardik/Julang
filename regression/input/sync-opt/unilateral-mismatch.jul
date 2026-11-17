@@ -6,7 +6,7 @@ import julay.funlib.println
  * illegal direction under Go channel rules.
  */
 
-proc A {
+static proc A {
     constructor initially(args : List<String>) {
         transit:
     }

@@ -1,4 +1,4 @@
-proc Peer {
+static proc Peer {
     var ack : Boolean := false
 
     constructor initially(args : List<String>) {
@@ -11,7 +11,7 @@ proc Peer {
 }
 
 // also is leaf-spec only
-proc Bad {
+static proc Bad {
     constructor initially(args : List<String>) {}
 
     transition send() also (m : Int) {

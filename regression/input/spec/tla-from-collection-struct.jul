@@ -5,7 +5,7 @@ type Msg {
     value : Int
 }
 
-proc Net {
+static proc Net {
     var msgs : Set<Msg>
     var got : Int
 

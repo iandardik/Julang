@@ -1,6 +1,8 @@
 import printer.Printer
 import server.ServerLogic
-import server.incHandler
+import server.IncHandler
+
+type DynProc
 
 static proc Counter {
     var counter : Int
@@ -21,10 +23,10 @@ static proc Counter {
 proc IncServer := Counter || Printer || ServerLogic
 
 invariant NonNegative := Counter.counter >= 0
-invariant CorrectCounter := forall t1 : Int,
-    (incHandler[t1].step = "C" & forall t2 : Int, incHandler[t2].step ~= "B") => (incHandler[t1].localCounter = Counter.counter)
+invariant CorrectCounter := forall t1 : DynProc,
+    (IncHandler[t1].step = "C" & forall t2 : DynProc, IncHandler[t2].step ~= "B") => (IncHandler[t1].localCounter = Counter.counter)
 invariant AllInvs := NonNegative & CorrectCounter
-spec HandlerSpec := incHandler[t : Int]
+spec HandlerSpec := IncHandler
 spec IncSpec := <true> Counter || HandlerSpec <AllInvs>
 
 compile IncServer, IncSpec

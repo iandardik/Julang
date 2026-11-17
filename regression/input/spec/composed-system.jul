@@ -1,4 +1,4 @@
-proc Counter {
+static proc Counter {
     var n : Int
 
     constructor initially(args : List<String>) {
@@ -11,7 +11,7 @@ proc Counter {
     }
 }
 
-proc Env {
+static proc Env {
     var ready : Boolean
 
     constructor initially(args : List<String>) {

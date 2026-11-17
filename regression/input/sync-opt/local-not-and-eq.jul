@@ -5,7 +5,7 @@ import julay.funlib.println
  * Local ~done + arg equality — Context-free enablement + sync.
  */
 
-proc Sender {
+static proc Sender {
     constructor initially(args : List<String>) {
         transit:
     }

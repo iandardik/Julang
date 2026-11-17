@@ -7,7 +7,6 @@ import julay.compiler.ast.ArgNode
 import julay.compiler.ast.ArgsNode
 import julay.compiler.ast.ConstructorNode
 import julay.compiler.ast.ProcClassNode
-import julay.compiler.ast.ProcFunNode
 import julay.compiler.ast.RootNode
 import julay.compiler.ast.TransitionNode
 import julay.compiler.ast.VarNode
@@ -32,12 +31,11 @@ fun jarSortReachabilityErrors(
 ): List<CompileError> {
     if (jarTargets.isEmpty()) return emptyList()
     val pclasses = ast.declNodes().filterIsInstance<ProcClassNode>().associateBy { it.name() }
-    val procFuns = ast.declNodes().filterIsInstance<ProcFunNode>().associateBy { it.stableName() }
     val errors = mutableListOf<CompileError>()
     for (target in jarTargets) {
         val leafNames = target.allProcNames(procDecls)
         for (leafName in leafNames) {
-            val pc = pclasses[leafName] ?: procFuns[leafName]?.asSyntheticProcClass() ?: continue
+            val pc = pclasses[leafName] ?: continue
             errors += uninterpretedUsesInProcClass(pc, target.name)
         }
     }

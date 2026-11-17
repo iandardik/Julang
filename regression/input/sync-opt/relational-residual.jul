@@ -5,7 +5,7 @@ import julay.funlib.println
  * Relational residual (x < y / y > 5) cannot bind for Go channels — compile failure.
  */
 
-proc Low {
+static proc Low {
     constructor initially(args : List<String>) {
         transit:
     }

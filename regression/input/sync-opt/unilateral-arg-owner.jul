@@ -31,7 +31,7 @@ static proc Hub {
     }
 }
 
-proc Client {
+static proc Client {
     constructor initially(args : List<String>) {
         transit:
     }

@@ -1,6 +1,6 @@
 type Node
 
-proc Counter {
+static proc Counter {
     var n : Int
 
     constructor initially(args : List<String>) {

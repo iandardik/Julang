@@ -1,5 +1,5 @@
 import julay.funlib.listOf
-proc S {
+static proc S {
     var list : List<String>
 
     constructor initially(args : List<String>) {

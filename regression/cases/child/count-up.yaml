@@ -1,0 +1,6 @@
+source: regression/input/child/count-up.jul
+programs:
+  - name: CountUpMain
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/child-count-up.stdout

@@ -1,57 +1,97 @@
-import julay.funlib.httpRequest
+import julay.funlib.doHttpRequest
 import julay.funlib.parseInt
 import node.lib.fieldValue
-import node.lib.KvPair
 
 /*
- * Outbound peer RPCs for ShardNode. Encode typed args → HTTP bodies,
- * dial, decode response bodies → typed returns. No worker pool.
+ * Outbound peer RPCs for ShardNode: one child per message. Ctor names match the
+ * PerfectNet send actions (specs/net.jul), so Shard syncs the same actions in the
+ * JAR (spawning these children) and in TLA (enqueueing on the network).
+ *
+ *   goClaim / goMoveBatch: fire-and-forget; the child sends, then returns internally.
+ *   goKeyCount: the child returns the peer's count to its parent via keyCountReply.
  */
-export api RpcOut {
-    proc: RpcOutIdle
-    calls: keyCount, claim, moveBatch
-}
 
-static proc RpcOutIdle {
-    constructor initially(args : List<String>) {
+export proc SendClaim {
+    const dest : String
+    const body : String
+    var sent : Boolean
+
+    constructor goClaim(peerUrl : String, key : String, owner : String) {
         transit:
-    }
-}
-
-fun encodeKvBatch(entries : List<KvPair>) : String =
-    entries.fold("", (acc, e) ->
-        if (acc = "") {
-            e.k + "=" + e.v
-        } else {
-            acc + ";" + e.k + "=" + e.v
-        })
-
-procfun keyCount(peerUrl : String) : Int {
-    internal transition go() {
-        return: parseInt(fieldValue(httpRequest(HttpClientRequest {
-            url := peerUrl + "/rpc/keyCount",
-            method := "POST",
-            body := ""
-        }).body))
-    }
-}
-
-procfun claim(peerUrl : String, key : String, owner : String) : Int {
-    internal transition go() {
-        return: httpRequest(HttpClientRequest {
-            url := peerUrl + "/rpc/claim",
-            method := "POST",
+            dest := peerUrl
             body := "k=" + key + "|owner=" + owner
-        }).code
+            sent := false
+    }
+
+    internal transition send() {
+        guard: ~sent
+        transit:
+            sent := doHttpRequest(HttpClientRequest {
+                url := dest + "/rpc/claim",
+                method := "POST",
+                body := body
+            }).code >= 0
+    }
+
+    internal return claimSent() {
+        guard: sent
     }
 }
 
-procfun moveBatch(peerUrl : String, ownerUrl : String, entries : List<KvPair>) : Int {
-    internal transition go() {
-        return: httpRequest(HttpClientRequest {
-            url := peerUrl + "/rpc/moveBatch",
-            method := "POST",
-            body := ownerUrl + "|" + encodeKvBatch(entries)
-        }).code
+export proc SendMoveBatch {
+    const dest : String
+    const body : String
+    var sent : Boolean
+
+    /* One KV per message: <ownerUrl>|<k>=<v> */
+    constructor goMoveBatch(peerUrl : String, ownerUrl : String, key : String, val : String) {
+        transit:
+            dest := peerUrl
+            body := ownerUrl + "|" + key + "=" + val
+            sent := false
+    }
+
+    internal transition send() {
+        guard: ~sent
+        transit:
+            sent := doHttpRequest(HttpClientRequest {
+                url := dest + "/rpc/moveBatch",
+                method := "POST",
+                body := body
+            }).code >= 0
+    }
+
+    internal return moveSent() {
+        guard: sent
+    }
+}
+
+export proc SendKeyCount {
+    const dest : String
+    const from : String
+    var reply : Int
+    var sent : Boolean
+
+    constructor goKeyCount(peerUrl : String, fromUrl : String) {
+        transit:
+            dest := peerUrl
+            from := fromUrl
+            reply := 0
+            sent := false
+    }
+
+    internal transition send() {
+        guard: ~sent
+        transit:
+            reply := parseInt(fieldValue(doHttpRequest(HttpClientRequest {
+                url := dest + "/rpc/keyCount",
+                method := "POST",
+                body := "from=" + from
+            }).body))
+            sent := true
+    }
+
+    return keyCountReply(replyFrom : String, count : Int) {
+        guard: sent & replyFrom = dest & count = reply
     }
 }

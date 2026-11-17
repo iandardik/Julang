@@ -2,7 +2,7 @@ type Box<T> {
     value : T
 }
 
-proc Worker {
+static proc Worker {
     var box : Box<Int>
 
     constructor initially(args : List<String>) {

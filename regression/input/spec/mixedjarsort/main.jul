@@ -2,7 +2,7 @@ import julay.funlib.exitProgram
 import julay.funlib.println
 import protocol.Sys
 
-proc Peer {
+static proc Peer {
     var done : Boolean
 
     constructor initially(args : List<String>) {

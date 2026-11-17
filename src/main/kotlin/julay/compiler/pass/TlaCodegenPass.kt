@@ -71,55 +71,30 @@ fun tlaCodegenPass(
     tlaOptConfig: TlaOptConfig = TlaOptConfig.ALL_ON,
 ): TlaCodegenResult {
     val moduleName = spec.specNodeName()
+    handlerResponseActions = unit.modules.flatMap { m ->
+        m.root.handlerRefs().map { it.handlerClass() to it.handlerAction() }
+    }.toSet()
     val leafSpecNodes = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<LeafSpecNode>() }
         .associateBy { it.name() }
     val pclassNodes = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<ProcClassNode>() }
         .associateBy { it.name() } + leafSpecNodes.mapValues { it.value.asProcClass() }
-    val procFunNodes = unit.modules
-        .flatMap { it.root.declNodes().filterIsInstance<ProcFunNode>() }
-        .associateBy { it.stableName() }
     val procAliases = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<ProcNode>() }
         .associateBy { it.name() }
     val specAliases = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<SpecNode>() }
         .associateBy { it.name() }
-    val apiAliases = unit.modules
-        .flatMap { it.root.declNodes().filterIsInstance<ApiNode>() }
-        .associateBy { it.name() }
 
     val compositionLeaves = compositionLeavesOfSpec(spec)
-    val procFunNameSet = procFunNodes.keys
-    // Composition listings of procfuns are metadata (whitelist), not free-standing SyncChannel peers —
-    // except when the entire system is a standalone procfun (compile F).
-    val standaloneProcFun = compositionLeaves.size == 1 && compositionLeaves.single().name in procFunNameSet
-    val hostLeavesRaw = expandLeavesToPclasses(
-        compositionLeaves.filter { it.name !in procFunNameSet || standaloneProcFun },
-        pclassNodes + procFunNodes.mapValues { (_, pf) -> pf.asSyntheticProcClass() },
-        procAliases,
-        specAliases,
-        apiAliases,
-        leafSpecNodes,
-    ).map { leaf ->
-        if (leaf.name in procFunNameSet) leaf.copy(isProcFun = true) else leaf
-    }
-    // Coupled via api calls: reachable from the spec's composition (including nested apis).
-    val composedProcFuns = collectApiCallsInComposition(
-        compositionLeaves.filter { it.name !in procFunNameSet || standaloneProcFun },
-        apiAliases,
-        procAliases,
-        specAliases,
-    )
-    val callSiteDraftsAll = discoverProcFunCallSiteDrafts(
-        hostLeavesRaw.filter { !it.isProcFun },
+    val leaves = expandLeavesToPclasses(
+        compositionLeaves,
         pclassNodes,
+        procAliases,
+        specAliases,
+        leafSpecNodes,
     )
-    val coupledDrafts = callSiteDraftsAll.filter { it.procFunName in composedProcFuns }
-    val havocDrafts = callSiteDraftsAll.filter { it.procFunName !in composedProcFuns }
-    val procFunLeavesRaw = procFunLeavesFromDrafts(coupledDrafts)
-    val leaves = assignTlaLeafNames(hostLeavesRaw + procFunLeavesRaw)
 
     val recordNames = unit.modules.flatMap { m ->
         m.root.declNodes().filterIsInstance<ObjClassNode>().map { it.name() }
@@ -141,15 +116,24 @@ fun tlaCodegenPass(
     val domains = mergedDomains.toMap()
     val domainModels = domains.mapNotNull { (name, d) ->
         d.cfgElements?.let { name to "{${it.joinToString(", ")}}" }
-    }.toMap()
+    }.toMap().toMutableMap()
+    // Peeled DynProc models → CONSTANT + cfg (not a DomainType).
+    leaves.mapNotNull { it.dynProcModel }.distinctBy { it.name() }.forEach { model ->
+        val elems = model.elements.map { lit ->
+            when (lit.inferType(emptyMap())) {
+                is StringType -> "\"${lit.literalText()}\""
+                is BoolType -> lit.literalText().uppercase()
+                else -> lit.literalText()
+            }
+        }
+        domainModels[DYN_PROC_MODEL] = "{${elems.joinToString(", ")}}"
+    }
+    if (leaves.any { it.isDynamic } && DYN_PROC_MODEL !in domainModels) {
+        domainModels[DYN_PROC_MODEL] = DEFAULT_DYN_PROC_MODEL
+    }
     val domainNames = domains.keys
 
-    val callSites = resolveProcFunCallSites(coupledDrafts, leaves)
-    val havocSites = resolveHavocProcFunCallSites(havocDrafts, leaves)
-    val handshake = buildProcFunHandshakeVars(callSites)
-    // Synthetic proc classes for procfun lookup (args + F_call + transitions + F_ret).
-    val pclassesForTla = pclassNodes + procFunNodes.mapValues { (_, pf) -> pf.asSyntheticProcClass() }
-    val procFunDecls = ast.procFunClassPass().associateBy { it.name }
+    val pclassesForTla = pclassNodes
 
     val constants = linkedSetOf<String>()
     leaves.forEach { leaf ->
@@ -161,6 +145,16 @@ fun tlaCodegenPass(
                 }
             }
         }
+        if (leaf.instParamType != null) {
+            typeDomainConstant(leaf.instParamType!!)?.let { name ->
+                if (name !in setOf("Int", "Nat", "Boolean", "Real")) {
+                    constants += name
+                }
+            }
+        }
+    }
+    if (DYN_PROC_MODEL in domainModels) {
+        constants += DYN_PROC_MODEL
     }
 
     val invariants = unit.modules
@@ -189,9 +183,7 @@ fun tlaCodegenPass(
 
     val cfgOverrides = linkedSetOf<String>()
 
-    val offers = collectTlaActionOffers(leaves, pclassesForTla, procFunDecls)
-        // Coupled: child construct is folded into parent *_call. Standalone: keep F_call.
-        .filterNot { it.isConstructor && it.leaf.isProcFun && !standaloneProcFun }
+    val offers = collectTlaActionOffers(leaves, pclassesForTla)
     val usedFunOpsAll = collectUserFunsUsedInOffers(
         offers,
         extraExprs = invClosure.map { it.invariantFormula() },
@@ -228,8 +220,6 @@ fun tlaCodegenPass(
             offers,
             usedFunOps,
             invClosure,
-            procFunLeafNames = leaves.filter { it.isProcFun }.map { it.name }.toSet(),
-            callSites = callSites,
             initExprs = leaves.flatMap { leaf -> leaf.initExprs.map { leaf.name to it } },
         )
     } else {
@@ -263,11 +253,7 @@ fun tlaCodegenPass(
             moduleName = moduleName,
             leaves = leaves,
             pclassesForTla = pclassesForTla,
-            procFunNodes = procFunNodes,
             leafSpecNodes = leafSpecNodes,
-            callSites = callSites,
-            havocSites = havocSites,
-            handshake = handshake,
             constants = constants,
             cfgOverrides = cfgOverrides,
             invClosure = invClosure,
@@ -292,11 +278,7 @@ private fun emitProjectedTla(
     moduleName: String,
     leaves: List<SpecLeaf>,
     pclassesForTla: Map<String, ProcClassNode>,
-    procFunNodes: Map<String, ProcFunNode>,
     leafSpecNodes: Map<String, LeafSpecNode>,
-    callSites: List<ProcFunCallSite>,
-    havocSites: List<ProcFunCallSite>,
-    handshake: ProcFunHandshakeVars,
     constants: LinkedHashSet<String>,
     cfgOverrides: LinkedHashSet<String>,
     invClosure: List<InvariantNode>,
@@ -325,20 +307,6 @@ private fun emitProjectedTla(
     collectIoHavocDomainModels(emittedOffers, cfgOverrides)
     collectTypeOkDomainModels(leaves, pclassesForTla, cfgOverrides)
     collectConstGlobalInitDomainModels(leaves, pclassesForTla, cfgOverrides)
-    havocSites.forEach { site ->
-        if (site.assignVars.isNotEmpty() &&
-            site.assignVars.none { TlaVarProjection.get().isRelevant(site.hostName, it) }
-        ) {
-            return@forEach
-        }
-        procFunNodes[site.procFunName]?.let { pf ->
-            try {
-                val d = typeToTlaDomain(pf.returnType)
-                val base = d.trim().removePrefix("(").substringBefore(" ")
-                if (base in setOf("Int", "Nat", "Real", "String")) cfgOverrides += base
-            } catch (_: RuntimeException) {}
-        }
-    }
     if ("String" in cfgOverrides) {
         constants += "String"
     }
@@ -394,10 +362,8 @@ private fun emitProjectedTla(
             invClosure.any { exprContainsAllDistinct(it.invariantFormula()) }
     val unsupportedBuiltinWarnings =
         collectUnsupportedBuiltinWarnings(offers, usedFunOps, invClosure)
-    val emittedOfferLists = collectEmittedOfferLists(offers, pclassesForTla)
-    val killTargets = collectKillTargets(emittedOfferLists)
-    val stateVarNames = buildStateVarNames(leaves, pclassesForTla, reservedTlaIds, killTargets)
-    val foldedCtors = foldableInitConstructors(offers, callSites, havocSites, pclassesForTla)
+    val stateVarNames = buildStateVarNames(leaves, pclassesForTla, reservedTlaIds)
+    val foldedCtors = foldableInitConstructors(offers, pclassesForTla)
     val foldedCtorLeaves = foldedCtors.keys
 
     // cfg Int/Nat may be finite \E bounds; TypeOK uses TypeOKInt (Int \cup Nat \cup extras).
@@ -430,37 +396,41 @@ private fun emitProjectedTla(
             "\\* State variables for ${leaf.name}"
         }
         val constructed = stateTlaName(leaf.tlaName, "constructed", stateVarNames)
-        val hasKilled = leaf.tlaName in killTargets
-        val killed = if (hasKilled) stateTlaName(leaf.tlaName, "killed", stateVarNames) else null
-        val terminated = if (leaf.isProcFun) stateTlaName(leaf.tlaName, "terminated", stateVarNames) else null
+        val parentDomain = parentLinkDomain(leaf, leaves)
+        val parentVar = if (parentDomain != null) stateTlaName(leaf.tlaName, "parent", stateVarNames) else null
         val paramDomain = leafParamDomain(leaf)
         val stateVarsByLeaf = pc.localDecls().filterIsInstance<VarNode>().map { it.name }.toSet()
         if (leaf.isParameterized) {
             val domain = paramDomain!!
+            val instDomain = leafInstDomain(leaf)
             val bareStateVars = stateVarsByLeaf
             val binder = indexBinderName(leaf, bareStateVars)
+            val instBinder = if (leaf.isDualIndexed) {
+                val base = leaf.instParamName!!
+                if (base !in bareStateVars && base != binder) base else "${base}_"
+            } else {
+                null
+            }
+            fun initMap(falseOrDefault: String): String =
+                if (instBinder != null && instDomain != null) {
+                    "[$binder \\in $domain |-> [$instBinder \\in $instDomain |-> $falseOrDefault]]"
+                } else {
+                    "[$binder \\in $domain |-> $falseOrDefault]"
+                }
             if (foldCtor == null) {
                 variables += constructed
-                initParts += "/\\ $constructed = [$binder \\in $domain |-> FALSE]"
-                typeOkParts += typeOkConjunct(constructed, "BOOLEAN", domain)
+                initParts += "/\\ $constructed = ${initMap("FALSE")}"
+                typeOkParts += typeOkConjunct(constructed, "BOOLEAN", domain, instDomain)
             }
-            if (killed != null) {
-                variables += killed
-                initParts += "/\\ $killed = [$binder \\in $domain |-> FALSE]"
-                typeOkParts += typeOkConjunct(killed, "BOOLEAN", domain)
-            }
-            if (terminated != null) {
-                variables += terminated
-                initParts += "/\\ $terminated = [$binder \\in $domain |-> FALSE]"
-                typeOkParts += typeOkConjunct(terminated, "BOOLEAN", domain)
+            if (parentVar != null) {
+                variables += parentVar
+                initParts += "/\\ $parentVar = ${initMap("CHOOSE p \\in $parentDomain : TRUE")}"
+                typeOkParts += typeOkConjunct(parentVar, parentDomain!!, domain, instDomain)
             }
             pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
                 if (!TlaVarProjection.get().isRelevant(leaf.name, vn.name)) return@forEach
                 val v = stateTlaName(leaf.tlaName, vn.name, stateVarNames)
                 variables += v
-                val typeOkRange = typeOkRangeForVar(
-                    leaf, vn, typeOkIntRange, typeOkShapes, stateVarNames, binder,
-                )
                 val folded = foldCtor?.let {
                     foldedCtorVarInit(
                         leaf, vn, it, binder, domain, stateVarNames, constants, cfgOverrides, stateVarsByLeaf,
@@ -469,14 +439,14 @@ private fun emitProjectedTla(
                 }
                 if (folded != null) {
                     initParts += folded
-                    if (leaf.indexesState(vn.name)) {
-                        typeOkParts += typeOkConjunct(v, typeOkRange, domain)
-                    } else {
-                        typeOkParts += typeOkConjunct(v, typeOkRange, null)
-                    }
                 } else if (leaf.indexesState(vn.name)) {
-                    initParts += "/\\ $v = [$binder \\in $domain |-> ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}]"
-                    typeOkParts += typeOkConjunct(v, typeOkRange, domain)
+                    // Prefer a one-line literal init when present (multi-line records break
+                    // Init `/\\` indentation). Open/spawn F_call re-applies inline inits.
+                    val def = when (val init = vn.initExpr) {
+                        is LiteralValueExprNode -> literalToTla(init)
+                        else -> defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)
+                    }
+                    initParts += "/\\ $v = ${initMap(def)}"
                 } else if (vn.name in leaf.globalConstVars) {
                     val singleton = singletonConstGlobals[leaf.tlaName to vn.name]
                     if (singleton != null) {
@@ -484,11 +454,13 @@ private fun emitProjectedTla(
                     } else {
                         initParts += "/\\ $v \\in ${typeToTlaDomain(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
                     }
-                    typeOkParts += typeOkConjunct(v, typeOkRange, null)
                 } else {
                     initParts += "/\\ $v = ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
-                    typeOkParts += typeOkConjunct(v, typeOkRange, null)
                 }
+                typeOkParts += typeOkForStateVar(
+                    leaf, vn, v, typeOkIntRange, typeOkShapes, stateVarNames,
+                    binder, domain, instDomain,
+                )
                 typeOkParts += typeOkShapeConjuncts(
                     leaf, vn.name, v, leaf.indexesState(vn.name), binder, domain,
                     typeOkShapes, stateVarNames,
@@ -496,7 +468,9 @@ private fun emitProjectedTla(
                 appendStateConstraint(
                     constraintParts, v, safeType(vn),
                     indexed = leaf.indexesState(vn.name),
-                    binder = binder, domain = domain, intRange = intConstraintRange,
+                    binder = binder, domain = domain,
+                    instBinder = instBinder, instDomain = instDomain,
+                    intRange = intConstraintRange,
                 )
             }
             if (foldCtor != null) {
@@ -510,16 +484,6 @@ private fun emitProjectedTla(
                 variables += constructed
                 initParts += "/\\ $constructed = FALSE"
                 typeOkParts += typeOkConjunct(constructed, "BOOLEAN", null)
-            }
-            if (killed != null) {
-                variables += killed
-                initParts += "/\\ $killed = FALSE"
-                typeOkParts += typeOkConjunct(killed, "BOOLEAN", null)
-            }
-            if (terminated != null) {
-                variables += terminated
-                initParts += "/\\ $terminated = FALSE"
-                typeOkParts += typeOkConjunct(terminated, "BOOLEAN", null)
             }
             pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
                 if (!TlaVarProjection.get().isRelevant(leaf.name, vn.name)) return@forEach
@@ -536,10 +500,9 @@ private fun emitProjectedTla(
                 } else {
                     initParts += "/\\ $v = ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
                 }
-                typeOkParts += typeOkConjunct(
-                    v,
-                    typeOkRangeForVar(leaf, vn, typeOkIntRange, typeOkShapes, stateVarNames, null),
-                    null,
+                typeOkParts += typeOkForStateVar(
+                    leaf, vn, v, typeOkIntRange, typeOkShapes, stateVarNames,
+                    binder = null, domain = null, instDomain = null,
                 )
                 typeOkParts += typeOkShapeConjuncts(
                     leaf, vn.name, v, indexed = false, binder = null, domain = null,
@@ -563,51 +526,9 @@ private fun emitProjectedTla(
     ) {
         cfgOverrides += "Int"
     }
-    // Procfun spawn-await handshake vars
-    if (handshake.allNames().isNotEmpty()) {
-        initParts += "\\* Procfun call-site handshake"
-        val hostByTla = leaves.associateBy { it.tlaName }
-        handshake.blockingByHost.forEach { (hostTla, varName) ->
-            val host = hostByTla[hostTla]
-            variables += varName
-            val domain = host?.let { leafParamDomain(it) }
-            if (host != null && host.isParameterized) {
-                val binder = indexBinderName(host, emptySet())
-                initParts += "/\\ $varName = [$binder \\in $domain |-> FALSE]"
-            } else {
-                initParts += "/\\ $varName = FALSE"
-            }
-            typeOkParts += typeOkConjunct(varName, "BOOLEAN", domain)
-        }
-        handshake.callFlags.forEach { (occ, varName) ->
-            variables += varName
-            val domain = leafParamDomain(occ)
-            if (occ.isParameterized) {
-                val binder = indexBinderName(occ, emptySet())
-                initParts += "/\\ $varName = [$binder \\in $domain |-> FALSE]"
-            } else {
-                initParts += "/\\ $varName = FALSE"
-            }
-            typeOkParts += typeOkConjunct(varName, "BOOLEAN", domain)
-        }
-        handshake.returnToByKey.forEach { (key, varName) ->
-            val (hostTla, _) = key
-            val host = hostByTla[hostTla]
-            variables += varName
-            val domain = host?.let { leafParamDomain(it) }
-            if (host != null && host.isParameterized) {
-                val binder = indexBinderName(host, emptySet())
-                initParts += "/\\ $varName = [$binder \\in $domain |-> FALSE]"
-            } else {
-                initParts += "/\\ $varName = FALSE"
-            }
-            typeOkParts += typeOkConjunct(varName, "BOOLEAN", domain)
-        }
-    }
     val built = buildTlaActions(
         leaves, pclassesForTla, offers, stateVarNames,
-        killTargets, callSites, handshake, procFunNodes,
-        havocSites, cfgOverrides, leafSpecNodes, foldedCtorLeaves,
+        cfgOverrides, leafSpecNodes, foldedCtorLeaves,
     )
     val helpers = built.helpers
     val actions = built.actions
@@ -629,7 +550,10 @@ private fun emitProjectedTla(
     val allDistinctOperatorDef =
         if (needsAllDistinctOperator) emitAllDistinctOperatorDef(funReservedNames) else null
     val funlibOperatorDefs = usedFunlibOps.map { emitFunOperatorDef(it, funReservedNames) }
-    val userFunOperatorDefs = usedUserFunOps.map { emitFunOperatorDef(it, funReservedNames) }
+    // Callers of funs using unsupported builtins already degrade to TRUE; no operator to emit.
+    val userFunOperatorDefs = usedUserFunOps
+        .filter { !exprContainsUnsupportedTlaBuiltin(it.funBody()) }
+        .map { emitFunOperatorDef(it, funReservedNames) }
     val hasJulayLibFuns =
         needsSpliceOperator || needsStartsWithOperator || needsAllDistinctOperator ||
             funlibOperatorDefs.isNotEmpty()
@@ -763,7 +687,14 @@ private fun emitProjectedTla(
         }
         appendLine("Next ==$nextBody")
         appendLine()
-        appendLine("Spec == Init /\\ [][Next]_vars")
+        val fairnessDef = emitFairnessDef(actions)
+        if (fairnessDef != null) {
+            appendLine(fairnessDef)
+            appendLine()
+            appendLine("Spec == Init /\\ [][Next]_vars /\\ Fairness")
+        } else {
+            appendLine("Spec == Init /\\ [][Next]_vars")
+        }
         appendLine()
         appendLine()
         appendLine("\\* Invariants")
@@ -786,19 +717,20 @@ private fun emitProjectedTla(
                 appendLine(def)
             }
         }
-        val terminatesDefs = leaves.filter { it.isProcFun }.map { leaf ->
+        val terminatesDefs = leaves.filter { it.isDynamic }.map { leaf ->
             emitTerminatesProperty(leaf, stateVarNames, pclassesForTla)
         }
         if (terminatesDefs.isNotEmpty()) {
             appendLine()
-            appendLine("GF(P) == <>[]P")
+            appendLine("\\* liveness: every dynamic proc slot eventually returns")
+            appendLine()
             terminatesDefs.forEach { appendLine(it) }
         }
         appendLine()
         appendLine("====")
     }
 
-    val terminatesPropNames = leaves.filter { it.isProcFun }.map { "${it.tlaName}Terminates" }
+    val terminatesPropNames = leaves.filter { it.isDynamic }.map { "${it.tlaName}Terminates" }
 
     val cfg = buildString {
         appendLine("SPECIFICATION Spec")
@@ -852,18 +784,43 @@ private fun emitTerminatesProperty(
     pclasses: Map<String, ProcClassNode>,
 ): String {
     val constructed = stateTlaName(leaf.tlaName, "constructed", stateVarNames)
-    val term = stateTlaName(leaf.tlaName, "terminated", stateVarNames)
     val propName = "${leaf.tlaName}Terminates"
-    return if (leaf.isParameterized) {
-        val pc = pclasses[leaf.name]
-        val bare = pc?.localDecls()?.filterIsInstance<VarNode>()?.map { it.name }?.toSet().orEmpty()
-        val binder = indexBinderName(leaf, bare)
-        val domain = typeDomainConstant(leaf.paramType!!) ?: leaf.paramType.toString()
-        "$propName == \\A $binder \\in $domain : ($constructed[$binder] ~> $term[$binder])"
+    val pc = pclasses[leaf.name]
+    val bare = pc?.localDecls()?.filterIsInstance<VarNode>()?.map { it.name }?.toSet().orEmpty()
+    val binder = indexBinderName(leaf, bare)
+    val domain = typeDomainConstant(leaf.paramType!!) ?: leaf.paramType.toString()
+    return if (leaf.isDualIndexed) {
+        val ibase = leaf.instParamName!!
+        val instBinder = if (ibase !in bare && ibase != binder) ibase else "${ibase}_"
+        val instDomain = typeDomainConstant(leaf.instParamType!!) ?: leaf.instParamType.toString()
+        "$propName == \\A $binder \\in $domain, $instBinder \\in $instDomain : " +
+            "($constructed[$binder][$instBinder] ~> ~$constructed[$binder][$instBinder])"
     } else {
-        "$propName == ($constructed ~> $term)"
+        "$propName == \\A $binder \\in $domain : ($constructed[$binder] ~> ~$constructed[$binder])"
     }
 }
+
+/**
+ * `Fairness == /\ \A slot : SF_vars(\E args : A(slot, args)) ...` for every system-controlled
+ * action (internal, timer, return, and syncs between procs). Unsynced env actions get none.
+ */
+private fun emitFairnessDef(actions: List<TlaAction>): String? {
+    val conjuncts = actions.filter { it.systemControlled }.map { action ->
+        val slots = action.params.take(action.indexParamCount)
+        val args = action.params.drop(action.indexParamCount)
+        val call = if (action.params.isEmpty()) action.name
+        else "${action.name}(${action.params.joinToString(", ") { it.first }})"
+        val inner = if (args.isEmpty()) call else wrapTlaExists(args, call)
+        val sf = "SF_vars($inner)"
+        if (slots.isEmpty()) sf
+        else "\\A " + slots.joinToString(", ") { "${it.first} \\in ${it.second}" } + " : $sf"
+    }
+    if (conjuncts.isEmpty()) return null
+    return "Fairness ==\n" + conjuncts.joinToString("\n") { "  /\\ ${it.replace("\n", "\n     ")}" }
+}
+
+/** (class, action) of `rcv` in every `serveHttp(port, A.snd ~> A.rcv)`: synced with the always-receptive runtime. */
+private var handlerResponseActions: Set<Pair<String, String>> = emptySet()
 
 internal data class TlaAction(
     val name: String,
@@ -872,6 +829,10 @@ internal data class TlaAction(
     val params: List<Pair<String, String>> = emptyList(),
     /** Present when [name] was renamed for disambiguation. */
     val comment: String? = null,
+    /** Leading [params] that are leaf index binders (create-index / `DynProc` slots). */
+    val indexParamCount: Int = 0,
+    /** Internal, timer, return, or a sync between procs: gets SF in `Fairness`. */
+    val systemControlled: Boolean = false,
 ) {
     fun nextDisjunct(): String {
         if (params.isEmpty()) return name
@@ -934,6 +895,20 @@ private fun offerIsStatic(offer: TlaActionOffer, pclasses: Map<String, ProcClass
  * - exactly two statics / two Defaults → one pairwise list
  * - otherwise null (caller falls back to ordinary default grouping)
  */
+/**
+ * Parent↔child pairs for one action name: each `B<A>` child offer (constructor or sync)
+ * with each syncable offer of an `A` occurrence. Null when no child meets its parent here.
+ */
+internal fun parentChildOfferPairs(group: List<TlaActionOffer>): List<List<TlaActionOffer>>? {
+    val pairs = mutableListOf<List<TlaActionOffer>>()
+    group.filter { it.leaf.parentClass != null }.forEach { child ->
+        group.filter { p ->
+            p.leaf.name == child.leaf.parentClass && p.leaf !== child.leaf && isSyncableTlaOffer(p)
+        }.forEach { parent -> pairs += listOf(parent, child) }
+    }
+    return pairs.ifEmpty { null }
+}
+
 private fun hubPairedOfferLists(
     syncables: List<TlaActionOffer>,
     pclasses: Map<String, ProcClassNode>,
@@ -974,20 +949,9 @@ private fun safeType(vn: VarNode): Type = try {
 private fun collectTlaActionOffers(
     leaves: List<SpecLeaf>,
     pclasses: Map<String, ProcClassNode>,
-    procFunDecls: Map<String, julay.compiler.decl.ProcClassDecl> = emptyMap(),
 ): List<TlaActionOffer> {
     val offers = mutableListOf<TlaActionOffer>()
     leaves.forEach { leaf ->
-        val pfDecl = procFunDecls[leaf.name]
-        if (pfDecl != null && leaf.isProcFun) {
-            pfDecl.constructors.forEach { ctor ->
-                offers += TlaActionOffer(leaf, ctor, TSAction.SyncRole.Internal, isConstructor = true)
-            }
-            pfDecl.transitions.forEach { tr ->
-                offers += TlaActionOffer(leaf, tr, tr.modifier, isConstructor = false)
-            }
-            return@forEach
-        }
         val pc = pclasses[leaf.name] ?: return@forEach
         val inlineAssigns = pc.localDecls().filterIsInstance<VarNode>().mapNotNull { v ->
             val init = v.initExpr ?: return@mapNotNull null
@@ -1019,6 +983,12 @@ internal fun collectEmittedOfferLists(
         val locals = group.filter { isLocalTlaOffer(it) }
         val syncables = group.filter { isSyncableTlaOffer(it) }
 
+        parentChildOfferPairs(group)?.let { pairs ->
+            pairs.forEach { result += it }
+            val paired = pairs.flatten().toSet()
+            (constructors + locals + syncables).filter { it !in paired }.forEach { result += listOf(it) }
+            return@forEach
+        }
         hubPairedOfferLists(syncables, pclasses)?.let { pairs ->
             pairs.forEach { result += it }
             constructors.forEach { result += listOf(it) }
@@ -1043,26 +1013,25 @@ internal fun collectEmittedOfferLists(
 }
 
 /**
- * Sole unsynced constructors folded into Init: not a hub-paired API, not hybrid
- * ctor+default, not a procfun `*_call` / havoc site, and the leaf has no other constructor.
+ * Sole unsynced constructors of static leaves folded into Init: not a hub-paired API, not hybrid
+ * ctor+default, and the leaf has no other constructor. Dynamic leaves are spawned per slot.
  */
 internal fun foldableInitConstructors(
     offers: List<TlaActionOffer>,
-    callSites: List<ProcFunCallSite>,
-    havocSites: List<ProcFunCallSite>,
     pclasses: Map<String, ProcClassNode> = emptyMap(),
 ): Map<String, TlaActionOffer> {
-    val splitKeys = (callSites + havocSites).map { it.hostName to it.hostActionName }.toSet()
     val out = linkedMapOf<String, TlaActionOffer>()
     offers.filter { it.isConstructor }.groupBy { it.leaf.tlaName }.forEach { (tlaName, ctors) ->
         if (ctors.size != 1) return@forEach
         val offer = ctors.single()
-        if ((offer.leaf.tlaName to offer.decl.action.name) in splitKeys) return@forEach
+        if (offer.leaf.isDynamic) return@forEach
         val group = offers.filter { it.decl.action.name == offer.decl.action.name }
         val syncables = group.filter { isSyncableTlaOffer(it) }
         if (hubPairedOfferLists(syncables, pclasses) != null) return@forEach
         val constructors = group.filter { it.isConstructor }
         if (constructors.size == 1 && syncables.size == 1) return@forEach
+        // Do not fold constructors that call TLA-unsupported builtins (e.g. parseInt).
+        if (offerContainsUnsupportedTlaBuiltin(offer)) return@forEach
         out[tlaName] = offer
     }
     return out
@@ -1081,40 +1050,16 @@ internal fun offerGroupHasEmittedUpdate(group: List<TlaActionOffer>): Boolean =
         }
     }
 
-/** Leaf names that are kill targets: `exitProc` callers. */
-private fun collectKillTargets(
-    emittedOfferLists: List<List<TlaActionOffer>>,
-): Set<String> {
-    val targets = linkedSetOf<String>()
-    emittedOfferLists.forEach { offerList ->
-        offerList.forEach { offer ->
-            if (offerHasExitProc(offer)) {
-                targets += offer.leaf.tlaName
-            }
-        }
-    }
-    return targets
-}
-
-private fun offerHasExitProc(offer: TlaActionOffer): Boolean =
-    (offer.decl.befores + offer.decl.afters).any { it.callName() == "exitProc" }
-
-private fun killedAssignTrueExpr(
-    leaf: SpecLeaf,
-    binder: String?,
-    stateVarNames: Map<Pair<String, String>, String>,
-): String {
-    val k = stateTlaName(leaf.tlaName, "killed", stateVarNames)
-    return if (binder != null) {
-        "$k' = [$k EXCEPT ![$binder] = TRUE]"
-    } else {
-        "$k' = TRUE"
-    }
-}
-
 private fun leafParamDomain(leaf: SpecLeaf): String? =
     if (leaf.isParameterized) {
         typeDomainConstant(leaf.paramType!!) ?: leaf.paramType.toString()
+    } else {
+        null
+    }
+
+private fun leafInstDomain(leaf: SpecLeaf): String? =
+    if (leaf.isDualIndexed) {
+        typeDomainConstant(leaf.instParamType!!) ?: leaf.instParamType.toString()
     } else {
         null
     }
@@ -1231,9 +1176,88 @@ private fun closedLiteralDomain(
     return TlaLiteralDomainProjection.get().render(lits)
 }
 
-private fun typeOkConjunct(name: String, range: String, paramDomain: String?): String {
-    val ty = if (paramDomain != null) "[$paramDomain -> $range]" else range
+private fun typeOkConjunct(
+    name: String,
+    range: String,
+    paramDomain: String?,
+    instDomain: String? = null,
+): String {
+    val ty = when {
+        paramDomain != null && instDomain != null -> "[$paramDomain -> [$instDomain -> $range]]"
+        paramDomain != null -> "[$paramDomain -> $range]"
+        else -> range
+    }
     return "/\\ $name \\in $ty"
+}
+
+/**
+ * Sparse Julay maps: pointwise DOMAIN/range checks (TLC-cheap) instead of
+ * `var \in [K -> V]` (total; rejects empty Init). When [mapKeyUniverse] is set
+ * the map is total over that collection.
+ */
+private fun typeOkMapConjunct(
+    name: String,
+    mapType: MapType,
+    intRange: String,
+    paramDomain: String?,
+    instDomain: String? = null,
+    mapKeyUniverse: String? = null,
+    leafClass: String? = null,
+    varName: String? = null,
+): String {
+    val keyUniv = mapKeyUniverse ?: typeOkEnumerableUniverse(mapType.keyType, intRange)
+    val valueRange = typeOkVarRange(
+        mapType.valueType, intRange, leafClass = leafClass, varName = varName,
+    )
+    if (mapKeyUniverse != null) {
+        return typeOkConjunct(name, "[$keyUniv -> $valueRange]", paramDomain, instDomain)
+    }
+    return when {
+        paramDomain != null && instDomain != null ->
+            "/\\ \\A n__tok \\in $paramDomain, i__tok \\in $instDomain :\n" +
+                "     /\\ DOMAIN $name[n__tok][i__tok] \\subseteq $keyUniv\n" +
+                "     /\\ \\A k__tok \\in DOMAIN $name[n__tok][i__tok] : " +
+                "$name[n__tok][i__tok][k__tok] \\in $valueRange"
+        paramDomain != null ->
+            "/\\ \\A n__tok \\in $paramDomain :\n" +
+                "     /\\ DOMAIN $name[n__tok] \\subseteq $keyUniv\n" +
+                "     /\\ \\A k__tok \\in DOMAIN $name[n__tok] : " +
+                "$name[n__tok][k__tok] \\in $valueRange"
+        else ->
+            "/\\ DOMAIN $name \\subseteq $keyUniv\n" +
+                "  /\\ \\A k__tok \\in DOMAIN $name : $name[k__tok] \\in $valueRange"
+    }
+}
+
+/** TypeOK conjunct for a leaf state var (maps get sparse DOMAIN checks). */
+private fun typeOkForStateVar(
+    leaf: SpecLeaf,
+    vn: VarNode,
+    tlaName: String,
+    intRange: String,
+    shapes: TypeOkShapePlan,
+    stateVarNames: Map<Pair<String, String>, String>,
+    binder: String?,
+    domain: String?,
+    instDomain: String?,
+): String {
+    val ty = safeType(vn)
+    val indexed = leaf.indexesState(vn.name)
+    val paramDom = if (indexed) domain else null
+    val instDom = if (indexed && leaf.isDualIndexed) instDomain else null
+    if (ty is MapType) {
+        fun srcRead(src: String): String {
+            val srcTla = stateTlaName(leaf.tlaName, src, stateVarNames)
+            return if (leaf.indexesState(src) && binder != null) "$srcTla[$binder]" else srcTla
+        }
+        val mapKey = shapes.domainEq[leaf.tlaName to vn.name]?.let { srcRead(it) }
+        return typeOkMapConjunct(
+            tlaName, ty, intRange, paramDom, instDom, mapKey,
+            leafClass = leaf.name, varName = vn.name,
+        )
+    }
+    val range = typeOkRangeForVar(leaf, vn, intRange, shapes, stateVarNames, binder)
+    return typeOkConjunct(tlaName, range, paramDom, instDom)
 }
 
 /** cfg Int plus negative literals already in the model (`votedFor = -1`). Not TypeOKInt extras. */
@@ -1253,22 +1277,31 @@ private fun appendStateConstraint(
     indexed: Boolean,
     binder: String?,
     domain: String?,
+    instBinder: String? = null,
+    instDomain: String? = null,
     intRange: String,
 ) {
+    val dual = indexed && binder != null && domain != null &&
+        instBinder != null && instDomain != null
+    val single = indexed && binder != null && domain != null
     when (type) {
         is IntType -> {
-            val body = if (indexed && binder != null && domain != null) {
-                "\\A $binder \\in $domain : $varName[$binder] \\in $intRange"
-            } else {
-                "$varName \\in $intRange"
+            val body = when {
+                dual ->
+                    "\\A $binder \\in $domain, $instBinder \\in $instDomain : " +
+                        "$varName[$binder][$instBinder] \\in $intRange"
+                single -> "\\A $binder \\in $domain : $varName[$binder] \\in $intRange"
+                else -> "$varName \\in $intRange"
             }
             parts += "/\\ $body"
         }
         is ListType -> {
-            val body = if (indexed && binder != null && domain != null) {
-                "\\A $binder \\in $domain : Len($varName[$binder]) <= MaxListLen"
-            } else {
-                "Len($varName) <= MaxListLen"
+            val body = when {
+                dual ->
+                    "\\A $binder \\in $domain, $instBinder \\in $instDomain : " +
+                        "Len($varName[$binder][$instBinder]) <= MaxListLen"
+                single -> "\\A $binder \\in $domain : Len($varName[$binder]) <= MaxListLen"
+                else -> "Len($varName) <= MaxListLen"
             }
             parts += "/\\ $body"
         }
@@ -1328,17 +1361,11 @@ private fun buildTlaActions(
     pclasses: Map<String, ProcClassNode>,
     offers: List<TlaActionOffer>,
     stateVarNames: Map<Pair<String, String>, String>,
-    killTargets: Set<String>,
-    callSites: List<ProcFunCallSite> = emptyList(),
-    handshake: ProcFunHandshakeVars = ProcFunHandshakeVars(emptyList(), emptyMap(), emptyMap()),
-    procFunNodes: Map<String, ProcFunNode> = emptyMap(),
-    havocSites: List<ProcFunCallSite> = emptyList(),
-    cfgOverrides: MutableSet<String> = linkedSetOf(),
+    @Suppress("UNUSED_PARAMETER") cfgOverrides: MutableSet<String> = linkedSetOf(),
     leafSpecs: Map<String, LeafSpecNode> = emptyMap(),
     foldedCtorLeaves: Set<String> = emptySet(),
 ): TlaBuildResult {
-    val allVars = allTlaVars(leaves, pclasses, stateVarNames, killTargets, foldedCtorLeaves) +
-        handshake.allNames()
+    val allVars = allTlaVars(leaves, pclasses, stateVarNames, foldedCtorLeaves)
     val stateVarsByLeaf = leaves.associate { leaf ->
         leaf.tlaName to (
             pclasses[leaf.name]
@@ -1349,15 +1376,6 @@ private fun buildTlaActions(
                 ?: emptySet()
             )
     }
-    val leafByTla = leaves.associateBy { it.tlaName }
-    val callSiteByHostAction = callSites.associateBy { it.hostName to it.hostActionName }
-    val havocByHostAction = havocSites.associateBy { it.hostName to it.hostActionName }
-    val returnToByOccurrence = callSites.associate {
-        it.occurrence.occurrenceId to handshake.returnToByKey.getValue(it.hostName to it.hostActionName)
-    }
-    val blockingByHost = handshake.blockingByHost
-    val hostsWithBlocking = blockingByHost.keys
-    val splitHostActions = callSiteByHostAction.keys + havocByHostAction.keys
 
     val result = mutableListOf<TlaAction>()
     val byName = offers.groupBy { it.decl.action.name }
@@ -1369,10 +1387,7 @@ private fun buildTlaActions(
     ) {
         emitConjoined(
             name, offerList, allVars, stateVarsByLeaf, stateVarNames,
-            killTargets, comment,
-            returnToByOccurrence = returnToByOccurrence,
-            blockingByHost = blockingByHost,
-            hostsWithBlocking = hostsWithBlocking,
+            comment,
             pclasses = pclasses,
             leafSpecs = leafSpecs,
             systemLeaves = leaves,
@@ -1380,37 +1395,33 @@ private fun buildTlaActions(
         )?.let { result += it }
     }
 
-    fun emitCoupled(offer: TlaActionOffer, site: ProcFunCallSite) {
-        val hostLeaf = leafByTla.getValue(offer.leaf.tlaName)
-        val pf = procFunNodes[site.procFunName]
-            ?: error("missing procfun ${site.procFunName}")
-        result += emitProcFunCallAndRet(
-            site, hostLeaf, offer, pf, allVars, stateVarsByLeaf, stateVarNames, handshake,
-            foldedCtorLeaves,
-        )
-    }
-
-    fun emitHavoc(offer: TlaActionOffer, site: ProcFunCallSite) {
-        val hostLeaf = leafByTla.getValue(offer.leaf.tlaName)
-        val pf = procFunNodes[site.procFunName]
-            ?: error("missing procfun ${site.procFunName}")
-        result += emitProcFunHavocAction(
-            site, hostLeaf, offer, pf, allVars, stateVarsByLeaf, stateVarNames, cfgOverrides,
-            foldedCtorLeaves,
-        )
-    }
-
-    fun emitSplitOrPlain(offer: TlaActionOffer): Boolean {
-        val key = offer.leaf.tlaName to offer.decl.action.name
-        callSiteByHostAction[key]?.let { emitCoupled(offer, it); return true }
-        havocByHostAction[key]?.let { emitHavoc(offer, it); return true }
-        return false
-    }
-
     byName.forEach { (actionName, group) ->
         val constructors = group.filter { it.isConstructor }
         val locals = group.filter { isLocalTlaOffer(it) }
         val syncables = group.filter { isSyncableTlaOffer(it) }
+
+        parentChildOfferPairs(group)?.let { pairs ->
+            val needDisambiguate = pairs.size > 1
+            pairs.forEach { pair ->
+                val (parent, child) = pair
+                if (needDisambiguate) {
+                    emit(
+                        "${actionName}_${parent.leaf.tlaName}_${child.leaf.tlaName}",
+                        pair,
+                        "$actionName action where ${parent.leaf.tlaName} is the parent and " +
+                            "${child.leaf.tlaName} is the child",
+                    )
+                } else {
+                    emit(actionName, pair)
+                }
+            }
+            val paired = pairs.flatten().toSet()
+            val rest = (constructors + locals + syncables).filter { it !in paired }
+            rest.forEach { offer ->
+                emit("${actionName}_${offer.leaf.tlaName}", listOf(offer), "$actionName action on ${offer.leaf.tlaName}")
+            }
+            return@forEach
+        }
 
         hubPairedOfferLists(syncables, pclasses)?.let { pairs ->
             val needDisambiguate = pairs.size > 1
@@ -1448,7 +1459,6 @@ private fun buildTlaActions(
             val disambiguateCtors = constructors.size > 1
             constructors.forEach { offer ->
                 if (offer.leaf.tlaName in foldedCtorLeaves) return@forEach
-                if (emitSplitOrPlain(offer)) return@forEach
                 val name = if (disambiguateCtors) {
                     if (offer.decl.action.name == "initially") "${offer.leaf.tlaName}_initially"
                     else "${actionName}_${offer.leaf.tlaName}"
@@ -1461,7 +1471,6 @@ private fun buildTlaActions(
             }
             val disambiguateLocals = locals.size > 1
             locals.forEach { offer ->
-                if (emitSplitOrPlain(offer)) return@forEach
                 val name = if (disambiguateLocals) "${actionName}_${offer.leaf.tlaName}" else actionName
                 val comment = if (disambiguateLocals) "$actionName action on ${offer.leaf.tlaName}" else null
                 emit(name, listOf(offer), comment)
@@ -1479,7 +1488,6 @@ private fun buildTlaActions(
         val disambiguateCtors = constructors.size > 1
         constructors.forEach { offer ->
             if (offer.leaf.tlaName in foldedCtorLeaves) return@forEach
-            if (emitSplitOrPlain(offer)) return@forEach
             val name: String
             val comment: String?
             if (disambiguateCtors) {
@@ -1502,7 +1510,6 @@ private fun buildTlaActions(
 
         val disambiguateLocals = locals.size > 1
         locals.forEach { offer ->
-            if (emitSplitOrPlain(offer)) return@forEach
             val name: String
             val comment: String?
             if (disambiguateLocals) {
@@ -1516,17 +1523,7 @@ private fun buildTlaActions(
         }
 
         when {
-            syncables.size >= 2 -> {
-                val (coupled, plain) = syncables.partition {
-                    (it.leaf.tlaName to it.decl.action.name) in splitHostActions
-                }
-                coupled.forEach { offer -> emitSplitOrPlain(offer) }
-                if (plain.isNotEmpty()) emit(actionName, plain)
-            }
-            syncables.size == 1 -> {
-                val offer = syncables[0]
-                if (!emitSplitOrPlain(offer)) emit(actionName, syncables)
-            }
+            syncables.isNotEmpty() -> emit(actionName, syncables)
         }
     }
 
@@ -1543,7 +1540,6 @@ private fun allTlaVars(
     leaves: List<SpecLeaf>,
     pclasses: Map<String, ProcClassNode>,
     stateVarNames: Map<Pair<String, String>, String>,
-    killTargets: Set<String>,
     foldedCtorLeaves: Set<String> = emptySet(),
 ): List<String> =
     leaves.flatMap { leaf ->
@@ -1552,11 +1548,8 @@ private fun allTlaVars(
         if (leaf.tlaName !in foldedCtorLeaves) {
             base += stateTlaName(leaf.tlaName, "constructed", stateVarNames)
         }
-        if (leaf.tlaName in killTargets) {
-            base += stateTlaName(leaf.tlaName, "killed", stateVarNames)
-        }
-        if (leaf.isProcFun) {
-            base += stateTlaName(leaf.tlaName, "terminated", stateVarNames)
+        if ((leaf.tlaName to "parent") in stateVarNames) {
+            base += stateTlaName(leaf.tlaName, "parent", stateVarNames)
         }
         base + pc.localDecls().filterIsInstance<VarNode>().filter {
             TlaVarProjection.get().isRelevant(leaf.name, it.name)
@@ -1571,11 +1564,7 @@ private fun emitConjoined(
     allVars: List<String>,
     stateVarsByLeaf: Map<String, Set<String>>,
     stateVarNamesIn: Map<Pair<String, String>, String>,
-    killTargets: Set<String> = emptySet(),
     comment: String? = null,
-    returnToByOccurrence: Map<String, String> = emptyMap(),
-    blockingByHost: Map<String, String> = emptyMap(),
-    hostsWithBlocking: Set<String> = emptySet(),
     pclasses: Map<String, ProcClassNode> = emptyMap(),
     leafSpecs: Map<String, LeafSpecNode> = emptyMap(),
     systemLeaves: List<SpecLeaf> = emptyList(),
@@ -1660,6 +1649,7 @@ private fun emitConjoined(
     // not be suffix-renamed just because that binder is in `reserved`.
     val moduleLevelTaken = (variableTlaIds + allVars).toMutableSet()
     val reserved = moduleLevelTaken.toMutableSet()
+    val instBinders = linkedMapOf<String, String>()
     fun bindLeaf(leaf: SpecLeaf) {
         // Apply-only / leaf-spec under `with`: register shared binder without lifting state.
         if (!leaf.isParameterized && leaf.withScopeId != null && leaf.paramName != null) {
@@ -1674,6 +1664,12 @@ private fun emitConjoined(
         selfBinders[leaf.tlaName] = binder
         reserved += binder
         leaf.withScopeId?.let { sharedWithBinders.putIfAbsent(it, binder) }
+        if (leaf.isDualIndexed) {
+            val base = leaf.instParamName!!
+            val ib = if (base !in reserved) base else firstFreeParamTlaName(base, reserved)
+            instBinders[leaf.tlaName] = ib
+            reserved += ib
+        }
     }
     offers.forEach { offer -> bindLeaf(offer.leaf) }
 
@@ -1699,7 +1695,40 @@ private fun emitConjoined(
     val exprOverrides = argRenames + constGlobalArgBinds
     fun argTla(name: String): String = exprOverrides[name] ?: name
 
-    fun selfOf(leaf: SpecLeaf): String? = selfBinders[leaf.tlaName]
+    /** Index path for reads/EXCEPT: `n` or `n][i` so `$v[$path]` / `EXCEPT ![$path]` work. */
+    fun selfOf(leaf: SpecLeaf): String? {
+        val n = selfBinders[leaf.tlaName] ?: return null
+        val i = instBinders[leaf.tlaName]
+        return if (leaf.isDualIndexed && i != null) "$n][$i" else n
+    }
+
+    /** Slot of [leaf] in this action: its `DynProc` binder (null for static leaves). */
+    fun slotOf(leaf: SpecLeaf): String? = when {
+        !leaf.isDynamic -> null
+        leaf.isDualIndexed -> instBinders[leaf.tlaName]
+        else -> selfBinders[leaf.tlaName]
+    }
+
+    /**
+     * Parent link for a `B<A>` child meeting its parent in this action: the child constructor
+     * records the parent slot; every other parent↔child sync checks it. Pairs of (part, primed var).
+     */
+    fun parentLinkParts(offer: TlaActionOffer): List<Pair<String, String?>> {
+        val child = offer.leaf
+        if ((child.tlaName to "parent") !in stateVarNames) return emptyList()
+        val parent = offers.firstOrNull { it.leaf.name == child.parentClass && it.leaf !== child }?.leaf
+            ?: return emptyList()
+        val pv = stateTlaName(child.tlaName, "parent", stateVarNames)
+        val value = parentLinkValue(parent, child, systemLeaves, slotOf(parent))
+        val self = selfOf(child)
+        return if (offer.isConstructor) {
+            listOf(
+                (if (self != null) "/\\ $pv' = [$pv EXCEPT ![$self] = $value]" else "/\\ $pv' = $value") to pv,
+            )
+        } else {
+            listOf((if (self != null) "/\\ $pv[$self] = $value" else "/\\ $pv = $value") to null)
+        }
+    }
 
     fun pickOfferFor(expr: ExprNode): TlaActionOffer {
         for (offer in offers) {
@@ -1776,7 +1805,8 @@ private fun emitConjoined(
                     if (update.name.isDiscardBinding()) return@forEach
                     seenLet = true
                     val tlaName = allocTlaName(update.name, taken)
-                    val io = exprContainsIoHavoc(update.init)
+                    val io = exprContainsIoHavoc(update.init) ||
+                        exprContainsUnsupportedTlaBuiltin(update.init)
                     val ioDomain = if (io) typeToTlaDomain(update.type) else null
                     val initTla = if (io) {
                         tlaName
@@ -1801,7 +1831,9 @@ private fun emitConjoined(
                     if (constGlobal && isActionArgSymbol(expr, argNames)) {
                         return@forEach
                     }
-                    if (exprContainsIoHavoc(expr)) {
+                    if (exprContainsIoHavoc(expr) ||
+                        exprContainsUnsupportedTlaBuiltin(expr)
+                    ) {
                         val domain = typeToTlaDomain(expr.getType())
                         addAssignPart(
                             if (constGlobal) {
@@ -1890,29 +1922,21 @@ private fun emitConjoined(
                 },
             )
         }
-        if (offer.decl.isReturn && offer.leaf.isProcFun &&
-            offer.decl.action.name == procFunRetAction(offer.leaf.name)
-        ) {
-            val term = stateTlaName(offer.leaf.tlaName, "terminated", stateVarNames)
-            targetChanged += term
+        if (offer.decl.isReturn && offer.leaf.tlaName !in foldedCtorLeaves) {
+            // A return frees the slot.
+            val c = stateTlaName(offer.leaf.tlaName, "constructed", stateVarNames)
+            targetChanged += c
             addAssignPart(
                 if (self != null) {
-                    "/\\ $term' = [$term EXCEPT ![$self] = TRUE]"
+                    "/\\ $c' = [$c EXCEPT ![$self] = FALSE]"
                 } else {
-                    "/\\ $term' = TRUE"
+                    "/\\ $c' = FALSE"
                 },
             )
-            val returnTo = returnToByOccurrence[offer.leaf.occurrenceId]
-            if (returnTo != null) {
-                targetChanged += returnTo
-                addAssignPart(
-                    if (self != null) {
-                        "/\\ $returnTo' = [$returnTo EXCEPT ![$self] = TRUE]"
-                    } else {
-                        "/\\ $returnTo' = TRUE"
-                    },
-                )
-            }
+        }
+        parentLinkParts(offer).forEach { (part, primed) ->
+            if (primed != null) targetChanged += primed
+            addAssignPart(part)
         }
 
         targetParts += prefixParts
@@ -1953,19 +1977,6 @@ private fun emitConjoined(
             } else {
                 parts += if (self != null) "/\\ $c[$self]" else "/\\ $c"
             }
-        }
-        if (offer.leaf.tlaName in killTargets) {
-            val killed = stateTlaName(offer.leaf.tlaName, "killed", stateVarNames)
-            parts += if (self != null) "/\\ ~$killed[$self]" else "/\\ ~$killed"
-        }
-        if (offer.leaf.isProcFun) {
-            val term = stateTlaName(offer.leaf.tlaName, "terminated", stateVarNames)
-            parts += if (self != null) "/\\ ~$term[$self]" else "/\\ ~$term"
-        }
-        // Host leaf blocked while awaiting a procfun return (child steps ignore this).
-        if (!offer.leaf.isProcFun && offer.leaf.tlaName in hostsWithBlocking) {
-            val blocking = blockingByHost.getValue(offer.leaf.tlaName)
-            parts += if (self != null) "/\\ ~$blocking[$self]" else "/\\ ~$blocking"
         }
 
         // Only include args that appear in guards/transits (skip unused initially args).
@@ -2015,11 +2026,6 @@ private fun emitConjoined(
         }
 
         emitTransitUpdates(offer, parts, changed)
-        if (offerHasExitProc(offer)) {
-            val killedVar = stateTlaName(offer.leaf.tlaName, "killed", stateVarNames)
-            parts += "/\\ ${killedAssignTrueExpr(offer.leaf, self, stateVarNames)}"
-            changed += killedVar
-        }
     }
 
     val unchanged = allVars.filter { it !in changed }
@@ -2052,11 +2058,17 @@ private fun emitConjoined(
         letBindings += argTla(arg) to emitBound(expr, "      ${argTla(arg)} == ")
     }
     val body = wrapTlaLet(letBindings, innerBody)
-    val indexParams = selfBinders.map { (leafName, binder) ->
+    val indexParams = mutableListOf<Pair<String, String>>()
+    selfBinders.forEach { (leafName, binder) ->
         val leaf = offers.firstOrNull { it.leaf.tlaName == leafName }?.leaf
             ?: error("missing leaf $leafName")
         val domain = typeDomainConstant(leaf.paramType!!) ?: leaf.paramType.toString()
-        binder to domain
+        indexParams += binder to domain
+        val ib = instBinders[leafName]
+        if (leaf.isDualIndexed && ib != null) {
+            val instDomain = typeDomainConstant(leaf.instParamType!!) ?: leaf.instParamType.toString()
+            indexParams += ib to instDomain
+        }
     }
     // Aux params that are already index binders (same name) are dropped by distinctBy.
     val omitBinders = bindPlan.omitArgTypeDomains()
@@ -2069,7 +2081,17 @@ private fun emitConjoined(
         "$name(${params.joinToString(", ") { it.first }})"
     }
     TlaSkipConjuncts.clear()
-    return TlaAction(name, "$signature ==\n  $body", params, comment)
+    val systemControlled = offers.size >= 2 || offers.any { o ->
+        o.decl.modifier == TSAction.SyncRole.Internal ||
+            o.decl.modifier == TSAction.SyncRole.Timer ||
+            o.decl.isTimer ||
+            (o.leaf.name to o.decl.action.name) in handlerResponseActions
+    }
+    return TlaAction(
+        name, "$signature ==\n  $body", params, comment,
+        indexParamCount = params.count { p -> indexParams.any { it.first == p.first } },
+        systemControlled = systemControlled,
+    )
 }
 
 /** Prefer [SpecLeaf.paramName] as the TLA binder; suffix `_` / `_2` on name clashes.
@@ -2097,7 +2119,6 @@ internal fun buildStateVarNames(
     leaves: List<SpecLeaf>,
     pclasses: Map<String, ProcClassNode>,
     reservedIds: Set<String>,
-    killTargets: Set<String> = emptySet(),
 ): Map<Pair<String, String>, String> {
     val ownersByVar = linkedMapOf<String, MutableList<String>>()
     leaves.forEach { leaf ->
@@ -2110,11 +2131,8 @@ internal fun buildStateVarNames(
     leaves.forEach { leaf ->
         val id = leaf.tlaName
         out[id to "constructed"] = "${id}_constructed"
-        if (id in killTargets || leaf.tlaName in killTargets) {
-            out[id to "killed"] = "${id}_killed"
-        }
-        if (leaf.isProcFun) {
-            out[id to "terminated"] = "${id}_terminated"
+        if (parentLinkDomain(leaf, leaves) != null) {
+            out[id to "parent"] = "${id}_parent"
         }
         val pc = pclasses[leaf.name] ?: return@forEach
         pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
@@ -2123,6 +2141,32 @@ internal fun buildStateVarNames(
         }
     }
     return out
+}
+
+/**
+ * TLA domain of `<Child>_parent` for a `B<A>` leaf, or null when no link var is needed
+ * (parent is a single static occurrence, or absent).
+ * One dynamic parent occurrence → its `DynProc` slot; several occurrences → `<<occ, slot>>`.
+ */
+internal fun parentLinkDomain(leaf: SpecLeaf, leaves: List<SpecLeaf>): String? {
+    val parents = parentOccurrences(leaf, leaves)
+    if (parents.isEmpty()) return null
+    if (parents.size == 1) return if (parents[0].isDynamic) DYN_PROC_MODEL else null
+    return parents.joinToString(" \\cup ") { p ->
+        if (p.isDynamic) "({\"${p.tlaName}\"} \\X $DYN_PROC_MODEL)" else "{<<\"${p.tlaName}\", 0>>}"
+    }
+}
+
+internal fun parentOccurrences(leaf: SpecLeaf, leaves: List<SpecLeaf>): List<SpecLeaf> {
+    val parent = leaf.parentClass ?: return emptyList()
+    return leaves.filter { it.name == parent && it !== leaf }
+}
+
+/** Slot path of a dynamic leaf inside an action: the `DynProc` binder. */
+internal fun parentLinkValue(parent: SpecLeaf, child: SpecLeaf, leaves: List<SpecLeaf>, slot: String?): String {
+    val multi = parentOccurrences(child, leaves).size > 1
+    val s = slot ?: "0"
+    return if (multi) "<<\"${parent.tlaName}\", $s>>" else s
 }
 
 internal fun stateTlaName(
@@ -2279,7 +2323,10 @@ private fun foldedCtorVarInit(
     if (constGlobal) {
         return null
     }
-    if (exprContainsIoHavoc(assign.expr) || isActionArgSymbol(assign.expr, argNames)) {
+    if (exprContainsIoHavoc(assign.expr) ||
+        exprContainsUnsupportedTlaBuiltin(assign.expr) ||
+        isActionArgSymbol(assign.expr, argNames)
+    ) {
         collectDomainModelNames(safeType(vn), cfgOverrides)
         val ty = typeToTlaDomain(safeType(vn))
         return if (binder != null && leaf.indexesState(vn.name)) {
@@ -2477,7 +2524,8 @@ internal fun defaultTlaValue(
     is DomainType -> type.cfgElements?.firstOrNull() ?: defaultTlaValue(type.carrierType)
     is ListType -> "<<>>"
     is SetType -> "{}"
-    is MapType -> "[x \\in {} |-> 0]"
+    // Binder must not collide with a state VARIABLE named `x` (SANY multiply-defined).
+    is MapType -> "[__k \\in {} |-> 0]"
     is ObjClassType -> {
         val single = TlaFieldProjection.get().singletonField(type)
         if (single != null) {
@@ -2590,7 +2638,6 @@ internal fun typeDomainConstant(typeExpr: TypeExpr): String? = when (typeExpr) {
     is TypeExpr.Simple -> typeExpr.name
     is TypeExpr.Parametric -> null
     is TypeExpr.Tuple -> null
-    is TypeExpr.ProcFunRef -> null
 }
 
 internal fun cfgConstantModel(name: String): String = when (name) {
@@ -2625,7 +2672,6 @@ private fun collectCfgLiteralsFromOffer(
     strs: MutableSet<String>,
 ) {
     offer.decl.guards.forEach { collectCfgLiteralsFromExpr(it, ints, strs) }
-    offer.decl.returnExpr?.let { collectCfgLiteralsFromExpr(it, ints, strs) }
     offer.decl.transits.forEach { update ->
         when (update) {
             is TransitUpdate.Let -> collectCfgLiteralsFromExpr(update.init, ints, strs)
@@ -2665,7 +2711,6 @@ private fun collectStringLiteralsFromExpr(expr: ExprNode, into: MutableSet<Strin
 
 private fun offerContainsIntToStringCoerce(offer: TlaActionOffer): Boolean {
     if (offer.decl.guards.any { exprContainsIntToStringCoerce(it) }) return true
-    if (offer.decl.returnExpr?.let { exprContainsIntToStringCoerce(it) } == true) return true
     return offer.decl.transits.any { update ->
         when (update) {
             is TransitUpdate.Let -> exprContainsIntToStringCoerce(update.init)
@@ -2792,6 +2837,7 @@ internal fun exprContainsIoHavoc(expr: ExprNode): Boolean =
         else -> expr.children.filterIsInstance<ExprNode>().any { exprContainsIoHavoc(it) }
     }
 
+
 /**
  * Sort CONSTANTs from leaf state, used action args, and also-args after unused-field projection.
  */
@@ -2899,8 +2945,7 @@ internal fun offerRefsArg(offer: TlaActionOffer, argName: String): Boolean =
                     exprReferencesSymbol(update.index, argName) || exprReferencesSymbol(update.value, argName)
                 is TransitUpdate.Let -> exprReferencesSymbol(update.init, argName)
             }
-        } ||
-        (offer.decl.returnExpr?.let { exprReferencesSymbol(it, argName) } == true)
+        }
 
 private fun collectIoHavocDomainModels(
     offers: List<TlaActionOffer>,
@@ -3234,6 +3279,30 @@ internal fun emitStartsWithOperatorDef(reservedNames: Set<String>): String {
 
 private val tlaUnsupportedBuiltins = setOf("split", "parseInt", "trim", "portFromUrl")
 
+internal fun exprContainsUnsupportedTlaBuiltin(expr: ExprNode): Boolean =
+    when (expr) {
+        is FunCallExprNode -> {
+            val name = expr.resolvedBuiltinOrNull()?.name ?: expr.callName()
+            name in tlaUnsupportedBuiltins ||
+                expr.callArgs().any { exprContainsUnsupportedTlaBuiltin(it) } ||
+                (expr.resolvedFunOrNull()?.let { exprContainsUnsupportedTlaBuiltin(it.funBody()) } ?: false)
+        }
+        is ParenExprNode -> exprContainsUnsupportedTlaBuiltin(expr.innerExpr())
+        else -> expr.children.filterIsInstance<ExprNode>().any { exprContainsUnsupportedTlaBuiltin(it) }
+    }
+
+internal fun offerContainsUnsupportedTlaBuiltin(offer: TlaActionOffer): Boolean =
+    offer.decl.guards.any { exprContainsUnsupportedTlaBuiltin(it) } ||
+        offer.decl.transits.any { update ->
+            when (update) {
+                is TransitUpdate.Assign -> exprContainsUnsupportedTlaBuiltin(update.expr)
+                is TransitUpdate.IndexPut ->
+                    exprContainsUnsupportedTlaBuiltin(update.index) ||
+                        exprContainsUnsupportedTlaBuiltin(update.value)
+                is TransitUpdate.Let -> exprContainsUnsupportedTlaBuiltin(update.init)
+            }
+        }
+
 /** True when [expr] calls `startsWith`. */
 internal fun exprContainsStartsWith(expr: ExprNode): Boolean =
     when (expr) {
@@ -3281,8 +3350,7 @@ internal fun offersUseListMembership(offers: List<TlaActionOffer>): Boolean =
                         exprContainsListMembership(update.index) || exprContainsListMembership(update.value)
                     is TransitUpdate.Let -> exprContainsListMembership(update.init)
                 }
-            } ||
-            (offer.decl.returnExpr?.let { exprContainsListMembership(it) } == true)
+            }
     }
 
 /** Sequence values: `Range(f) == { f[x] : x \in DOMAIN f }` (not in standard `TLC.tla`). */
@@ -3363,8 +3431,7 @@ private fun offersUseExpr(offers: List<TlaActionOffer>, pred: (ExprNode) -> Bool
                     is TransitUpdate.IndexPut -> pred(update.index) || pred(update.value)
                     is TransitUpdate.Let -> pred(update.init)
                 }
-            } ||
-            (offer.decl.returnExpr?.let(pred) == true)
+            }
     }
 
 /** Collect unsupported funlib builtins used in TLA-emitted exprs (for compile warnings). */
@@ -4325,7 +4392,7 @@ internal fun exprToTla(
             when {
                 sym in symbolOverrides -> symbolOverrides.getValue(sym)
                 sym in argNames -> sym
-                sym in bareStateVars && leafCtx.size == 1 -> {
+                sym in bareStateVars && leafCtx.values.toSet().size == 1 -> {
                     stateRead(leafCtx.values.first(), sym)
                 }
                 else -> sym
@@ -4425,7 +4492,7 @@ internal fun exprToTla(
                 val baseRendered = when {
                     base in symbolOverrides -> symbolOverrides.getValue(base)
                     base in argNames -> base
-                    base in bareStateVars && leafCtx.size == 1 -> {
+                    base in bareStateVars && leafCtx.values.toSet().size == 1 -> {
                         stateRead(leafCtx.values.first(), base)
                     }
                     else -> base
@@ -4459,7 +4526,7 @@ internal fun exprToTla(
                 // Object field on arg or state var: base.field… (with indexing when needed)
                 val baseRendered = when {
                     base in argNames -> base
-                    base in bareStateVars && leafCtx.size == 1 -> {
+                    base in bareStateVars && leafCtx.values.toSet().size == 1 -> {
                         stateRead(leafCtx.values.first(), base)
                     }
                     else -> base
@@ -4559,7 +4626,7 @@ internal fun exprToTla(
         }
         is MapLiteralExprNode -> {
             if (expr.entries.isEmpty()) {
-                "[x \\in {} |-> 0]"
+                "[__k \\in {} |-> 0]"
             } else {
                 // TLC `:>` / `@@` (EXTENDS TLC).
                 expr.entries.joinToString(" @@ ") { (k, v) ->

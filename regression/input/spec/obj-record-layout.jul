@@ -3,7 +3,7 @@ type Point {
     y : Int
 }
 
-proc Painter {
+static proc Painter {
     var p : Point
 
     constructor initially(args : List<String>) {

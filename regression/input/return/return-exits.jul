@@ -1,0 +1,45 @@
+import julay.funlib.delaySeconds
+import julay.funlib.exitProgram
+import julay.funlib.println
+
+/*
+ * Printer spawns Exiter, then syncs on A with Exiter's return: Printer prints "A"
+ * and Exiter terminates. Printer then takes internal B and prints "B".
+ */
+static proc Printer {
+    var phase : String
+
+    constructor initially(args : List<String>) {
+        transit: phase := "spawn"
+    }
+
+    transition start() {
+        guard: phase = "spawn"
+        transit: phase := "A"
+    }
+
+    transition A() {
+        guard: phase = "A"
+        before: println("A")
+        transit: phase := "B"
+        after: delaySeconds(1)
+    }
+
+    internal transition B() {
+        guard:
+            phase = "B"
+        after:
+            println("B")
+            exitProgram(0)
+    }
+}
+
+proc Exiter {
+    constructor start() {}
+
+    return A() {}
+}
+
+proc P := Printer || Exiter
+
+compile P

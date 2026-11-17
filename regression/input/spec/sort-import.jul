@@ -1,6 +1,6 @@
 import imports.nodeset.NodeSet
 
-proc Counter {
+static proc Counter {
     var n : Int
 
     constructor initially(args : List<String>) {

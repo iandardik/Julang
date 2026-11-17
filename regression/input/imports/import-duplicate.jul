@@ -1,7 +1,7 @@
 import julay.funlib.println
 import julay.funlib.println
 
-proc ImportDuplicateTest {
+static proc ImportDuplicateTest {
     constructor initially(args : List<String>) {}
 }
 

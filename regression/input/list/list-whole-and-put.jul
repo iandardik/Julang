@@ -1,5 +1,5 @@
 import julay.funlib.listOf
-proc BadListTransit {
+static proc BadListTransit {
     var xs : List<Int>
 
     constructor initially(args : List<String>) {

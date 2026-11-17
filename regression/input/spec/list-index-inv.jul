@@ -1,6 +1,6 @@
 type NodeSet
 
-proc Worker {
+static proc Worker {
     var log : List<String>
     constructor initially(args : List<String>) { transit: log := args }
 }

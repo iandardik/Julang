@@ -11,7 +11,6 @@ fun validateProcExprs(unit: CompilationUnit): List<CompileError> =
         unit.allProcNames,
         unit.importTable,
         unit.moduleSymbols,
-        collectProcFunNames(unit.root),
         unit.allLeafSpecNames,
     )
 
@@ -22,138 +21,96 @@ fun validateProcExprsInModule(
     allProcNames: Set<String>,
     importTable: ImportTable,
     moduleSymbols: Map<String, ResolvedSymbol>,
-    procFunNames: Set<String> = emptySet(),
     leafSpecNames: Set<String> = emptySet(),
-): List<CompileError> =
-    root.declNodes().flatMap { decl ->
+): List<CompileError> {
+    val ctx = ProcExprCtx(root, entryDeclNames, allPClassNames, allProcNames, importTable, moduleSymbols, leafSpecNames)
+    return root.declNodes().flatMap { decl ->
         when (decl) {
-            is ProcNode -> validateProcExprsInNode(
-                decl.procNodeValue(),
-                entryDeclNames,
-                allPClassNames,
-                allProcNames,
-                importTable,
-                moduleSymbols,
-                procFunNames,
-                banLeafSpecs = true,
-                leafSpecNames,
-            )
-            is ApiNode -> validateProcExprsInNode(
-                decl,
-                entryDeclNames,
-                allPClassNames,
-                allProcNames,
-                importTable,
-                moduleSymbols,
-                procFunNames,
-                banLeafSpecs = true,
-                leafSpecNames,
-            )
-            is SpecNode -> validateProcExprsInNode(
-                decl,
-                entryDeclNames,
-                allPClassNames,
-                allProcNames,
-                importTable,
-                moduleSymbols,
-                procFunNames,
-                banLeafSpecs = false,
-                leafSpecNames,
-            )
+            is ProcNode -> validateProcExprsInNode(decl.procNodeValue(), ctx, banLeafSpecs = true)
+            is SpecNode -> validateProcExprsInNode(decl, ctx, banLeafSpecs = false)
             else -> emptyList()
         }
     }
+}
+
+private class ProcExprCtx(
+    val root: RootNode,
+    val entryDeclNames: Set<String>,
+    val allPClassNames: Set<String>,
+    val allProcNames: Set<String>,
+    val importTable: ImportTable,
+    val moduleSymbols: Map<String, ResolvedSymbol>,
+    val leafSpecNames: Set<String>,
+) {
+    fun resolve(node: ValueProcExprNode): Pair<ResolvedProcRef?, CompileError?> =
+        resolveProcLeaf(node, entryDeclNames, allPClassNames, allProcNames, importTable, moduleSymbols)
+
+    /** Declaration named by a composition leaf (local or imported), if any. */
+    fun declOf(node: ValueProcExprNode): DeclNode? {
+        if (node.isQualified()) {
+            val resolved = resolveQualifiedName(node.qualifiedParts()!!, moduleSymbols) ?: return null
+            return declFromResolvedSymbol(resolved)
+        }
+        val bare = node.valueProcName()
+        importTable.shortNames[bare]?.let { return declFromResolvedSymbol(it) }
+        return root.declNodes().firstOrNull { it.name() == bare }
+    }
+}
 
 private fun validateProcExprsInNode(
     node: ASTNode,
-    entryDeclNames: Set<String>,
-    allPClassNames: Set<String>,
-    allProcNames: Set<String>,
-    importTable: ImportTable,
-    moduleSymbols: Map<String, ResolvedSymbol>,
-    procFunNames: Set<String>,
+    ctx: ProcExprCtx,
     banLeafSpecs: Boolean,
-    leafSpecNames: Set<String>,
 ): List<CompileError> {
     return when (node) {
         is ValueProcExprNode -> {
             val bare = if (!node.isQualified()) node.valueProcName() else null
-            // Procfuns may not appear in || — use an api's calls: for TLA coupling.
-            // Indexed spec leaves (banLeafSpecs = false) may reference procfuns directly.
-            if (banLeafSpecs) {
-                if (bare != null && bare in procFunNames) {
-                    return listOf(
-                        OneLocCompileError(
-                            node.programLocation(),
-                            "Procfun \"$bare\" cannot appear in parallel composition; " +
-                                "list it in an api's calls: instead",
-                        ),
-                    )
-                }
-                val imported = if (bare != null) importTable.shortNames[bare] else null
-                val importedDecl = imported?.let { declFromResolvedSymbol(it) }
-                if (importedDecl is ProcFunNode) {
-                    return listOf(
-                        OneLocCompileError(
-                            node.programLocation(),
-                            "Procfun \"${importedDecl.procFunName()}\" cannot appear in parallel composition; " +
-                                "list it in an api's calls: instead",
-                        ),
-                    )
-                }
-            }
-            val imported = if (bare != null) importTable.shortNames[bare] else null
+            val imported = if (bare != null) ctx.importTable.shortNames[bare] else null
             val importedDecl = imported?.let { declFromResolvedSymbol(it) }
             if (banLeafSpecs) {
                 val leafSpecError = leafSpecInProcAssemblyError(
-                    node, bare, importedDecl, leafSpecNames, moduleSymbols,
+                    node, bare, importedDecl, ctx.leafSpecNames, ctx.moduleSymbols,
                 )
                 if (leafSpecError != null) return listOf(leafSpecError)
             }
-            val (_, error) = resolveProcLeaf(
-                node,
-                entryDeclNames,
-                allPClassNames,
-                allProcNames,
-                importTable,
-                moduleSymbols,
-            )
-            if (error != null) listOf(error) else emptyList()
+            val (_, error) = ctx.resolve(node)
+            return if (error != null) listOf(error) else emptyList()
         }
-        is ApiNode -> {
-            val procErrors = validateProcExprsInNode(
-                node.apiProcExpr(),
-                entryDeclNames, allPClassNames, allProcNames, importTable, moduleSymbols, procFunNames,
-                banLeafSpecs, leafSpecNames,
-            )
-            val callErrors = node.apiCallNames().flatMap { callName ->
-                val localPf = callName in procFunNames
-                val importedPf = importTable.shortNames[callName]?.let { declFromResolvedSymbol(it) } is ProcFunNode
-                when {
-                    localPf || importedPf -> emptyList()
-                    else -> listOf(
-                        OneLocCompileError(
-                            node.programLocation(),
-                            "Unknown procfun \"$callName\" in api \"${node.apiName()}\" calls:",
-                        ),
+        is ChildBindingProcExprNode -> {
+            val loc = node.programLocation()
+            val childNode = ValueProcExprNode(node.childName(), null, loc)
+            val parentNode = ValueProcExprNode(node.parentName(), null, loc)
+            val errors = mutableListOf<CompileError>()
+            ctx.resolve(childNode).second?.let { errors += it }
+            ctx.resolve(parentNode).second?.let { errors += it }
+            if (errors.isNotEmpty()) return errors
+            val child = ctx.declOf(childNode)
+            val parent = ctx.declOf(parentNode)
+            when {
+                child !is ProcClassNode ->
+                    errors += OneLocCompileError(
+                        loc,
+                        "\"${node.childName()}\" in \"$node\" must be a proc class",
                     )
-                }
+                child.isStatic ->
+                    errors += OneLocCompileError(
+                        loc,
+                        "static proc \"${node.childName()}\" cannot be bound as ${node.childName()}<…>; " +
+                            "only dynamic procs may have a parent",
+                    )
             }
-            val dupCalls = node.apiCallNames().groupingBy { it }.eachCount().filter { it.value > 1 }
-            val dupErrors = dupCalls.map { (name, n) ->
-                OneLocCompileError(
-                    node.programLocation(),
-                    "Procfun \"$name\" listed $n times in api \"${node.apiName()}\" calls:",
+            if (parent !is ProcClassNode && parent !is LeafSpecNode) {
+                errors += OneLocCompileError(
+                    loc,
+                    "parent \"${node.parentName()}\" in \"$node\" must be a proc class",
                 )
             }
-            procErrors + callErrors + dupErrors
+            if (banLeafSpecs && parent is LeafSpecNode) {
+                errors += OneLocCompileError(loc, "leaf spec \"${node.parentName()}\" cannot appear in a proc assembly")
+            }
+            errors
         }
-        else -> node.children.flatMap {
-            validateProcExprsInNode(
-                it, entryDeclNames, allPClassNames, allProcNames, importTable, moduleSymbols, procFunNames,
-                banLeafSpecs, leafSpecNames,
-            )
-        }
+        else -> node.children.flatMap { validateProcExprsInNode(it, ctx, banLeafSpecs) }
     }
 }
 

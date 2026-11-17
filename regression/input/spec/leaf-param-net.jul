@@ -13,7 +13,7 @@ spec Net[n : Node] {
     }
 }
 
-proc Peer {
+static proc Peer {
     var ack : Boolean := false
 
     constructor initially(args : List<String>) {

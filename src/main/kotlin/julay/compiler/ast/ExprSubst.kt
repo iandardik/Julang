@@ -71,17 +71,11 @@ fun substituteExpr(expr: ExprNode, name: String, replacement: ExprNode): ExprNod
             expr.args.map { substituteExpr(it, name, replacement) },
             expr.programLocation(),
         ).also { copy ->
-            val api = expr.resolvedApiNameOrNull()
-            val pf = expr.resolvedProcFunOrNull()
-            if (api != null && pf != null) {
-                copy.resolveApiProcFun(api, pf)
-            } else {
-                val body = expr.hofBodyOrNull()
-                val params = expr.hofParamNamesOrNull()
-                val types = expr.hofParamTypesOrNull()
-                if (body != null && params != null && types != null) {
-                    copy.resolveHof(substituteExpr(body, name, replacement), params, types)
-                }
+            val body = expr.hofBodyOrNull()
+            val params = expr.hofParamNamesOrNull()
+            val types = expr.hofParamTypesOrNull()
+            if (body != null && params != null && types != null) {
+                copy.resolveHof(substituteExpr(body, name, replacement), params, types)
             }
         }.withTypeOf(expr)
         is LambdaExprNode -> LambdaExprNode(
@@ -127,7 +121,6 @@ fun substituteExpr(expr: ExprNode, name: String, replacement: ExprNode): ExprNod
             typeArgs = expr.callTypeArgs(),
         ).also { copy ->
             expr.resolvedBuiltinOrNull()?.let { copy.resolveBuiltin(it) }
-            expr.resolvedProcFunOrNull()?.let { copy.resolveProcFun(it) }
             expr.specializedBodyOrNull()?.let { body ->
                 copy.resolveSpecializedBody(substituteExpr(body, name, replacement))
             }

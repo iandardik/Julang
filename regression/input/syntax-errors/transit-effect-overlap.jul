@@ -1,6 +1,6 @@
 import julay.funlib.readln
 
-proc S {
+static proc S {
     var msg : String
 
     constructor initially(args : List<String>) {

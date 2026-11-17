@@ -11,7 +11,7 @@ type Cfg {
     nextIndex : Map<Node, Int>
 }
 
-proc SetInObjDemo {
+static proc SetInObjDemo {
     var cfg : Cfg
     var steps : Int
 

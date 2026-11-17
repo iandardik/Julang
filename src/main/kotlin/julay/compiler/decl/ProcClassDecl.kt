@@ -25,14 +25,9 @@ data class ActionDecl(
     val befores: List<CallStmtNode> = emptyList(),
     val afters: List<CallStmtNode> = emptyList(),
     val errors: List<ErrorArmNode> = emptyList(),
-    /** When non-null, this transition is a procfun return edge (mutually exclusive with [transits]). */
-    val returnExpr: ExprNode? = null,
-    /**
-     * When set, this transition was inlined from a fused callee procfun named [fuseOriginPclass].
-     * Used for composition channelKey lookup and transit dispatch disambiguation.
-     */
-    val fuseOriginPclass: String? = null,
+    /** Named `return` action that terminates the instance (no transit/after). */
+    val isReturnAction: Boolean = false,
 ) {
     val isTimer: Boolean get() = action.isTimer
-    val isReturn: Boolean get() = returnExpr != null
+    val isReturn: Boolean get() = isReturnAction
 }

@@ -13,7 +13,7 @@ type Mixed {
     count : Int
 }
 
-proc Worker {
+static proc Worker {
     var pos : Point
     var segment : Line
     var mixed : Mixed
