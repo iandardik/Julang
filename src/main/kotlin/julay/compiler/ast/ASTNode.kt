@@ -194,6 +194,8 @@ class LeafSpecNode(
     private val typeModels: List<TypeModelNode> = emptyList(),
     /** Spec-only nullary fun overrides (`name := expr`) in the leaf-spec body. */
     private val funModels: List<FunModelNode> = emptyList(),
+    /** Same lifecycle as `static proc` when true (`static spec`). */
+    val isStatic: Boolean = false,
 ) : DeclNode(localDecls + typeModels + funModels) {
     override fun programLocation() = loc
     override fun name() = name
@@ -206,15 +208,14 @@ class LeafSpecNode(
     internal fun isParameterized(): Boolean = paramName != null
     /** View as a [ProcClassNode] for TLA / alphabet reuse. */
     internal fun asProcClass(): ProcClassNode =
-        ProcClassNode(name, localDecls, loc, isStatic = isStaticSpec()).also { it.visibility = this.visibility }
-    /** A leaf spec booted by `initially` plays the role of a static proc. */
-    internal fun isStaticSpec(): Boolean =
-        localDecls.any { it is ConstructorNode && it.constructorName() == "initially" }
+        ProcClassNode(name, localDecls, loc, isStatic = isStatic).also { it.visibility = this.visibility }
+    internal fun isStaticSpec(): Boolean = isStatic
     override fun toString(): String {
         val body = (typeModels + funModels + localDecls).joinToString("\n") { "$it".prependIndent() }
         val export = if (isExported) "export " else ""
+        val staticStr = if (isStatic) "static " else ""
         val params = if (paramName != null && paramType != null) "[$paramName : $paramType]" else ""
-        return "${export}spec $name$params {\n$body\n}"
+        return "${export}${staticStr}spec $name$params {\n$body\n}"
     }
 }
 

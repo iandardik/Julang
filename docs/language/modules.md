@@ -12,7 +12,7 @@ export api RpcOut {
 }
 export fun add(x : Int, y : Int) : Int = x + y
 export type NodeSet
-export spec Net[n : NodeSet] { ... }   // leaf or composition specs; pin NodeSet := { … } in the body / create-index
+export static spec Net[n : NodeSet] { ... }   // leaf; pin NodeSet := { … } in the body / create-index
 ```
 
 ```jul

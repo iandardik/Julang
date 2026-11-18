@@ -421,9 +421,10 @@ private fun ProcClassNode.errorPassProcClass(
     librariesInUse: Set<String>,
     isLeafSpec: Boolean = false,
 ): List<CompileError> {
+    val entity = if (isLeafSpec) "spec" else "proc"
     val localDecls = localDecls()
-    val staticCtorErrors = staticConstructorErrors()
-    val lifecycleErrors = if (isLeafSpec) emptyList() else lifecycleErrors()
+    val staticCtorErrors = staticConstructorErrors(entity)
+    val lifecycleErrors = lifecycleErrors(entity)
     val repeatStateVarNameErrors = localDecls
         .filterIsInstance<VarNode>()
         .groupBy { it.name }
@@ -511,22 +512,23 @@ private fun ProcClassNode.errorPassProcClass(
         constructorBeforeErrors + stateInAssignErrors + ctorTransActionNotMutexErrors
 }
 
-/** Static procs must have exactly one constructor, and it must be named `initially`. */
-private fun ProcClassNode.staticConstructorErrors(): List<CompileError> {
+/** Static procs/specs must have exactly one constructor, and it must be named `initially`. */
+private fun ProcClassNode.staticConstructorErrors(entity: String = "proc"): List<CompileError> {
     if (!isStatic) return emptyList()
     val name = procClassNodeName()
+    val label = if (entity == "spec") "Static spec" else "Static proc"
     val ctors = localDecls().filterIsInstance<ConstructorNode>()
     return when {
         ctors.size != 1 -> listOf(
             OneLocCompileError(
                 programLocation(),
-                "Static proc \"$name\" must have exactly one constructor named \"initially\"",
+                "$label \"$name\" must have exactly one constructor named \"initially\"",
             ),
         )
         ctors.single().constructorName() != "initially" -> listOf(
             OneLocCompileError(
                 ctors.single().programLocation(),
-                "Static proc \"$name\" constructor must be named \"initially\", " +
+                "$label \"$name\" constructor must be named \"initially\", " +
                     "found \"${ctors.single().constructorName()}\"",
             ),
         )
@@ -535,18 +537,21 @@ private fun ProcClassNode.staticConstructorErrors(): List<CompileError> {
 }
 
 /**
- * Static vs dynamic lifecycle: children are dynamic; only static procs declare `initially`;
- * dynamic procs need at least one `return` action; static procs have none.
+ * Static vs dynamic lifecycle: only static declare `initially`; dynamic need a `return`;
+ * static have none. Same rules for `proc` / `static proc` and leaf `spec` / `static spec`.
  */
-internal fun ProcClassNode.lifecycleErrors(): List<CompileError> {
+internal fun ProcClassNode.lifecycleErrors(entity: String = "proc"): List<CompileError> {
     val name = procClassNodeName()
     val returns = localDecls().filterIsInstance<ReturnActionNode>()
     val errors = mutableListOf<CompileError>()
+    val staticLabel = if (entity == "spec") "Static spec" else "Static proc"
+    val dynamicLabel = if (entity == "spec") "Dynamic spec" else "Dynamic proc"
+    val staticKeyword = if (entity == "spec") "static spec" else "static proc"
     if (isStatic) {
         returns.forEach {
             errors += OneLocCompileError(
                 it.programLocation(),
-                "Static proc \"$name\" cannot have a return action \"${it.returnActionName()}\"",
+                "$staticLabel \"$name\" cannot have a return action \"${it.returnActionName()}\"",
             )
         }
     } else {
@@ -555,14 +560,14 @@ internal fun ProcClassNode.lifecycleErrors(): List<CompileError> {
             .forEach {
                 errors += OneLocCompileError(
                     it.programLocation(),
-                    "Only static procs may declare constructor \"initially\"; " +
-                        "declare \"$name\" as `static proc` or give it a spawning constructor",
+                    "Only ${entity}s marked static may declare constructor \"initially\"; " +
+                        "declare \"$name\" as `$staticKeyword` or give it a spawning constructor",
                 )
             }
         if (returns.isEmpty()) {
             errors += OneLocCompileError(
                 programLocation(),
-                "Dynamic proc \"$name\" must have at least one return action",
+                "$dynamicLabel \"$name\" must have at least one return action",
             )
         }
     }

@@ -15,7 +15,7 @@ static proc Peer {
     }
 }
 
-spec Net[n : Node] {
+static spec Net[n : Node] {
     Node := { "n1", "n2" }
     var lastSeen : String := ""
 

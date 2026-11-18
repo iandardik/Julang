@@ -55,6 +55,6 @@ input/sharded_kv/ShardClient http://127.0.0.1:6001 owners
 
 ## TLA+ sketch
 
-- Shard source is identical in JAR and TLA; only the composition changes. JAR: `ShardNode := Store || ServerStarter || HttpWorkers || SendClaim` (`PutPath` / `ApplyMovePath` under `HttpWorkers`). TLA: `VerifNode := Store || VerifPutPath || PeerInbound` (same nesting, `Verif*` names to avoid decl clashes in `sys.jul`). `Put.put` / `putDone` stay unsynced (environment).
-- Unindexed `PerfectNet := ClaimMsgs || MoveBatchMsgs || KeyCountReqs || KeyCountReplies` (network is not node state; leaf specs, not a `static proc`, so `also` works and the net stays out of `ShardNode`). `goClaim` / `goMoveBatch` are fire-and-forget; only `goKeyCount` has a reply. The peer that receives a move batch takes ownership and broadcasts claims.
+- Shard source is identical in JAR and TLA; only the composition changes. JAR: `ShardNode := Store || ServerStarter || HttpWorkers || SendClaim` (`PutPath` / `ApplyMovePath` under `HttpWorkers`). TLA: `VerifNodeIndexed || PerfectNet` — node state create-indexed, PerfectNet unindexed beside it (`Verif*` names avoid decl clashes in `sys.jul`). `Put.put` / `putDone` stay unsynced (environment).
+- Unindexed `PerfectNet := ClaimMsgs || MoveBatchMsgs || KeyCountReqs || KeyCountReplies` (shared bags; four `static spec` leaves so `also` works and the net stays out of `ShardNode`). Actions use `also (n : NodeSet)` to sync with the indexed node. `goClaim` / `goMoveBatch` are fire-and-forget; only `goKeyCount` has a reply. The peer that receives a move batch takes ownership and broadcasts claims.
 - Invariants target `Store[n].store` / `Store[n].owners`. Each dynamic class gets a `Terminates` property under strong fairness.

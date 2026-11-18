@@ -4,7 +4,7 @@ import julay.funlib.listOf
 import julay.funlib.setOf
 import julay.funlib.mapOf
 import julay.funlib.splice
-import node.lib.Node
+import node.lib.NodeInfo
 import node.lib.CfgPair
 import node.lib.KvPair
 import node.lib.OwnerEntry
@@ -27,8 +27,8 @@ export fun reshardEntries(store : Map<Key, Value>, excludeKey : Key) : List<KvPa
  * does not redeclare the same := binder in one function.
  */
 export static proc Store {
-    const me : Node
-    const cluster : List<Node>
+    const me : NodeInfo
+    const cluster : List<NodeInfo>
     var store : Map<Key, Value>
     var owners : Map<Key, String>
 

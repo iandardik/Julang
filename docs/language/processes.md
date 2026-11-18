@@ -37,7 +37,7 @@ proc IncServer := Counter || Printer || ServerLogic
 
 See [Composition and actions](composition-and-actions.md).
 
-**Leaf specs** use the same curly-body shape as a proc class (`spec Env { … }`) but are not executable processes: they compile only to TLA+ and must not appear in `proc Name := …` assemblies. See [Specifications — Leaf specs](specifications.md#leaf-specs).
+**Leaf specs** use the same curly-body shape as a proc class (`static spec Env { … }` / dynamic `spec Worker { … }`) but are not executable processes: they compile only to TLA+ and must not appear in `proc Name := …` assemblies. Static/dynamic lifecycle matches procs. See [Specifications — Leaf specs](specifications.md#leaf-specs).
 
 ## Programs as sequences of actions
 

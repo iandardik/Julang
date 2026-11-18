@@ -37,10 +37,10 @@ Plain `spec Name := System` is also what `--compile-tla Name` synthesizes for a 
 
 ### Leaf specs
 
-A leaf spec looks like a proc class but is **verification-only**: `compile` emits `.tla` / `.cfg`, never a JAR. Use them for environments and other stubs that should not be executable.
+A leaf spec looks like a proc class but is **verification-only**: `compile` emits `.tla` / `.cfg`, never a JAR. Use them for environments and other stubs that should not be executable. Lifecycle matches procs: **`static spec`** has exactly one `constructor initially` and no `return`; plain **`spec`** (dynamic) has no `initially`, must have a spawning constructor and at least one `return`.
 
 ```jul
-spec Env {
+static spec Env {
     var ready : Boolean := false
     constructor initially(args : List<String>) { transit: ready := false }
     transition mark() { transit: ready := true }
@@ -54,7 +54,7 @@ Optional **declaration parameters** bind an immutable name usable in guards and 
 
 ```jul
 type Node
-spec Net[n : Node] {
+static spec Net[n : Node] {
     Node := { "n1", "n2" }
     var lastDest : String := ""
     constructor initially(args : List<String>) {}
@@ -81,8 +81,8 @@ TLA action parameter order: **decl param (if used), then `also` args, then used 
 **Not allowed in proc assemblies.** Leaf specs may appear in composition specs, but not under `proc Name := …` or an api’s `proc:`:
 
 ```jul
-spec A { constructor initially(args : List<String>) {} }
-proc Peer { constructor initially(args : List<String>) {} }
+static spec A { constructor initially(args : List<String>) {} }
+static proc Peer { constructor initially(args : List<String>) {} }
 
 spec C := A            // ok
 proc B := A            // error

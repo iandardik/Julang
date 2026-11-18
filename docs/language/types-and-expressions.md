@@ -65,7 +65,7 @@ spec ClusterSpec := RaftProtocol[n : NodeSet] {
     NodeSet := { "n1", "n2", "n3" }   // create-index
 }
 
-spec Net[n : NodeSet] {
+static spec Net[n : NodeSet] {
     NodeSet := { "n1", "n2", "n3" }   // leaf-spec body
     var lastDest : String := ""
     ...

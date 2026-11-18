@@ -78,7 +78,7 @@ class AlphabetJsonTest {
                 service transition handleVote() { transit: }
             }
 
-            spec Net[n : Node] {
+            static spec Net[n : Node] {
                 Node := { "n1", "n2" }
                 constructor initially(args : List<String>) {}
                 transition requestVote() { transit: }
@@ -148,7 +148,7 @@ class AlphabetJsonTest {
         file.writeText(
             """
             type Node
-            spec Net[n : Node] {
+            static spec Net[n : Node] {
                 Node := { "n1" }
                 constructor initially(args : List<String>) {}
                 transition requestVote() { transit: }

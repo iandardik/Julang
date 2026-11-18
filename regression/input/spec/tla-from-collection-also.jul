@@ -20,7 +20,7 @@ static proc Peer {
     }
 }
 
-spec Net[n : NodeSet] {
+static spec Net[n : NodeSet] {
     NodeSet := { "n1", "n2" }
     var msgs : Set<Msg> := setOf()
     var got : Int := 0

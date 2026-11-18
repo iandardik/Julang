@@ -2,7 +2,7 @@ type Idx
 
 fun cap() : Int = 9
 
-spec Leaf[i : Idx] {
+static spec Leaf[i : Idx] {
     Idx := { "a" }
     cap := 1
     cap := 2

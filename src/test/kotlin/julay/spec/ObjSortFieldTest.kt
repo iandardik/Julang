@@ -41,7 +41,7 @@ class ObjSortFieldTest {
         val result = typeCheck(
             """
             type Node
-            spec E {
+            static spec E {
                 Node := { "n1", "n2" }
                 var d : Node := "n1"
                 constructor initially(args : List<String>) { transit: d := "n1" }
@@ -61,7 +61,7 @@ class ObjSortFieldTest {
                 dest : NodeSet
                 msg : String
             }
-            spec Env {
+            static spec Env {
                 NodeSet := { "n1", "n2" }
                 var msgs : Set<VoteRequestMsg> := setOf()
                 constructor initially(args : List<String>) { transit: msgs := setOf() }
@@ -102,7 +102,7 @@ class ObjSortFieldTest {
                 dest : NodeSet
                 msg : String
             }
-            export spec Net {
+            export static spec Net {
                 NodeSet := { "n1", "n2" }
                 var msgs : Set<VoteRequestMsg> := setOf()
                 constructor initially(args : List<String>) {}
@@ -229,7 +229,7 @@ class ObjSortFieldTest {
         val source = """
             type NodeSet
             type Msg { dest : NodeSet }
-            spec Good {
+            static spec Good {
                 NodeSet := { "n1" }
                 var m : Msg
                 constructor initially(args : List<String>) {
@@ -262,7 +262,7 @@ class ObjSortFieldTest {
                 """
                 type NodeSet
                 type Msg { dest : NodeSet }
-                spec Good {
+                static spec Good {
                     NodeSet := { "n1" }
                     var m : Msg
                     constructor initially(args : List<String>) {
@@ -287,7 +287,7 @@ class ObjSortFieldTest {
             """
             type Node
             type Vote { dest : Node }
-            spec Net[n : Node] {
+            static spec Net[n : Node] {
                 Node := { "n1", "n2" }
                 var last : Vote
                 constructor initially(args : List<String>) {

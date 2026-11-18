@@ -14,7 +14,7 @@ import specs.net.Value
 /*
  * TLA assembly: same Shard children as ShardNode, re-parented. Put's constructor
  * / return stay unsynced (environment clients). PerfectNet stands in for
- * RpcIn/RpcOut. Index the whole node once on ShardSpec — do not wrap again.
+ * RpcIn/RpcOut — unindexed (shared bags); node state is create-indexed once.
  *
  * Nesting mirrors node/main.jul (PutPath / ApplyMovePath) under Verif* names so
  * sys.jul can compile JAR + TLA together without decl clashes. Each BroadcastClaim
@@ -30,13 +30,16 @@ spec VerifPutPath := Put
 /* Inbound move-batch worker and its claim fan-out. */
 spec VerifApplyMovePath := ApplyMoveBatch || BroadcastClaim
 
-/* PerfectNet delivers peer RPCs; workers consume them (KeyCount / ApplyClaim / moves). */
-spec PeerInbound := PerfectNet
-    || KeyCount
-    || ApplyClaim
-    || VerifApplyMovePath
+/* Peer RPC workers (PerfectNet is composed beside the indexed node, not under it). */
+spec PeerInbound := KeyCount || ApplyClaim || VerifApplyMovePath
 
-spec VerifNode := Store || VerifPutPath || PeerInbound
+spec Node := Store || VerifPutPath || PeerInbound
+
+spec Cluster := Node[n : NodeSet] {
+    NodeSet := { "n1", "n2", "n3" }
+    Key := { "a", "b", "c", "d", "e", "f", "g", "h" }
+    Value := { "v1", "v2", "v3" }
+}
 
 invariant AtMostOneStore := forall k : Key, forall n1 : NodeSet, forall n2 : NodeSet,
     (k in Store[n1].store & k in Store[n2].store) => n1 = n2
@@ -48,8 +51,6 @@ invariant OwnersAgree := forall n1 : NodeSet, forall n2 : NodeSet, forall k : Ke
     (k in Store[n1].owners & k in Store[n2].owners) =>
         Store[n1].owners[k] = Store[n2].owners[k]
 
-export spec ShardSpec := VerifNode[n : NodeSet] {
-    NodeSet := { "n1", "n2", "n3" }
-    Key := { "a", "b", "c", "d", "e", "f", "g", "h" }
-    Value := { "v1", "v2", "v3" }
-} |= (AtMostOneStore & OwnerHasValue & OwnersAgree)
+/* PerfectNet is unindexed; also (n : NodeSet) merges with Cluster's create-index n. */
+export spec ShardSpec := Cluster || PerfectNet
+    |= (AtMostOneStore & OwnerHasValue & OwnersAgree)

@@ -8,14 +8,14 @@ import julay.funlib.startsWith
 import specs.net.Key
 import specs.net.Value
 
-export type Node {
+export type NodeInfo {
     id : Int
     url : String
 }
 
 export type CfgPair {
-    me : Node
-    cluster : List<Node>
+    me : NodeInfo
+    cluster : List<NodeInfo>
 }
 
 export type KvPair {
@@ -61,7 +61,7 @@ export fun parseCfg(cfgPath : String, myIdx : Int) : CfgPair =
     let (entries : List<String> := split(readFile(cfgPath), "\n")
         .map(line -> trim(line))
         .filter(line -> ~isBlankOrComment(line)))
-    let (cluster : List<Node> := entries.fold(listOf<Node>(), (acc, line) ->
-        acc + listOf(Node { id := length(acc) + 1, url := line }))) {
+    let (cluster : List<NodeInfo> := entries.fold(listOf<NodeInfo>(), (acc, line) ->
+        acc + listOf(NodeInfo { id := length(acc) + 1, url := line }))) {
         CfgPair { me := cluster[myIdx], cluster := cluster }
     }

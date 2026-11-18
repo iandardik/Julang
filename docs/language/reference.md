@@ -44,8 +44,9 @@ type Name                                   // uninterpreted
 // delayed model Name := { lit, ... } only inside create-index / leaf-spec body
 fun name(...) : Type = expr
 invariant Name := Expr
-spec Name { ... }                          // leaf spec (optional [p : T] body binder; no state lift)
-spec Name[p : T] { ... }                   // leaf spec with decl param
+static spec Name { ... }                   // static leaf (initially only; optional [p : T] binder)
+static spec Name[p : T] { ... }            // static leaf with decl param
+spec Name { ... }                          // dynamic leaf (spawn ctor + return; same as dynamic proc)
 spec Name := <Assume> System <Guarantee>
 spec Name := System |= Guarantee
 spec Name := System
@@ -65,7 +66,7 @@ Leaf-spec actions: `transition name(args) also (aux : T) { … }` (leaf specs on
 
 `Guarantee` may be a named invariant, an inline Boolean formula (`true` / `false` included), or `true` meaning no guarantee. Plain `spec := System` equals `<true> System <true>` / `--compile-tla`.
 
-`compile` targets: **proc** → native binary (fails if the assembly reaches an uninterpreted type); **spec** (composition or leaf) → `.tla` / `.cfg`. Leaf specs must not appear in `proc Name := …` assemblies. Only `static proc` may declare `constructor initially`. Dynamic procs must have at least one named `return` action.
+`compile` targets: **proc** → native binary (fails if the assembly reaches an uninterpreted type); **spec** (composition or leaf) → `.tla` / `.cfg`. Leaf specs must not appear in `proc Name := …` assemblies. Only `static proc` / `static spec` may declare `constructor initially`. Dynamic procs and dynamic leaf specs must have at least one named `return` action.
 
 ## Funlib (`import julay.funlib.<name>`)
 

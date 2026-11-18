@@ -312,6 +312,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             val paramType = if (ctx.LBRACK() != null) parseTypeExpr(ctx.typeExpr()) else null
             return LeafSpecNode(
                 name, paramName, paramType, localDecls, sourceLocation(ctx), typeModels, funModels,
+                isStatic = ctx.STATIC() != null,
             )
         }
         val value = when {

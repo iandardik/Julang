@@ -86,7 +86,7 @@ compile_decl
     ;
 
 spec
-    : SPEC ID (LBRACK ID COLON typeExpr RBRACK)? LCURLY leaf_spec_item* RCURLY
+    : STATIC? SPEC ID (LBRACK ID COLON typeExpr RBRACK)? LCURLY leaf_spec_item* RCURLY
     | SPEC ID ASGN_EQ ag_spec
     | SPEC ID ASGN_EQ system_expr MODELS expr
     | SPEC ID ASGN_EQ system_expr

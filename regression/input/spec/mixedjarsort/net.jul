@@ -6,7 +6,7 @@ type VoteRequestMsg {
     msg : String
 }
 
-export spec Net {
+export static spec Net {
     NodeSet := { "n1", "n2" }
     var msgs : Set<VoteRequestMsg> := setOf()
 

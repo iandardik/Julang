@@ -12,7 +12,7 @@ static proc Peer {
     }
 }
 
-spec Net[n : Node] {
+static spec Net[n : Node] {
     Node := { "n1" }
     constructor initially(args : List<String>) {}
 

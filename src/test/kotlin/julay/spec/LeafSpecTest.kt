@@ -1,6 +1,7 @@
 package julay.spec
 
 import julay.compiler.OneLocCompileError
+import julay.compiler.checkJulFile
 import julay.compiler.compileJulFile
 import julay.compiler.loadCompilationUnit
 import julay.compiler.pass.TypePassResult
@@ -16,7 +17,7 @@ class LeafSpecTest {
     fun unparameterizedLeafSpecTypeChecks() {
         val result = typeCheck(
             """
-            spec Env {
+            static spec Env {
                 var ready : Boolean := false
                 constructor initially(args : List<String>) { transit: ready := false }
                 transition mark() { transit: ready := true }
@@ -32,7 +33,7 @@ class LeafSpecTest {
         val result = typeCheck(
             """
             type Node
-            spec Net[n : Node] {
+            static spec Net[n : Node] {
                 Node := { "n1", "n2" }
                 var lastDest : String := ""
                 constructor initially(args : List<String>) {}
@@ -51,7 +52,7 @@ class LeafSpecTest {
         val result = typeCheck(
             """
             type Node
-            spec Net[n : Node] {
+            static spec Net[n : Node] {
                 Node := { "n1" }
                 constructor initially(args : List<String>) {}
                 transition bump() {
@@ -71,7 +72,7 @@ class LeafSpecTest {
     fun procAliasOfLeafSpecIsError() {
         val (unit, loadErrors) = loadSource(
             """
-            spec A {
+            static spec A {
                 constructor initially(args : List<String>) {}
             }
             proc B := A
@@ -87,10 +88,10 @@ class LeafSpecTest {
     fun procParallelOfLeafSpecsIsError() {
         val (unit, loadErrors) = loadSource(
             """
-            spec A {
+            static spec A {
                 constructor initially(args : List<String>) {}
             }
-            spec B {
+            static spec B {
                 constructor initially(args : List<String>) {}
             }
             proc D := A || B
@@ -106,7 +107,7 @@ class LeafSpecTest {
     fun procParallelLeafWithProcIsError() {
         val (unit, loadErrors) = loadSource(
             """
-            spec A {
+            static spec A {
                 constructor initially(args : List<String>) {}
             }
             static proc Peer {
@@ -125,7 +126,7 @@ class LeafSpecTest {
     fun compositionSpecMayReferenceLeafSpec() {
         val result = typeCheck(
             """
-            spec A {
+            static spec A {
                 var ready : Boolean := false
                 constructor initially(args : List<String>) { transit: ready := false }
             }
@@ -136,12 +137,75 @@ class LeafSpecTest {
     }
 
     @Test
+    fun dynamicLeafSpecRequiresReturn() {
+        val dir = Files.createTempDirectory("julay-leaf-dyn-return")
+        val file = dir.resolve("main.jul")
+        file.writeText(
+            """
+            spec Worker {
+                var id : Int
+                constructor spawn(id : Int) { transit: id := id }
+            }
+            spec S := Worker
+            compile S
+            """.trimIndent(),
+        )
+        val check = checkJulFile(file)
+        assertTrue(
+            check.diagnostics.any { it.message.contains("must have at least one return action") },
+            check.diagnostics.toString(),
+        )
+    }
+
+    @Test
+    fun dynamicLeafSpecCannotUseInitially() {
+        val dir = Files.createTempDirectory("julay-leaf-dyn-init")
+        val file = dir.resolve("main.jul")
+        file.writeText(
+            """
+            spec Bad {
+                constructor initially(args : List<String>) {}
+                internal return done() {}
+            }
+            spec S := Bad
+            compile S
+            """.trimIndent(),
+        )
+        val check = checkJulFile(file)
+        assertTrue(
+            check.diagnostics.any { it.message.contains("Only specs marked static may declare constructor \"initially\"") },
+            check.diagnostics.toString(),
+        )
+    }
+
+    @Test
+    fun staticLeafSpecRequiresInitially() {
+        val dir = Files.createTempDirectory("julay-leaf-static-init")
+        val file = dir.resolve("main.jul")
+        file.writeText(
+            """
+            static spec Bad {
+                var x : Int := 0
+                constructor spawn(x : Int) { transit: x := x }
+            }
+            spec S := Bad
+            compile S
+            """.trimIndent(),
+        )
+        val check = checkJulFile(file)
+        assertTrue(
+            check.diagnostics.any { it.message.contains("constructor must be named \"initially\"") },
+            check.diagnostics.toString(),
+        )
+    }
+
+    @Test
     fun mismatchedReindexOnLeafSpecIsError() {
         val result = typeCheck(
             """
             type Node
             type Other
-            spec Net[n : Node] {
+            static spec Net[n : Node] {
                 Node := { "n1" }
                 constructor initially(args : List<String>) {}
             }
@@ -162,7 +226,7 @@ class LeafSpecTest {
         val file = dir.resolve("main.jul")
         file.writeText(
             """
-            spec Env {
+            static spec Env {
                 var ready : Boolean := false
                 constructor initially(args : List<String>) { transit: ready := false }
                 transition mark() { transit: ready := true }
@@ -200,7 +264,7 @@ class LeafSpecTest {
                 constructor initially(args : List<String>) { transit: self := "n1" }
                 transition ping() { transit: self := self }
             }
-            spec Net[n : Node] {
+            static spec Net[n : Node] {
                 Node := { "n1" }
                 constructor initially(args : List<String>) {}
                 transition observe(target : String) also (m : Node) {
