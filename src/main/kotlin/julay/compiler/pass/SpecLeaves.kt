@@ -11,8 +11,25 @@ import java.util.ArrayDeque
 /** Reserved create-index delayed model: slot set indexing every dynamic proc leaf. */
 const val DYN_PROC_MODEL = "DynProc"
 
-/** Slot model used when no `DynProc := { ... }` is declared. */
-const val DEFAULT_DYN_PROC_MODEL = "{1, 2}"
+/** How many slots the implicit `DynProc` model provides. */
+const val DEFAULT_DYN_PROC_SLOT_COUNT = 3
+
+/**
+ * Default DynProc slot names: `dp1`..`dpN`, or `dpp1`.. / `dppp1`.. when those
+ * strings are already reserved (other cfg String / domain model elements).
+ */
+fun defaultDynProcSlotNames(
+    reserved: Set<String>,
+    count: Int = DEFAULT_DYN_PROC_SLOT_COUNT,
+): List<String> {
+    require(count >= 1) { "DynProc slot count must be positive" }
+    var prefix = "dp"
+    while (true) {
+        val elems = (1..count).map { "$prefix$it" }
+        if (elems.none { it in reserved }) return elems
+        prefix += "p"
+    }
+}
 
 data class SpecLeaf(
     val name: String,
@@ -185,12 +202,23 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
                         }
                     }
                     else -> {
+                        // Named body (e.g. VerifNode[n : NodeSet]): one shared with-scope so
+                        // expanded peers reuse the same TLA binder (not n vs n_ on sync).
                         val pType = n.paramType()!!
+                        val scopeId = withScopeId ?: freshWithScopeId()
                         flattenSpecLeaves(n.paramBody(), intro).forEach { child ->
                             out += if (!child.isParameterized) {
-                                withGlobals(child.copy(paramName = paramName, paramType = pType))
+                                withGlobals(
+                                    child.copy(
+                                        paramName = paramName,
+                                        paramType = pType,
+                                        withScopeId = scopeId,
+                                    ),
+                                )
                             } else {
-                                withGlobals(child)
+                                withGlobals(
+                                    child.copy(withScopeId = child.withScopeId ?: scopeId),
+                                )
                             }
                         }
                     }

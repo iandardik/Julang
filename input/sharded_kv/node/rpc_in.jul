@@ -8,6 +8,8 @@ import node.lib.parseCfg
 import node.lib.PutResult
 import node.lib.GetResult
 import node.lib.OwnerEntry
+import specs.net.Key
+import specs.net.Value
 
 /*
  * Inbound HTTP adapters: parse request → spawn a Shard child; encode its result → response.
@@ -52,7 +54,7 @@ export proc HandleRpc {
     }
 
     /* body: k=<k>|v=<v> */
-    transition put(putK : String, putV : String) {
+    transition put(putK : Key, putV : Value) {
         guard:
             & step = "route"
             & path = "kv/put"
@@ -62,7 +64,7 @@ export proc HandleRpc {
     }
 
     /* body: k=<k> */
-    transition get(getK : String) {
+    transition get(getK : Key) {
         guard: step = "route" & path = "kv/get" & getK = bodyField(body, 1)
         transit: step := "wait"
     }
@@ -79,7 +81,7 @@ export proc HandleRpc {
     }
 
     /* body: k=<k>|owner=<url>; fire-and-forget */
-    transition claim(claimKey : String, claimOwner : String) {
+    transition claim(claimKey : Key, claimOwner : String) {
         guard:
             & step = "route"
             & path = "rpc/claim"
@@ -92,7 +94,7 @@ export proc HandleRpc {
     }
 
     /* body: <ownerUrl>|<k>=<v>; fire-and-forget */
-    transition moveBatch(moveOwner : String, moveKey : String, moveVal : String) {
+    transition moveBatch(moveOwner : String, moveKey : Key, moveVal : Value) {
         guard:
             & step = "route"
             & path = "rpc/moveBatch"

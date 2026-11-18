@@ -7,28 +7,36 @@ import node.shard.FindLightestPeer
 import node.shard.BroadcastClaim
 import node.shard.ReshardToPeer
 import specs.net.PerfectNet
-import specs.net.ClientEnv
 import specs.net.NodeSet
 import specs.net.Key
+import specs.net.Value
 
 /*
- * TLA assembly: the same Shard children as ShardNode, re-parented. ClientEnv spawns
- * Put (HandleRpc in the JAR); PerfectNet delivers peer messages (RpcIn in the JAR)
- * and carries the go* sends (RpcOut children in the JAR).
+ * TLA assembly: same Shard children as ShardNode, re-parented. Put's constructor
+ * / return stay unsynced (environment clients). PerfectNet stands in for
+ * RpcIn/RpcOut. Index the whole node once on ShardSpec — do not wrap again.
+ *
+ * Nesting mirrors node/main.jul (PutPath / ApplyMovePath) under Verif* names so
+ * sys.jul can compile JAR + TLA together without decl clashes. Each BroadcastClaim
+ * seals with its own parent (Put vs ApplyMoveBatch).
  */
-spec VerifNode := Store
-    || (ClientEnv || (Put || FindLightestPeer || BroadcastClaim || ReshardToPeer))
-    || (PerfectNet || KeyCount || ApplyClaim || (ApplyMoveBatch || BroadcastClaim))
 
-spec NodeIndexed := VerifNode[n : NodeSet] {
-    NodeSet := { "n1", "n2", "n3" }
-    Key := { "a", "b", "c", "d", "e", "f", "g", "h" }
-    DynProc := { "i1", "i2" }
-}
+/* Client put path: Put + helpers (FindLightestPeer / BroadcastClaim / ReshardToPeer). */
+spec VerifPutPath := Put
+    || FindLightestPeer
+    || BroadcastClaim
+    || ReshardToPeer
 
-spec ShardSys := (with (n : NodeSet) {
-    NodeIndexed[n] || ClientEnv[n]
-}) || PerfectNet
+/* Inbound move-batch worker and its claim fan-out. */
+spec VerifApplyMovePath := ApplyMoveBatch || BroadcastClaim
+
+/* PerfectNet delivers peer RPCs; workers consume them (KeyCount / ApplyClaim / moves). */
+spec PeerInbound := PerfectNet
+    || KeyCount
+    || ApplyClaim
+    || VerifApplyMovePath
+
+spec VerifNode := Store || VerifPutPath || PeerInbound
 
 invariant AtMostOneStore := forall k : Key, forall n1 : NodeSet, forall n2 : NodeSet,
     (k in Store[n1].store & k in Store[n2].store) => n1 = n2
@@ -40,4 +48,8 @@ invariant OwnersAgree := forall n1 : NodeSet, forall n2 : NodeSet, forall k : Ke
     (k in Store[n1].owners & k in Store[n2].owners) =>
         Store[n1].owners[k] = Store[n2].owners[k]
 
-export spec ShardSpec := ShardSys |= (AtMostOneStore & OwnerHasValue & OwnersAgree)
+export spec ShardSpec := VerifNode[n : NodeSet] {
+    NodeSet := { "n1", "n2", "n3" }
+    Key := { "a", "b", "c", "d", "e", "f", "g", "h" }
+    Value := { "v1", "v2", "v3" }
+} |= (AtMostOneStore & OwnerHasValue & OwnersAgree)

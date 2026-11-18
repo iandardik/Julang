@@ -17,13 +17,26 @@ import node.shard.ReshardToPeer
 /*
  * Parent↔child edges are inferred from nested || (ctor/return orientation).
  * Outer SendClaim meets every still-external BroadcastClaim.goClaim.
+ * Subtrees parallel specs/protocol.jul (VerifPutPath / VerifApplyMovePath).
  */
-export proc ShardNode := Store || ServerStarter || (
-    HandleRpc
-    || (Put
-        || (FindLightestPeer || SendKeyCount)
-        || BroadcastClaim
-        || (ReshardToPeer || SendMoveBatch))
-    || Get || Owners || KeyCount || ApplyClaim
-    || (ApplyMoveBatch || BroadcastClaim)
-) || SendClaim
+
+proc FindLightestPath := FindLightestPeer || SendKeyCount
+proc ReshardPath := ReshardToPeer || SendMoveBatch
+
+proc PutPath := Put
+    || FindLightestPath
+    || BroadcastClaim
+    || ReshardPath
+
+proc ApplyMovePath := ApplyMoveBatch || BroadcastClaim
+
+/* HandleRpc + shard workers (puts, gets, owners, inbound RPCs). */
+proc HttpWorkers := HandleRpc
+    || PutPath
+    || Get
+    || Owners
+    || KeyCount
+    || ApplyClaim
+    || ApplyMovePath
+
+export proc ShardNode := Store || ServerStarter || HttpWorkers || SendClaim

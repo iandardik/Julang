@@ -4,12 +4,21 @@ import julay.compiler.ast.SpecNode
 import julay.compiler.compileJulFile
 import julay.compiler.prepareCheckedCompilation
 import julay.compiler.pass.TlaOptConfig
+import julay.compiler.pass.cfgStringModel
+import julay.compiler.pass.rawStringFromCfgElement
+import julay.compiler.pass.addStringCarrierDomainElements
+import julay.compiler.pass.defaultDynProcSlotNames
+import julay.program.type.DomainKind
+import julay.program.type.DomainType
+import julay.program.type.stringType
+import julay.compiler.pass.escapeTlaStringLiteral
 import julay.compiler.pass.tlaCodegenPass
 import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 import org.junit.Ignore
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
@@ -34,6 +43,55 @@ private fun tlaAfterNext(tlaText: String): String {
 }
 
 class SpecTlaTlcSmokeTest {
+
+    @Test
+    fun cfgStringModelEscapesControlChars() {
+        assertEquals("\\n", escapeTlaStringLiteral("\n"))
+        assertEquals("a\\\"b", escapeTlaStringLiteral("a\"b"))
+        assertEquals("x\\\\y", escapeTlaStringLiteral("x\\y"))
+        val model = cfgStringModel(setOf("", "\n", "\t", "#", "a\"b"), emptySet(), false)
+        assertFalse('\n' in model, "raw newline must not appear in cfg String model:\n$model")
+        assertFalse('\t' in model, "raw tab must not appear in cfg String model:\n$model")
+        assertTrue(model.contains("\"\\n\""), model)
+        assertTrue(model.contains("\"\\t\""), model)
+        assertTrue(model.contains("\"a\\\"b\""), model)
+        assertTrue(model.contains("\"#\""), model)
+    }
+
+    @Test
+    fun defaultDynProcSlotsAvoidReservedNames() {
+        assertEquals(listOf("dp1", "dp2", "dp3"), defaultDynProcSlotNames(emptySet()))
+        assertEquals(
+            listOf("dpp1", "dpp2", "dpp3"),
+            defaultDynProcSlotNames(setOf("dp1", "dp2")),
+        )
+        assertEquals(
+            listOf("dppp1", "dppp2", "dppp3"),
+            defaultDynProcSlotNames(setOf("dp2", "dpp1")),
+        )
+    }
+
+    @Test
+    fun stringCfgIncludesStringCarrierDomainElements() {
+        assertEquals("a", rawStringFromCfgElement("\"a\""))
+        assertEquals("\n", rawStringFromCfgElement("\"\\n\""))
+        val into = linkedSetOf("ask")
+        addStringCarrierDomainElements(
+            mapOf(
+                "Key" to DomainType(
+                    "Key",
+                    DomainKind.Typedef,
+                    stringType,
+                    cfgElements = listOf("\"a\"", "\"b\""),
+                ),
+            ),
+            into,
+        )
+        assertTrue("a" in into && "b" in into && "ask" in into, into.toString())
+        val model = cfgStringModel(into, emptySet(), false)
+        assertTrue(model.contains("\"a\""), model)
+        assertTrue(model.contains("\"b\""), model)
+    }
 
     @Test
     fun safeIncCompilesAndTlcStarts() {

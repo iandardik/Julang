@@ -22,9 +22,7 @@ RESHARD_PUTS="${RESHARD_PUTS:-20}"
 
 CLIENT="${SHARD_CLIENT_BIN:-}"
 if [[ -z "$CLIENT" ]]; then
-  if [[ -x "$SKV_DIR/client/ShardClient" ]]; then
-    CLIENT="$SKV_DIR/client/ShardClient"
-  elif [[ -x "$SKV_DIR/ShardClient" ]]; then
+  if [[ -x "$SKV_DIR/ShardClient" ]]; then
     CLIENT="$SKV_DIR/ShardClient"
   elif [[ -x "$REPO_ROOT/ShardClient" ]]; then
     CLIENT="$REPO_ROOT/ShardClient"

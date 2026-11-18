@@ -152,11 +152,11 @@ Leave **ordinary** (untagged) syncs for two-static peers or composition-private 
 
 ## Fairness
 
-Generated TLA+ specs assume **strong fairness** for every action the system controls: internal actions, timers, returns, and synchronizations between procs. Environment-driven actions (inbound HTTP requests, `readln`, and any action left unsynchronized in the composed spec) have no fairness, because the outside world is never obligated to act.
+Generated TLA+ specs use `Fairness == SF_vars(Next)`: if any `Next` arm is enabled infinitely often, a non-stuttering step must occur infinitely often. That covers internals, timers, returns, synchronizations, and unsynchronized / environment arms, so a done dynamic proc cannot stutter forever while its return stays enabled.
 
-For local actions, this matches the Go runtime: a proc's `select` chooses uniformly at random among its ready cases, so an action that is enabled infinitely often is taken with probability 1.
+This is an idealization of the outside world (the environment is not obligated to act in Go) and of synchronizations: in Go, a sync fires only when one side is parked waiting on the other. A proc that always has some local action ready never parks. So if *both* sides of a sync always have local work, the sync can be starved indefinitely, even though TLC assumes it eventually fires.
 
-For synchronizations, it is an idealization. In Go, a sync fires only when one side is parked waiting on the other. A proc that always has some local action ready never parks. So if *both* sides of a sync always have local work, the sync can be starved indefinitely, even though TLC assumes it eventually fires.
+For local actions, SF matches the Go runtime more closely: a proc's `select` chooses uniformly at random among its ready cases, so an action that is enabled infinitely often is taken with probability 1.
 
 ```jul
 proc A { var n : Int := 0  internal transition tick() { transit: n := n + 1 }  transition ping() { } }

@@ -199,12 +199,18 @@ private fun sortDomainBan(type: Type, loc: ProgramLoc): CompileError? =
 /** Value-level view: domain types use their carrier / element type in specs. */
 private fun valueView(type: Type): Type = when (type) {
     is DomainType -> type.carrierType
+    is ListType -> listType(valueView(type.elementType))
+    is SetType -> setType(valueView(type.elementType))
+    is MapType -> mapType(valueView(type.keyType), valueView(type.valueType))
     else -> type
 }
 
 /** Proc/JAR view: typedefs erase to carrier; uninterpreted stays (and is banned). */
 private fun procErasure(type: Type): Type = when (type) {
     is DomainType -> if (type.kind == DomainKind.Typedef) type.carrierType else type
+    is ListType -> listType(procErasure(type.elementType))
+    is SetType -> setType(procErasure(type.elementType))
+    is MapType -> mapType(procErasure(type.keyType), procErasure(type.valueType))
     else -> type
 }
 
@@ -522,7 +528,7 @@ private fun ArgNode.typePassArgNode(symbolEnv: Map<String, Type>, registry: ObjC
     funBuiltinEnv: Map<String, FunBuiltin>): List<CompileError> =
     when (val result = registry.resolveTypeExpr(argTypeExpr(), typeParamEnv, programLocation())) {
         is TypeResolveResult.Found -> {
-            resolveArgType(result.type)
+            resolveArgType(typingView(result.type))
             listOfNotNull(sortDomainBan(result.type, programLocation()))
         }
         is TypeResolveResult.Error ->
@@ -609,7 +615,7 @@ private fun LetTransitNode.typePassLetTransit(
 ): List<CompileError> {
     val typeErrors = when (val result = registry.resolveTypeExpr(letTypeExpr(), typeParamEnv, programLocation())) {
         is TypeResolveResult.Found -> {
-            resolveLetType(result.type)
+            resolveLetType(typingView(result.type))
             listOfNotNull(sortDomainBan(result.type, programLocation()))
         }
         is TypeResolveResult.Error ->
@@ -958,7 +964,7 @@ private fun LetExprNode.typePassLet(symbolEnv: Map<String, Type>, registry: ObjC
     funBuiltinEnv: Map<String, FunBuiltin>): List<CompileError> {
     val typeErrors = when (val result = registry.resolveTypeExpr(letTypeExpr(), typeParamEnv, programLocation())) {
         is TypeResolveResult.Found -> {
-            resolveLetType(result.type)
+            resolveLetType(typingView(result.type))
             listOfNotNull(sortDomainBan(result.type, programLocation()))
         }
         is TypeResolveResult.Error ->
@@ -2355,7 +2361,7 @@ private fun FunNode.typePassFunSignature(registry: ObjClassRegistry): List<Compi
     val argErrors = argNodes.flatMap { arg ->
         when (val result = registry.resolveTypeExpr(arg.argTypeExpr(), typeParamEnv, arg.programLocation())) {
             is TypeResolveResult.Found -> {
-                arg.resolveArgType(result.type)
+                arg.resolveArgType(typingView(result.type))
                 listOfNotNull(sortDomainBan(result.type, arg.programLocation()))
             }
             is TypeResolveResult.Error ->
@@ -2369,7 +2375,7 @@ private fun FunNode.typePassFunSignature(registry: ObjClassRegistry): List<Compi
     }
     val returnErrors = when (val result = registry.resolveTypeExpr(funReturnTypeExpr(), typeParamEnv, programLocation())) {
         is TypeResolveResult.Found -> {
-            resolveReturnType(result.type)
+            resolveReturnType(typingView(result.type))
             listOfNotNull(sortDomainBan(result.type, programLocation()))
         }
         is TypeResolveResult.Error ->

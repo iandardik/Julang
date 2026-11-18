@@ -17,8 +17,6 @@ LOGDIR="$(dirname "$CONFIG")"
 
 if [[ -n "${SHARD_NODE_BIN:-}" ]]; then
   BIN="$SHARD_NODE_BIN"
-elif [[ -x "$SKV_DIR/node/ShardNode" ]]; then
-  BIN="$SKV_DIR/node/ShardNode"
 elif [[ -x "$SKV_DIR/ShardNode" ]]; then
   BIN="$SKV_DIR/ShardNode"
 elif [[ -x "$REPO_ROOT/ShardNode" ]]; then

@@ -9,14 +9,13 @@ import node.lib.CfgPair
 import node.lib.KvPair
 import node.lib.OwnerEntry
 import node.lib.parseCfg
+import specs.net.Key
+import specs.net.Value
 
-export fun reshardMoveCount(store : Map<String, String>, excludeKey : String) : Int =
-    length(store.keys.filter(x -> x ~= excludeKey).toList()) / 4
-
-export fun reshardEntries(store : Map<String, String>, excludeKey : String) : List<KvPair> =
-    let (candidates : List<String> := store.keys.filter(x -> x ~= excludeKey).toList())
+export fun reshardEntries(store : Map<Key, Value>, excludeKey : Key) : List<KvPair> =
+    let (candidates : List<Key> := store.keys.filter(x -> x ~= excludeKey).toList())
     let (limit : Int := length(candidates) / 4)
-    let (taken : List<String> := splice(candidates, 1, limit)) {
+    let (taken : List<Key> := splice(candidates, 1, limit)) {
         taken.map(key -> KvPair { k := key, v := store[key] })
     }
 
@@ -30,8 +29,8 @@ export fun reshardEntries(store : Map<String, String>, excludeKey : String) : Li
 export static proc Store {
     const me : Node
     const cluster : List<Node>
-    var store : Map<String, String>
-    var owners : Map<String, String>
+    var store : Map<Key, Value>
+    var owners : Map<Key, String>
 
     constructor initially(args : List<String>) {
         transit:
@@ -61,12 +60,12 @@ export static proc Store {
     }
 
     /* Client binds ownKey; hub replies with owner ("" if unowned). */
-    service transition ownerOf(ownKey : String, owner : String) {
+    service transition ownerOf(ownKey : Key, owner : String) {
         guard: owner = if (ownKey in owners) { owners[ownKey] } else { "" }
     }
 
     /* Client binds getKey; hub replies with getVal. */
-    service transition getValue(getKey : String, getVal : String) {
+    service transition getValue(getKey : Key, getVal : Value) {
         guard: getVal = store[getKey]
     }
 
@@ -76,43 +75,42 @@ export static proc Store {
     }
 
     /* Client binds putKey and putVal. */
-    service transition putLocal(putKey : String, putVal : String) {
+    service transition putLocal(putKey : Key, putVal : Value) {
         transit:
             store[putKey] := putVal
             owners[putKey] := me.url
     }
 
     /* Client binds claimKey and claimOwner. */
-    service transition applyClaim(claimKey : String, claimOwner : String) {
+    service transition applyClaim(claimKey : Key, claimOwner : String) {
         transit:
             owners[claimKey] := claimOwner
     }
 
     /*
-     * Client binds excludeKey + newOwner; hub replies with entries + nMoved.
-     * Drop moved keys from store; point local owners at newOwner (claim broadcast skips self).
+     * Drop a reshard slice from this node (hub replies fix entries):
+     *   excludeKey — omitted from the donated batch (the key this put is writing)
+     *   newOwner   — peer URL that will own the moved keys
+     *   entries    — KV pairs removed here and sent via goMoveBatch
      */
-    service transition exportReshard(
-        excludeKey : String,
+    service transition dropReshardBatch(
+        excludeKey : Key,
         newOwner : String,
-        entries : List<KvPair>,
-        nMoved : Int
+        entries : List<KvPair>
     ) {
-        guard:
-            & nMoved = reshardMoveCount(store, excludeKey)
-            & entries = reshardEntries(store, excludeKey)
+        guard: entries = reshardEntries(store, excludeKey)
         transit:
             /* Remove exactly the keys named in `entries` (same value as the guard).
              * Do not re-sample store.keys — map iteration order is not stable across calls. */
-            let takenSet : Set<String> := entries.map(e -> e.k).toSet()
-            let ownerKeys : Set<String> := owners.keys.filter(x -> x ~in takenSet) + takenSet
+            let takenSet : Set<Key> := entries.map(e -> e.k).toSet()
+            let ownerKeys : Set<Key> := owners.keys.filter(x -> x ~in takenSet) + takenSet
             store := store.keys.filter(x -> x ~in takenSet).associateWith(x -> store[x])
             owners := ownerKeys.associateWith(k ->
                 if (k in takenSet) { newOwner } else { owners[k] })
     }
 
     /* Client binds moveKey, moveVal, moveOwner. */
-    service transition putFromMove(moveKey : String, moveVal : String, moveOwner : String) {
+    service transition putFromMove(moveKey : Key, moveVal : Value, moveOwner : String) {
         transit:
             store[moveKey] := moveVal
             owners[moveKey] := moveOwner

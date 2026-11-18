@@ -20,6 +20,7 @@ profile-out/
 tools/async-profiler/
 tools/pgo/
 *-jul-build/
-input/sharded_kv/node/ShardNode
-input/sharded_kv/client/ShardClient
+# Go/native binaries emitted next to sources or into CWD
+ShardNode
+ShardClient
 input/sharded_kv/bench-out/

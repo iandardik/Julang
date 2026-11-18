@@ -1,10 +1,13 @@
 import julay.funlib.setOf
-import node.lib.PutResult
 
 /*
- * Perfect network (verification-only). Replaces RpcIn/RpcOut in ShardSpec: the
- * Shard children sync the same actions here that spawn RpcOut / HandleRpc
- * children in the JAR. Send enqueues; deliver dequeues (reorder OK). No drop model.
+ * Perfect network (verification-only leaf specs). Replaces RpcIn/RpcOut in
+ * ShardSpec: Shard children sync the same actions here that spawn RpcOut /
+ * HandleRpc children in the JAR. Send enqueues; deliver dequeues (reorder OK).
+ * No drop model.
+ *
+ * One leaf per bag (not a static proc: `also` is leaf-spec-only, and this net
+ * must not appear in ShardNode):
  *
  *   goClaim     → claimMsgs       → claim          (spawns ApplyClaim)
  *   goMoveBatch → moveBatchMsgs   → moveBatch      (spawns ApplyMoveBatch)
@@ -16,11 +19,12 @@ import node.lib.PutResult
  */
 export type NodeSet := String
 export type Key := String
+export type Value := String
 
 type ClaimMsg {
     src : NodeSet
     dest : NodeSet
-    k : String
+    k : Key
     owner : String
 }
 
@@ -28,8 +32,8 @@ type MoveBatchMsg {
     src : NodeSet
     dest : NodeSet
     owner : String
-    k : String
-    v : String
+    k : Key
+    v : Value
 }
 
 type KeyCountReq {
@@ -43,18 +47,14 @@ type KeyCountReplyMsg {
     count : Int
 }
 
-export spec PerfectNet {
-    NodeSet := { "n1", "n2", "n3" }
-    Key := { "a", "b", "c", "d", "e", "f", "g", "h" }
+export spec PerfectNet := ClaimMsgs || MoveBatchMsgs || KeyCountReqs || KeyCountReplies
 
+spec ClaimMsgs {
     var claimMsgs : Set<ClaimMsg> := setOf()
-    var moveBatchMsgs : Set<MoveBatchMsg> := setOf()
-    var keyCountReqs : Set<KeyCountReq> := setOf()
-    var keyCountReplies : Set<KeyCountReplyMsg> := setOf()
 
     constructor initially(args : List<String>) {}
 
-    transition goClaim(peerUrl : String, key : String, owner : String) also (n : NodeSet, dest : NodeSet) {
+    transition goClaim(peerUrl : String, key : Key, owner : String) also (n : NodeSet, dest : NodeSet) {
         guard: peerUrl = dest
         transit:
             claimMsgs := claimMsgs + setOf(ClaimMsg {
@@ -66,7 +66,7 @@ export spec PerfectNet {
     }
 
     /* Spawns ApplyClaim on n. */
-    transition claim(claimKey : String, claimOwner : String) also (n : NodeSet, src : NodeSet) {
+    transition claim(claimKey : Key, claimOwner : String) also (n : NodeSet, src : NodeSet) {
         guard:
             ClaimMsg {
                 src := src,
@@ -82,12 +82,18 @@ export spec PerfectNet {
                 owner := claimOwner
             })
     }
+}
+
+spec MoveBatchMsgs {
+    var moveBatchMsgs : Set<MoveBatchMsg> := setOf()
+
+    constructor initially(args : List<String>) {}
 
     transition goMoveBatch(
         peerUrl : String,
         ownerUrl : String,
-        key : String,
-        val : String
+        key : Key,
+        val : Value
     ) also (n : NodeSet, dest : NodeSet) {
         guard: peerUrl = dest
         transit:
@@ -101,7 +107,7 @@ export spec PerfectNet {
     }
 
     /* Spawns ApplyMoveBatch on n. */
-    transition moveBatch(moveOwner : String, moveKey : String, moveVal : String) also (n : NodeSet, src : NodeSet) {
+    transition moveBatch(moveOwner : String, moveKey : Key, moveVal : Value) also (n : NodeSet, src : NodeSet) {
         guard:
             MoveBatchMsg {
                 src := src,
@@ -119,6 +125,12 @@ export spec PerfectNet {
                 v := moveVal
             })
     }
+}
+
+spec KeyCountReqs {
+    var keyCountReqs : Set<KeyCountReq> := setOf()
+
+    constructor initially(args : List<String>) {}
 
     transition goKeyCount(peerUrl : String, fromUrl : String) also (n : NodeSet, dest : NodeSet) {
         guard: peerUrl = dest & fromUrl = n
@@ -137,6 +149,12 @@ export spec PerfectNet {
         transit:
             keyCountReqs := keyCountReqs - setOf(KeyCountReq { src := src, dest := n })
     }
+}
+
+spec KeyCountReplies {
+    var keyCountReplies : Set<KeyCountReplyMsg> := setOf()
+
+    constructor initially(args : List<String>) {}
 
     transition keyCountDone(toUrl : String, replyCount : Int) also (n : NodeSet, dest : NodeSet) {
         guard: toUrl = dest
@@ -159,25 +177,5 @@ export spec PerfectNet {
                 dest := n,
                 count := count
             })
-    }
-}
-
-/* Client load for one node: a bounded number of puts, each awaited via putDone. */
-export spec ClientEnv[n : NodeSet] {
-    var pending : Int := 0
-    var issued : Int := 0
-
-    constructor initially(args : List<String>) {}
-
-    transition put(putK : String, putV : String) also (k : Key) {
-        guard: issued < 2 & putK = k & putV = "v"
-        transit:
-            issued := issued + 1
-            pending := pending + 1
-    }
-
-    transition putDone(result : PutResult) {
-        guard: pending > 0
-        transit: pending := pending - 1
     }
 }

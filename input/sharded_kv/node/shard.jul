@@ -5,15 +5,18 @@ import node.lib.GetResult
 import node.lib.KvPair
 import node.lib.OwnerEntry
 import node.lib.PeerPick
+import specs.net.Key
+import specs.net.Value
 
 /*
  * Shard domain: ownership, reshard, claim fan-out. No HTTP wire strings —
  * RpcIn/RpcOut handle marshalling; Store holds maps.
  *
  * Every worker is a proc; its parent is bound by the composition:
- * HandleRpc (JAR) / ClientEnv or PerfectNet (TLA) for the request workers, Put /
+ * HandleRpc (JAR) / PerfectNet (TLA) for the request workers, Put /
  * ApplyMoveBatch for the helpers. Outbound peer messages (goClaim / goMoveBatch /
  * goKeyCount) spawn RpcOut children in the JAR and enqueue on PerfectNet in TLA.
+ * In ShardSpec, Put's put / putDone stay unsynced (env clients; SF_vars(Next)).
  *
  * Action arg names are unique within each proc so Go emit does not redeclare the
  * same := binder in one run loop.
@@ -102,7 +105,7 @@ export proc FindLightestPeer {
 
 /* Fan-out claim to every peer except self (fire-and-forget). */
 export proc BroadcastClaim {
-    const claimKey : String
+    const claimKey : Key
     const claimOwner : String
     const meUrl : String
     var step : String
@@ -110,7 +113,7 @@ export proc BroadcastClaim {
     var peerIdx : Int
     var curUrl : String
 
-    constructor broadcastClaim(bcKey : String, bcOwner : String, bcFrom : String) {
+    constructor broadcastClaim(bcKey : Key, bcOwner : String, bcFrom : String) {
         transit:
             claimKey := bcKey
             claimOwner := bcOwner
@@ -136,7 +139,7 @@ export proc BroadcastClaim {
             step := if (atUrl = meUrl | atId < 0) { "next" } else { "send" }
     }
 
-    transition goClaim(peerUrl : String, key : String, owner : String) {
+    transition goClaim(peerUrl : String, key : Key, owner : String) {
         guard: step = "send" & peerUrl = curUrl & key = claimKey & owner = claimOwner
         transit: step := "next"
     }
@@ -155,17 +158,17 @@ export proc BroadcastClaim {
 }
 
 /*
- * Export up to 25% of keys (excluding exKey) to the peer, one goMoveBatch per entry.
+ * Hand off up to 25% of keys (excluding exKey) to the peer, one goMoveBatch per entry.
  * The receiving ApplyMoveBatch stores each entry, takes ownership, and broadcasts the claim.
  */
 export proc ReshardToPeer {
-    const exportKey : String
+    const exportKey : Key
     const peer : String
     var step : String
     var movedEntries : List<KvPair>
     var moveIdx : Int
 
-    constructor reshardToPeer(exKey : String, reshardPeer : String) {
+    constructor reshardToPeer(exKey : Key, reshardPeer : String) {
         transit:
             exportKey := exKey
             peer := reshardPeer
@@ -174,20 +177,19 @@ export proc ReshardToPeer {
             moveIdx := 1
     }
 
-    client transition exportReshard(
-        excludeKey : String,
+    client transition dropReshardBatch(
+        excludeKey : Key,
         newOwner : String,
-        entries : List<KvPair>,
-        nMoved : Int
+        entries : List<KvPair>
     ) {
         guard: step = "export" & excludeKey = exportKey & newOwner = peer
         transit:
             movedEntries := entries
             moveIdx := 1
-            step := if (nMoved > 0) { "send" } else { "done" }
+            step := if (length(entries) > 0) { "send" } else { "done" }
     }
 
-    transition goMoveBatch(peerUrl : String, ownerUrl : String, key : String, val : String) {
+    transition goMoveBatch(peerUrl : String, ownerUrl : String, key : Key, val : Value) {
         guard:
             & step = "send"
             & moveIdx <= length(movedEntries)
@@ -207,8 +209,8 @@ export proc ReshardToPeer {
 }
 
 export proc Put {
-    const key : String
-    const val : String
+    const key : Key
+    const val : Value
     var step : String
     var meUrl : String
     var ownerUrl : String
@@ -216,7 +218,7 @@ export proc Put {
     var wasUnowned : Boolean
     var pick : PeerPick
 
-    constructor put(putK : String, putV : String) {
+    constructor put(putK : Key, putV : Value) {
         transit:
             key := putK
             val := putV
@@ -235,7 +237,7 @@ export proc Put {
             step := "owner"
     }
 
-    client transition ownerOf(ownKey : String, owner : String) {
+    client transition ownerOf(ownKey : Key, owner : String) {
         guard: step = "owner" & ownKey = key
         transit:
             ownerUrl := owner
@@ -265,7 +267,7 @@ export proc Put {
             step := if (shouldReshard) { "reshard" } else { "put" }
     }
 
-    transition reshardToPeer(exKey : String, reshardPeer : String) {
+    transition reshardToPeer(exKey : Key, reshardPeer : String) {
         guard: step = "reshard" & exKey = key & reshardPeer = pick.url
         transit: step := "resharding"
     }
@@ -275,12 +277,12 @@ export proc Put {
         transit: step := "put"
     }
 
-    client transition putLocal(putKey : String, putVal : String) {
+    client transition putLocal(putKey : Key, putVal : Value) {
         guard: step = "put" & putKey = key & putVal = val
         transit: step := if (wasUnowned) { "claim" } else { "done" }
     }
 
-    transition broadcastClaim(bcKey : String, bcOwner : String, bcFrom : String) {
+    transition broadcastClaim(bcKey : Key, bcOwner : String, bcFrom : String) {
         guard: step = "claim" & bcKey = key & bcOwner = meUrl & bcFrom = meUrl
         transit: step := "claiming"
     }
@@ -302,13 +304,13 @@ export proc Put {
 }
 
 export proc Get {
-    const key : String
+    const key : Key
     var step : String
     var meUrl : String
     var ownerUrl : String
-    var value : String
+    var value : Value
 
-    constructor get(getK : String) {
+    constructor get(getK : Key) {
         transit:
             key := getK
             step := "lookup"
@@ -324,7 +326,7 @@ export proc Get {
             step := "owner"
     }
 
-    client transition ownerOf(ownKey : String, owner : String) {
+    client transition ownerOf(ownKey : Key, owner : String) {
         guard: step = "owner" & ownKey = key
         transit:
             ownerUrl := owner
@@ -335,7 +337,7 @@ export proc Get {
             }
     }
 
-    client transition getValue(getKey : String, getVal : String) {
+    client transition getValue(getKey : Key, getVal : Value) {
         guard: step = "getvalue" & getKey = key
         transit:
             value := getVal
@@ -402,18 +404,18 @@ export proc KeyCount {
 }
 
 export proc ApplyClaim {
-    const key : String
+    const key : Key
     const owner : String
     var step : String
 
-    constructor claim(claimKey : String, claimOwner : String) {
+    constructor claim(claimKey : Key, claimOwner : String) {
         transit:
             key := claimKey
             owner := claimOwner
             step := "call"
     }
 
-    client transition applyClaim(claimKey : String, claimOwner : String) {
+    client transition applyClaim(claimKey : Key, claimOwner : String) {
         guard: step = "call" & claimKey = key & claimOwner = owner
         transit: step := "done"
     }
@@ -428,13 +430,13 @@ export proc ApplyClaim {
  * claim so peers point at this node. OwnerHasValue holds by construction.
  */
 export proc ApplyMoveBatch {
-    const key : String
-    const val : String
+    const key : Key
+    const val : Value
     const meUrl : String
     var step : String
 
     /* moveOwner is this node (the sender addressed the batch to its new owner). */
-    constructor moveBatch(moveOwner : String, moveKey : String, moveVal : String) {
+    constructor moveBatch(moveOwner : String, moveKey : Key, moveVal : Value) {
         transit:
             key := moveKey
             val := moveVal
@@ -442,12 +444,12 @@ export proc ApplyMoveBatch {
             step := "store"
     }
 
-    client transition putFromMove(moveKey : String, moveVal : String, moveOwner : String) {
+    client transition putFromMove(moveKey : Key, moveVal : Value, moveOwner : String) {
         guard: step = "store" & moveKey = key & moveVal = val & moveOwner = meUrl
         transit: step := "claim"
     }
 
-    transition broadcastClaim(bcKey : String, bcOwner : String, bcFrom : String) {
+    transition broadcastClaim(bcKey : Key, bcOwner : String, bcFrom : String) {
         guard: step = "claim" & bcKey = key & bcOwner = meUrl & bcFrom = meUrl
         transit: step := "claiming"
     }

@@ -105,10 +105,10 @@ serveHttp(port, HandleRpc.req ~> HandleRpc.resp)
 
 ## TLA
 
-- Every dynamic leaf is indexed by `DynProc`: `X[i]` or `X[n][i]` under a create-index.
+- Every dynamic leaf is indexed by `DynProc`: `X[i]` or `X[n][i]` under a create-index. If the create-index omits `DynProc := { … }`, TLC gets `{"dp1", "dp2", "dp3"}` (or `dpp1`… when those strings are already used elsewhere in the model).
 - Parent-bound classes get `<B>_parent` per slot. When the parent class has several occurrences, the link is `<<occurrence, slot>>`.
 - `<Class>Terminates == \A slot : constructed[slot] ~> ~constructed[slot]`.
-- Spec includes strong fairness (`SF`) for system-controlled actions. See [Composition and actions — Fairness](composition-and-actions.md#fairness).
+- Spec includes strong fairness (`SF`) over every `Next` action. See [Composition and actions — Fairness](composition-and-actions.md#fairness).
 
 ## See also
 

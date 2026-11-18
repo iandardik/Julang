@@ -53,7 +53,7 @@ spec Name := with (v : T) { System }       // shared apply-binder scope
 spec Name := System[v : T] { const global x } // create-index; x unindexed & immutable in TLA+
 spec Name := System[v : T] { const global x; init: expr } // extra Init conjuncts (const-global)
 spec Name := System[v : T] { global y }       // create-index; y unindexed (mutable) in TLA+
-spec Name := System[v : T] { DynProc := { … } } // dynamic-proc slot model
+spec Name := System[v : T] { DynProc := { … } } // optional; default {"dp1","dp2","dp3"}
 compile Name1, Name2, ...
 ```
 

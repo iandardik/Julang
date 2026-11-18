@@ -123,20 +123,20 @@ fun tlaCodegenPass(
     val domainModels = domains.mapNotNull { (name, d) ->
         d.cfgElements?.let { name to "{${it.joinToString(", ")}}" }
     }.toMap().toMutableMap()
-    // Peeled DynProc models → CONSTANT + cfg (not a DomainType).
+    // Peeled DynProc models → CONSTANT + cfg (not a DomainType). Implicit default
+    // (`dp1`..`dp3`, clash-renamed) is filled in after cfg string literals are known.
     leaves.mapNotNull { it.dynProcModel }.distinctBy { it.name() }.forEach { model ->
         val elems = model.elements.map { lit ->
             when (lit.inferType(emptyMap())) {
-                is StringType -> "\"${lit.literalText()}\""
+                is StringType -> "\"${escapeTlaStringLiteral(lit.literalText())}\""
                 is BoolType -> lit.literalText().uppercase()
                 else -> lit.literalText()
             }
         }
         domainModels[DYN_PROC_MODEL] = "{${elems.joinToString(", ")}}"
     }
-    if (leaves.any { it.isDynamic } && DYN_PROC_MODEL !in domainModels) {
-        domainModels[DYN_PROC_MODEL] = DEFAULT_DYN_PROC_MODEL
-    }
+    val needsDefaultDynProc =
+        leaves.any { it.isDynamic } && DYN_PROC_MODEL !in domainModels
     val domainNames = domains.keys
 
     val pclassesForTla = pclassNodes
@@ -159,7 +159,7 @@ fun tlaCodegenPass(
             }
         }
     }
-    if (DYN_PROC_MODEL in domainModels) {
+    if (DYN_PROC_MODEL in domainModels || needsDefaultDynProc) {
         constants += DYN_PROC_MODEL
     }
 
@@ -296,6 +296,7 @@ private fun emitProjectedTla(
     unusedFieldWarnings: List<OneLocCompileWarning>,
     domains: Map<String, DomainType>,
 ): TlaCodegenResult {
+    val cfgDomainModels = domainModels.toMutableMap()
     val emittedOffers = collectEmittedOfferLists(offers, pclassesForTla)
         .filter { offerGroupHasEmittedUpdate(it) }
         .flatten()
@@ -328,6 +329,16 @@ private fun emitProjectedTla(
         leaf.initExprs.forEach { collectCfgLiteralsFromExpr(it, intModelValues, stringModelValues) }
     }
     usedFunOps.forEach { collectCfgLiteralsFromExpr(it.funBody(), intModelValues, stringModelValues) }
+    // Typedef/uninterpreted domains over String (Key, NodeSet, …) have their own CONSTANT
+    // models; TypeOK often types the same slots as String, so domain elements must ⊆ String.
+    addStringCarrierDomainElements(domains, stringModelValues)
+    addDynProcStringElements(leaves, stringModelValues)
+    if (leaves.any { it.isDynamic } && DYN_PROC_MODEL !in cfgDomainModels) {
+        val slots = defaultDynProcSlotNames(stringModelValues)
+        cfgDomainModels[DYN_PROC_MODEL] =
+            "{${slots.joinToString(", ") { "\"${escapeTlaStringLiteral(it)}\"" }}}"
+        stringModelValues.addAll(slots)
+    }
     val coerceIntToString =
         emittedOffers.any { offerContainsIntToStringCoerce(it) } ||
             invClosure.any { exprContainsIntToStringCoerce(it.invariantFormula()) } ||
@@ -757,7 +768,7 @@ private fun emitProjectedTla(
         }
         appendLine("CHECK_DEADLOCK FALSE")
         fun modelFor(name: String): String {
-            if (name in domainModels) return domainModels.getValue(name)
+            if (name in cfgDomainModels) return cfgDomainModels.getValue(name)
             domains[name]?.let { d ->
                 if (!d.hasModel && d.kind == DomainKind.Typedef) {
                     carrierTlaName(d.carrierType)?.let { return it }
@@ -807,22 +818,15 @@ private fun emitTerminatesProperty(
 }
 
 /**
- * `Fairness == /\ \A slot : SF_vars(\E args : A(slot, args)) ...` for every system-controlled
- * action (internal, timer, return, and syncs between procs). Unsynced env actions get none.
+ * `Fairness == SF_vars(Next)`: if any `Next` arm is enabled infinitely often,
+ * a non-stuttering step must occur infinitely often. Same meaning as
+ * `SF_vars(A1 \/ A2 \/ …)` when `Next` is that disjunction; spelling the arms
+ * out again only bloats the module. (Per-action `\A … : SF_vars(Ai)` is
+ * stronger and blows TLC's liveness tableau.)
  */
 private fun emitFairnessDef(actions: List<TlaAction>): String? {
-    val conjuncts = actions.filter { it.systemControlled }.map { action ->
-        val slots = action.params.take(action.indexParamCount)
-        val args = action.params.drop(action.indexParamCount)
-        val call = if (action.params.isEmpty()) action.name
-        else "${action.name}(${action.params.joinToString(", ") { it.first }})"
-        val inner = if (args.isEmpty()) call else wrapTlaExists(args, call)
-        val sf = "SF_vars($inner)"
-        if (slots.isEmpty()) sf
-        else "\\A " + slots.joinToString(", ") { "${it.first} \\in ${it.second}" } + " : $sf"
-    }
-    if (conjuncts.isEmpty()) return null
-    return "Fairness ==\n" + conjuncts.joinToString("\n") { "  /\\ ${it.replace("\n", "\n     ")}" }
+    if (actions.isEmpty()) return null
+    return "Fairness == SF_vars(Next)"
 }
 
 /** (class, action) of `rcv` in every `serveHttp(port, A.snd ~> A.rcv)`: synced with the always-receptive runtime. */
@@ -837,7 +841,10 @@ internal data class TlaAction(
     val comment: String? = null,
     /** Leading [params] that are leaf index binders (create-index / `DynProc` slots). */
     val indexParamCount: Int = 0,
-    /** Internal, timer, return, or a sync between procs: gets SF in `Fairness`. */
+    /**
+     * Formerly gated inclusion in `Fairness`; fairness is now all of `Next`.
+     * Still recorded for diagnostics (sync / internal / timer / handler reply).
+     */
     val systemControlled: Boolean = false,
 ) {
     fun nextDisjunct(): String {
@@ -1813,7 +1820,9 @@ private fun emitConjoined(
                     val tlaName = allocTlaName(update.name, taken)
                     val io = exprContainsIoHavoc(update.init) ||
                         exprContainsUnsupportedTlaBuiltin(update.init)
-                    val ioDomain = if (io) typeToTlaDomain(update.type) else null
+                    // IO / unsupported-builtin havoc must stay TLC-enumerable: list length 1
+                    // (full MaxListLen × large element types exceeds TLC's 1e6-set limit).
+                    val ioDomain = if (io) typeToTlaIoDomain(update.type) else null
                     val initTla = if (io) {
                         tlaName
                     } else {
@@ -2044,26 +2053,6 @@ private fun emitConjoined(
         parts += "/\\ UNCHANGED <<${unchanged.joinToString(", ")}>>"
     }
 
-    val innerBody = parts.joinToString("\n  ")
-    val letBindings = mutableListOf<Pair<String, String>>()
-    bindPlan.listBinds.forEach { b ->
-        letBindings += argTla(b.arg) to "${emitBound(b.list)}[${argTla(b.index)}]"
-    }
-    bindPlan.structBinds.forEach { b ->
-        val elemType = try {
-            (b.set.getType() as? SetType)?.elementType
-        } catch (_: RuntimeException) {
-            null
-        }
-        b.argPaths.forEach { (arg, path) ->
-            letBindings += argTla(arg) to emitUnwrappedFieldPath(argTla(b.tmp), elemType, path)
-        }
-    }
-    bindPlan.determined.forEach { (arg, expr) ->
-        if (arg in constGlobalArgBinds) return@forEach
-        letBindings += argTla(arg) to emitBound(expr, "      ${argTla(arg)} == ")
-    }
-    val body = wrapTlaLet(letBindings, innerBody)
     val indexParams = mutableListOf<Pair<String, String>>()
     selfBinders.forEach { (leafName, binder) ->
         val leaf = offers.firstOrNull { it.leaf.tlaName == leafName }?.leaf
@@ -2076,11 +2065,46 @@ private fun emitConjoined(
             indexParams += ib to instDomain
         }
     }
+    val indexBinderNames = indexParams.map { it.first }.toSet()
+
+    val letBindings = mutableListOf<Pair<String, String>>()
+    bindPlan.listBinds.forEach { b ->
+        letBindings += argTla(b.arg) to "${emitBound(b.list)}[${argTla(b.index)}]"
+    }
+    bindPlan.structBinds.forEach { b ->
+        val elemType = try {
+            (b.set.getType() as? SetType)?.elementType
+        } catch (_: RuntimeException) {
+            null
+        }
+        b.argPaths.forEach { (arg, path) ->
+            val tlaArg = argTla(arg)
+            val rhs = emitUnwrappedFieldPath(argTla(b.tmp), elemType, path)
+            // Index binders stay as action params (for Next `\E n \in …`); do not LET-shadow them.
+            if (tlaArg in indexBinderNames) {
+                parts += "/\\ $rhs = $tlaArg"
+            } else {
+                letBindings += tlaArg to rhs
+            }
+        }
+    }
+    bindPlan.determined.forEach { (arg, expr) ->
+        if (arg in constGlobalArgBinds) return@forEach
+        val tlaArg = argTla(arg)
+        if (tlaArg in indexBinderNames) {
+            parts += "/\\ $tlaArg = ${emitBound(expr)}"
+        } else {
+            letBindings += tlaArg to emitBound(expr, "      $tlaArg == ")
+        }
+    }
+    val body = wrapTlaLet(letBindings, parts.joinToString("\n  "))
     // Aux params that are already index binders (same name) are dropped by distinctBy.
+    // Determined / struct-bound also-args are omitted from type-domain `\E`, but index
+    // binders must stay: set domains like `msgs[n]` still need `\E n \in NodeSet` in Next.
     val omitBinders = bindPlan.omitArgTypeDomains()
     val params = (indexParams + auxParams + argParams)
         .distinctBy { it.first }
-        .filter { it.first !in omitBinders }
+        .filter { it.first !in omitBinders || it.first in indexBinderNames }
     val signature = if (params.isEmpty()) {
         name
     } else {
@@ -2658,6 +2682,21 @@ internal fun cfgIntModel(values: Set<Int>, maxListLen: Int = DEFAULT_MAX_LIST_LE
     return "{${(0..hi).joinToString(", ")}}"
 }
 
+/** Escape content for a TLA+/TLC double-quoted string (`.tla` and `.cfg`). */
+internal fun escapeTlaStringLiteral(s: String): String =
+    buildString {
+        for (ch in s) {
+            when (ch) {
+                '\\' -> append("\\\\")
+                '"' -> append("\\\"")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> append(ch)
+            }
+        }
+    }
+
 internal fun cfgStringModel(
     literals: Set<String>,
     intValues: Set<Int>,
@@ -2669,7 +2708,55 @@ internal fun cfgStringModel(
         intValues.filter { it >= 0 }.forEach { strs += it.toString() }
     }
     if (strs.isEmpty()) strs += ""
-    return "{${strs.sorted().joinToString(", ") { "\"$it\"" }}}"
+    return "{${strs.sorted().joinToString(", ") { "\"${escapeTlaStringLiteral(it)}\"" }}}"
+}
+
+/** Strip a TLA+ cfg string element (`"a"` / `"a\"b"`) to the raw Julang/Java string. */
+internal fun rawStringFromCfgElement(elem: String): String? {
+    if (elem.length < 2 || !elem.startsWith("\"") || !elem.endsWith("\"")) return null
+    val body = elem.substring(1, elem.length - 1)
+    return buildString {
+        var i = 0
+        while (i < body.length) {
+            val ch = body[i]
+            if (ch == '\\' && i + 1 < body.length) {
+                when (body[i + 1]) {
+                    'n' -> append('\n')
+                    't' -> append('\t')
+                    'r' -> append('\r')
+                    '"' -> append('"')
+                    '\\' -> append('\\')
+                    else -> append(body[i + 1])
+                }
+                i += 2
+            } else {
+                append(ch)
+                i++
+            }
+        }
+    }
+}
+
+/** Union String-carrier domain models (e.g. Key, NodeSet) into the cfg String universe. */
+internal fun addStringCarrierDomainElements(
+    domains: Map<String, DomainType>,
+    into: MutableSet<String>,
+) {
+    domains.values.forEach { d ->
+        if (d.carrierType !is StringType) return@forEach
+        d.cfgElements?.forEach { elem ->
+            rawStringFromCfgElement(elem)?.let { into += it }
+        }
+    }
+}
+
+/** DynProc create-index models are string literals; include them in cfg String when present. */
+private fun addDynProcStringElements(leaves: List<SpecLeaf>, into: MutableSet<String>) {
+    leaves.mapNotNull { it.dynProcModel }.distinctBy { it.name() }.forEach { model ->
+        model.elements.forEach { lit ->
+            if (lit.inferType(emptyMap()) is StringType) into += lit.literalText()
+        }
+    }
 }
 
 private fun collectCfgLiteralsFromOffer(
@@ -2796,6 +2883,37 @@ internal fun typeToTlaDomain(
         }
     }
     else -> "Int"
+    }
+}
+
+/**
+ * Domain for `\E` IO / unsupported-builtin havoc. Lists use length bound 1 so
+ * TLC does not build `BoundedSeq(S, MaxListLen)` sets larger than 1e6 elements
+ * (e.g. cluster configs over `[id: Int, url: String]`).
+ */
+internal fun typeToTlaIoDomain(type: Type): String {
+    closedLiteralDomain(type, null, null, null, null)?.let { return it }
+    return when (type) {
+        is ListType -> "BoundedSeq(${typeToTlaIoDomain(type.elementType)}, 1)"
+        is SetType -> "SUBSET ${typeToTlaIoDomain(type.elementType)}"
+        is MapType -> "[${typeToTlaIoDomain(type.keyType)} -> ${typeToTlaIoDomain(type.valueType)}]"
+        is ObjClassType -> {
+            val single = TlaFieldProjection.get().singletonField(type)
+            if (single != null) {
+                typeToTlaIoDomain(single.type)
+            } else {
+                val fields = TlaFieldProjection.get().fieldsFor(type)
+                if (fields.isEmpty()) {
+                    "[dummy: {0}]"
+                } else {
+                    val rendered = fields.joinToString(", ") { f ->
+                        "${f.name}: ${typeToTlaIoDomain(f.type)}"
+                    }
+                    "[$rendered]"
+                }
+            }
+        }
+        else -> typeToTlaDomain(type)
     }
 }
 
@@ -4090,7 +4208,7 @@ private fun whenLiteralToTla(lit: WhenLiteral): String = when (lit) {
     is WhenLiteral.IntLit -> lit.value
     is WhenLiteral.RealLit -> lit.value
     is WhenLiteral.BoolLit -> if (lit.value == "true") "TRUE" else "FALSE"
-    is WhenLiteral.StringLit -> "\"${lit.value}\""
+    is WhenLiteral.StringLit -> "\"${escapeTlaStringLiteral(lit.value)}\""
 }
 
 /**
@@ -5018,8 +5136,9 @@ private fun emitMapToTla(
 }
 
 private fun literalToTla(expr: LiteralValueExprNode): String {
-    return expr.toTransitString(emptyMap(), emptySet()).let { s ->
-        when (s) {
+    return when {
+        expr.getType() is StringType -> "\"${escapeTlaStringLiteral(expr.literalText())}\""
+        else -> when (val s = expr.toTransitString(emptyMap(), emptySet())) {
             "true" -> "TRUE"
             "false" -> "FALSE"
             else -> s

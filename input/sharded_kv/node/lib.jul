@@ -5,6 +5,8 @@ import julay.funlib.parseInt
 import julay.funlib.readFile
 import julay.funlib.listOf
 import julay.funlib.startsWith
+import specs.net.Key
+import specs.net.Value
 
 export type Node {
     id : Int
@@ -17,12 +19,12 @@ export type CfgPair {
 }
 
 export type KvPair {
-    k : String
-    v : String
+    k : Key
+    v : Value
 }
 
 export type OwnerEntry {
-    k : String
+    k : Key
     owner : String
 }
 
@@ -34,7 +36,7 @@ export type PutResult {
 
 export type GetResult {
     kind : String
-    value : String
+    value : Value
     ownerUrl : String
 }
 

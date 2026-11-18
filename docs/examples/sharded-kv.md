@@ -8,8 +8,8 @@ Multi-node key–value store under [`input/sharded_kv/`](../../input/sharded_kv/
 |------|------|
 | `cluster.conf` | Node URLs (ids `1..n` by line order), ports **6001–6003** |
 | `node/` | `Store` hub + Shard workers + `rpc_in` / `rpc_out` children; JAR nests workers under `HandleRpc` / peers |
-| `client/` | CLI with one `303 OWNER` redirect retry; binary `ShardClient` |
-| `specs/` | Same Shard children re-parented: `ClientEnv` / `PerfectNet` + `DynProc` slots; unindexed PerfectNet (4 bags) |
+| `client/` | CLI with one `303 OWNER` redirect retry |
+| `specs/` | Same Shard children re-parented: unsynced `Put` + `PerfectNet` (`ClaimMsgs \|\| …` four bag leaves) + `DynProc` slots |
 | `scripts/` | `compile.sh`, `start_cluster.sh`, `stop_cluster.sh`, `smoke_test.sh`, `reshard_test.sh` |
 
 ## Build
@@ -21,13 +21,13 @@ From the repo root:
 input/sharded_kv/scripts/compile.sh
 ```
 
-That compiles `sys.jul` and places:
+That compiles `sys.jul` and places under `input/sharded_kv/`:
 
-- `input/sharded_kv/node/ShardNode`
-- `input/sharded_kv/client/ShardClient`
-- `input/sharded_kv/specs/ShardSpec.tla` / `.cfg`
+- `ShardNode`
+- `ShardClient`
+- `ShardSpec.tla` / `ShardSpec.cfg`
 
-(`julayc` still emits into the cwd first; `compile.sh` moves the artifacts into these folders.)
+(`julayc` still emits into the cwd first; `compile.sh` moves the artifacts here.)
 
 ## Run cluster
 
@@ -41,10 +41,10 @@ input/sharded_kv/scripts/stop_cluster.sh
 Or manually:
 
 ```bash
-input/sharded_kv/node/ShardNode "$(pwd)/input/sharded_kv/cluster.conf" 1
-input/sharded_kv/client/ShardClient http://127.0.0.1:6001 put myKey myVal
-input/sharded_kv/client/ShardClient http://127.0.0.1:6002 get myKey    # may 303 then retry
-input/sharded_kv/client/ShardClient http://127.0.0.1:6001 owners
+input/sharded_kv/ShardNode "$(pwd)/input/sharded_kv/cluster.conf" 1
+input/sharded_kv/ShardClient http://127.0.0.1:6001 put myKey myVal
+input/sharded_kv/ShardClient http://127.0.0.1:6002 get myKey    # may 303 then retry
+input/sharded_kv/ShardClient http://127.0.0.1:6001 owners
 ```
 
 ## Protocol sketch
@@ -55,6 +55,6 @@ input/sharded_kv/client/ShardClient http://127.0.0.1:6001 owners
 
 ## TLA+ sketch
 
-- Shard source is identical in JAR and TLA; only the composition changes. JAR nests workers under `HandleRpc` / `Put` / …; TLA re-nests under `ClientEnv` / `PerfectNet` with `DynProc` slots (parenthood inferred from `||`).
-- Unindexed `PerfectNet` (network is not node state): bags for claims, move batches, key-count requests, and key-count replies. `goClaim` / `goMoveBatch` are fire-and-forget; only `goKeyCount` has a reply. The peer that receives a move batch takes ownership and broadcasts claims.
+- Shard source is identical in JAR and TLA; only the composition changes. JAR: `ShardNode := Store || ServerStarter || HttpWorkers || SendClaim` (`PutPath` / `ApplyMovePath` under `HttpWorkers`). TLA: `VerifNode := Store || VerifPutPath || PeerInbound` (same nesting, `Verif*` names to avoid decl clashes in `sys.jul`). `Put.put` / `putDone` stay unsynced (environment).
+- Unindexed `PerfectNet := ClaimMsgs || MoveBatchMsgs || KeyCountReqs || KeyCountReplies` (network is not node state; leaf specs, not a `static proc`, so `also` works and the net stays out of `ShardNode`). `goClaim` / `goMoveBatch` are fire-and-forget; only `goKeyCount` has a reply. The peer that receives a move batch takes ownership and broadcasts claims.
 - Invariants target `Store[n].store` / `Store[n].owners`. Each dynamic class gets a `Terminates` property under strong fairness.
