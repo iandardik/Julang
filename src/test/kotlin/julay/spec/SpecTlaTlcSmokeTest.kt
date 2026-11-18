@@ -880,6 +880,120 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun fieldVarsProjectsSoleUsedFieldToVarField() {
+        val source = File("regression/input/spec/field-vars-me-url.jul")
+        val (tlaText, _) = compileSpecTla(source, "FieldVarsMeUrl")
+        val initDef = tlaText.substringAfter("Init ==").substringBefore("\n\n")
+        assertTrue(
+            initDef.contains("\\* field-vars: me → me_url (omitted id)"),
+            "expected field-vars Init comment;\n$initDef",
+        )
+        assertTrue(
+            initDef.contains("me_url = [i \\in N |-> \"x\"]") ||
+                initDef.contains("me_url \\in [N -> String]"),
+            "me_url should be String-valued (literal or domain);\n$initDef",
+        )
+        val putDef = tlaText.substringAfter("put(i,").substringBefore("\n\n")
+        assertTrue(
+            !tlaText.contains("VARIABLES me,") &&
+                tlaText.contains("me_url") &&
+                putDef.contains("me_url[i]") &&
+                !putDef.contains(".url") &&
+                !putDef.contains(".id"),
+            "put should use me_url without .url/.id;\n$putDef\n$tlaText",
+        )
+        val (offText, _) = compileSpecTla(
+            source,
+            "FieldVarsMeUrl",
+            tlaOptConfig = TlaOptConfig.fromDisableTlaOptFlag("field-vars"),
+        )
+        assertTrue(
+            offText.contains("VARIABLES me,") || Regex("""VARIABLES me\b""").containsMatchIn(offText),
+            "disabling field-vars should keep me;\n$offText",
+        )
+        assertTrue(
+            !offText.contains("field-vars:"),
+            "disabled field-vars should omit Init comment;\n$offText",
+        )
+    }
+
+    @Test
+    fun mapIndexPutDefaultEmitsDomainUnionRebuild() {
+        val source = File("regression/input/spec/map-index-put-tla.jul")
+        val (tlaText, _) = compileSpecTla(source, "MapPutSpec")
+        assertFalse(
+            tlaText.contains("[@ EXCEPT !["),
+            "default map put must not use nested EXCEPT insert;\n$tlaText",
+        )
+        assertTrue(
+            tlaText.contains("DOMAIN __m \\cup {__pk}") &&
+                tlaText.contains("IF __k = __pk THEN __pv ELSE __m[__k]"),
+            "default map put should rebuild over DOMAIN ∪ {key};\n$tlaText",
+        )
+        val putDef = tlaText.substringAfter("put(i, k, v) ==").substringBefore("\n\n")
+        assertTrue(
+            putDef.contains("EXCEPT ![i]") && putDef.contains("LET __m == @"),
+            "indexed map put should keep outer EXCEPT ![i] and rebuild inner map;\n$putDef",
+        )
+    }
+
+    @Test
+    fun mapIndexPutDisableEmitsNestedExcept() {
+        val source = File("regression/input/spec/map-index-put-tla.jul")
+        val (tlaText, _) = compileSpecTla(
+            source,
+            "MapPutSpec",
+            tlaOptConfig = TlaOptConfig.fromDisableTlaOptFlag("map-index-put"),
+        )
+        val putDef = tlaText.substringAfter("put(i, k, v) ==").substringBefore("\n\n")
+        assertTrue(
+            putDef.contains("[@ EXCEPT ![k] = v]"),
+            "disabled map-index-put should use nested EXCEPT;\n$putDef",
+        )
+        assertFalse(
+            putDef.contains("DOMAIN __m"),
+            "disabled map-index-put should not rebuild DOMAIN ∪;\n$putDef",
+        )
+    }
+
+    @Test
+    fun parseIntInitiallyFoldsIntoInitWithOmittedVarsComment() {
+        val source = File("regression/input/spec/ctor-parseint-fold-tla.jul")
+        val (tlaText, _) = compileSpecTla(source, "ParseIntFold")
+        val initDef = tlaText.substringAfter("Init ==").substringBefore("\n\n")
+        assertTrue(
+            initDef.contains("with initially constructor logic"),
+            "parseInt initially should fold into Init;\n$initDef",
+        )
+        assertTrue(
+            initDef.contains("\\* unused-vars: omitted unusedPeer"),
+            "expected unused-vars omission comment;\n$initDef",
+        )
+        assertTrue(
+            !initDef.contains("constructor assumption") &&
+                !initDef.contains("Len(args)") &&
+                !initDef.contains("\\E args"),
+            "args-only error assumptions must not appear in Init;\n$initDef",
+        )
+        assertTrue(
+            Regex("""me \\in \[N ->""").containsMatchIn(initDef) ||
+                initDef.contains("me \\in [N ->"),
+            "me assigned via parseInt let should be Init \\\\in domain;\n$initDef",
+        )
+        assertTrue(
+            !tlaText.contains("Box_constructed") &&
+                !Regex("""(?m)^initially\(""").containsMatchIn(tlaText) &&
+                !tlaText.contains("Box_initially"),
+            "folded initially must not leave constructed or Next initially;\n$tlaText",
+        )
+        val nextDef = tlaAfterNext(tlaText)
+        assertTrue(
+            !nextDef.contains("initially("),
+            "Next must not call initially;\n$nextDef",
+        )
+    }
+
+    @Test
     fun optionalRecordEmitsPresentValue() {
         val source = File("regression/input/spec/tla-optional.jul")
         val (tlaText, _) = compileSpecTla(source, "OptionalSpec")

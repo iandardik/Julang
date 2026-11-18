@@ -14,7 +14,7 @@ Former Kotlin/JAR flags `--disable-opt` / ids `eq-unify`, `arg-ownership`, `dire
 
 ## TLA+ emission optimizations
 
-When compiling a `spec` (or `--compile-tla`), Julay may rewrite generated `.tla` / `.cfg` so TLC `\E` quantification is smaller. **Go codegen is unchanged.** Default: all named TLA+ optimizations are **on**. Disable with `--disable-tla-opt` / `--disable-tla-opt=ID,...` (`=` is required when passing ids).
+When compiling a `spec` (or `--compile-tla`), Julay may rewrite generated `.tla` / `.cfg` so TLC `\E` quantification is smaller. **Go codegen is unchanged.** Default: named TLA+ optimizations are **on**. Disable with `--disable-tla-opt` / `--disable-tla-opt=ID,...` (`=` is required when passing ids). `--opt-tla` remains for any future default-off rewrites (none currently).
 
 Some of these are **equivalent rewrites** of the same transition relation. Others are **projections**: they exclude values the Julay type would otherwise allow, so `=` / `in` / `~=` can diverge from the program.
 
@@ -31,12 +31,14 @@ Always-on (not named opt ids): singleton `init:` that uniquely determines a cons
 | ID | Role | Kind |
 |----|------|------|
 | `unused-fields` | Omit obj fields that the TLA-relevant fragment never projects (field access / struct patterns / comparison-operand literals) | Projection |
-| `unused-vars` | Omit state vars/consts the TLA-relevant fragment never reads (emitted-action guards/transits and the guarantee). Not TLA+ liveness (`WF`/`SF`). | Equivalent rewrite (of the emitted spec) |
+| `unused-vars` | Omit state vars/consts the TLA-relevant fragment never reads (emitted-action guards/transits and the guarantee). Not TLA+ liveness (`WF`/`SF`). When any are omitted, Init lists them under `\* unused-vars: omitted …` after that leaf’s state-variables comment. | Equivalent rewrite (of the emitted spec) |
 | `determined-args` | Drop `\E` for action args fixed by `arg = expr` or `arg <=> expr`; substitute with `LET`. A `|` of `&`-branches that determines the same arg on every arm binds a `LET` of `IF`/`CASE` and skips the per-branch equalities (not the rest of the `|` tree) | Equivalent rewrite |
 | `from-collection` | Quantify remaining args from a state collection: `a in S` on a set, `S[a.f] = a` on a list (index binder `i \in 1..Len(S)`), a struct literal `in` a set, or `S.filter(x -> x.f = a).length > 0` (`\E a \in { x.f : x \in S }`; a `|` of bags unions the projections) | Equivalent rewrite |
 | `literal-domains` | Per-site finite `{…}` for String/Int that only use a closed literal set, including TypeOK var/field ranges and const-global Init `\in` domains. Does **not** by itself shrink the global `String` CONSTANT (so e.g. `Entry.value` stays open); the cfg String/Int models are still the residual open-site literals | Projection (when it excludes values the type would otherwise allow) |
 | `unwrap-singletons` | After unused-fields, an obj with one remaining field emits as that field’s type (Raft `Node` → `Int`) | Equivalent rewrite |
 | `unused-lets` | Drop expression and transit `LET` bindings that the `IN` body (and later kept inits) never read; walk inner-to-outer so dropping `voteCondition` then drops `logOk` | Equivalent rewrite |
+| `field-vars` | When a retained obj state var is only read through one field, emit that field as `var_field` (e.g. `me` + `.url` → `me_url`) and Init comment `\* field-vars: me → me_url (omitted id)` | Projection |
+| `map-index-put` | Map `m[k] := v` as a `DOMAIN ∪ {k}` function rebuild instead of nested `EXCEPT` (avoids TLC “EXCEPT was applied to non-existing fields” warnings on inserts) | Equivalent rewrite |
 
 If a field is omitted from a type that still appears in whole-record comparison or set containment, `julayc` warns and points at `--disable-tla-opt=unused-fields`. Values that differed only in omitted fields become equal.
 
@@ -56,8 +58,11 @@ java -jar build/libs/julayc.jar --disable-tla-opt=unused-vars path/to/file.jul
 
 # Disable a mix
 java -jar build/libs/julayc.jar --disable-tla-opt=determined-args,from-collection path/to/file.jul
+
+# Readable nested EXCEPT for map puts (disable DOMAIN ∪ rebuild)
+java -jar build/libs/julayc.jar --disable-tla-opt=map-index-put path/to/file.jul
 ```
 
-Unknown TLA+ optimization ids are a usage error. `--disable-opt` and `--disable-tla-opt` may be passed together; they do not interact.
+Unknown TLA+ optimization ids are a usage error. `--disable-opt`, `--disable-tla-opt`, and `--opt-tla` may be passed together.
 
 See also [Composition and actions](composition-and-actions.md) and [Tooling](../tooling.md).

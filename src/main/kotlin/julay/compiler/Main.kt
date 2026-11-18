@@ -81,8 +81,18 @@ class Julayc : CliktCommand(name = "julayc") {
         "--disable-tla-opt",
         metavar = "OPT,...",
         help = "Disable TLA+ emission optimizations. Use bare --disable-tla-opt to disable all " +
-            "(unused-fields, unused-vars, determined-args, from-collection, literal-domains, unwrap-singletons, unused-lets), " +
+            "(unused-fields, unused-vars, determined-args, from-collection, literal-domains, " +
+            "unwrap-singletons, unused-lets, field-vars, map-index-put), " +
             "or --disable-tla-opt=ID,ID for a subset. " +
+            "The '=' form is required when passing ids so the input path is not consumed. " +
+            "See docs/language/compiler-optimizations.md",
+    ).optionalValue("ALL", acceptsUnattachedValue = false)
+
+    private val optTla by option(
+        "--opt-tla",
+        metavar = "OPT,...",
+        help = "Enable opt-in TLA+ emission rewrites that stay off by default. " +
+            "Currently no default-off ids (map-index-put is default-on; use --disable-tla-opt=map-index-put). " +
             "The '=' form is required when passing ids so the input path is not consumed. " +
             "See docs/language/compiler-optimizations.md",
     ).optionalValue("ALL", acceptsUnattachedValue = false)
@@ -107,9 +117,9 @@ class Julayc : CliktCommand(name = "julayc") {
             throw UsageError(e.message ?: "Invalid --disable-opt")
         }
         val tlaOptConfig = try {
-            TlaOptConfig.fromDisableTlaOptFlag(disableTlaOpt)
+            TlaOptConfig.fromFlags(disableTlaOpt, optTla)
         } catch (e: IllegalArgumentException) {
-            throw UsageError(e.message ?: "Invalid --disable-tla-opt")
+            throw UsageError(e.message ?: "Invalid --disable-tla-opt / --opt-tla")
         }
         compileJulFile(
             file,

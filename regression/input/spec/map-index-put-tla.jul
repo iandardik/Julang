@@ -1,0 +1,28 @@
+import julay.funlib.mapOf
+
+type N
+
+static proc Box {
+    var table : Map<String, Int>
+
+    constructor initially(args : List<String>) {
+        transit:
+            table := mapOf()
+    }
+
+    internal transition put(k : String, v : Int) {
+        guard:
+            true
+        transit:
+            table[k] := v
+    }
+}
+
+invariant TableDom := forall i : N, forall k : String,
+    (k in Box[i].table) => Box[i].table[k] >= 0
+
+spec MapPutSpec := Box[i : N] {
+    N := {"a"}
+} |= TableDom
+
+compile MapPutSpec

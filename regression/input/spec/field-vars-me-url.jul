@@ -1,0 +1,36 @@
+import julay.funlib.mapOf
+
+type N
+type NodeInfo {
+    id : Int
+    url : String
+}
+
+static proc Box {
+    const me : NodeInfo
+    var table : Map<String, Int>
+
+    constructor initially(args : List<String>) {
+        transit:
+            me := NodeInfo { id := 0, url := "x" }
+            table := mapOf()
+    }
+
+    internal transition put(k : String, v : Int) {
+        guard:
+            true
+        transit:
+            table[k] := v
+            /* read only me.url — id unused */
+            table[me.url] := v
+    }
+}
+
+invariant TableOk := forall i : N, forall k : String,
+    (k in Box[i].table) => Box[i].table[k] >= 0
+
+spec FieldVarsMeUrl := Box[i : N] {
+    N := {"a"}
+} |= TableOk
+
+compile FieldVarsMeUrl

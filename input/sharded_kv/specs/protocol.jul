@@ -12,13 +12,15 @@ import specs.net.Key
 import specs.net.Value
 
 /*
- * TLA assembly: same Shard children as ShardNode, re-parented. Put's constructor
- * / return stay unsynced (environment clients). PerfectNet stands in for
- * RpcIn/RpcOut — unindexed (shared bags); node state is create-indexed once.
+ * Compositional TLA: Store is verified under assumption StoreAsm; ShardEnv (workers
+ * + PerfectNet) is checked to establish StoreAsm. StoreAsm is `true` for now and
+ * can be strengthened later without changing the AG shape.
  *
- * Nesting mirrors node/main.jul (PutPath / ApplyMovePath) under Verif* names so
- * sys.jul can compile JAR + TLA together without decl clashes. Each BroadcastClaim
- * seals with its own parent (Put vs ApplyMoveBatch).
+ *   ShardEnvSpec := ShardEnv |= StoreAsm
+ *   StoreSpec    := <StoreAsm> IndexedStore <StoreInvs>
+ *
+ * Put's put / putDone stay unsynced (environment clients). PerfectNet is unindexed
+ * beside the create-indexed workers. Verif* names avoid decl clashes with node/main.jul.
  */
 
 /* Client put path: Put + helpers (FindLightestPeer / BroadcastClaim / ReshardToPeer). */
@@ -30,16 +32,26 @@ spec VerifPutPath := Put
 /* Inbound move-batch worker and its claim fan-out. */
 spec VerifApplyMovePath := ApplyMoveBatch || BroadcastClaim
 
-/* Peer RPC workers (PerfectNet is composed beside the indexed node, not under it). */
+/* Peer RPC workers (PerfectNet is composed beside the indexed workers, not under them). */
 spec PeerInbound := KeyCount || ApplyClaim || VerifApplyMovePath
 
-spec Node := Store || VerifPutPath || PeerInbound
+/* Everything that syncs with Store — the store's environment. */
+spec ShardEnvCore := VerifPutPath || PeerInbound
 
-spec Cluster := Node[n : NodeSet] {
+spec ShardEnv := ShardEnvCore[n : NodeSet] {
+    NodeSet := { "n1", "n2", "n3" }
+    Key := { "a", "b", "c", "d", "e", "f", "g", "h" }
+    Value := { "v1", "v2", "v3" }
+} || PerfectNet
+
+spec IndexedStore := Store[n : NodeSet] {
     NodeSet := { "n1", "n2", "n3" }
     Key := { "a", "b", "c", "d", "e", "f", "g", "h" }
     Value := { "v1", "v2", "v3" }
 }
+
+/* Assumption Store establishes under / Env is asked to prove. Strengthen later. */
+invariant StoreAsm := true
 
 invariant AtMostOneStore := forall k : Key, forall n1 : NodeSet, forall n2 : NodeSet,
     (k in Store[n1].store & k in Store[n2].store) => n1 = n2
@@ -51,6 +63,9 @@ invariant OwnersAgree := forall n1 : NodeSet, forall n2 : NodeSet, forall k : Ke
     (k in Store[n1].owners & k in Store[n2].owners) =>
         Store[n1].owners[k] = Store[n2].owners[k]
 
-/* PerfectNet is unindexed; also (n : NodeSet) merges with Cluster's create-index n. */
-export spec ShardSpec := Cluster || PerfectNet
-    |= (AtMostOneStore & OwnerHasValue & OwnersAgree)
+invariant StoreInvs := AtMostOneStore & OwnerHasValue & OwnersAgree
+
+export spec ShardEnvSpec := ShardEnv |= StoreAsm
+
+/* <true> until StoreAsm is a real env system or a stronger property. */
+export spec StoreSpec := <true> IndexedStore <StoreInvs>

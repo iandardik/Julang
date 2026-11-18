@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Compile ShardNode, ShardClient, and ShardSpec; place artifacts under input/sharded_kv/.
+# Compile ShardNode, ShardClient, ShardEnvSpec, and StoreSpec; place under input/sharded_kv/.
 #
 # Usage (from repo root): ./input/sharded_kv/scripts/compile.sh
 # Requires: ./gradlew shadowJar (or an existing build/libs/julayc.jar)
@@ -30,13 +30,18 @@ echo "Compiling input/sharded_kv/sys.jul with $JAR"
 
 mv -f "$REPO_ROOT/ShardNode" "$SKV_DIR/ShardNode"
 mv -f "$REPO_ROOT/ShardClient" "$SKV_DIR/ShardClient"
-mv -f "$REPO_ROOT/ShardSpec.tla" "$SKV_DIR/ShardSpec.tla"
-mv -f "$REPO_ROOT/ShardSpec.cfg" "$SKV_DIR/ShardSpec.cfg"
+mv -f "$REPO_ROOT/ShardEnvSpec.tla" "$SKV_DIR/ShardEnvSpec.tla"
+mv -f "$REPO_ROOT/ShardEnvSpec.cfg" "$SKV_DIR/ShardEnvSpec.cfg"
+mv -f "$REPO_ROOT/StoreSpec.tla" "$SKV_DIR/StoreSpec.tla"
+mv -f "$REPO_ROOT/StoreSpec.cfg" "$SKV_DIR/StoreSpec.cfg"
+rm -f "$SKV_DIR/ShardSpec.tla" "$SKV_DIR/ShardSpec.cfg"
 rm -rf "$REPO_ROOT/ShardNode-jul-build" "$REPO_ROOT/ShardClient-jul-build"
 
 chmod +x "$SKV_DIR/ShardNode" "$SKV_DIR/ShardClient"
 echo "Wrote:"
 echo "  $SKV_DIR/ShardNode"
 echo "  $SKV_DIR/ShardClient"
-echo "  $SKV_DIR/ShardSpec.tla"
-echo "  $SKV_DIR/ShardSpec.cfg"
+echo "  $SKV_DIR/ShardEnvSpec.tla"
+echo "  $SKV_DIR/ShardEnvSpec.cfg"
+echo "  $SKV_DIR/StoreSpec.tla"
+echo "  $SKV_DIR/StoreSpec.cfg"

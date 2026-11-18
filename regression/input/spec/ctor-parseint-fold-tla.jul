@@ -1,0 +1,43 @@
+import julay.funlib.parseInt
+import julay.funlib.length
+import julay.funlib.mapOf
+
+type N
+type NodeInfo {
+    id : Int
+    url : String
+}
+
+static proc Box {
+    const me : NodeInfo
+    const unusedPeer : String
+    var table : Map<String, Int>
+
+    constructor initially(args : List<String>) {
+        transit:
+            let id : Int := parseInt(args[2])
+            me := NodeInfo { id := id, url := args[1] }
+            unusedPeer := ""
+            table := mapOf()
+        error:
+            (length(args) ~= 2) -> "need two args"
+    }
+
+    internal transition put(k : String, v : Int) {
+        guard:
+            true
+        transit:
+            table[k] := v
+    }
+}
+
+invariant TableDom := forall i : N, forall k : String,
+    (k in Box[i].table) => Box[i].table[k] >= 0
+
+invariant MeId := forall i : N, Box[i].me.id >= 0
+
+spec ParseIntFold := Box[i : N] {
+    N := {"a"}
+} |= TableDom & MeId
+
+compile ParseIntFold

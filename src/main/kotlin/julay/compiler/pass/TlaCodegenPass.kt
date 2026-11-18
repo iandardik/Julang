@@ -232,6 +232,19 @@ fun tlaCodegenPass(
         TlaRelevantVars.IDENTITY
     }
     TlaVarProjection.set(relevantVars)
+    val fieldVars = if (tlaOptConfig.fieldVars) {
+        analyzeTlaFieldVars(
+            pclassesForTla,
+            offers,
+            usedFunOps,
+            invClosure,
+            relevantVars,
+            initExprs = leaves.flatMap { leaf -> leaf.initExprs.map { leaf.name to it } },
+        )
+    } else {
+        TlaFieldVars.IDENTITY
+    }
+    TlaFieldVarProjection.set(fieldVars)
     val literalDomains = if (tlaOptConfig.literalDomains) {
         analyzeTlaLiteralDomains(leaves, pclassesForTla, offers, usedFunOps, invClosure)
     } else {
@@ -245,10 +258,10 @@ fun tlaCodegenPass(
     domains.forEach { (name, domain) ->
         symbolTypes[name] = domain
     }
-    pclassesForTla.values.forEach { pc ->
+    pclassesForTla.forEach { (leafName, pc) ->
         pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
             try {
-                symbolTypes[vn.name] = vn.type
+                symbolTypes[vn.name] = TlaFieldVarProjection.get().effectiveType(leafName, vn.name, vn.type)
             } catch (_: RuntimeException) {
             }
         }
@@ -277,6 +290,7 @@ fun tlaCodegenPass(
         TlaEmitOpts.set(TlaOptConfig.ALL_ON)
         TlaSymbolTypes.set(emptyMap())
         TlaVarProjection.set(TlaRelevantVars.IDENTITY)
+        TlaFieldVarProjection.set(TlaFieldVars.IDENTITY)
     }
 }
 
@@ -379,7 +393,11 @@ private fun emitProjectedTla(
             invClosure.any { exprContainsAllDistinct(it.invariantFormula()) }
     val unsupportedBuiltinWarnings =
         collectUnsupportedBuiltinWarnings(offers, usedFunOps, invClosure)
-    val stateVarNames = buildStateVarNames(leaves, pclassesForTla, reservedTlaIds)
+    val stateVarNames = applyFieldVarNames(
+        buildStateVarNames(leaves, pclassesForTla, reservedTlaIds),
+        leaves,
+        reservedTlaIds,
+    )
     val foldedCtors = foldableInitConstructors(offers, pclassesForTla)
     val foldedCtorLeaves = foldedCtors.keys
 
@@ -411,6 +429,10 @@ private fun emitProjectedTla(
             "\\* State variables for ${leaf.name} with ${foldCtor.decl.action.name} constructor logic"
         } else {
             "\\* State variables for ${leaf.name}"
+        }
+        unusedVarsOmittedComment(leaf, pc)?.let { initParts += it }
+        TlaFieldVarProjection.get().projectionsForLeaf(leaf.name).forEach { proj ->
+            initParts += proj.initComment()
         }
         val constructed = stateTlaName(leaf.tlaName, "constructed", stateVarNames)
         val parentDomain = parentLinkDomain(leaf, leaves)
@@ -461,7 +483,7 @@ private fun emitProjectedTla(
                     // Init `/\\` indentation). Open/spawn F_call re-applies inline inits.
                     val def = when (val init = vn.initExpr) {
                         is LiteralValueExprNode -> literalToTla(init)
-                        else -> defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)
+                        else -> defaultTlaValue(effectiveVarType(leaf, vn), leafClass = leaf.name, varName = vn.name)
                     }
                     initParts += "/\\ $v = ${initMap(def)}"
                 } else if (vn.name in leaf.globalConstVars) {
@@ -469,10 +491,10 @@ private fun emitProjectedTla(
                     if (singleton != null) {
                         initParts += "/\\ $v = $singleton"
                     } else {
-                        initParts += "/\\ $v \\in ${typeToTlaDomain(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
+                        initParts += "/\\ $v \\in ${typeToTlaDomain(effectiveVarType(leaf, vn), leafClass = leaf.name, varName = vn.name)}"
                     }
                 } else {
-                    initParts += "/\\ $v = ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
+                    initParts += "/\\ $v = ${defaultTlaValue(effectiveVarType(leaf, vn), leafClass = leaf.name, varName = vn.name)}"
                 }
                 typeOkParts += typeOkForStateVar(
                     leaf, vn, v, typeOkIntRange, typeOkShapes, stateVarNames,
@@ -483,7 +505,7 @@ private fun emitProjectedTla(
                     typeOkShapes, stateVarNames,
                 )
                 appendStateConstraint(
-                    constraintParts, v, safeType(vn),
+                    constraintParts, v, effectiveVarType(leaf, vn),
                     indexed = leaf.indexesState(vn.name),
                     binder = binder, domain = domain,
                     instBinder = instBinder, instDomain = instDomain,
@@ -515,7 +537,7 @@ private fun emitProjectedTla(
                 if (folded != null) {
                     initParts += folded
                 } else {
-                    initParts += "/\\ $v = ${defaultTlaValue(safeType(vn), leafClass = leaf.name, varName = vn.name)}"
+                    initParts += "/\\ $v = ${defaultTlaValue(effectiveVarType(leaf, vn), leafClass = leaf.name, varName = vn.name)}"
                 }
                 typeOkParts += typeOkForStateVar(
                     leaf, vn, v, typeOkIntRange, typeOkShapes, stateVarNames,
@@ -526,7 +548,7 @@ private fun emitProjectedTla(
                     typeOkShapes, stateVarNames,
                 )
                 appendStateConstraint(
-                    constraintParts, v, safeType(vn),
+                    constraintParts, v, effectiveVarType(leaf, vn),
                     indexed = false, binder = null, domain = null, intRange = intConstraintRange,
                 )
             }
@@ -959,6 +981,31 @@ private fun safeType(vn: VarNode): Type = try {
     intType
 }
 
+/**
+ * Init comment listing state vars/consts dropped by `unused-vars` (declaration order).
+ * Null when none were omitted or projection is off.
+ */
+internal fun unusedVarsOmittedComment(leaf: SpecLeaf, pc: ProcClassNode): String? {
+    val proj = TlaVarProjection.get()
+    if (!proj.projecting) return null
+    val omitted = pc.localDecls().filterIsInstance<VarNode>()
+        .map { it.name }
+        .filter { !proj.isRelevant(leaf.name, it) }
+    if (omitted.isEmpty()) return null
+    return "\\* unused-vars: omitted ${omitted.joinToString(", ")}"
+}
+
+/**
+ * Map put as an explicit domain-extending function rebuild.
+ * Avoids TLC's "EXCEPT was applied to non-existing fields" warning (and matches
+ * pure TLA+ better than relying on TLC extending DOMAIN via EXCEPT).
+ *
+ * [oldMap] is the pre-put map (`@` inside an outer EXCEPT, or the variable name).
+ */
+internal fun emitMapIndexPutRhs(oldMap: String, keyTla: String, valueTla: String): String =
+    "LET __m == $oldMap __pk == $keyTla __pv == $valueTla IN " +
+        "[__k \\in DOMAIN __m \\cup {__pk} |-> IF __k = __pk THEN __pv ELSE __m[__k]]"
+
 private fun collectTlaActionOffers(
     leaves: List<SpecLeaf>,
     pclasses: Map<String, ProcClassNode>,
@@ -1043,8 +1090,8 @@ internal fun foldableInitConstructors(
         if (hubPairedOfferLists(syncables, pclasses) != null) return@forEach
         val constructors = group.filter { it.isConstructor }
         if (constructors.size == 1 && syncables.size == 1) return@forEach
-        // Do not fold constructors that call TLA-unsupported builtins (e.g. parseInt).
-        if (offerContainsUnsupportedTlaBuiltin(offer)) return@forEach
+        // Unsupported builtins (parseInt/parseCfg, …) still fold: assigns that depend on
+        // them become Init `\in` domains via foldedCtorAssignNeedsDomainInit.
         out[tlaName] = offer
     }
     return out
@@ -1161,7 +1208,7 @@ private fun typeOkRangeForVar(
     val setUniv = shapes.subsetSrc[leaf.tlaName to vn.name]?.let { srcRead(it) }
         ?: shapes.subsetRange[leaf.tlaName to vn.name]?.let { "Range(${srcRead(it)})" }
     return typeOkVarRange(
-        safeType(vn),
+        effectiveVarType(leaf, vn),
         intRange,
         leafClass = leaf.name,
         varName = vn.name,
@@ -1254,7 +1301,7 @@ private fun typeOkForStateVar(
     domain: String?,
     instDomain: String?,
 ): String {
-    val ty = safeType(vn)
+    val ty = effectiveVarType(leaf, vn)
     val indexed = leaf.indexesState(vn.name)
     val paramDom = if (indexed) domain else null
     val instDom = if (indexed && leaf.isDualIndexed) instDomain else null
@@ -1344,7 +1391,9 @@ private fun collectTypeOkDomainModels(
     leaves.forEach { leaf ->
         val pc = pclasses[leaf.name] ?: return@forEach
         pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
-            if (TlaVarProjection.get().isRelevant(leaf.name, vn.name)) walk(safeType(vn))
+            if (TlaVarProjection.get().isRelevant(leaf.name, vn.name)) {
+                walk(effectiveVarType(leaf, vn))
+            }
         }
     }
 }
@@ -1608,7 +1657,8 @@ private fun emitConjoined(
         offer.decl.action.args.forEach { symbolTypes[it.name] = it.type }
         pclasses[offer.leaf.name]?.localDecls()?.filterIsInstance<VarNode>()?.forEach { vn ->
             try {
-                symbolTypes[vn.name] = vn.type
+                symbolTypes[vn.name] = TlaFieldVarProjection.get()
+                    .effectiveType(offer.leaf.name, vn.name, vn.type)
             } catch (_: RuntimeException) {
             }
         }
@@ -1893,17 +1943,44 @@ private fun emitConjoined(
                         return@forEach
                     }
                     val k = emitExpr(update.index, "")
+                    // Maps: DOMAIN ∪ {key} rebuild when map-index-put is on (default);
+                    // nested EXCEPT when disabled. Lists always use EXCEPT.
+                    val quietMapPut = TlaSymbolTypes.get()[update.collectionVar] is MapType &&
+                        TlaEmitOpts.get().mapIndexPutRebuild
                     if (exprContainsIoHavoc(update.value)) {
                         val domain = typeToTlaDomain(update.value.getType())
                         addAssignPart(
-                            if (constGlobal) {
-                                "/\\ \\E __io \\in $domain: $v = [$v EXCEPT ![$k] = __io] \\* global const check"
-                            } else if (indexes(update.collectionVar)) {
-                                "/\\ \\E __io \\in $domain: $v' = [$v EXCEPT ![$self] = [@ EXCEPT ![$k] = __io]]"
-                            } else {
-                                "/\\ \\E __io \\in $domain: $v' = [$v EXCEPT ![$k] = __io]"
+                            when {
+                                quietMapPut && constGlobal ->
+                                    "/\\ \\E __io \\in $domain: $v = ${emitMapIndexPutRhs(v, k, "__io")} \\* global const check"
+                                quietMapPut && indexes(update.collectionVar) ->
+                                    "/\\ \\E __io \\in $domain: $v' = [$v EXCEPT ![$self] = ${emitMapIndexPutRhs("@", k, "__io")}]"
+                                quietMapPut ->
+                                    "/\\ \\E __io \\in $domain: $v' = ${emitMapIndexPutRhs(v, k, "__io")}"
+                                constGlobal ->
+                                    "/\\ \\E __io \\in $domain: $v = [$v EXCEPT ![$k] = __io] \\* global const check"
+                                indexes(update.collectionVar) ->
+                                    "/\\ \\E __io \\in $domain: $v' = [$v EXCEPT ![$self] = [@ EXCEPT ![$k] = __io]]"
+                                else ->
+                                    "/\\ \\E __io \\in $domain: $v' = [$v EXCEPT ![$k] = __io]"
                             },
                         )
+                    } else if (quietMapPut) {
+                        if (constGlobal) {
+                            val putPrefix = "/\\ $v = "
+                            val vv = emitExpr(update.value, putPrefix)
+                            addAssignPart(
+                                "$putPrefix${emitMapIndexPutRhs(v, k, vv)} \\* global const check",
+                            )
+                        } else if (indexes(update.collectionVar)) {
+                            val putPrefix = "/\\ $v' = [$v EXCEPT ![$self] = "
+                            val vv = emitExpr(update.value, putPrefix)
+                            addAssignPart("$putPrefix${emitMapIndexPutRhs("@", k, vv)}]")
+                        } else {
+                            val putPrefix = "/\\ $v' = "
+                            val vv = emitExpr(update.value, putPrefix)
+                            addAssignPart("$putPrefix${emitMapIndexPutRhs(v, k, vv)}")
+                        }
                     } else if (constGlobal) {
                         val putPrefix = "/\\ $v = [$v EXCEPT ![$k] = "
                         val vv = emitExpr(update.value, putPrefix)
@@ -2173,6 +2250,38 @@ internal fun buildStateVarNames(
     return out
 }
 
+/** Rename state vars projected by `field-vars` to `var_field` (freshen on clash). */
+internal fun applyFieldVarNames(
+    names: Map<Pair<String, String>, String>,
+    leaves: List<SpecLeaf>,
+    reservedIds: Set<String>,
+): Map<Pair<String, String>, String> {
+    val fieldVars = TlaFieldVarProjection.get()
+    if (!fieldVars.projecting) return names
+    val taken = names.values.toMutableSet()
+    taken += reservedIds
+    val out = names.toMutableMap()
+    leaves.forEach { leaf ->
+        fieldVars.projectionsForLeaf(leaf.name).forEach { proj ->
+            val key = leaf.tlaName to proj.varName
+            if (key !in out) return@forEach
+            var candidate = proj.projectedName
+            if (candidate in taken && out[key] != candidate) {
+                var i = 2
+                while ("${candidate}_$i" in taken) i++
+                candidate = "${candidate}_$i"
+            }
+            taken -= out.getValue(key)
+            taken += candidate
+            out[key] = candidate
+        }
+    }
+    return out
+}
+
+private fun effectiveVarType(leaf: SpecLeaf, vn: VarNode): Type =
+    TlaFieldVarProjection.get().effectiveType(leaf.name, vn.name, safeType(vn))
+
 /**
  * TLA domain of `<Child>_parent` for a `B<A>` leaf, or null when no link var is needed
  * (parent is a single static occurrence, or absent).
@@ -2296,6 +2405,43 @@ private fun lastCtorAssign(offer: TlaActionOffer, varName: String): TransitUpdat
         it.transitRootVar() == varName
     }
 
+/**
+ * Transit lets whose init (or a prior let it references) contains IO / unsupported
+ * builtins — omitted from [ctorSymbolOverrides] so fold cannot splice `TRUE.field`.
+ */
+private fun ctorLetsWithHavocInit(offer: TlaActionOffer): Set<String> {
+    val argNames = offer.decl.action.args.map { it.name }.toSet()
+    val havoc = linkedSetOf<String>()
+    offer.decl.transits.forEach { update ->
+        if (update !is TransitUpdate.Let || update.name.isDiscardBinding()) return@forEach
+        val refsHavocLet = havoc.any { exprReferencesSymbol(update.init, it) }
+        if (refsHavocLet ||
+            exprContainsIoHavoc(update.init) ||
+            exprContainsUnsupportedTlaBuiltin(update.init) ||
+            argNames.any { exprReferencesSymbol(update.init, it) }
+        ) {
+            havoc += update.name
+        }
+    }
+    return havoc
+}
+
+/** True when a folded Init assign must use `\in` domain (IO / unsupported / args / havoc lets). */
+internal fun foldedCtorAssignNeedsDomainInit(
+    offer: TlaActionOffer,
+    assign: TransitUpdate.Assign,
+): Boolean {
+    val argNames = offer.decl.action.args.map { it.name }.toSet()
+    if (exprContainsIoHavoc(assign.expr) ||
+        exprContainsUnsupportedTlaBuiltin(assign.expr) ||
+        isActionArgSymbol(assign.expr, argNames)
+    ) {
+        return true
+    }
+    val havocLets = ctorLetsWithHavocInit(offer)
+    return havocLets.any { exprReferencesSymbol(assign.expr, it) }
+}
+
 private fun ctorSymbolOverrides(
     leaf: SpecLeaf,
     offer: TlaActionOffer,
@@ -2315,8 +2461,10 @@ private fun ctorSymbolOverrides(
         val v = stateTlaName(leaf.tlaName, varName, stateVarNames)
         overrides[arg] = if (binder != null && leaf.indexesState(varName)) "$v[$binder]" else v
     }
+    val skipLets = ctorLetsWithHavocInit(offer)
     offer.decl.transits.forEach { update ->
         if (update !is TransitUpdate.Let || update.name.isDiscardBinding()) return@forEach
+        if (update.name in skipLets) return@forEach
         val rhs = exprToTla(
             update.init,
             leafCtx = leafCtx,
@@ -2353,12 +2501,10 @@ private fun foldedCtorVarInit(
     if (constGlobal) {
         return null
     }
-    if (exprContainsIoHavoc(assign.expr) ||
-        exprContainsUnsupportedTlaBuiltin(assign.expr) ||
-        isActionArgSymbol(assign.expr, argNames)
-    ) {
-        collectDomainModelNames(safeType(vn), cfgOverrides)
-        val ty = typeToTlaDomain(safeType(vn))
+    if (foldedCtorAssignNeedsDomainInit(offer, assign)) {
+        val effTy = effectiveVarType(leaf, vn)
+        collectDomainModelNames(effTy, cfgOverrides)
+        val ty = typeToTlaDomain(effTy)
         return if (binder != null && leaf.indexesState(vn.name)) {
             "/\\ $v \\in [$domain -> $ty]"
         } else {
@@ -2412,28 +2558,10 @@ private fun emitFoldedCtorAssumptions(
             TlaVarProjection.get().isRelevant(leaf.name, update.transitRootVar()) &&
             !isActionArgSymbol(update.expr, argNames)
     }
-    if (offer.decl.errors.isEmpty() && constChecks.isEmpty()) return
-    initParts += "\\* ${leaf.name} constructor assumption"
     val leafCtx = mapOf(leaf.name to leaf, leaf.tlaName to leaf)
     val overrides = ctorSymbolOverrides(
         leaf, offer, binder, stateVarNames, constants, stateVarsByLeaf, leaves,
     )
-    constChecks.forEach { update ->
-        val v = stateTlaName(leaf.tlaName, update.transitRootVar(), stateVarNames)
-        val rhs = exprToTla(
-            update.expr,
-            leafCtx = leafCtx,
-            argNames = argNames,
-            self = binder,
-            bareStateVars = stateVarsByLeaf,
-            reservedNames = constants,
-            stateVarNames = stateVarNames,
-            symbolOverrides = overrides,
-            linePrefix = "/\\ $v = ",
-            globalByLeaf = globalVarsByLeaf(leaves),
-        )
-        initParts += "/\\ $v = $rhs \\* global const check"
-    }
     val argAssigns = ctorArgStateAssigns(offer)
     val argTypes = offer.decl.action.args.associate { it.name to it.type }
     val takenNames = (
@@ -2444,13 +2572,18 @@ private fun emitFoldedCtorAssumptions(
             overrides.values.map { it.substringBefore('[') }
         ).toMutableSet()
     if (binder != null) takenNames += binder
+    val errorFormulas = mutableListOf<String>()
     offer.decl.errors.forEach { arm ->
         val assumed = negateErrorCondition(arm.condExpr())
-        val quantifiedIndexed = binder != null && domain != null && argAssigns.any { (arg, varName) ->
-            leaf.indexesState(varName) && exprReferencesSymbol(assumed, arg)
-        }
         val existsArgs = argTypes.keys.filter { arg ->
             arg !in overrides && exprReferencesSymbol(assumed, arg)
+        }
+        // `\E args : P(args)` with no state does not constrain Init — drop it.
+        if (foldedCtorAssumptionIsArgsOnly(assumed, existsArgs, stateVarsByLeaf, overrides.keys)) {
+            return@forEach
+        }
+        val quantifiedIndexed = binder != null && domain != null && argAssigns.any { (arg, varName) ->
+            leaf.indexesState(varName) && exprReferencesSymbol(assumed, arg)
         }
         existsArgs.forEach { arg ->
             argTypes[arg]?.let { collectDomainModelNames(it, cfgOverrides) }
@@ -2479,13 +2612,47 @@ private fun emitFoldedCtorAssumptions(
             val tlaArg = existsArgTla[arg] ?: arg
             "\\E $tlaArg \\in $ty : $inner"
         }
-        val formula = if (quantifiedIndexed) {
+        errorFormulas += if (quantifiedIndexed) {
             "\\A $binder \\in $domain : $existsWrap"
         } else {
             existsWrap
         }
-        initParts += "/\\ $formula"
     }
+    if (constChecks.isEmpty() && errorFormulas.isEmpty()) return
+    initParts += "\\* ${leaf.name} constructor assumption"
+    constChecks.forEach { update ->
+        val v = stateTlaName(leaf.tlaName, update.transitRootVar(), stateVarNames)
+        val rhs = exprToTla(
+            update.expr,
+            leafCtx = leafCtx,
+            argNames = argNames,
+            self = binder,
+            bareStateVars = stateVarsByLeaf,
+            reservedNames = constants,
+            stateVarNames = stateVarNames,
+            symbolOverrides = overrides,
+            linePrefix = "/\\ $v = ",
+            globalByLeaf = globalVarsByLeaf(leaves),
+        )
+        initParts += "/\\ $v = $rhs \\* global const check"
+    }
+    errorFormulas.forEach { initParts += "/\\ $it" }
+}
+
+/**
+ * True when a folded constructor `error:` assumption only mentions unbound ctor args
+ * (no process state / arg→state binds). Such `\E args : P(args)` does not constrain Init.
+ */
+internal fun foldedCtorAssumptionIsArgsOnly(
+    assumed: ExprNode,
+    existsArgs: Collection<String>,
+    stateVars: Set<String>,
+    overriddenArgs: Set<String>,
+): Boolean {
+    if (existsArgs.isEmpty()) return false
+    if (stateVars.any { exprReferencesSymbol(assumed, it) }) return false
+    if (overriddenArgs.any { exprReferencesSymbol(assumed, it) }) return false
+    return existsArgs.any { exprReferencesSymbol(assumed, it) }
 }
 
 internal fun collectSortLengthConstants(
@@ -3071,16 +3238,24 @@ internal fun offerRefsArg(offer: TlaActionOffer, argName: String): Boolean =
             }
         }
 
+/**
+ * Finite TLC models for `\E` domains of IO / unsupported-builtin havoc (same sites as
+ * [typeToTlaIoDomain] emission). Must include unsupported builtins (e.g. parseInt via
+ * user funs), not only direct IO calls — otherwise `[id: Int, …]` is not enumerable.
+ */
 private fun collectIoHavocDomainModels(
     offers: List<TlaActionOffer>,
     into: MutableSet<String>,
 ) {
+    fun needsHavocDomain(expr: ExprNode): Boolean =
+        exprContainsIoHavoc(expr) || exprContainsUnsupportedTlaBuiltin(expr)
+
     offers.forEach { offer ->
         offer.decl.transits.forEach { update ->
             when (update) {
                 is TransitUpdate.Assign -> if (
                     TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar()) &&
-                    exprContainsIoHavoc(update.expr)
+                    needsHavocDomain(update.expr)
                 ) {
                     try {
                         collectDomainModelNames(update.expr.getType(), into)
@@ -3089,14 +3264,14 @@ private fun collectIoHavocDomainModels(
                 }
                 is TransitUpdate.IndexPut -> if (
                     TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar()) &&
-                    exprContainsIoHavoc(update.value)
+                    needsHavocDomain(update.value)
                 ) {
                     try {
                         collectDomainModelNames(update.value.getType(), into)
                     } catch (_: RuntimeException) {
                     }
                 }
-                is TransitUpdate.Let -> if (exprContainsIoHavoc(update.init)) {
+                is TransitUpdate.Let -> if (needsHavocDomain(update.init)) {
                     try {
                         collectDomainModelNames(update.init.getType(), into)
                     } catch (_: RuntimeException) {
@@ -4040,8 +4215,33 @@ internal fun emitMultiLineIf(
     }
 }
 
-internal fun emitUnwrappedFieldPath(base: String, type: Type?, path: List<String>): String {
-    val dropped = if (type != null) TlaFieldProjection.get().dropUnwrappedPath(type, path) else path
+/**
+ * Drop the kept field of a `field-vars` projection (`me.url` → path `[]` when `me` → `me_url`).
+ */
+internal fun dropProjectedFieldPath(leafClass: String?, varName: String, path: List<String>): List<String> {
+    if (leafClass == null || path.isEmpty()) return path
+    val proj = TlaFieldVarProjection.get().projection(leafClass, varName) ?: return path
+    return if (path.first() == proj.keptField) path.drop(1) else path
+}
+
+internal fun emitUnwrappedFieldPath(
+    base: String,
+    type: Type?,
+    path: List<String>,
+    leafClass: String? = null,
+    stateVarName: String? = null,
+): String {
+    val afterFieldVar =
+        if (leafClass != null && stateVarName != null) {
+            dropProjectedFieldPath(leafClass, stateVarName, path)
+        } else {
+            path
+        }
+    val dropped = if (type != null) {
+        TlaFieldProjection.get().dropUnwrappedPath(type, afterFieldVar)
+    } else {
+        afterFieldVar
+    }
     return if (dropped.isEmpty()) base else dropped.fold(base) { acc, f -> "$acc.$f" }
 }
 
@@ -4628,7 +4828,8 @@ internal fun exprToTla(
                 val leafVar = stateVarNames[base to varName]
                     ?: leafCtx[base]?.let { stateTlaName(it.tlaName, varName, stateVarNames) }
                 if (leafVar != null && base !in argNames && base !in bareStateVars && base !in symbolOverrides) {
-                    val rest = expr.fieldPath.drop(1)
+                    val peerLeaf = leafCtx[base]?.name ?: base
+                    val rest = dropProjectedFieldPath(peerLeaf, varName, expr.fieldPath.drop(1))
                     return if (rest.isEmpty()) {
                         leafVar
                     } else {
@@ -4648,14 +4849,20 @@ internal fun exprToTla(
                 leafVarName
             } else {
                 // Object field on arg or state var: base.field… (with indexing when needed)
+                val stateLeaf = leafCtx.values.singleOrNull()
                 val baseRendered = when {
                     base in argNames -> base
-                    base in bareStateVars && leafCtx.values.toSet().size == 1 -> {
-                        stateRead(leafCtx.values.first(), base)
+                    base in bareStateVars && stateLeaf != null -> {
+                        stateRead(stateLeaf, base)
                     }
                     else -> base
                 }
-                emitPeerPropPath(baseRendered, TlaSymbolTypes.get()[base], expr.fieldPath)
+                val path = dropProjectedFieldPath(stateLeaf?.name, base, expr.fieldPath)
+                if (path.isEmpty()) {
+                    baseRendered
+                } else {
+                    emitPeerPropPath(baseRendered, TlaSymbolTypes.get()[base], path)
+                }
             }
         }
         is MemberAccessExprNode -> {
@@ -4683,10 +4890,14 @@ internal fun exprToTla(
                             (peer?.let { globalByLeaf[it.tlaName].orEmpty() } ?: emptySet())
                         if (expr.fieldName in globals) mapped else "$mapped[${rec(base.index)}]"
                     } else {
+                        val stateLeaf = leafCtx.values.singleOrNull()
+                        val idxBase = (base.base as SymbolValueExprNode).symbol
                         emitUnwrappedFieldPath(
                             rec(base),
                             typeOfBaseExpr(base),
                             listOf(expr.fieldName),
+                            leafClass = stateLeaf?.name,
+                            stateVarName = idxBase,
                         )
                     }
                 }
@@ -4694,7 +4905,15 @@ internal fun exprToTla(
                     stateTlaName(base.symbol, expr.fieldName, stateVarNames)
                 else -> {
                     val rendered = rec(base)
-                    emitUnwrappedFieldPath(rendered, typeOfBaseExpr(base), listOf(expr.fieldName))
+                    val stateLeaf = leafCtx.values.singleOrNull()
+                    val varName = (base as? SymbolValueExprNode)?.symbol
+                    emitUnwrappedFieldPath(
+                        rendered,
+                        typeOfBaseExpr(base),
+                        listOf(expr.fieldName),
+                        leafClass = stateLeaf?.name,
+                        stateVarName = varName,
+                    )
                 }
             }
         }
@@ -4703,7 +4922,19 @@ internal fun exprToTla(
                 return tlaLengthOf(rec(expr.baseExpr), expr.baseExpr)
             }
             val base = rec(expr.baseExpr)
-            emitUnwrappedFieldPath(base, typeOfBaseExpr(expr.baseExpr), expr.fieldPath)
+            val stateLeaf = leafCtx.values.singleOrNull()
+            val varName = when (val b = expr.baseExpr) {
+                is SymbolValueExprNode -> b.symbol
+                is IndexExprNode -> (b.base as? SymbolValueExprNode)?.symbol
+                else -> null
+            }
+            emitUnwrappedFieldPath(
+                base,
+                typeOfBaseExpr(expr.baseExpr),
+                expr.fieldPath,
+                leafClass = stateLeaf?.name,
+                stateVarName = varName,
+            )
         }
         is FunCallExprNode -> {
             when (expr.callName()) {

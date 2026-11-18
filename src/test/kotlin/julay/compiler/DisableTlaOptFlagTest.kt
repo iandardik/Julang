@@ -60,9 +60,51 @@ class DisableTlaOptFlagTest {
     }
 
     @Test
+    fun fieldVarsIdDisablesOnlyThat() {
+        val cfg = TlaOptConfig.fromDisableTlaOptFlag("field-vars")
+        assertEquals(true, cfg.unusedFields)
+        assertEquals(false, cfg.fieldVars)
+        assertEquals(true, cfg.mapIndexPutRebuild)
+    }
+
+    @Test
+    fun mapIndexPutIdDisablesOnlyThat() {
+        val cfg = TlaOptConfig.fromDisableTlaOptFlag("map-index-put")
+        assertEquals(false, cfg.mapIndexPutRebuild)
+        assertEquals(true, cfg.fieldVars)
+        assertEquals(true, cfg.unusedFields)
+    }
+
+    @Test
     fun unknownNameErrors() {
         assertFailsWith<IllegalArgumentException> {
             TlaOptConfig.fromDisableTlaOptFlag("not-a-real-opt")
+        }
+    }
+
+    @Test
+    fun mapIndexPutDefaultOn() {
+        assertEquals(true, TlaOptConfig.ALL_ON.mapIndexPutRebuild)
+        assertEquals(true, TlaOptConfig.fromOptTlaFlag(null).mapIndexPutRebuild)
+    }
+
+    @Test
+    fun optTlaLegacyMapIndexPutIsNoOp() {
+        val cfg = TlaOptConfig.fromOptTlaFlag("map-index-put")
+        assertEquals(true, cfg.mapIndexPutRebuild)
+    }
+
+    @Test
+    fun fromFlagsDisableMapIndexPut() {
+        val cfg = TlaOptConfig.fromFlags("map-index-put", null)
+        assertEquals(false, cfg.mapIndexPutRebuild)
+        assertEquals(true, cfg.unusedFields)
+    }
+
+    @Test
+    fun optTlaUnknownNameErrors() {
+        assertFailsWith<IllegalArgumentException> {
+            TlaOptConfig.fromOptTlaFlag("not-a-real-opt")
         }
     }
 }

@@ -50,7 +50,7 @@ How-to: [Getting started](../getting-started.md). Specs: [Specifications](specif
 1. [Processes](processes.md) — state, `initially`, `static proc` vs dynamic, constructors vs transitions, returns
 2. [Composition and actions](composition-and-actions.md) — `||`, **service/client**, ordinary composition-private syncs, action shapes, fairness
 3. [Parent/child inference](children.md) — nested `||`, returns, HTTP `~>`
-4. [Compiler optimizations](compiler-optimizations.md) — compile-time direction analysis; TLA+ `--disable-tla-opt`
+4. [Compiler optimizations](compiler-optimizations.md) — compile-time direction analysis; TLA+ `--disable-tla-opt` / `--opt-tla`
 5. [Types and expressions](types-and-expressions.md)
 6. [Collections](collections.md) — `List` / `Map` / `Set`, methods, lambdas
 7. [Modules](modules.md) — `import` and search path

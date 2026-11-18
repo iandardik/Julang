@@ -25,7 +25,7 @@ That compiles `sys.jul` and places under `input/sharded_kv/`:
 
 - `ShardNode`
 - `ShardClient`
-- `ShardSpec.tla` / `ShardSpec.cfg`
+- `ShardEnvSpec.tla` / `.cfg` and `StoreSpec.tla` / `.cfg`
 
 (`julayc` still emits into the cwd first; `compile.sh` moves the artifacts here.)
 
@@ -55,6 +55,6 @@ input/sharded_kv/ShardClient http://127.0.0.1:6001 owners
 
 ## TLA+ sketch
 
-- Shard source is identical in JAR and TLA; only the composition changes. JAR: `ShardNode := Store || ServerStarter || HttpWorkers || SendClaim` (`PutPath` / `ApplyMovePath` under `HttpWorkers`). TLA: `VerifNodeIndexed || PerfectNet` — node state create-indexed, PerfectNet unindexed beside it (`Verif*` names avoid decl clashes in `sys.jul`). `Put.put` / `putDone` stay unsynced (environment).
-- Unindexed `PerfectNet := ClaimMsgs || MoveBatchMsgs || KeyCountReqs || KeyCountReplies` (shared bags; four `static spec` leaves so `also` works and the net stays out of `ShardNode`). Actions use `also (n : NodeSet)` to sync with the indexed node. `goClaim` / `goMoveBatch` are fire-and-forget; only `goKeyCount` has a reply. The peer that receives a move batch takes ownership and broadcasts claims.
-- Invariants target `Store[n].store` / `Store[n].owners`. Each dynamic class gets a `Terminates` property under strong fairness.
+- Shard source is identical in JAR and TLA; only the composition changes. JAR: `ShardNode := Store || ServerStarter || HttpWorkers || SendClaim`. TLA is compositional: `ShardEnvSpec := ShardEnv |= StoreAsm` (workers + unindexed PerfectNet) and `StoreSpec := <true> IndexedStore <StoreInvs>` (`StoreAsm` is `true` for now). `Verif*` names avoid decl clashes in `sys.jul`. `Put.put` / `putDone` stay unsynced (environment).
+- Unindexed `PerfectNet := ClaimMsgs || MoveBatchMsgs || KeyCountReqs || KeyCountReplies` (shared bags; four `static spec` leaves). Actions use `also (n : NodeSet)` to sync with the indexed workers.
+- Invariants target `Store[n].store` / `Store[n].owners` on `StoreSpec`. Each dynamic class gets a `Terminates` property under strong fairness.
