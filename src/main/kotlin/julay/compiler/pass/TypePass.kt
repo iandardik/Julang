@@ -528,7 +528,10 @@ private fun ArgNode.typePassArgNode(symbolEnv: Map<String, Type>, registry: ObjC
     funBuiltinEnv: Map<String, FunBuiltin>): List<CompileError> =
     when (val result = registry.resolveTypeExpr(argTypeExpr(), typeParamEnv, programLocation())) {
         is TypeResolveResult.Found -> {
-            resolveArgType(typingView(result.type))
+            // Keep typedef/uninterpreted DomainType on the arg (like state vars) so TLA+
+            // `\E` binders use CONSTANT Key/Value/… . Expression typing still applies
+            // typingView when building the action env.
+            resolveArgType(result.type)
             listOfNotNull(sortDomainBan(result.type, programLocation()))
         }
         is TypeResolveResult.Error ->

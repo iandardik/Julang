@@ -957,6 +957,25 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun typedefActionArgsExistOverTypedefConstants() {
+        val source = File("regression/input/spec/typedef-arg-domain-tla.jul")
+        val (tlaText, _) = compileSpecTla(source, "TypedefArgSpec")
+        val next = tlaAfterNext(tlaText)
+        assertTrue(
+            next.contains("\\E k \\in Key") && next.contains("\\E v \\in Value"),
+            "typedef action args must quantify over Key/Value, not String;\n$next",
+        )
+        assertFalse(
+            Regex("""\\E k, v \\in String|\\E k \\in String|\\E v \\in String""").containsMatchIn(next),
+            "typedef put args must not \\E over String;\n$next",
+        )
+        assertTrue(
+            tlaText.contains("DOMAIN table") && tlaText.contains("\\subseteq Key"),
+            "TypeOK should still constrain map keys to Key;\n$tlaText",
+        )
+    }
+
+    @Test
     fun parseIntInitiallyFoldsIntoInitWithOmittedVarsComment() {
         val source = File("regression/input/spec/ctor-parseint-fold-tla.jul")
         val (tlaText, _) = compileSpecTla(source, "ParseIntFold")

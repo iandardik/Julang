@@ -2,6 +2,7 @@ package julay.compiler.pass
 
 import julay.compiler.ast.*
 import julay.compiler.decl.TransitUpdate
+import julay.program.type.DomainType
 import julay.program.type.IntType
 import julay.program.type.MapType
 import julay.program.type.ObjClassType
@@ -140,13 +141,19 @@ internal fun argLiteralDomain(
     type: Type,
 ): String? {
     if (!TlaEmitOpts.get().literalDomains) return null
-    if (type !is StringType && type !is IntType) return null
+    // Typedef args keep DomainType for TLA CONSTANTs; peel carrier for literal projection.
+    val litType = when (type) {
+        is StringType, is IntType -> type
+        is DomainType -> type.carrierType
+        else -> return null
+    }
+    if (litType !is StringType && litType !is IntType) return null
     val lits = linkedSetOf<String>()
     var constrained = false
     offers.forEach { offer ->
         offer.decl.guards.flatMap { flattenTopLevelAnd(it) }.forEach { c ->
             if (!exprReferencesSymbol(c, argName)) return@forEach
-            val collected = literalsConstrainingArg(c, argName, type) ?: run {
+            val collected = literalsConstrainingArg(c, argName, litType) ?: run {
                 return null
             }
             constrained = true

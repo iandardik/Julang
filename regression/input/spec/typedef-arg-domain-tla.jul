@@ -1,0 +1,31 @@
+import julay.funlib.mapOf
+
+/* Typedef action args must `\E` over the typedef CONSTANT (not String), matching TypeOK. */
+type N
+type Key := String
+type Value := String
+
+static proc Box {
+    var table : Map<Key, Value>
+
+    constructor initially(args : List<String>) {
+        transit:
+            table := mapOf()
+    }
+
+    internal transition put(k : Key, v : Value) {
+        transit:
+            table[k] := v
+    }
+}
+
+invariant TableDom := forall i : N, forall k : Key,
+    (k in Box[i].table) => k in Box[i].table
+
+spec TypedefArgSpec := Box[i : N] {
+    N := {"a"}
+    Key := {"k1", "k2"}
+    Value := {"v1", "v2"}
+} |= TableDom
+
+compile TypedefArgSpec
