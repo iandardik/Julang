@@ -10,7 +10,32 @@ invariant AllInvs := NonNegative & CorrectCounter
 invariant Bound := forall k : Int, Counter.n <= 3
 ```
 
-Invariants are Boolean expressions over proc state. Quantifiers (`forall`, `exists`) are common. Indexed state uses `Leaf[i].var`; collection properties and nested record fields are allowed (`Leaf[i].log.length`, `Leaf[i].log[j]`).
+Invariants are Boolean expressions over proc state and/or **fluents**. Quantifiers (`forall`, `exists`) are common. Indexed state uses `Leaf[i].var`; collection properties and nested record fields are allowed (`Leaf[i].log.length`, `Leaf[i].log[j]`).
+
+## Fluents
+
+Ghost history relations for compositional assume–guarantee. They are not JAR/runtime state.
+
+```jul
+fluent Claimed(k : Key, owner : String) {
+    initially false
+    on applyClaim[n](claimKey, claimOwner) := true
+}
+
+fluent BadMove {
+    initially false
+    on putFromMove[n](moveKey, _, moveOwner) := ~Claimed(moveKey, moveOwner)
+}
+
+invariant StoreAsm := ~BadMove
+spec StoreSpec := <StoreAsm> IndexedStore <StoreInvs>
+```
+
+- **`initially`**: Boolean formula over fluent params and non-fluent state/domains. It **may not** mention fluents.
+- **`on Act(…)` / `on Act[n](…)`**: update when that alphabet action fires. Binders are action arg names; `_` ignores. Use `[n]` iff the action is create-indexed in the AG system (mismatch is a compile error).
+- **Targets (v1):** `true`, `false`, `Fluent(args)`, `~Fluent(args)`.
+- Fluents appear only in invariants / other fluent targets — not in proc bodies.
+- Formula assume (`<StoreAsm> Sys <G>`): fluents become TLA `VARIABLES`; actions update them; a post-state operator `StoreAsmOK` (fluents primed) is conjoined on steps (not a cfg `INVARIANT`). Guarantee `Sys |= StoreAsm` still lists `StoreAsm` as `INVARIANT`.
 
 ## Specs
 
@@ -27,11 +52,14 @@ Three surface forms (same TLA pipeline):
 spec Plain := Counter                      // no assume, no guarantee  (== <true> Counter <true>)
 spec WithInv := Counter |= Bound           // no assume; guarantee Bound (== <true> Counter <Bound>)
 spec SafeInc := <Env> Counter <Bound>       // full assume-guarantee
+spec UnderAsm := <StoreAsm> Store <Inv>  // formula assume (named invariant / fluents)
 ```
 
-- Left of the system (`<Env>`): assumption / environment (`true` means none)
+- Left of the system (`<Env>` / `<StoreAsm>`): assumption — `true`, a **system**, or a **named invariant** (formula assume)
 - Middle: system expression (procs, **apis**, **leaf specs**, indexing, `||`)
 - Right / `|=` side: guarantee — a named invariant, an inline Boolean formula, or `true` (no guarantee)
+
+Invariant assume/guarantee formulas are type-checked against the AG **system** leaves (missing leaf state or wrong indexing is a compile error). Formula assumes do not compose env leaves into the TLC model.
 
 Plain `spec Name := System` is also what `--compile-tla Name` synthesizes for a proc or api. Apis work like procs in all three forms; procfuns listed in an api's `calls:` are coupled in TLA+ (see [Composition and actions — APIs](composition-and-actions.md#apis)).
 

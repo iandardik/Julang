@@ -1,0 +1,35 @@
+import julay.funlib.mapOf
+
+/* on put without [n] under create-indexed system must fail. */
+type N
+type Key := String
+
+static proc Box {
+    var table : Map<Key, String>
+
+    constructor initially(args : List<String>) {
+        transit:
+            table := mapOf()
+    }
+
+    service transition putLocal(putKey : Key, putVal : String) {
+        transit:
+            table[putKey] := putVal
+    }
+}
+
+fluent PutSeen(k : Key) {
+    initially false
+    on putLocal(putKey, _) := true
+}
+
+invariant Asm := forall k : Key, ~PutSeen(k) | PutSeen(k)
+
+spec IndexedBox := Box[n : N] {
+    N := {"a"}
+    Key := {"k1"}
+}
+
+export spec BadFluentSpec := <Asm> IndexedBox <true>
+
+compile BadFluentSpec

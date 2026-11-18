@@ -31,6 +31,32 @@ internal object TlaEmitOpts {
     }
 }
 
+/** Active fluent emit plan for action bodies / exprToTla fluent apps. */
+internal object TlaFluentEmit {
+    private val current = ThreadLocal<FluentEmitPlan?>()
+    private val primeFluents = ThreadLocal.withInitial { false }
+    fun get(): FluentEmitPlan? = current.get()
+    fun primeFluents(): Boolean = primeFluents.get()
+    fun <T> withPlan(plan: FluentEmitPlan?, block: () -> T): T {
+        val prev = current.get()
+        current.set(plan)
+        try {
+            return block()
+        } finally {
+            current.set(prev)
+        }
+    }
+    fun <T> withPrimedFluents(block: () -> T): T {
+        val prev = primeFluents.get()
+        primeFluents.set(true)
+        try {
+            return block()
+        } finally {
+            primeFluents.set(prev)
+        }
+    }
+}
+
 internal object TlaSymbolTypes {
     private val current = ThreadLocal.withInitial { emptyMap<String, Type>() }
     fun get(): Map<String, Type> = current.get()
@@ -87,7 +113,20 @@ fun tlaCodegenPass(
         .flatMap { it.root.declNodes().filterIsInstance<SpecNode>() }
         .associateBy { it.name() }
 
-    val compositionLeaves = compositionLeavesOfSpec(spec)
+    val invariantsEarly = unit.modules
+        .flatMap { it.root.declNodes().filterIsInstance<InvariantNode>() }
+        .associateBy { it.name() }
+    val allFluents = unit.modules
+        .flatMap { it.root.declNodes().filterIsInstance<FluentNode>() }
+        .associateBy { it.name() }
+    val systemDeclNames = (
+        pclassNodes.keys + leafSpecNodes.keys + procAliases.keys + specAliases.keys
+        ).toSet()
+    val compositionLeaves = compositionLeavesOfSpec(
+        spec,
+        invariantNames = invariantsEarly.keys,
+        systemDeclNames = systemDeclNames,
+    )
     val procDecls = unit.modules.flatMap { it.root.resolvedProcPass(unit) }
     val program = procDecls.firstOrNull { it.name == moduleName }
         ?: ProcDecl(moduleName, compositionLeaves.map { ProcDecl(it.name, emptyList(), ProcDeclType.Proc) }, ProcDeclType.Spec)
@@ -163,10 +202,13 @@ fun tlaCodegenPass(
         constants += DYN_PROC_MODEL
     }
 
-    val invariants = unit.modules
-        .flatMap { it.root.declNodes().filterIsInstance<InvariantNode>() }
-        .associateBy { it.name() }
+    val invariants = invariantsEarly
     val ag = spec.specNodeValue() as? AgSpecExprNode
+    val registry = ast.cachedObjClassRegistry()
+        ?: error("ObjClassRegistry required for TLA codegen")
+    val fluentPlan = buildFluentEmitPlan(
+        spec, invariants, allFluents, systemDeclNames, registry,
+    )
     val invNode = ag?.let { resolveGuaranteeInvariant(it, spec.specNodeName(), invariants) }
     val invClosure = if (invNode != null) {
         val invMap = if (invariants.containsKey(invNode.name())) {
@@ -178,7 +220,16 @@ fun tlaCodegenPass(
     } else {
         emptyList()
     }
+    // Formula-assume invariant ops are emitted for `Name'` but not listed in cfg INVARIANT.
+    val assumeInvClosure = fluentPlan.formulaAssumeName?.let { an ->
+        if (invariants.containsKey(an) && invClosure.none { it.name() == an }) {
+            topologicalInvariantClosure(an, invariants)
+        } else {
+            emptyList()
+        }
+    }.orEmpty()
     invClosure.forEach { collectTypeConstants(it.invariantFormula(), constants) }
+    assumeInvClosure.forEach { collectTypeConstants(it.invariantFormula(), constants) }
     val sortNames = domainNames
     leaves.forEach { leaf ->
         leaf.initExprs.forEach { expr ->
@@ -276,6 +327,8 @@ fun tlaCodegenPass(
             constants = constants,
             cfgOverrides = cfgOverrides,
             invClosure = invClosure,
+            assumeInvClosure = assumeInvClosure,
+            fluentPlan = fluentPlan,
             domainModels = domainModels,
             offers = offers,
             usedFunlibOps = usedFunlibOps,
@@ -302,6 +355,8 @@ private fun emitProjectedTla(
     constants: LinkedHashSet<String>,
     cfgOverrides: LinkedHashSet<String>,
     invClosure: List<InvariantNode>,
+    assumeInvClosure: List<InvariantNode>,
+    fluentPlan: FluentEmitPlan,
     domainModels: Map<String, String>,
     offers: List<TlaActionOffer>,
     usedFunlibOps: List<FunNode>,
@@ -310,6 +365,7 @@ private fun emitProjectedTla(
     unusedFieldWarnings: List<OneLocCompileWarning>,
     domains: Map<String, DomainType>,
 ): TlaCodegenResult {
+    val registry = fluentPlan.registry
     val cfgDomainModels = domainModels.toMutableMap()
     val emittedOffers = collectEmittedOfferLists(offers, pclassesForTla)
         .filter { offerGroupHasEmittedUpdate(it) }
@@ -417,11 +473,21 @@ private fun emitProjectedTla(
             consumedInitExprs += hit.consumed
         }
     }
-    dropConsumedOnlyTypeConstants(leaves, invClosure, consumedInitExprs, constants)
+    dropConsumedOnlyTypeConstants(leaves, invClosure + assumeInvClosure, consumedInitExprs, constants)
     val variables = mutableListOf<String>()
     val initParts = mutableListOf<String>()
     val typeOkParts = mutableListOf<String>()
     val constraintParts = mutableListOf<String>()
+    emitFluentInit(fluentPlan, variables, initParts)
+    fluentPlan.fluents.forEach { fl ->
+        val params = fluentParamTypes(fl, registry)
+        if (params.isEmpty()) {
+            typeOkParts += "/\\ ${fl.name()} \\in BOOLEAN"
+        } else {
+            val product = params.joinToString(" \\X ") { (_, ty) -> typeToTlaDomain(ty) }
+            typeOkParts += "/\\ ${fl.name()} \\in [$product -> BOOLEAN]"
+        }
+    }
     leaves.forEach { leaf ->
         val pc = pclassesForTla[leaf.name] ?: return@forEach
         val foldCtor = foldedCtors[leaf.tlaName]
@@ -565,10 +631,13 @@ private fun emitProjectedTla(
     ) {
         cfgOverrides += "Int"
     }
-    val built = buildTlaActions(
-        leaves, pclassesForTla, offers, stateVarNames,
-        cfgOverrides, leafSpecNodes, foldedCtorLeaves,
-    )
+    val built = TlaFluentEmit.withPlan(fluentPlan) {
+        buildTlaActions(
+            leaves, pclassesForTla, offers, stateVarNames,
+            cfgOverrides, leafSpecNodes, foldedCtorLeaves,
+            fluentVarNames = fluentPlan.fluents.map { it.name() },
+        )
+    }
     val helpers = built.helpers
     val actions = built.actions
 
@@ -602,12 +671,26 @@ private fun emitProjectedTla(
         cfgOverrides += "MaxListLen"
     }
 
-    val invDefs = if (invClosure.isNotEmpty()) {
-        invClosure.flatMap { node ->
-            emitInvariantDefs(node, leaves, stateVarNames, constants)
+    val invDefs = TlaFluentEmit.withPlan(fluentPlan) {
+        buildList {
+            val emitted = mutableSetOf<String>()
+            (assumeInvClosure + invClosure).forEach { node ->
+                if (!emitted.add(node.name())) return@forEach
+                addAll(emitInvariantDefs(node, leaves, stateVarNames, constants))
+            }
         }
-    } else {
-        emptyList()
+    }
+    // Formula assume: SANY rejects Op' for defined Op; emit OpOK over primed fluents
+    // before actions so action bodies can conjoin `/\\ OpOK`.
+    val assumeOkDefs = TlaFluentEmit.withPlan(fluentPlan) {
+        val an = fluentPlan.formulaAssumeName ?: return@withPlan emptyList()
+        val node = assumeInvClosure.find { it.name() == an } ?: return@withPlan emptyList()
+        TlaFluentEmit.withPrimedFluents {
+            emitInvariantDefs(node, leaves, stateVarNames, constants).map { def ->
+                val eq = def.indexOf(" ==")
+                if (eq < 0) def else "${an}OK${def.substring(eq)}"
+            }
+        }
     }
     val constLine = if (constants.isEmpty()) "" else "CONSTANT ${constants.joinToString(", ")}\n\n"
     val varsLine = if (variables.isEmpty()) {
@@ -707,6 +790,13 @@ private fun emitProjectedTla(
         appendLine()
         appendLine("\\* system definition")
         appendLine()
+        if (assumeOkDefs.isNotEmpty()) {
+            appendLine("\\* formula assume (post-state fluents)")
+            assumeOkDefs.forEach { def ->
+                appendLine(def)
+                appendLine()
+            }
+        }
         appendLine("Init ==")
         if (initParts.isEmpty()) {
             appendLine("  /\\ TRUE")
@@ -778,10 +868,12 @@ private fun emitProjectedTla(
             appendLine("CONSTRAINT StateConstraint")
         }
         if (invDefs.isNotEmpty()) {
-            val skipCfgInv = cfgSkipConjunctiveInvariants(invClosure)
+            val skipCfgInv = cfgSkipConjunctiveInvariants(invClosure) +
+                (fluentPlan.formulaAssumeName?.let { setOf(it) } ?: emptySet())
+            val guaranteeOps = invClosure.map { it.name() }.toSet()
             invDefs.forEach { def ->
                 val invOp = def.substringBefore(" ==")
-                if (invOp in skipCfgInv) return@forEach
+                if (invOp !in guaranteeOps || invOp in skipCfgInv) return@forEach
                 appendLine("INVARIANT $invOp")
             }
         }
@@ -1426,8 +1518,9 @@ private fun buildTlaActions(
     @Suppress("UNUSED_PARAMETER") cfgOverrides: MutableSet<String> = linkedSetOf(),
     leafSpecs: Map<String, LeafSpecNode> = emptyMap(),
     foldedCtorLeaves: Set<String> = emptySet(),
+    fluentVarNames: List<String> = emptyList(),
 ): TlaBuildResult {
-    val allVars = allTlaVars(leaves, pclasses, stateVarNames, foldedCtorLeaves)
+    val allVars = allTlaVars(leaves, pclasses, stateVarNames, foldedCtorLeaves) + fluentVarNames
     val stateVarsByLeaf = leaves.associate { leaf ->
         leaf.tlaName to (
             pclasses[leaf.name]
@@ -2120,6 +2213,23 @@ private fun emitConjoined(
         emitTransitUpdates(offer, parts, changed)
     }
 
+    val fluentPlan = TlaFluentEmit.get()
+    if (fluentPlan != null) {
+        val julayAction = offers.first().decl.action.name
+        val indexTla = selfBinders.values.firstOrNull()
+        val argTlaByJulay = linkedMapOf<String, String>()
+        offers.forEach { offer ->
+            offer.decl.action.args.forEach { arg ->
+                argTlaByJulay[arg.name] = argTla(arg.name)
+            }
+        }
+        val fluentUpdates = emitFluentUpdatesForAction(
+            fluentPlan, julayAction, indexTla, argTlaByJulay,
+        )
+        parts += fluentUpdates
+        changed += fluentsChangedByAction(fluentPlan, julayAction)
+    }
+
     val unchanged = allVars.filter { it !in changed }
     // Guard-only / pure-stutter actions: no primed updates → omit (stuttering via [][Next]_vars).
     if (changed.isEmpty()) {
@@ -2128,6 +2238,10 @@ private fun emitConjoined(
     }
     if (unchanged.isNotEmpty()) {
         parts += "/\\ UNCHANGED <<${unchanged.joinToString(", ")}>>"
+    }
+    // After fluent EXCEPT / UNCHANGED so primed fluent cells are defined for TLC.
+    if (fluentPlan != null) {
+        emitFluentAssumePrime(fluentPlan)?.let { parts += it }
     }
 
     val indexParams = mutableListOf<Pair<String, String>>()
@@ -4719,7 +4833,14 @@ internal fun exprToTla(
                 sym in bareStateVars && leafCtx.values.toSet().size == 1 -> {
                     stateRead(leafCtx.values.first(), sym)
                 }
-                else -> sym
+                else -> {
+                    val plan = TlaFluentEmit.get()
+                    if (plan != null && sym in plan.byName && TlaFluentEmit.primeFluents()) {
+                        "$sym'"
+                    } else {
+                        sym
+                    }
+                }
             }
         }
         is ThisAccessExprNode -> {
@@ -4962,18 +5083,25 @@ internal fun exprToTla(
                     emitMapToTla(xs, f, ::rec, ::recWithOverrides)
                 }
                 else -> {
-                    val userFun = expr.resolvedFunOrNull()
-                    if (userFun != null) {
+                    val fluentPlan = TlaFluentEmit.get()
+                    if (fluentPlan != null && expr.callName() in fluentPlan.byName) {
                         val args = expr.callArgs().joinToString(", ") { rec(it, linePrefix, PREC_BOTTOM) }
-                        if (args.isEmpty()) userFun.name() else "${userFun.name()}($args)"
+                        val app = if (args.isEmpty()) expr.callName() else "${expr.callName()}[$args]"
+                        if (TlaFluentEmit.primeFluents()) "$app'" else app
                     } else {
-                        when (expr.resolvedBuiltinOrNull()?.name ?: expr.callName()) {
-                            "startsWith" -> {
-                                val args = expr.callArgs()
-                                if (args.size != 2) unresolvedTlaCall("function", "startsWith")
-                                "startsWith(${rec(args[0], linePrefix, PREC_BOTTOM)}, ${rec(args[1], linePrefix, PREC_BOTTOM)})"
+                        val userFun = expr.resolvedFunOrNull()
+                        if (userFun != null) {
+                            val args = expr.callArgs().joinToString(", ") { rec(it, linePrefix, PREC_BOTTOM) }
+                            if (args.isEmpty()) userFun.name() else "${userFun.name()}($args)"
+                        } else {
+                            when (expr.resolvedBuiltinOrNull()?.name ?: expr.callName()) {
+                                "startsWith" -> {
+                                    val args = expr.callArgs()
+                                    if (args.size != 2) unresolvedTlaCall("function", "startsWith")
+                                    "startsWith(${rec(args[0], linePrefix, PREC_BOTTOM)}, ${rec(args[1], linePrefix, PREC_BOTTOM)})"
+                                }
+                                else -> unresolvedTlaCall("function", expr.callName())
                             }
-                            else -> unresolvedTlaCall("function", expr.callName())
                         }
                     }
                 }

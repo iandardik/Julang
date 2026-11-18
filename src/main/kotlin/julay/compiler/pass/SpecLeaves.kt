@@ -246,26 +246,43 @@ fun systemLeavesOfSpec(spec: SpecNode): List<SpecLeaf> {
     }
 }
 
-fun assumeLeavesOfSpec(spec: SpecNode): List<SpecLeaf> {
+fun assumeLeavesOfSpec(
+    spec: SpecNode,
+    invariantNames: Set<String> = emptySet(),
+    systemDeclNames: Set<String> = emptySet(),
+): List<SpecLeaf> {
     resetSpecOccurrenceCounter()
     val value = spec.specNodeValue()
     return when (value) {
-        is AgSpecExprNode -> flattenSpecLeaves(value.assumeExpr(), spec.specNodeName())
+        is AgSpecExprNode -> {
+            if (isFormulaAssume(value.assumeExpr(), invariantNames, systemDeclNames)) {
+                emptyList()
+            } else {
+                flattenSpecLeaves(value.assumeExpr(), spec.specNodeName())
+            }
+        }
         else -> emptyList()
     }
 }
 
-fun compositionLeavesOfSpec(spec: SpecNode): List<SpecLeaf> {
+fun compositionLeavesOfSpec(
+    spec: SpecNode,
+    invariantNames: Set<String> = emptySet(),
+    systemDeclNames: Set<String> = emptySet(),
+): List<SpecLeaf> {
     resetSpecOccurrenceCounter()
     val value = spec.specNodeValue()
     val assembly = spec.specNodeName()
     return when (value) {
         is AgSpecExprNode -> {
-            if (value.assumeExpr() == null) {
-                flattenSpecLeaves(value.systemExpr(), assembly)
-            } else {
-                flattenSpecLeaves(value.assumeExpr(), assembly) +
+            val assume = value.assumeExpr()
+            when {
+                assume == null -> flattenSpecLeaves(value.systemExpr(), assembly)
+                isFormulaAssume(assume, invariantNames, systemDeclNames) ->
                     flattenSpecLeaves(value.systemExpr(), assembly)
+                else ->
+                    flattenSpecLeaves(assume, assembly) +
+                        flattenSpecLeaves(value.systemExpr(), assembly)
             }
         }
         else -> flattenSpecLeaves(value, assembly)

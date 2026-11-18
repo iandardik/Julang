@@ -13,14 +13,15 @@ import specs.net.Value
 
 /*
  * Compositional TLA: Store is verified under assumption StoreAsm; ShardEnv (workers
- * + PerfectNet) is checked to establish StoreAsm. StoreAsm is `true` for now and
- * can be strengthened later without changing the AG shape.
+ * + PerfectNet) is checked to establish StoreAsm.
  *
  *   ShardEnvSpec := ShardEnv |= StoreAsm
  *   StoreSpec    := <StoreAsm> IndexedStore <StoreInvs>
  *
- * Put's put / putDone stay unsynced (environment clients). PerfectNet is unindexed
- * beside the create-indexed workers. Verif* names avoid decl clashes with node/main.jul.
+ * StoreAsm: putFromMove only after a matching applyClaim (proxy for "donated toward
+ * owner"). Put's put / putDone stay unsynced (environment clients). PerfectNet is
+ * unindexed beside the create-indexed workers. Verif* names avoid decl clashes with
+ * node/main.jul.
  */
 
 /* Client put path: Put + helpers (FindLightestPeer / BroadcastClaim / ReshardToPeer). */
@@ -50,8 +51,19 @@ spec IndexedStore := Store[n : NodeSet] {
     Value := { "v1", "v2", "v3" }
 }
 
-/* Assumption Store establishes under / Env is asked to prove. Strengthen later. */
-invariant StoreAsm := true
+/* History: (key, owner) was claimed at some indexed Store/Shard sync. */
+fluent Claimed(k : Key, owner : String) {
+    initially false
+    on applyClaim[n](claimKey, claimOwner) := true
+}
+
+/* Nullary violation: putFromMove without a prior matching claim. */
+fluent BadMove {
+    initially false
+    on putFromMove[n](moveKey, _, moveOwner) := ~Claimed(moveKey, moveOwner)
+}
+
+invariant StoreAsm := ~BadMove
 
 invariant AtMostOneStore := forall k : Key, forall n1 : NodeSet, forall n2 : NodeSet,
     (k in Store[n1].store & k in Store[n2].store) => n1 = n2
@@ -67,5 +79,4 @@ invariant StoreInvs := AtMostOneStore & OwnerHasValue & OwnersAgree
 
 export spec ShardEnvSpec := ShardEnv |= StoreAsm
 
-/* <true> until StoreAsm is a real env system or a stronger property. */
-export spec StoreSpec := <true> IndexedStore <StoreInvs>
+export spec StoreSpec := <StoreAsm> IndexedStore <StoreInvs>

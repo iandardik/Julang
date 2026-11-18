@@ -4,7 +4,8 @@ Compact cheat sheet. For explanations, use the other chapters.
 
 ## Keywords
 
-`proc` `static` `type` `fun` `import` `export` `compile` `spec` `invariant`  
+`proc` `static` `type` `fun` `import` `export` `compile` `spec` `invariant` `fluent`  
+`on` `initially`  
 `var` `const` `constructor` `transition` `return`  
 `service` `client` `internal` `timer`  
 `guard` `before` `transit` `error` `after`  
@@ -44,6 +45,7 @@ type Name                                   // uninterpreted
 // delayed model Name := { lit, ... } only inside create-index / leaf-spec body
 fun name(...) : Type = expr
 invariant Name := Expr
+fluent Name(p : T, …) { initially Expr  on Act[n](a, _) := true | ~Other(a) … }
 static spec Name { ... }                   // static leaf (initially only; optional [p : T] binder)
 static spec Name[p : T] { ... }            // static leaf with decl param
 spec Name { ... }                          // dynamic leaf (spawn ctor + return; same as dynamic proc)
@@ -65,6 +67,8 @@ Leaf-spec actions: `transition name(args) also (aux : T) { … }` (leaf specs on
 **Types:** record `type Name { fields }`; typedef `type Name := Carrier`; uninterpreted `type Name`. Delayed models `Name := { lits }` appear only in create-index or leaf-spec bodies — required for uninterpreted when used, optional for typedef (cfg aliases carrier if absent), forbidden for records. Nullary fun overrides `name := expr` in those same places rewrite the TLA operator only (binary unchanged). Uninterpreted types are spec-only; proc `compile` errors if a proc reaches one. Typedefs erase to the carrier in procs. Details: [Types and expressions](types-and-expressions.md#delayed-models), [Specifications — Fun overrides](specifications.md#fun-overrides).
 
 `Guarantee` may be a named invariant, an inline Boolean formula (`true` / `false` included), or `true` meaning no guarantee. Plain `spec := System` equals `<true> System <true>` / `--compile-tla`.
+
+`Assume` may be `true`, a system expression, or a **named invariant** (formula assume, often over fluents). A bare name that is both an invariant and a declared system is an error. Formula assumes are not composed as env leaves; TLA conjoins a post-state `AssumeOK` (primed fluents) on actions. See [Specifications — Fluents](specifications.md#fluents).
 
 `compile` targets: **proc** → native binary (fails if the assembly reaches an uninterpreted type); **spec** (composition or leaf) → `.tla` / `.cfg`. Leaf specs must not appear in `proc Name := …` assemblies. Only `static proc` / `static spec` may declare `constructor initially`. Dynamic procs and dynamic leaf specs must have at least one named `return` action.
 

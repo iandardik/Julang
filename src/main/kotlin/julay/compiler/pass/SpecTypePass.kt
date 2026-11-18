@@ -18,6 +18,9 @@ fun RootNode.specTypePass(
     val invariants = unit.modules
         .flatMap { it.root.declNodes().filterIsInstance<InvariantNode>() }
         .associateBy { it.name() }
+    val fluents = unit.modules
+        .flatMap { it.root.declNodes().filterIsInstance<FluentNode>() }
+        .associateBy { it.name() }
     val funEnvByInv = mutableMapOf<String, Map<String, FunNode>>()
     val funBuiltinEnvByInv = mutableMapOf<String, Map<String, FunBuiltin>>()
     unit.modules.forEach { mod ->
@@ -44,6 +47,39 @@ fun RootNode.specTypePass(
 
     val errors = mutableListOf<CompileError>()
     val warnings = mutableListOf<CompileWarning>()
+    val fluentNames = fluents.keys
+    fluents.values.forEach { fl ->
+        errors += typePassFluentDecl(fl, registry, fluentNames)
+        // Type initially with fluent params in env (no peers yet).
+        val paramEnv = mutableMapOf<String, Type>()
+        fl.fluentParams().forEach { p ->
+            when (val r = registry.resolveTypeExpr(p.typeExpr, emptyMap())) {
+                is TypeResolveResult.Found -> paramEnv[p.name] = valueViewForFluent(r.type)
+                else -> {}
+            }
+        }
+        errors += typePassSpecFormula(
+            fl.fluentInitially(),
+            paramEnv,
+            registry,
+            emptyMap(),
+            emptyMap(),
+            emptyMap(),
+            emptyMap(),
+            fluentArities = emptyMap(), // initially may not mention fluents
+        )
+        try {
+            if (errors.none { it is OneLocCompileError && it.msg.contains("initially") } &&
+                fl.fluentInitially().getType() !is BoolType
+            ) {
+                errors += OneLocCompileError(
+                    fl.fluentInitially().programLocation(),
+                    "fluent \"${fl.name()}\" initially formula must be Boolean",
+                )
+            }
+        } catch (_: RuntimeException) {
+        }
+    }
     unit.modules.forEach { mod ->
         val moduleFunEnv = callableFuns(mod)
         val moduleFunBuiltinEnv = callableFunBuiltins(mod)
@@ -51,6 +87,7 @@ fun RootNode.specTypePass(
             val result = typePassSpec(
                 spec,
                 invariants,
+                fluents,
                 pclassNodes,
                 leafSpecNodes,
                 procAliases,
@@ -70,6 +107,12 @@ fun RootNode.specTypePass(
     return SpecTypePassResult(errors, warnings)
 }
 
+/** Carrier view for fluent param typing (same as valueView). */
+private fun valueViewForFluent(type: Type): Type = when (type) {
+    is DomainType -> type.carrierType
+    else -> type
+}
+
 private fun ProcClassNode.isInitiallyOnly(): Boolean {
     val ctors = localDecls().flatMap { it.constructors() }
     return ctors.isNotEmpty() && ctors.all { it.action.name == "initially" }
@@ -86,6 +129,7 @@ private fun resolveType(
 private fun typePassSpec(
     spec: SpecNode,
     invariants: Map<String, InvariantNode>,
+    fluents: Map<String, FluentNode>,
     pclassNodes: Map<String, ProcClassNode>,
     leafSpecNodes: Map<String, LeafSpecNode>,
     procAliases: Map<String, ProcNode>,
@@ -101,6 +145,13 @@ private fun typePassSpec(
     val errors = mutableListOf<CompileError>()
     val warnings = mutableListOf<CompileWarning>()
     val value = spec.specNodeValue()
+    // Declared systems only — do not include names merely mentioned as AG assumes
+    // (those appear in allProcNames via procPass and would make every formula-assume "ambiguous").
+    val systemDeclNames = (
+        pclassNodes.keys + leafSpecNodes.keys + procAliases.keys + specAliases.keys
+        ).toSet()
+    val invariantNames = invariants.keys
+    val fluentArities = fluents.mapValues { it.value.fluentParams().size }
 
     fun annotateDeclParams(leaves: List<SpecLeaf>): List<SpecLeaf> =
         leaves.map { leaf ->
@@ -183,43 +234,64 @@ private fun typePassSpec(
     when (value) {
         is AgSpecExprNode -> {
             errors += withIndexStructureErrors(value)
-            val assumeLeaves = annotateDeclParams(flattenSpecLeaves(value.assumeExpr()))
+            val (formulaAssume, assumeAmbiguity) =
+                formulaAssumeInvariantName(value.assumeExpr(), invariantNames, systemDeclNames)
+            assumeAmbiguity?.let { errors += it }
             val systemLeaves = annotateDeclParams(flattenSpecLeaves(value.systemExpr()))
-            checkLeaves(assumeLeaves, "assumption")
             checkLeaves(systemLeaves, "system")
-            checkIndexing(assumeLeaves)
             checkIndexing(systemLeaves)
+            if (formulaAssume == null && value.assumeExpr() != null) {
+                val assumeLeaves = annotateDeclParams(flattenSpecLeaves(value.assumeExpr()))
+                checkLeaves(assumeLeaves, "assumption")
+                checkIndexing(assumeLeaves)
+            }
             errors += globalDeclErrors(value, pclassNodes, leafSpecNodes, procAliases, specAliases)
             errors += initClauseErrors(
                 value, pclassNodes, leafSpecNodes, procAliases, specAliases, registry,
                 moduleFunEnv, moduleFunBuiltinEnv,
             )
 
+            val expandedSystem = expandLeavesToPclasses(
+                systemLeaves,
+                pclassNodes,
+                procAliases,
+                specAliases,
+                leafSpecNodes,
+            )
+            val systemPclasses = expandedSystem.mapNotNull { leaf ->
+                pclassNodes[leaf.name]?.let { leaf.name to it }
+            }.toMap()
+
+            fun checkInvAgainstSystem(invName: String) {
+                errors += typePassInvariantNamed(
+                    invName,
+                    invariants,
+                    expandedSystem,
+                    systemPclasses,
+                    registry,
+                    funEnvByInv,
+                    moduleFunEnv,
+                    funBuiltinEnvByInv,
+                    moduleFunBuiltinEnv,
+                    fluentArities = fluentArities,
+                )
+                val inv = invariants[invName] ?: return
+                val used = fluentsUsedByInvariant(inv, invariants, fluents)
+                used.forEach { fname ->
+                    val fl = fluents[fname] ?: return@forEach
+                    errors += typePassFluentOnAgainstSystem(fl, expandedSystem, pclassNodes)
+                }
+            }
+
+            if (formulaAssume != null) {
+                checkInvAgainstSystem(formulaAssume)
+            }
+
             val guarantee = value.guaranteeExpr()
             if (guarantee != null) {
-                val expandedSystem = expandLeavesToPclasses(
-                    systemLeaves,
-                    pclassNodes,
-                    procAliases,
-                    specAliases,
-                    leafSpecNodes,
-                )
-                val systemPclasses = expandedSystem.mapNotNull { leaf ->
-                    pclassNodes[leaf.name]?.let { leaf.name to it }
-                }.toMap()
                 when {
                     guarantee is SymbolValueExprNode && invariants.containsKey(guarantee.symbol) -> {
-                        errors += typePassInvariantNamed(
-                            guarantee.symbol,
-                            invariants,
-                            expandedSystem,
-                            systemPclasses,
-                            registry,
-                            funEnvByInv,
-                            moduleFunEnv,
-                            funBuiltinEnvByInv,
-                            moduleFunBuiltinEnv,
-                        )
+                        checkInvAgainstSystem(guarantee.symbol)
                     }
                     else -> {
                         errors += typePassInvariantFormula(
@@ -235,6 +307,7 @@ private fun typePassSpec(
                             funBuiltinEnvByInv,
                             moduleFunBuiltinEnv,
                             guarantee.programLocation(),
+                            fluentArities = fluentArities,
                         )
                     }
                 }
@@ -358,6 +431,7 @@ private fun typePassInvariantNamed(
     defaultFunBuiltinEnv: Map<String, FunBuiltin>,
     checking: MutableSet<String> = mutableSetOf(),
     checked: MutableSet<String> = mutableSetOf(),
+    fluentArities: Map<String, Int> = emptyMap(),
 ): List<CompileError> {
     if (invName in checked) return emptyList()
     val inv = invariants[invName]
@@ -384,6 +458,7 @@ private fun typePassInvariantNamed(
         funBuiltinEnvByInv,
         funBuiltinEnvByInv[invName] ?: defaultFunBuiltinEnv,
         inv.programLocation(),
+        fluentArities = fluentArities,
     )
     checking -= invName
     checked += invName
@@ -404,6 +479,7 @@ private fun typePassInvariantFormula(
     funBuiltinEnvByInv: Map<String, Map<String, FunBuiltin>>,
     funBuiltinEnv: Map<String, FunBuiltin>,
     loc: julay.compiler.ProgramLoc,
+    fluentArities: Map<String, Int> = emptyMap(),
 ): List<CompileError> {
     val refs = collectInvariantRefs(formula, invariants.keys)
     val errors = mutableListOf<CompileError>()
@@ -421,6 +497,7 @@ private fun typePassInvariantFormula(
             funBuiltinEnv,
             checking,
             checked,
+            fluentArities = fluentArities,
         )
         env[name] = boolType
     }
@@ -434,6 +511,7 @@ private fun typePassInvariantFormula(
         unindexed,
         indexed,
         paramTypes,
+        fluentArities = fluentArities,
     )
     if (errors.isEmpty()) {
         try {
@@ -474,7 +552,7 @@ private fun specPeerMaps(
     return Triple(unindexed, indexed, paramTypes)
 }
 
-private fun collectInvariantRefs(
+internal fun collectInvariantRefs(
     expr: ExprNode,
     invariantNames: Set<String>,
     bound: Set<String> = emptySet(),

@@ -101,6 +101,9 @@ private var typePassForbidEffects: Boolean = false
  */
 private var typePassStateEnv: Map<String, Type>? = null
 
+/** Fluents in scope for spec/invariant formulas (name → arity). */
+private var typePassFluentArities: Map<String, Int> = emptyMap()
+
 /**
  * Type an invariant or `init:` formula with the same [ASTNode.typePass] used for
  * proc / leaf-spec bodies, plus spec-only flags (sort domains, peer maps, no `this`).
@@ -115,6 +118,7 @@ internal fun typePassSpecFormula(
     indexedPeers: Map<String, ProcClassNode>,
     indexedParamTypes: Map<String, Type> = emptyMap(),
     initConstGlobals: Map<String, Set<String>>? = null,
+    fluentArities: Map<String, Int> = emptyMap(),
 ): List<CompileError> {
     val prevAllow = typePassAllowSortDomains
     val prevPeers = typePassPeerClasses
@@ -125,6 +129,7 @@ internal fun typePassSpecFormula(
     val prevSpec = typePassSpecFormula
     val prevForbid = typePassForbidEffects
     val prevState = typePassStateEnv
+    val prevFluents = typePassFluentArities
     typePassAllowSortDomains = true
     typePassSpecFormula = true
     typePassForbidEffects = true
@@ -134,6 +139,7 @@ internal fun typePassSpecFormula(
     typePassInitConstGlobals = initConstGlobals
     typePassPeerClasses = unindexedPeers + indexedPeers
     typePassStateEnv = null
+    typePassFluentArities = fluentArities
     val builtins = funBuiltinEnv.toMutableMap()
     FunBuiltinRegistry.lookup("length")?.let { builtins.putIfAbsent("length", it) }
     try {
@@ -147,6 +153,7 @@ internal fun typePassSpecFormula(
         typePassInitConstGlobals = prevInit
         typePassSpecFormula = prevSpec
         typePassForbidEffects = prevForbid
+        typePassFluentArities = prevFluents
         typePassStateEnv = prevState
     }
 }
@@ -276,7 +283,7 @@ fun RootNode.typePass(
             val builtins = callableFunBuiltins(module)
             module.root.declNodes()
                 .filter {
-                    it !is FunNode && it !is SpecNode && it !is InvariantNode
+                    it !is FunNode && it !is SpecNode && it !is InvariantNode && it !is FluentNode
                 }
                 .flatMap { decl ->
                     when (decl) {
@@ -1980,6 +1987,18 @@ private fun SymbolValueExprNode.typePassSymbol(
         )
     }
     if (symbol !in symbolEnv) {
+        typePassFluentArities[symbol]?.let { arity ->
+            if (arity != 0) {
+                return listOf(
+                    OneLocCompileError(
+                        programLocation(),
+                        "fluent \"$symbol\" expects $arity argument(s)",
+                    ),
+                )
+            }
+            setInferredType(TypePassType.Inferred(boolType))
+            return emptyList()
+        }
         if (typePassAllowSortDomains) {
             registry.domains[symbol]?.let { domain ->
                 setInferredType(TypePassType.Inferred(domain))
@@ -2160,6 +2179,20 @@ private fun FunCallExprNode.typePassFunCall(
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
 ): List<CompileError> {
+    typePassFluentArities[callName()]?.let { arity ->
+        val argErrors = callArgs().flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
+        if (argErrors.isNotEmpty()) return argErrors
+        if (callArgs().size != arity) {
+            return listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "fluent \"${callName()}\" expects $arity argument(s) but got ${callArgs().size}",
+                ),
+            )
+        }
+        setInferredType(TypePassType.Inferred(boolType))
+        return emptyList()
+    }
     if (typePassAllowSortDomains && callName() == "length" && callArgs().size == 1) {
         val arg = callArgs().single()
         if (arg is SymbolValueExprNode && arg.symbol !in symbolEnv &&

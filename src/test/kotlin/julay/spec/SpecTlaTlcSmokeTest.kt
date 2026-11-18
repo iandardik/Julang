@@ -957,6 +957,60 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun fluentFormulaAssumeEmitsHistoryAndAssumePrime() {
+        assumeTlcPresent()
+        val source = File("regression/input/spec/fluent-asm-tla.jul")
+        val emit = compileSpecEmit(source, "FluentAsmSpec")
+        val tlaText = emit.tlaText
+        val cfgText = emit.cfgText
+        assertTrue(
+            tlaText.contains("BadMove") && tlaText.contains("Claimed"),
+            "fluents should be VARIABLES;\n$tlaText",
+        )
+        assertTrue(
+            tlaText.contains("EXCEPT ![claimKey, claimOwner] = TRUE"),
+            "applyClaim should update Claimed;\n$tlaText",
+        )
+        assertTrue(
+            tlaText.contains("BadMove' = ~Claimed[moveKey, moveOwner]") ||
+                tlaText.contains("BadMove' = ~Claimed["),
+            "putFromMove should update BadMove from Claimed;\n$tlaText",
+        )
+        assertTrue(
+            tlaText.contains("MoveAsmOK ==") &&
+                tlaText.contains("/\\ MoveAsmOK") &&
+                tlaText.contains("MoveAsm =="),
+            "formula assume should emit MoveAsmOK (primed fluents) and conjoin it;\n$tlaText",
+        )
+        assertFalse(
+            cfgText.contains("INVARIANT MoveAsm"),
+            "formula assume must not be a cfg INVARIANT;\n$cfgText",
+        )
+        assertTrue(
+            cfgText.contains("INVARIANT TableOk"),
+            "guarantee should remain a cfg INVARIANT;\n$cfgText",
+        )
+        val work = Files.createTempDirectory("julay-fluent-asm").toFile()
+        try {
+            File(work, "FluentAsmSpec.tla").writeText(tlaText)
+            File(work, "FluentAsmSpec.cfg").writeText(cfgText)
+            assertTlcCompletesWithoutEvalError(work, "FluentAsmSpec")
+        } finally {
+            work.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun fluentIndexMismatchIsCompileError() {
+        val source = File("regression/input/spec/fluent-index-mismatch.jul")
+        val checked = prepareCheckedCompilation(source.toPath())
+        assertTrue(
+            checked == null,
+            "expected type error for unindexed on-clause under create-indexed system",
+        )
+    }
+
+    @Test
     fun typedefActionArgsExistOverTypedefConstants() {
         val source = File("regression/input/spec/typedef-arg-domain-tla.jul")
         val (tlaText, _) = compileSpecTla(source, "TypedefArgSpec")

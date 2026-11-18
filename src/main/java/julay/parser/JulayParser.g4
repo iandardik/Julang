@@ -32,6 +32,7 @@ decl
     | compile_decl
     | EXPORT? spec
     | EXPORT? invariant_decl
+    | EXPORT? fluent_decl
     | EXPORT? fun_decl
     ;
 
@@ -103,6 +104,7 @@ ag_spec
     : LT assume_expr GT system_expr LT expr GT
     ;
 
+/* TRUE / system; a bare ID that names an invariant is resolved as formula-assume later. */
 assume_expr
     : TRUE
     | system_expr
@@ -153,6 +155,45 @@ invariant_decl
     : INVARIANT ID ASGN_EQ expr
     ;
 
+/*
+ * Ghost history relation for compositional AG.
+ *   fluent Name(p : T, …) { initially Expr  on Act[n](a, _) := true | ~Other(a) … }
+ *   fluent Bad { initially false  on putFromMove[n](k, _, o) := ~Claimed(k, o) }
+ */
+fluent_decl
+    : FLUENT ID fluent_params? LCURLY fluent_item+ RCURLY
+    ;
+
+fluent_params
+    : LPAREN fluent_param (COMMA fluent_param)* RPAREN
+    ;
+
+fluent_param
+    : ID COLON typeExpr
+    ;
+
+fluent_item
+    : INITIALLY expr
+    | ON ID (LBRACK ID RBRACK)? LPAREN on_arg_list RPAREN ASGN_EQ fluent_target
+    ;
+
+on_arg_list
+    : /* empty */
+    | on_arg (COMMA on_arg)*
+    ;
+
+on_arg
+    : ID
+    ;
+
+/* true | false | Fluent(args) | ~Fluent(args) | Fluent | ~Fluent */
+fluent_target
+    : TRUE
+    | FALSE
+    | NOT ID (LPAREN expr (COMMA expr)* RPAREN)?
+    | ID (LPAREN expr (COMMA expr)* RPAREN)?
+    ;
+
 proc_body
     : var
     | constructor
@@ -169,7 +210,8 @@ var
     ;
 
 constructor
-    : CONSTRUCTOR ID args (ALSO args)? LCURLY constructor_body* RCURLY
+    /* INITIALLY is a keyword for fluents but remains a legal constructor name. */
+    : CONSTRUCTOR (ID | INITIALLY) args (ALSO args)? LCURLY constructor_body* RCURLY
     ;
 
 transition

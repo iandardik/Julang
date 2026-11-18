@@ -100,8 +100,15 @@ fun compileJulFile(
         if (!runTlaStructuralPass(ast, specDecl, procDecls, librariesInUse)) {
             return
         }
+        val invariantNames = unit.modules
+            .flatMap { it.root.declNodes().filterIsInstance<julay.compiler.ast.InvariantNode>() }
+            .map { it.name() }
+            .toSet()
+        val systemDeclNames = (
+            pclasses.keys + leafSpecs.keys + procAliases.keys + compositionSpecs.keys
+            ).toSet()
         val leaves = expandLeavesToPclasses(
-            compositionLeavesOfSpec(specNode),
+            compositionLeavesOfSpec(specNode, invariantNames, systemDeclNames),
             pclasses,
             procAliases,
             compositionSpecs,

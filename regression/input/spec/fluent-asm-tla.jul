@@ -1,0 +1,53 @@
+import julay.funlib.mapOf
+
+/* Fluents + formula assume for an indexed Store-like leaf. */
+type N
+type Key := String
+type Value := String
+
+static proc Box {
+    var table : Map<Key, Value>
+    var owners : Map<Key, String>
+
+    constructor initially(args : List<String>) {
+        transit:
+            table := mapOf()
+            owners := mapOf()
+    }
+
+    service transition applyClaim(claimKey : Key, claimOwner : String) {
+        transit:
+            owners[claimKey] := claimOwner
+    }
+
+    service transition putFromMove(moveKey : Key, moveVal : Value, moveOwner : String) {
+        transit:
+            table[moveKey] := moveVal
+            owners[moveKey] := moveOwner
+    }
+}
+
+fluent Claimed(k : Key, owner : String) {
+    initially false
+    on applyClaim[n](claimKey, claimOwner) := true
+}
+
+fluent BadMove {
+    initially false
+    on putFromMove[n](moveKey, _, moveOwner) := ~Claimed(moveKey, moveOwner)
+}
+
+invariant MoveAsm := ~BadMove
+
+invariant TableOk := forall i : N, forall k : Key,
+    (k in Box[i].table) => k in Box[i].owners
+
+spec IndexedBox := Box[n : N] {
+    N := {"a"}
+    Key := {"k1", "k2"}
+    Value := {"v1", "v2"}
+}
+
+export spec FluentAsmSpec := <MoveAsm> IndexedBox <TableOk>
+
+compile FluentAsmSpec

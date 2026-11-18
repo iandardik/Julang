@@ -231,8 +231,101 @@ class InvariantNode(
     override fun toString(): String = "invariant $name := $formula"
 }
 
+/** Fluent parameter `p : T` in `fluent Name(p : T, …)`. */
+data class FluentParam(
+    val name: String,
+    val typeExpr: TypeExpr,
+)
+
+/** RHS of `on Act(…) := …`: true/false or (negated) fluent application. */
+sealed class FluentTarget {
+    data object True : FluentTarget() {
+        override fun toString(): String = "true"
+    }
+    data object False : FluentTarget() {
+        override fun toString(): String = "false"
+    }
+    data class FluentRef(
+        val negated: Boolean,
+        val name: String,
+        val args: List<ExprNode>,
+    ) : FluentTarget() {
+        override fun toString(): String {
+            val call = if (args.isEmpty()) name else "$name(${args.joinToString(", ")})"
+            return if (negated) "~$call" else call
+        }
+    }
+}
+
+/** One `on Action[n](a, _) := target` clause. */
+data class FluentOnClause(
+    val actionName: String,
+    /** Create-index binder in `Action[n]`, or null if unindexed. */
+    val indexBinder: String?,
+    /** Action arg names in order; `"_"` ignores. */
+    val argBinders: List<String>,
+    val target: FluentTarget,
+    val loc: ProgramLoc,
+) {
+    override fun toString(): String {
+        val idx = indexBinder?.let { "[$it]" } ?: ""
+        val args = argBinders.joinToString(", ")
+        return "on $actionName$idx($args) := $target"
+    }
+}
+
+/**
+ * Ghost history relation for compositional AG.
+ * Illegal in proc/JAR bodies; used from invariants and fluent `on` targets.
+ */
+class FluentNode(
+    private val name: String,
+    private val params: List<FluentParam>,
+    private val initially: ExprNode,
+    private val onClauses: List<FluentOnClause>,
+    private val loc: ProgramLoc,
+) : DeclNode(
+    listOf(initially) + onClauses.flatMap { clause ->
+        when (val t = clause.target) {
+            is FluentTarget.FluentRef -> t.args
+            else -> emptyList()
+        }
+    },
+) {
+    override fun programLocation() = loc
+    override fun name() = name
+    internal fun fluentName() = name
+    internal fun fluentParams() = params
+    internal fun fluentInitially() = initially
+    internal fun fluentOnClauses() = onClauses
+    override fun toString(): String {
+        val ps = if (params.isEmpty()) "" else {
+            params.joinToString(", ", "(", ")") { "${it.name} : ${it.typeExpr}" }
+        }
+        val body = buildString {
+            appendLine("    initially $initially")
+            onClauses.forEach { appendLine("    $it") }
+        }
+        val export = if (isExported) "export " else ""
+        return "${export}fluent $name$ps {\n$body}"
+    }
+}
+
+/**
+ * Formula assume: `<InvName> System <G>` where [name] is an invariant
+ * (possibly over fluents). Distinct from a system assume leaf.
+ */
+class AssumeInvariantExprNode(
+    private val name: String,
+    private val loc: ProgramLoc,
+) : ASTNode(emptyList()) {
+    override fun programLocation() = loc
+    internal fun assumeInvariantName() = name
+    override fun toString(): String = name
+}
+
 class AgSpecExprNode(
-    /** null means `<true>` (no assumption). */
+    /** null means `<true>` (no assumption). System leaf tree or [AssumeInvariantExprNode]. */
     private val assume: ASTNode?,
     private val system: ASTNode,
     /** null means `<true>` (no guarantee). */

@@ -55,6 +55,6 @@ input/sharded_kv/ShardClient http://127.0.0.1:6001 owners
 
 ## TLA+ sketch
 
-- Shard source is identical in JAR and TLA; only the composition changes. JAR: `ShardNode := Store || ServerStarter || HttpWorkers || SendClaim`. TLA is compositional: `ShardEnvSpec := ShardEnv |= StoreAsm` (workers + unindexed PerfectNet) and `StoreSpec := <true> IndexedStore <StoreInvs>` (`StoreAsm` is `true` for now). `Verif*` names avoid decl clashes in `sys.jul`. `Put.put` / `putDone` stay unsynced (environment).
+- Shard source is identical in JAR and TLA; only the composition changes. JAR: `ShardNode := Store || ServerStarter || HttpWorkers || SendClaim`. TLA is compositional: `ShardEnvSpec := ShardEnv |= StoreAsm` (workers + unindexed PerfectNet) and `StoreSpec := <StoreAsm> IndexedStore <StoreInvs>` (`StoreAsm` is `~BadMove` over Claimed/BadMove fluents). `Verif*` names avoid decl clashes in `sys.jul`. `Put.put` / `putDone` stay unsynced (environment).
 - Unindexed `PerfectNet := ClaimMsgs || MoveBatchMsgs || KeyCountReqs || KeyCountReplies` (shared bags; four `static spec` leaves). Actions use `also (n : NodeSet)` to sync with the indexed workers.
 - Invariants target `Store[n].store` / `Store[n].owners` on `StoreSpec`. Each dynamic class gets a `Terminates` property under strong fairness.

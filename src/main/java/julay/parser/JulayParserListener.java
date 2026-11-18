@@ -298,6 +298,76 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitInvariant_decl(JulayParser.Invariant_declContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#fluent_decl}.
+	 * @param ctx the parse tree
+	 */
+	void enterFluent_decl(JulayParser.Fluent_declContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#fluent_decl}.
+	 * @param ctx the parse tree
+	 */
+	void exitFluent_decl(JulayParser.Fluent_declContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#fluent_params}.
+	 * @param ctx the parse tree
+	 */
+	void enterFluent_params(JulayParser.Fluent_paramsContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#fluent_params}.
+	 * @param ctx the parse tree
+	 */
+	void exitFluent_params(JulayParser.Fluent_paramsContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#fluent_param}.
+	 * @param ctx the parse tree
+	 */
+	void enterFluent_param(JulayParser.Fluent_paramContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#fluent_param}.
+	 * @param ctx the parse tree
+	 */
+	void exitFluent_param(JulayParser.Fluent_paramContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#fluent_item}.
+	 * @param ctx the parse tree
+	 */
+	void enterFluent_item(JulayParser.Fluent_itemContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#fluent_item}.
+	 * @param ctx the parse tree
+	 */
+	void exitFluent_item(JulayParser.Fluent_itemContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#on_arg_list}.
+	 * @param ctx the parse tree
+	 */
+	void enterOn_arg_list(JulayParser.On_arg_listContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#on_arg_list}.
+	 * @param ctx the parse tree
+	 */
+	void exitOn_arg_list(JulayParser.On_arg_listContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#on_arg}.
+	 * @param ctx the parse tree
+	 */
+	void enterOn_arg(JulayParser.On_argContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#on_arg}.
+	 * @param ctx the parse tree
+	 */
+	void exitOn_arg(JulayParser.On_argContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#fluent_target}.
+	 * @param ctx the parse tree
+	 */
+	void enterFluent_target(JulayParser.Fluent_targetContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#fluent_target}.
+	 * @param ctx the parse tree
+	 */
+	void exitFluent_target(JulayParser.Fluent_targetContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#proc_body}.
 	 * @param ctx the parse tree
 	 */

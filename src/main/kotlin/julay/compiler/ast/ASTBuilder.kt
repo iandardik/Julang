@@ -128,6 +128,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             ctx.compile_decl(),
             ctx.spec(),
             ctx.invariant_decl(),
+            ctx.fluent_decl(),
             ctx.fun_decl(),
         )
         val node = visit(decl)
@@ -456,6 +457,61 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
         return InvariantNode(name, formula, sourceLocation(ctx))
     }
 
+    override fun visitFluent_decl(ctx: JulayParser.Fluent_declContext?): ASTNode {
+        val name = ctx!!.ID().text
+        val params = ctx.fluent_params()?.fluent_param()?.map { p ->
+            FluentParam(p.ID().text, parseTypeExpr(p.typeExpr()))
+        }.orEmpty()
+        var initially: ExprNode? = null
+        val onClauses = mutableListOf<FluentOnClause>()
+        ctx.fluent_item().forEach { item ->
+            when {
+                item.INITIALLY() != null -> {
+                    if (initially != null) {
+                        throw RuntimeException("fluent \"$name\" has multiple initially clauses")
+                    }
+                    val expr = visit(item.expr())
+                    if (expr !is ExprNode) {
+                        throw RuntimeException("Expected initially formula to be an expression")
+                    }
+                    initially = expr
+                }
+                item.ON() != null -> {
+                    val actionName = item.ID(0).text
+                    val indexBinder = if (item.LBRACK() != null) item.ID(1).text else null
+                    val binders = item.on_arg_list()?.on_arg()?.map { it.ID().text }.orEmpty()
+                    val target = visitFluentTarget(item.fluent_target())
+                    onClauses += FluentOnClause(
+                        actionName, indexBinder, binders, target, sourceLocation(item),
+                    )
+                }
+                else -> throw RuntimeException("Invalid fluent item in \"$name\"")
+            }
+        }
+        val initExpr = initially
+            ?: throw RuntimeException("fluent \"$name\" requires an initially clause")
+        return FluentNode(name, params, initExpr, onClauses, sourceLocation(ctx))
+    }
+
+    private fun visitFluentTarget(ctx: JulayParser.Fluent_targetContext): FluentTarget {
+        return when {
+            ctx.TRUE() != null -> FluentTarget.True
+            ctx.FALSE() != null -> FluentTarget.False
+            else -> {
+                val negated = ctx.NOT() != null
+                val fname = ctx.ID().text
+                val args = ctx.expr().map { e ->
+                    val node = visit(e)
+                    if (node !is ExprNode) {
+                        throw RuntimeException("Expected fluent target argument expression")
+                    }
+                    node
+                }
+                FluentTarget.FluentRef(negated, fname, args)
+            }
+        }
+    }
+
     override fun visitProc_body(ctx: JulayParser.Proc_bodyContext?): ASTNode {
         val body = oneChoice(ctx!!.`var`(), ctx.constructor(), ctx.transition(), ctx.return_action())
         return visit(body)
@@ -474,7 +530,10 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     }
 
     override fun visitConstructor(ctx: JulayParser.ConstructorContext?): ASTNode {
-        val name = ctx!!.ID().text
+        val name = when {
+            ctx!!.INITIALLY() != null -> "initially"
+            else -> ctx.ID().text
+        }
         val alsoArgs = if (ctx.ALSO() != null) {
             val allArgs = ctx.args()
             val alsoNode = visit(allArgs[allArgs.size - 1])

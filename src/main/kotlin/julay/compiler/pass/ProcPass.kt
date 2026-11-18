@@ -9,6 +9,7 @@ fun ASTNode.procPass(): List<ProcDecl> = when (this) {
     is SpecNode -> listOf(ProcDecl(specNodeName(), specNodeValue().procPass(), ProcDeclType.Spec))
     is LeafSpecNode -> listOf(ProcDecl(leafSpecName(), emptyList(), ProcDeclType.Spec))
     is AgSpecExprNode -> {
+        // SpecLeaves decides formula-vs-system assume with invariant maps; here keep both.
         val assumeParts = assumeExpr()?.procPass() ?: emptyList()
         val systemParts = systemExpr().procPass()
         assumeParts + systemParts

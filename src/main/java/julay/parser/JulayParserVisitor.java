@@ -185,6 +185,48 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitInvariant_decl(JulayParser.Invariant_declContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#fluent_decl}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitFluent_decl(JulayParser.Fluent_declContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#fluent_params}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitFluent_params(JulayParser.Fluent_paramsContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#fluent_param}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitFluent_param(JulayParser.Fluent_paramContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#fluent_item}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitFluent_item(JulayParser.Fluent_itemContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#on_arg_list}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitOn_arg_list(JulayParser.On_arg_listContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#on_arg}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitOn_arg(JulayParser.On_argContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#fluent_target}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitFluent_target(JulayParser.Fluent_targetContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#proc_body}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
