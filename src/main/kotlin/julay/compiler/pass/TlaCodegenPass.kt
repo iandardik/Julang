@@ -21,6 +21,10 @@ data class TlaCodegenResult(
     val tlaText: String,
     val cfgText: String,
     val warnings: List<OneLocCompileWarning> = emptyList(),
+    /** Second cfg for CircSide SC2 (`PROPERTY SC2Prop`); null when not a CircSide emit. */
+    val cfgSc2Text: String? = null,
+    /** Apalache safety cfg (`INIT`/`NEXT`, no Fairness / Terminates). */
+    val apalacheCfgText: String? = null,
 )
 
 internal object TlaEmitOpts {
@@ -82,11 +86,18 @@ fun compileSpecToTla(
     unit: CompilationUnit,
     outputDir: File = File("."),
     tlaOptConfig: TlaOptConfig = TlaOptConfig.ALL_ON,
+    circularSide: CircularAgPair? = null,
 ): TlaCodegenResult {
-    val result = tlaCodegenPass(spec, ast, unit, tlaOptConfig)
+    val result = tlaCodegenPass(spec, ast, unit, tlaOptConfig, circularSide)
     result.warnings.forEach { System.err.println(it) }
     File(outputDir, "${result.moduleName}.tla").writeText(result.tlaText)
     File(outputDir, "${result.moduleName}.cfg").writeText(result.cfgText)
+    result.cfgSc2Text?.let { sc2 ->
+        File(outputDir, "${result.moduleName}_SC2.cfg").writeText(sc2)
+    }
+    result.apalacheCfgText?.let { apa ->
+        File(outputDir, "${result.moduleName}.apalache.cfg").writeText(apa)
+    }
     return result
 }
 
@@ -95,6 +106,7 @@ fun tlaCodegenPass(
     ast: RootNode,
     unit: CompilationUnit,
     tlaOptConfig: TlaOptConfig = TlaOptConfig.ALL_ON,
+    circularSide: CircularAgPair? = null,
 ): TlaCodegenResult {
     val moduleName = spec.specNodeName()
     handlerResponseActions = unit.modules.flatMap { m ->
@@ -206,28 +218,40 @@ fun tlaCodegenPass(
     val ag = spec.specNodeValue() as? AgSpecExprNode
     val registry = ast.cachedObjClassRegistry()
         ?: error("ObjClassRegistry required for TLA codegen")
+    val circSideInvNames = circularSide?.let { p ->
+        listOfNotNull(p.pName, p.aName, p.gName, p.safeName)
+    }.orEmpty()
     val fluentPlan = buildFluentEmitPlan(
         spec, invariants, allFluents, systemDeclNames, registry,
+        extraInvariantNames = circSideInvNames,
     )
-    val invNode = ag?.let { resolveGuaranteeInvariant(it, spec.specNodeName(), invariants) }
-    val invClosure = if (invNode != null) {
-        val invMap = if (invariants.containsKey(invNode.name())) {
-            invariants
-        } else {
-            invariants + (invNode.name() to invNode)
+    val invRoots = buildList {
+        ag?.let { addAll(resolveGuaranteeInvariants(it, spec.specNodeName(), invariants)) }
+        // CircSide needs A/G (and P/Safe) operator defs for SC1/SC2, not as cfg guarantees.
+        circSideInvNames.forEach { n -> invariants[n]?.let { add(it) } }
+    }.distinctBy { it.name() }
+    val invClosure = buildList {
+        val seen = mutableSetOf<String>()
+        invRoots.forEach { invNode ->
+            val invMap = if (invariants.containsKey(invNode.name())) {
+                invariants
+            } else {
+                invariants + (invNode.name() to invNode)
+            }
+            topologicalInvariantClosure(invNode.name(), invMap).forEach { n ->
+                if (seen.add(n.name())) add(n)
+            }
         }
-        topologicalInvariantClosure(invNode.name(), invMap)
-    } else {
-        emptyList()
     }
-    // Formula-assume invariant ops are emitted for `Name'` but not listed in cfg INVARIANT.
-    val assumeInvClosure = fluentPlan.formulaAssumeName?.let { an ->
-        if (invariants.containsKey(an) && invClosure.none { it.name() == an }) {
-            topologicalInvariantClosure(an, invariants)
-        } else {
-            emptyList()
+    // Formula-assume invariant ops are emitted for NameOK but not listed in cfg INVARIANT.
+    val assumeInvClosure = buildList {
+        val seen = invClosure.map { it.name() }.toMutableSet()
+        fluentPlan.formulaAssumeNames.forEach { an ->
+            if (an in invariants && seen.add(an)) {
+                addAll(topologicalInvariantClosure(an, invariants))
+            }
         }
-    }.orEmpty()
+    }
     invClosure.forEach { collectTypeConstants(it.invariantFormula(), constants) }
     assumeInvClosure.forEach { collectTypeConstants(it.invariantFormula(), constants) }
     val sortNames = domainNames
@@ -336,6 +360,8 @@ fun tlaCodegenPass(
             usedFunOps = usedFunOps,
             unusedFieldWarnings = unusedFieldWarnings,
             domains = domains,
+            circularSide = circularSide,
+            isAgObl = ag != null,
         )
     } finally {
         TlaFieldProjection.set(TlaRelevantFields.IDENTITY)
@@ -364,6 +390,8 @@ private fun emitProjectedTla(
     usedFunOps: List<FunNode>,
     unusedFieldWarnings: List<OneLocCompileWarning>,
     domains: Map<String, DomainType>,
+    circularSide: CircularAgPair? = null,
+    isAgObl: Boolean = false,
 ): TlaCodegenResult {
     val registry = fluentPlan.registry
     val cfgDomainModels = domainModels.toMutableMap()
@@ -438,7 +466,11 @@ private fun emitProjectedTla(
                     exprContainsToSet(it.invariantFormula()) ||
                     exprContainsAllDistinct(it.invariantFormula())
             } ||
-            typeOkShapes.usesRange
+            typeOkShapes.usesRange ||
+            // Fluent bulk updates on list `entries` may still use Range elsewhere.
+            fluentPlan.fluents.any { fl ->
+                fl.fluentOnClauses().any { "entries" in it.argBinders }
+            }
     val needsSetToSeqOperator =
         offersUseToList(offers) ||
             usedFunOps.any { exprContainsToList(it.funBody()) } ||
@@ -475,6 +507,7 @@ private fun emitProjectedTla(
     }
     dropConsumedOnlyTypeConstants(leaves, invClosure + assumeInvClosure, consumedInitExprs, constants)
     val variables = mutableListOf<String>()
+    val stateVarApalacheTypes = linkedMapOf<String, String>()
     val initParts = mutableListOf<String>()
     val typeOkParts = mutableListOf<String>()
     val constraintParts = mutableListOf<String>()
@@ -524,11 +557,13 @@ private fun emitProjectedTla(
                 }
             if (foldCtor == null) {
                 variables += constructed
+                stateVarApalacheTypes[constructed] = indexedApalacheType("Bool", domain, instDomain)
                 initParts += "/\\ $constructed = ${initMap("FALSE")}"
                 typeOkParts += typeOkConjunct(constructed, "BOOLEAN", domain, instDomain)
             }
             if (parentVar != null) {
                 variables += parentVar
+                stateVarApalacheTypes[parentVar] = indexedApalacheType("Str", domain, instDomain)
                 initParts += "/\\ $parentVar = ${initMap("CHOOSE p \\in $parentDomain : TRUE")}"
                 typeOkParts += typeOkConjunct(parentVar, parentDomain!!, domain, instDomain)
             }
@@ -536,6 +571,14 @@ private fun emitProjectedTla(
                 if (!TlaVarProjection.get().isRelevant(leaf.name, vn.name)) return@forEach
                 val v = stateTlaName(leaf.tlaName, vn.name, stateVarNames)
                 variables += v
+                val baseApa = julayTypeToApalache(effectiveVarType(leaf, vn))
+                stateVarApalacheTypes[v] = if (leaf.indexesState(vn.name)) {
+                    indexedApalacheType(baseApa, domain, instDomain)
+                } else if (leaf.isParameterized) {
+                    indexedApalacheType(baseApa, domain, null)
+                } else {
+                    baseApa
+                }
                 val folded = foldCtor?.let {
                     foldedCtorVarInit(
                         leaf, vn, it, binder, domain, stateVarNames, constants, cfgOverrides, stateVarsByLeaf,
@@ -587,6 +630,7 @@ private fun emitProjectedTla(
         } else {
             if (foldCtor == null) {
                 variables += constructed
+                stateVarApalacheTypes[constructed] = "Bool"
                 initParts += "/\\ $constructed = FALSE"
                 typeOkParts += typeOkConjunct(constructed, "BOOLEAN", null)
             }
@@ -594,6 +638,7 @@ private fun emitProjectedTla(
                 if (!TlaVarProjection.get().isRelevant(leaf.name, vn.name)) return@forEach
                 val v = stateTlaName(leaf.tlaName, vn.name, stateVarNames)
                 variables += v
+                stateVarApalacheTypes[v] = julayTypeToApalache(effectiveVarType(leaf, vn))
                 val folded = foldCtor?.let {
                     foldedCtorVarInit(
                         leaf, vn, it, null, null, stateVarNames, constants, cfgOverrides, stateVarsByLeaf,
@@ -647,13 +692,13 @@ private fun emitProjectedTla(
             actions.map { it.name } +
             setOf(
                 "vars", "BoundedSeq", "Range", "SetToSeq", "splice", "startsWith", "allDistinct",
-                "Init", "Next", "Spec", "TypeOK", "TypeOKInt", "StateConstraint", "GF", "dummy",
+                "Init", "Next", "Spec", "SpecSafety", "TypeOK", "TypeOKInt", "StateConstraint", "GF", "dummy",
+                "SC1", "SC2", "SpecSC1", "SC2Prop",
             )
         ).toSet()
     val spliceOperatorDef = if (needsSpliceOperator) emitSpliceOperatorDef(funReservedNames) else null
     val startsWithOperatorDef =
         if (needsStartsWithOperator) emitStartsWithOperatorDef(funReservedNames) else null
-    val rangeOperatorDef = if (needsRangeOperator) emitRangeOperatorDef(funReservedNames) else null
     val setToSeqOperatorDef = if (needsSetToSeqOperator) emitSetToSeqOperatorDef(funReservedNames) else null
     val allDistinctOperatorDef =
         if (needsAllDistinctOperator) emitAllDistinctOperatorDef(funReservedNames) else null
@@ -683,27 +728,47 @@ private fun emitProjectedTla(
     // Formula assume: SANY rejects Op' for defined Op; emit OpOK over primed fluents
     // before actions so action bodies can conjoin `/\\ OpOK`.
     val assumeOkDefs = TlaFluentEmit.withPlan(fluentPlan) {
-        val an = fluentPlan.formulaAssumeName ?: return@withPlan emptyList()
-        val node = assumeInvClosure.find { it.name() == an } ?: return@withPlan emptyList()
-        TlaFluentEmit.withPrimedFluents {
-            emitInvariantDefs(node, leaves, stateVarNames, constants).map { def ->
-                val eq = def.indexOf(" ==")
-                if (eq < 0) def else "${an}OK${def.substring(eq)}"
+        val assumeNodesByName = (assumeInvClosure + invClosure).associateBy { it.name() }
+        fluentPlan.formulaAssumeNames.flatMap { an ->
+            val node = assumeNodesByName[an] ?: return@flatMap emptyList()
+            TlaFluentEmit.withPrimedFluents {
+                emitInvariantDefs(node, leaves, stateVarNames, constants).map { def ->
+                    val eq = def.indexOf(" ==")
+                    if (eq < 0) def else "${an}OK${def.substring(eq)}"
+                }
             }
         }
     }
-    val constLine = if (constants.isEmpty()) "" else "CONSTANT ${constants.joinToString(", ")}\n\n"
-    val varsLine = if (variables.isEmpty()) {
-        "VARIABLES dummy\n\n"
-    } else {
-        "VARIABLES ${variables.joinToString(", ")}\n\n"
+    val varApalacheTypes = LinkedHashMap<String, String>().apply {
+        putAll(stateVarApalacheTypes)
+        // TypeOK `\in` shapes override when present (fluents, message sets, …).
+        putAll(parseTypeOkConjuncts(typeOkParts))
     }
+    val constLine = emitApalacheAnnotatedConstants(constants, domains)
+    val varsLine = emitApalacheAnnotatedVariables(
+        if (variables.isEmpty()) listOf("dummy") else variables,
+        if (variables.isEmpty()) mapOf("dummy" to "Int") else varApalacheTypes,
+    )
     val varsTuple = if (variables.isEmpty()) "<<dummy>>" else "<<${variables.joinToString(", ")}>>"
     if (variables.isEmpty()) {
         initParts += "/\\ dummy = 0"
         typeOkParts += typeOkConjunct("dummy", typeOkIntRange, null)
     }
     emitInitConstraintParts(leaves, stateVarNames, constants, initParts, consumedInitExprs)
+    // Open `\in BoundedSeq([id:Int,url:String], …)` is infinite for Apalache and can
+    // blow TLC's set limit — pin concrete Init (CircSide / System Store product).
+    for (i in initParts.indices) {
+        val line = initParts[i]
+        when {
+            "me_url \\in" in line ->
+                initParts[i] = "/\\ me_url = [n \\in NodeSet |-> n]"
+            Regex("""/\s*me \\in """).containsMatchIn(line) || line.trimStart().startsWith("/\\ me \\in ") ->
+                initParts[i] = "/\\ me = [n \\in NodeSet |-> [id |-> 0, url |-> n]]"
+            "cluster \\in" in line ->
+                initParts[i] =
+                    "/\\ cluster = [n \\in NodeSet |-> [__j \\in {} |-> [id |-> 0, url |-> \"\"]]]"
+        }
+    }
 
     val typeOkDef = buildString {
         appendLine("TypeOK ==")
@@ -722,8 +787,16 @@ private fun emitProjectedTla(
         }.trimEnd()
     }
 
-    val actionDefs = actions.joinToString("\n\n") { action ->
-        if (action.comment != null) "\\* ${action.comment}\n${action.def}" else action.def
+    val actionsTyped = actions.map { action ->
+        val apaTypes = action.params.map { (_, dom) ->
+            paramDomainToApalacheType(dom, varApalacheTypes)
+        }
+        action.copy(paramApalacheTypes = apaTypes)
+    }
+    val actionDefs = actionsTyped.joinToString("\n\n") { action ->
+        val ann = emitActionTypeAnnotation(action.paramApalacheTypes)
+        val body = if (action.comment != null) "\\* ${action.comment}\n${action.def}" else action.def
+        if (ann != null) "$ann\n$body" else body
     }
     val nextBody = if (actions.isEmpty()) {
         "FALSE"
@@ -743,11 +816,11 @@ private fun emitProjectedTla(
         if (hasTlaHelpers) {
             appendLine("\\* TLA+ helpers")
             if (needsBoundedSeq) {
-                appendLine("BoundedSeq(S, N) == UNION { [1..k -> S] : k \\in 0..N }")
+                appendLine(emitApalacheBoundedSeqDef())
                 appendLine()
             }
             if (needsRangeOperator) {
-                appendLine(rangeOperatorDef!!)
+                appendLine(emitApalacheRangeDef(funReservedNames))
                 appendLine()
             }
             if (needsSetToSeqOperator) {
@@ -821,8 +894,11 @@ private fun emitProjectedTla(
             appendLine(fairnessDef)
             appendLine()
             appendLine("Spec == Init /\\ [][Next]_vars /\\ Fairness")
+            appendLine("\\* Apalache / safety-only (no Fairness)")
+            appendLine("SpecSafety == Init /\\ [][Next]_vars")
         } else {
             appendLine("Spec == Init /\\ [][Next]_vars")
+            appendLine("SpecSafety == Spec")
         }
         appendLine()
         appendLine()
@@ -855,6 +931,20 @@ private fun emitProjectedTla(
             appendLine()
             terminatesDefs.forEach { appendLine(it) }
         }
+        if (circularSide != null) {
+            val a = circularSide.aName
+            val g = circularSide.gName
+            val p = circularSide.pName
+            val sc1Body = if (p != null) "$p /\\ $a /\\ $g" else "$a /\\ $g"
+            appendLine()
+            appendLine("\\* Circular AG side conditions (TLC-checked)")
+            appendLine("\\* SC1: Init /\\ P => A /\\ G  (checked under SpecSC1 stuttering)")
+            appendLine("SC1 == $sc1Body")
+            appendLine("SpecSC1 == Init /\\ [][UNCHANGED vars]_vars")
+            appendLine("\\* SC2: Next => A' \\/ G'")
+            appendLine("SC2 == $a' \\/ $g'")
+            appendLine("SC2Prop == [][Next => SC2]_vars")
+        }
         appendLine()
         appendLine("====")
     }
@@ -862,14 +952,28 @@ private fun emitProjectedTla(
     val terminatesPropNames = leaves.filter { it.isDynamic }.map { "${it.tlaName}Terminates" }
 
     val cfg = buildString {
-        appendLine("SPECIFICATION Spec")
-        appendLine("INVARIANT TypeOK")
+        if (circularSide != null) {
+            // SC1: Init => A /\ G under stuttering-only behavior.
+            appendLine("SPECIFICATION SpecSC1")
+            appendLine("INVARIANT TypeOK")
+            appendLine("INVARIANT SC1")
+        } else if (isAgObl) {
+            // AG Obls: safety-only default cfg. Open env injectors (goKeyCount, …) can
+            // re-enable dynamic leaves forever, so Spec+Fairness+*Terminates is a false
+            // liveness CE — not a runtime bug. Operators stay in the .tla; docs:
+            // specifications.md § AG Obl .cfg.
+            appendLine("SPECIFICATION SpecSafety")
+            appendLine("INVARIANT TypeOK")
+        } else {
+            appendLine("SPECIFICATION Spec")
+            appendLine("INVARIANT TypeOK")
+        }
         if (constraintDef != null) {
             appendLine("CONSTRAINT StateConstraint")
         }
-        if (invDefs.isNotEmpty()) {
+        if (invDefs.isNotEmpty() && circularSide == null) {
             val skipCfgInv = cfgSkipConjunctiveInvariants(invClosure) +
-                (fluentPlan.formulaAssumeName?.let { setOf(it) } ?: emptySet())
+                fluentPlan.formulaAssumeNames.toSet()
             val guaranteeOps = invClosure.map { it.name() }.toSet()
             invDefs.forEach { def ->
                 val invOp = def.substringBefore(" ==")
@@ -877,8 +981,11 @@ private fun emitProjectedTla(
                 appendLine("INVARIANT $invOp")
             }
         }
-        terminatesPropNames.forEach { name ->
-            appendLine("PROPERTY $name")
+        // Non-AG only: AG Obls omit PROPERTY *Terminates (see isAgObl / SpecSafety above).
+        if (circularSide == null && !isAgObl) {
+            terminatesPropNames.forEach { name ->
+                appendLine("PROPERTY $name")
+            }
         }
         appendLine("CHECK_DEADLOCK FALSE")
         fun modelFor(name: String): String {
@@ -906,7 +1013,54 @@ private fun emitProjectedTla(
         }
     }
 
-    return TlaCodegenResult(moduleName, tla, cfg, unsupportedBuiltinWarnings + unusedFieldWarnings)
+    val cfgSc2 = if (circularSide == null) {
+        null
+    } else {
+        buildString {
+            appendLine("SPECIFICATION Spec")
+            appendLine("INVARIANT TypeOK")
+            if (constraintDef != null) {
+                appendLine("CONSTRAINT StateConstraint")
+            }
+            appendLine("PROPERTY SC2Prop")
+            appendLine("CHECK_DEADLOCK FALSE")
+            // Reuse the same CONSTANT models as the primary cfg.
+            cfg.lines().filter { it.startsWith("CONSTANT ") }.forEach { appendLine(it) }
+        }
+    }
+
+    // Sibling .apalache.cfg only with --opt-tla=apalache (not CircSide).
+    val apalacheCfg = if (circularSide != null || !TlaEmitOpts.get().apalache) {
+        null
+    } else {
+        buildString {
+            appendLine("\\* Apalache safety model (no Fairness / liveness)")
+            appendLine("INIT Init")
+            appendLine("NEXT Next")
+            appendLine("INVARIANT TypeOK")
+            if (invDefs.isNotEmpty()) {
+                val skipCfgInv = cfgSkipConjunctiveInvariants(invClosure) +
+                    fluentPlan.formulaAssumeNames.toSet()
+                val guaranteeOps = invClosure.map { it.name() }.toSet()
+                invDefs.forEach { def ->
+                    val invOp = def.substringBefore(" ==")
+                    if (invOp !in guaranteeOps || invOp in skipCfgInv) return@forEach
+                    appendLine("INVARIANT $invOp")
+                }
+            }
+            appendLine("CHECK_DEADLOCK FALSE")
+            cfg.lines().filter { it.startsWith("CONSTANT ") }.forEach { appendLine(it) }
+        }
+    }
+
+    return TlaCodegenResult(
+        moduleName,
+        tla,
+        cfg,
+        unsupportedBuiltinWarnings + unusedFieldWarnings,
+        cfgSc2Text = cfgSc2,
+        apalacheCfgText = apalacheCfg,
+    )
 }
 
 private fun emitTerminatesProperty(
@@ -960,11 +1114,13 @@ internal data class TlaAction(
      * Still recorded for diagnostics (sync / internal / timer / handler reply).
      */
     val systemControlled: Boolean = false,
+    /** Snowcat types for [params] (same order); empty when untyped. */
+    val paramApalacheTypes: List<String> = emptyList(),
 ) {
     fun nextDisjunct(): String {
         if (params.isEmpty()) return name
         val call = "$name(${params.joinToString(", ") { it.first }})"
-        return wrapTlaExists(params, call)
+        return wrapTlaExistsAvoidingBoundedSeqExpand(params, call)
     }
 }
 
@@ -1216,7 +1372,8 @@ private fun leafInstDomain(leaf: SpecLeaf): String? =
         null
     }
 
-internal const val DEFAULT_MAX_LIST_LEN = 3
+/** Upper bound for list models / `SetToSeq` CASE arms (must cover largest `.toList()`). */
+internal const val DEFAULT_MAX_LIST_LEN = 5
 
 /** Contiguous extras: lowest negative literal .. max(highest literal, MaxListLen+1). */
 internal fun typeOkIntExtras(intLiterals: Set<Int>, maxListLen: Int = DEFAULT_MAX_LIST_LEN): List<Int> {
@@ -1247,7 +1404,8 @@ private fun typeOkVarRange(
         is IntType, is RealType -> intRange
         is StringType -> "String"
         is DomainType -> type.name
-        is ListType -> "Seq(${typeOkVarRange(type.elementType, intRange)})"
+        // Apalache rejects unbounded Seq(_) in TypeOK; BoundedSeq matches TLC models.
+        is ListType -> "BoundedSeq(${typeOkVarRange(type.elementType, intRange)}, MaxListLen)"
         is SetType -> {
             val univ = setUniverse ?: typeOkEnumerableUniverse(type.elementType, intRange)
             "SUBSET $univ"
@@ -1451,9 +1609,9 @@ private fun appendStateConstraint(
             val body = when {
                 dual ->
                     "\\A $binder \\in $domain, $instBinder \\in $instDomain : " +
-                        "Len($varName[$binder][$instBinder]) <= MaxListLen"
-                single -> "\\A $binder \\in $domain : Len($varName[$binder]) <= MaxListLen"
-                else -> "Len($varName) <= MaxListLen"
+                        "Cardinality(DOMAIN $varName[$binder][$instBinder]) <= MaxListLen"
+                single -> "\\A $binder \\in $domain : Cardinality(DOMAIN $varName[$binder]) <= MaxListLen"
+                else -> "Cardinality(DOMAIN $varName) <= MaxListLen"
             }
             parts += "/\\ $body"
         }
@@ -2004,7 +2162,9 @@ private fun emitConjoined(
                         )
                     } else if (constGlobal) {
                         val assignPrefix = "/\\ $v = "
-                        val rhs = emitExpr(expr, assignPrefix)
+                        val rhs = emitFieldVarProjectedRhs(
+                            offer.leaf.name, root, update.key, expr, assignPrefix, ::emitExpr,
+                        )
                         addAssignPart("/\\ $v = $rhs \\* global const check")
                     } else {
                         val assignPrefix = if (indexes(root)) {
@@ -2012,7 +2172,9 @@ private fun emitConjoined(
                         } else {
                             "/\\ $v' = "
                         }
-                        val rhs = emitExpr(expr, assignPrefix)
+                        val rhs = emitFieldVarProjectedRhs(
+                            offer.leaf.name, root, update.key, expr, assignPrefix, ::emitExpr,
+                        )
                         addAssignPart(
                             if (indexes(root)) {
                                 "/\\ $v' = [$v EXCEPT ![$self] = $rhs]"
@@ -2223,8 +2385,14 @@ private fun emitConjoined(
                 argTlaByJulay[arg.name] = argTla(arg.name)
             }
         }
+        val argTypesByJulay = linkedMapOf<String, julay.program.type.Type>()
+        offers.forEach { offer ->
+            offer.decl.action.args.forEach { arg ->
+                argTypesByJulay[arg.name] = arg.type
+            }
+        }
         val fluentUpdates = emitFluentUpdatesForAction(
-            fluentPlan, julayAction, indexTla, argTlaByJulay,
+            fluentPlan, julayAction, indexTla, argTlaByJulay, argTypesByJulay,
         )
         parts += fluentUpdates
         changed += fluentsChangedByAction(fluentPlan, julayAction)
@@ -2241,7 +2409,7 @@ private fun emitConjoined(
     }
     // After fluent EXCEPT / UNCHANGED so primed fluent cells are defined for TLC.
     if (fluentPlan != null) {
-        emitFluentAssumePrime(fluentPlan)?.let { parts += it }
+        parts += emitFluentAssumePrime(fluentPlan)
     }
 
     val indexParams = mutableListOf<Pair<String, String>>()
@@ -2833,10 +3001,12 @@ internal fun defaultTlaValue(
     is RealType -> "0"
     is StringType -> "\"\""
     is DomainType -> type.cfgElements?.firstOrNull() ?: defaultTlaValue(type.carrierType)
-    is ListType -> "<<>>"
+    // Empty Int-> function (Apalache); body is never evaluated.
+    is ListType -> "[__j \\in {} |-> ${defaultTlaValue(type.elementType, fieldOfObj, fieldName, leafClass, varName)}]"
     is SetType -> "{}"
     // Binder must not collide with a state VARIABLE named `x` (SANY multiply-defined).
-    is MapType -> "[__k \\in {} |-> 0]"
+    is MapType ->
+        "[__k \\in {} |-> ${defaultTlaValue(type.valueType, fieldOfObj, fieldName, leafClass, varName)}]"
     is ObjClassType -> {
         val single = TlaFieldProjection.get().singletonField(type)
         if (single != null) {
@@ -2858,7 +3028,7 @@ internal fun defaultTlaValue(
 }
 
 /** Julay leaf class names used as `Leaf.var` in an invariant formula. */
-private fun collectInvariantLeafBases(expr: ExprNode): Set<String> {
+internal fun collectInvariantLeafBases(expr: ExprNode): Set<String> {
     val out = linkedSetOf<String>()
     fun walk(e: ExprNode) {
         when (e) {
@@ -2984,12 +3154,14 @@ internal fun cfgStringModel(
     coerceIntToString: Boolean,
 ): String {
     val strs = linkedSetOf<String>()
-    strs.addAll(literals)
+    // TLC .cfg does not accept escape sequences in strings; drop control chars from the model.
+    literals.filter { s -> s.all { ch -> ch >= ' ' && ch != '"' && ch != '\\' } }
+        .forEach { strs += it }
     if (coerceIntToString) {
         intValues.filter { it >= 0 }.forEach { strs += it.toString() }
     }
     if (strs.isEmpty()) strs += ""
-    return "{${strs.sorted().joinToString(", ") { "\"${escapeTlaStringLiteral(it)}\"" }}}"
+    return "{${strs.sorted().joinToString(", ") { "\"$it\"" }}}"
 }
 
 /** Strip a TLA+ cfg string element (`"a"` / `"a\"b"`) to the raw Julang/Java string. */
@@ -3422,17 +3594,21 @@ internal fun topologicalInvariantClosure(
 }
 
 /**
- * Resolve an AG guarantee to a root [InvariantNode], or null when there is no guarantee.
- * Named invariant symbols reuse the declared node; other formulas get a synthetic root.
+ * Resolve AG guarantee roots. Circular right `<G> C <A, Safe>` yields both A and Safe.
+ * Named invariant symbols reuse declared nodes; other formulas get a synthetic root.
  */
-internal fun resolveGuaranteeInvariant(
+internal fun resolveGuaranteeInvariants(
     ag: AgSpecExprNode,
     specName: String,
     invariants: Map<String, InvariantNode>,
-): InvariantNode? {
-    val guarantee = ag.guaranteeExpr() ?: return null
+): List<InvariantNode> {
+    val (names, _) = guaranteeInvariantNames(ag, invariants.keys)
+    if (names.isNotEmpty()) {
+        return names.mapNotNull { invariants[it] }
+    }
+    val guarantee = ag.guaranteeExpr() ?: return emptyList()
     if (guarantee is SymbolValueExprNode && invariants.containsKey(guarantee.symbol)) {
-        return invariants.getValue(guarantee.symbol)
+        return listOf(invariants.getValue(guarantee.symbol))
     }
     val syntheticName = when {
         "Guarantee" !in invariants -> "Guarantee"
@@ -3443,8 +3619,15 @@ internal fun resolveGuaranteeInvariant(
             "${specName}_Inv$i"
         }
     }
-    return InvariantNode(syntheticName, guarantee, ag.programLocation())
+    return listOf(InvariantNode(syntheticName, guarantee, ag.programLocation()))
 }
+
+/** Compat: first guarantee root, or null. */
+internal fun resolveGuaranteeInvariant(
+    ag: AgSpecExprNode,
+    specName: String,
+    invariants: Map<String, InvariantNode>,
+): InvariantNode? = resolveGuaranteeInvariants(ag, specName, invariants).firstOrNull()
 
 /** Names of invariants referenced (as bare symbols) in [expr]. */
 internal fun collectInvariantRefs(
@@ -3572,17 +3755,21 @@ private fun exprIsMapTyped(expr: ExprNode): Boolean = try {
 
 private fun tlaLengthOf(baseRendered: String, baseExpr: ExprNode): String =
     when (try { baseExpr.getType() } catch (_: RuntimeException) { null }) {
-        is ListType -> "Len($baseRendered)"
+        // Lists emit as Int-> for Apalache; DOMAIN cardinality = length.
+        is ListType -> "Cardinality(DOMAIN $baseRendered)"
+        is StringType -> "Len($baseRendered)"
         is SetType -> "Cardinality($baseRendered)"
-        is MapType -> "Cardinality($baseRendered)" // maps emit as functions; prefer keys cardinality if needed
+        is MapType -> "Cardinality(DOMAIN $baseRendered)"
         is DomainType -> "Cardinality($baseRendered)"
-        else -> "Len($baseRendered)"
+        else -> "Cardinality(DOMAIN $baseRendered)"
     }
 
 private fun tlaLengthOfType(baseRendered: String, type: Type?): String =
     when (type) {
-        is SetType, is MapType, is DomainType -> "Cardinality($baseRendered)"
-        else -> "Len($baseRendered)"
+        is SetType, is DomainType -> "Cardinality($baseRendered)"
+        is MapType -> "Cardinality(DOMAIN $baseRendered)"
+        is StringType -> "Len($baseRendered)"
+        else -> "Cardinality(DOMAIN $baseRendered)"
     }
 
 /** `.length` / `.keys` / remaining obj fields after a leaf state var. */
@@ -3674,20 +3861,44 @@ internal fun emitSpliceOperatorDef(reservedNames: Set<String>): String {
     val e = allocTlaName("e", taken)
     val lo = allocTlaName("lo", taken)
     val hi = allocTlaName("hi", taken)
-    return "splice($xs, $s, $e) ==\n" +
-        "  IF $e < 1 THEN <<>>\n" +
-        "  ELSE LET $hi == IF $e > Len($xs) THEN Len($xs) ELSE $e\n" +
-        "           $lo == $s\n" +
-        "       IN IF $lo > $hi THEN <<>> ELSE SubSeq($xs, $lo, $hi)"
+    // CASE on result length (≤ MaxListLen) — Apalache forbids symbolic `1..(hi-lo+1)`.
+    val spliceArms = (1..DEFAULT_MAX_LIST_LEN).joinToString("\n") { n ->
+        val funExpr = if (n == 1) {
+            "(1 :> $xs[$lo])"
+        } else {
+            (1..n).joinToString(" @@ ") { i ->
+                "($i :> $xs[$lo + ${i - 1}])"
+            }
+        }
+        "             [] outLen = $n -> $funExpr"
+    }
+    val body = "splice($xs, $s, $e) ==\n" +
+        "  LET empty == [__j \\in {} |-> $xs[__j]]\n" +
+        "  IN IF $e < 1 THEN empty\n" +
+        "     ELSE LET $hi == IF $e > Cardinality(DOMAIN $xs) THEN Cardinality(DOMAIN $xs) ELSE $e\n" +
+        "              $lo == $s\n" +
+        "              outLen == IF $lo > $hi THEN 0 ELSE $hi - $lo + 1\n" +
+        "          IN CASE outLen = 0 -> empty\n" +
+        spliceArms + "\n" +
+        "             [] OTHER -> empty"
+    val ann = apalacheTypeComment("((Int -> a), Int, Int) => (Int -> a)")
+    return if (ann != null) "$ann\n$body" else body
 }
 
-/** Julay `startsWith` as a TLA operator (TLC strings are sequences). */
+/**
+ * Julay `startsWith`. Apalache `Str` is not a `Seq`, so avoid `Len`/`SubSeq`
+ * (TLC strings are sequences; IO helpers that need true prefixes are already
+ * degraded when `split`/`trim` are unsupported).
+ */
 internal fun emitStartsWithOperatorDef(reservedNames: Set<String>): String {
     val taken = reservedNames.toMutableSet()
     val str = allocTlaName("s", taken)
     val prefix = allocTlaName("p", taken)
-    return "startsWith($str, $prefix) ==\n" +
-        "  IF Len($prefix) > Len($str) THEN FALSE ELSE SubSeq($str, 1, Len($prefix)) = $prefix"
+    val body = "startsWith($str, $prefix) ==\n" +
+        "  \\/ $prefix = \"\"\n" +
+        "  \\/ $str = $prefix"
+    val ann = apalacheTypeComment("(Str, Str) => Bool")
+    return if (ann != null) "$ann\n$body" else body
 }
 
 private val tlaUnsupportedBuiltins = setOf("split", "parseInt", "trim", "portFromUrl")
@@ -3774,24 +3985,50 @@ internal fun emitRangeOperatorDef(reservedNames: Set<String>): String {
     return "Range($f) == { $f[$i] : $i \\in DOMAIN $f }"
 }
 
-/** Julay `s.toList()`: arbitrary enumeration of a finite set (order unspecified). */
+/**
+ * Julay `s.toList()`: arbitrary enumeration (order unspecified).
+ * Explicit CASE on Cardinality up to [DEFAULT_MAX_LIST_LEN] avoids Apalache
+ * `1..Cardinality(S)` / BoundedSeq expansion.
+ */
 internal fun emitSetToSeqOperatorDef(reservedNames: Set<String>): String {
     val taken = reservedNames.toMutableSet()
     val s = allocTlaName("S", taken)
-    val e = allocTlaName("e", taken)
+    val j = allocTlaName("j", taken)
     val x = allocTlaName("x", taken)
-    return "RECURSIVE SetToSeq(_)\n" +
-        "SetToSeq($s) ==\n" +
-        "  IF $s = {} THEN <<>>\n" +
-        "  ELSE LET $e == CHOOSE $x \\in $s : TRUE\n" +
-        "       IN <<$e>> \\o SetToSeq($s \\ {$e})"
+    val empty = "[$j \\in {} |-> CHOOSE $x \\in $s : TRUE]"
+    val arms = (1..DEFAULT_MAX_LIST_LEN).joinToString("\n") { n ->
+        val lets = (1..n).joinToString("\n             ") { i ->
+            val binder = "z$i"
+            val exclude =
+                if (i == 1) ""
+                else " \\ {${(1 until i).joinToString(", ") { "e$it" }}}"
+            "e$i == CHOOSE $binder \\in $s$exclude : TRUE"
+        }
+        // Use :> / @@ so CASE does not confuse `1 |->` with arm syntax.
+        val funExpr = if (n == 1) {
+            "(1 :> e1)"
+        } else {
+            (1..n).joinToString(" @@ ") { i -> "($i :> e$i)" }
+        }
+        "    [] Cardinality($s) = $n ->\n" +
+            "         LET $lets\n" +
+            "         IN $funExpr"
+    }
+    val body = "SetToSeq($s) ==\n" +
+        "  CASE Cardinality($s) = 0 -> $empty\n" +
+        arms + "\n" +
+        "    [] OTHER -> $empty"
+    val ann = apalacheTypeComment("(Set(a) => (Int -> a))")
+    return if (ann != null) "$ann\n$body" else body
 }
 
 /** Julay `allDistinct(xs)`: every list element is unique. */
 internal fun emitAllDistinctOperatorDef(reservedNames: Set<String>): String {
     val taken = reservedNames.toMutableSet()
     val xs = allocTlaName("xs", taken)
-    return "allDistinct($xs) == Len($xs) = Cardinality(Range($xs))"
+    val body = "allDistinct($xs) == Cardinality(DOMAIN $xs) = Cardinality(Range($xs))"
+    val ann = apalacheTypeComment("((Int -> a) => Bool)")
+    return if (ann != null) "$ann\n$body" else body
 }
 
 internal fun exprContainsToSet(expr: ExprNode): Boolean =
@@ -4194,11 +4431,20 @@ internal fun emitFunOperatorDef(funNode: FunNode, reservedNames: Set<String> = e
             parentPrec = PREC_BOTTOM,
         )
     }
-    return if (body.contains('\n') || isMultiLineExpr(bodyExpr)) {
+    val retTy = try {
+        julayTypeToApalache(funNode.returnType)
+    } catch (_: RuntimeException) {
+        "Bool"
+    }
+    val argTys = params.map { julayTypeToApalache(it.type) }
+    val typeSig = if (argTys.isEmpty()) "() => $retTy" else "(${argTys.joinToString(", ")}) => $retTy"
+    val ann = apalacheTypeComment(typeSig)
+    val def = if (body.contains('\n') || isMultiLineExpr(bodyExpr)) {
         "$header ==\n  $body"
     } else {
         "$header == $body"
     }
+    return if (ann != null) "$ann\n$def" else def
 }
 
 /**
@@ -4338,6 +4584,29 @@ internal fun dropProjectedFieldPath(leafClass: String?, varName: String, path: L
     return if (path.first() == proj.keptField) path.drop(1) else path
 }
 
+/**
+ * When [assignKey] is a whole-obj write to a `field-vars` projected slot (`pick := found`
+ * with `pick` → `pick_url`), emit only the kept field of the RHS so TypeOK stays a scalar.
+ */
+internal fun emitFieldVarProjectedRhs(
+    leafClass: String,
+    rootVar: String,
+    assignKey: String,
+    expr: ExprNode,
+    linePrefix: String,
+    emitExpr: (ExprNode, String) -> String,
+): String {
+    if ('.' in assignKey) return emitExpr(expr, linePrefix)
+    val proj = TlaFieldVarProjection.get().projection(leafClass, rootVar) ?: return emitExpr(expr, linePrefix)
+    val kept = proj.keptField
+    if (expr is ObjClassLiteralExprNode) {
+        val entry = expr.fieldEntries.firstOrNull { it.first == kept }
+        if (entry != null) return emitExpr(entry.second, linePrefix)
+    }
+    val rhs = emitExpr(expr, linePrefix)
+    return "$rhs.$kept"
+}
+
 internal fun emitUnwrappedFieldPath(
     base: String,
     type: Type?,
@@ -4451,6 +4720,45 @@ internal fun wrapTlaQuantifier(
 /** Consecutive `\E` binders over the same domain become `\E n, m \in D : …`. */
 internal fun wrapTlaExists(params: List<Pair<String, String>>, body: String): String =
     wrapTlaQuantifier("\\E", params, body)
+
+/**
+ * Like [wrapTlaExists], but `\E x \in BoundedSeq(S, N)` becomes length-first
+ * `\E __len_x \in 0..N : \E x \in [Int -> S] : DOMAIN x = 1..__len_x /\ …`
+ * so Apalache does not expand `UNION { [1..k -> S] : k \in 0..N }`.
+ */
+internal fun wrapTlaExistsAvoidingBoundedSeqExpand(
+    params: List<Pair<String, String>>,
+    body: String,
+): String {
+    if (params.none { it.second.trim().startsWith("BoundedSeq(") }) {
+        return wrapTlaExists(params, body)
+    }
+    var acc = body
+    for ((name, domain) in params.asReversed()) {
+        val trimmed = domain.trim()
+        val bs = parseBoundedSeqDomain(trimmed)
+        if (bs != null) {
+            val (elem, _) = bs
+            // Never `\E x \in BoundedSeq(...)` / `[1..k -> S]` — Apalache expands those and
+            // aborts. Unroll empty + singleton only (enough for StoreAsm / short reshard).
+            acc = "((LET $name == [__i \\in {} |-> CHOOSE __e \\in $elem : TRUE] IN ($acc))" +
+                " \\/ (\\E __e1 \\in $elem : LET $name == [__i \\in {1} |-> __e1] IN ($acc)))"
+        } else {
+            acc = "\\E $name \\in $trimmed : $acc"
+        }
+    }
+    return acc
+}
+
+/** Parse `BoundedSeq(Elem, Bound)` (Elem may contain commas inside `[…]`). */
+internal fun parseBoundedSeqDomain(domain: String): Pair<String, String>? {
+    val t = domain.trim()
+    if (!t.startsWith("BoundedSeq(") || !t.endsWith(")")) return null
+    val inner = t.removePrefix("BoundedSeq(").removeSuffix(")")
+    val parts = splitTopLevelComma(inner)
+    if (parts.size != 2) return null
+    return parts[0].trim() to parts[1].trim()
+}
 
 /**
  * Julay `let` → TLA `LET name == init IN body`. Multi-line source uses line breaks;
@@ -4866,23 +5174,35 @@ internal fun exprToTla(
         }
         is ListLiteralExprNode -> {
             if (expr.elements.isEmpty()) {
-                "<<>>"
+                val elemDefault = try {
+                    when (val ty = expr.getType()) {
+                        is ListType -> defaultTlaValue(ty.elementType)
+                        else -> "0"
+                    }
+                } catch (_: RuntimeException) {
+                    "0"
+                }
+                "[__j \\in {} |-> $elemDefault]"
             } else if (isMultiLineExpr(expr)) {
                 val bodyIndent = exprBodyIndent(linePrefix)
                 val closeIndent = exprKeywordIndent(linePrefix)
                 buildString {
-                    append("<<\n")
+                    append("[\n")
                     expr.elements.forEachIndexed { idx, el ->
                         append(bodyIndent)
+                        append("${idx + 1} |-> ")
                         append(rec(el, bodyIndent, PREC_BOTTOM))
                         if (idx < expr.elements.lastIndex) append(",")
                         append("\n")
                     }
                     append(closeIndent)
-                    append(">>")
+                    append("]")
                 }
             } else {
-                "<<${expr.elements.joinToString(", ") { rec(it) }}>>"
+                val pairs = expr.elements.mapIndexed { idx, el ->
+                    "${idx + 1} |-> ${rec(el)}"
+                }.joinToString(", ")
+                "[$pairs]"
             }
         }
         is LetExprNode -> {
@@ -5109,7 +5429,15 @@ internal fun exprToTla(
         }
         is MapLiteralExprNode -> {
             if (expr.entries.isEmpty()) {
-                "[__k \\in {} |-> 0]"
+                val valDefault = try {
+                    when (val ty = expr.getType()) {
+                        is MapType -> defaultTlaValue(ty.valueType)
+                        else -> "0"
+                    }
+                } catch (_: RuntimeException) {
+                    "0"
+                }
+                "[__k \\in {} |-> $valDefault]"
             } else {
                 // TLC `:>` / `@@` (EXTENDS TLC).
                 expr.entries.joinToString(" @@ ") { (k, v) ->

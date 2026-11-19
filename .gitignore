@@ -24,3 +24,9 @@ tools/pgo/
 ShardNode
 ShardClient
 input/sharded_kv/bench-out/
+input/sharded_kv/_apalache-out/
+input/sharded_kv/apalache-out/
+input/sharded_kv/*_IndCheck.tla
+input/sharded_kv/tlc-out/
+input/sharded_kv/states/
+*.apalache.cfg

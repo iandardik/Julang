@@ -27,17 +27,21 @@ data class TlaOptConfig(
      * warnings). Default on; disable with `--disable-tla-opt=map-index-put`.
      */
     val mapIndexPutRebuild: Boolean = true,
+    /**
+     * Emit Apalache Snowcat `\* @type:` annotations and a sibling `.apalache.cfg`
+     * (INIT/NEXT safety). Off by default; enable with `--opt-tla=apalache`.
+     */
+    val apalache: Boolean = false,
 ) {
     /**
      * Merge opt-in flags from [optIn] (OR only default-off ids).
      * Default-on flags come solely from this config (`--disable-tla-opt`).
      */
-    fun withOptIn(@Suppress("UNUSED_PARAMETER") optIn: TlaOptConfig): TlaOptConfig =
-        // No OPT_IN_IDS currently; map-index-put is default-on.
-        this
+    fun withOptIn(optIn: TlaOptConfig): TlaOptConfig =
+        copy(apalache = apalache || optIn.apalache)
 
     companion object {
-        /** Default-on named opts enabled. */
+        /** Default-on named opts enabled (Apalache opt-in stays off). */
         val ALL_ON = TlaOptConfig()
         val ALL_OFF = TlaOptConfig(
             unusedFields = false,
@@ -49,6 +53,7 @@ data class TlaOptConfig(
             unusedLets = false,
             fieldVars = false,
             mapIndexPutRebuild = false,
+            apalache = false,
         )
 
         /** Stable CLI / docs IDs for `--disable-tla-opt` (default-on). */
@@ -64,8 +69,8 @@ data class TlaOptConfig(
             "map-index-put",
         )
 
-        /** Stable CLI / docs IDs for `--opt-tla` (default-off). None currently. */
-        val OPT_IN_IDS: Set<String> = emptySet()
+        /** Stable CLI / docs IDs for `--opt-tla` (default-off). */
+        val OPT_IN_IDS: Set<String> = setOf("apalache")
 
         /**
          * @param raw `null` if `--disable-tla-opt` was not passed; `"ALL"` for a bare flag;
@@ -95,6 +100,8 @@ data class TlaOptConfig(
                 unusedLets = "unused-lets" !in disabled,
                 fieldVars = "field-vars" !in disabled,
                 mapIndexPutRebuild = "map-index-put" !in disabled,
+                // Opt-in; --disable-tla-opt never enables it.
+                apalache = false,
             )
         }
 
@@ -107,7 +114,7 @@ data class TlaOptConfig(
         fun fromOptTlaFlag(raw: String?): TlaOptConfig {
             if (raw == null) return TlaOptConfig()
             if (raw == "ALL" || raw.isBlank()) {
-                return if (OPT_IN_IDS.isEmpty()) TlaOptConfig() else TlaOptConfig()
+                return TlaOptConfig(apalache = "apalache" in OPT_IN_IDS)
             }
             val names = raw.split(',')
                 .map { it.trim() }
@@ -119,8 +126,7 @@ data class TlaOptConfig(
                 val valid = (OPT_IN_IDS + legacy).joinToString(", ").ifEmpty { "(none)" }
                 "Unknown TLA+ opt-in id(s): ${unknown.joinToString(", ")}. Valid: $valid"
             }
-            // map-index-put is default-on; legacy --opt-tla=map-index-put is a no-op.
-            return TlaOptConfig()
+            return TlaOptConfig(apalache = "apalache" in names)
         }
 
         fun fromFlags(disableRaw: String?, optRaw: String?): TlaOptConfig =

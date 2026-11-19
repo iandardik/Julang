@@ -283,35 +283,43 @@ private fun typePassSpec(
                 }
             }
 
-            if (formulaAssume != null) {
-                checkInvAgainstSystem(formulaAssume)
-            }
+            val (assumeNames, assumeNameErrors) =
+                formulaAssumeNames(value, invariantNames, systemDeclNames)
+            errors += assumeNameErrors
+            assumeNames.forEach { checkInvAgainstSystem(it) }
 
-            val guarantee = value.guaranteeExpr()
-            if (guarantee != null) {
-                when {
-                    guarantee is SymbolValueExprNode && invariants.containsKey(guarantee.symbol) -> {
-                        checkInvAgainstSystem(guarantee.symbol)
-                    }
-                    else -> {
-                        errors += typePassInvariantFormula(
-                            guarantee,
-                            expandedSystem,
-                            systemPclasses,
-                            registry,
-                            invariants,
-                            checking = mutableSetOf(),
-                            checked = mutableSetOf(),
-                            funEnvByInv,
-                            moduleFunEnv,
-                            funBuiltinEnvByInv,
-                            moduleFunBuiltinEnv,
-                            guarantee.programLocation(),
-                            fluentArities = fluentArities,
-                        )
+            val (guarNames, guarNameErrors) = guaranteeInvariantNames(value, invariantNames)
+            errors += guarNameErrors
+            if (guarNames.isNotEmpty()) {
+                guarNames.forEach { checkInvAgainstSystem(it) }
+            } else {
+                val guarantee = value.guaranteeExpr()
+                if (guarantee != null) {
+                    when {
+                        guarantee is SymbolValueExprNode && invariants.containsKey(guarantee.symbol) -> {
+                            checkInvAgainstSystem(guarantee.symbol)
+                        }
+                        else -> {
+                            errors += typePassInvariantFormula(
+                                guarantee,
+                                expandedSystem,
+                                systemPclasses,
+                                registry,
+                                invariants,
+                                checking = mutableSetOf(),
+                                checked = mutableSetOf(),
+                                funEnvByInv,
+                                moduleFunEnv,
+                                funBuiltinEnvByInv,
+                                moduleFunBuiltinEnv,
+                                guarantee.programLocation(),
+                                fluentArities = fluentArities,
+                            )
+                        }
                     }
                 }
             }
+            errors += circularFluentSlotErrors(value, invariants, fluents)
         }
         else -> {
             errors += withIndexStructureErrors(value)

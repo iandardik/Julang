@@ -1,0 +1,65 @@
+/*
+ * Circular assume–guarantee via comma slots + local inductive Inv:
+ *   Obl1 := I1 |= <true, A> C1 <G>
+ *   Obl2 := I2 |= <G>      C2 <A, Safe>
+ * Compiling both emits CircSide.tla/cfg (SC1) and CircSide_SC2.cfg (SC2).
+ */
+
+static proc C1 {
+    var ready : Boolean
+
+    constructor initially(args : List<String>) {
+        transit: ready := false
+    }
+
+    transition tick() {
+        guard: ~ready
+        transit: ready := true
+    }
+
+    transition reset() {
+        guard: ready
+        transit: ready := false
+    }
+}
+
+static proc C2 {
+    var ok : Boolean
+
+    constructor initially(args : List<String>) {
+        transit: ok := true
+    }
+
+    transition tick() {
+        guard: ok
+        transit: ok := true
+    }
+
+    transition reset() {
+        transit: ok := true
+    }
+}
+
+fluent SeenTick {
+    initially false
+    on tick() := true
+}
+
+fluent SeenReset {
+    initially false
+    on reset() := true
+}
+
+/* A / G must be fluent-only for circular slots. */
+invariant A := ~SeenReset | SeenTick
+invariant G := ~SeenTick | SeenTick
+invariant Safe := C2.ok
+
+/* I1 / I2 are local inductive invs (here equal to contract G / A∧Safe). */
+invariant I1 := G
+invariant I2 := A & Safe
+
+export spec Obl1 := I1 |= <true, A> C1 <G>
+export spec Obl2 := I2 |= <G> C2 <A, Safe>
+
+compile Obl1, Obl2

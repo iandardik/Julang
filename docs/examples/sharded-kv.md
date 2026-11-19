@@ -55,6 +55,14 @@ input/sharded_kv/ShardClient http://127.0.0.1:6001 owners
 
 ## TLA+ sketch
 
-- Shard source is identical in JAR and TLA; only the composition changes. JAR: `ShardNode := Store || ServerStarter || HttpWorkers || SendClaim`. TLA is compositional: `ShardEnvSpec := ShardEnv |= StoreAsm` (workers + unindexed PerfectNet) and `StoreSpec := <StoreAsm> IndexedStore <StoreInvs>` (`StoreAsm` is `~BadMove` over Claimed/BadMove fluents). `Verif*` names avoid decl clashes in `sys.jul`. `Put.put` / `putDone` stay unsynced (environment).
+- Shard source is identical in JAR and TLA; only the composition changes. JAR: `ShardNode := Store || ServerStarter || HttpWorkers || SendClaim`.
+- **Monolithic smoke:** `System := <true> (ShardEnv || IndexedStore) <StoreInvs>` → `System.tla` / `.cfg`.
+- **Compositional AG (sound Rest cut):**
+  - **Circular pair only:** `ShardEnvInv |= <true, StoreIface> ShardEnv <StoreAsm>` × `StoreInv |= <StoreAsm> IndexedStore <StoreIface, StoreInvs>` → `CircSide` SC1/SC2. There is no compiler parallel-AG for Put∥Inbound.
+  - **Rest-internal RG:** `PutInv |= <StoreIface> PutEnv <StoreAsm>`; `InboundInv |= <InboundAsm> InboundEnv <StoreAsm>`. Both halves use **PerfectNet** (including `goMoveBatch`). Open inbound injects are constrained by `AssumeOK(InboundAsm')` (bag shape + `MoveBagPending`/`MoveApplyPending` so two in-flight moves for the same key cannot dual-`Held`). Dropping `goMoveBatch` from the inbound alphabet under-approximates the product and is **unsound**.
+  - **Manual lemma:** PutEnvObl ∧ InboundEnvObl ∧ shared PerfectNet ⇒ ShardEnv ⊢ StoreAsm under StoreIface.
+  - **TLC:** `./input/sharded_kv/scripts/tlc_obls.sh` (20m, `-workers auto`; Store/Inbound Key `{a,b}`; Put/ShardEnv `{a..e}`). Pass = no `Error:` in the window. CircSide SC1 strips `INVARIANT TypeOK` (BoundedSeq of TypeOKInt×String is not TLC-enumerable).
+  - **Local Inv → Apalache:** `LocalInv |= <A> C <G>` in `protocol.jul` (`StoreInv` / `PutInv` / `InboundInv` / `ShardEnvInv`; each `LocalInv := Inv1 & …` with strengthenings). Recompile with `JULAYC_OPTS='--opt-tla=apalache'`, then `./input/sharded_kv/scripts/apalache_obls.sh`. Outer loop: CE that falsifies the AG story → redesign contracts; missing Inv conjuncts only → strengthen Inv.
+  - Sorts trimmed (2 nodes, 5 keys for reshard `/4`, 2 values). `goKeyCount` stays open under Inbound (without it the Obl is vacuous); that makes `KeyCountTerminates` fail under fairness even when `StoreAsm` holds — so AG Obl `.cfg`s use `SPECIFICATION SpecSafety` and omit `PROPERTY *Terminates`. See [AG Obl `.cfg`](../language/specifications.md#ag-obl-cfg-safety-by-default-no-terminates) and [Compiler optimizations — Apalache](../language/compiler-optimizations.md#opt-in---opt-tla-default-off). `sys.jul` compiles System + Put/Inbound/Store/ShardEnv Obls (+ CircSide).
 - Unindexed `PerfectNet := ClaimMsgs || MoveBatchMsgs || KeyCountReqs || KeyCountReplies` (shared bags; four `static spec` leaves). Actions use `also (n : NodeSet)` to sync with the indexed workers.
-- Invariants target `Store[n].store` / `Store[n].owners` on `StoreSpec`. Each dynamic class gets a `Terminates` property under strong fairness.
+- Store invariants target `Store[n].store` / `Store[n].owners`.

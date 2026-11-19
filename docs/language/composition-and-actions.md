@@ -166,6 +166,8 @@ A || B   // TLC: ping eventually fires.  Go: ping may never fire.
 
 Liveness properties proved by TLC (including each dynamic proc's `Terminates` property) hold for the Go program only if no synchronization the property depends on is starved this way. In practice, avoid procs that spin on internal actions while also waiting on a sync.
 
+Assume–guarantee Obls are an extra caveat: their default `.cfg` checks **safety only** (`SpecSafety`, no `PROPERTY *Terminates`), because open environment arms can re-enable work forever. See [Specifications — AG Obl `.cfg`](specifications.md#ag-obl-cfg-safety-by-default-no-terminates).
+
 ## See also
 
 - [Processes](processes.md) — `static proc` vs dynamic

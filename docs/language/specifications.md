@@ -32,7 +32,7 @@ spec StoreSpec := <StoreAsm> IndexedStore <StoreInvs>
 ```
 
 - **`initially`**: Boolean formula over fluent params and non-fluent state/domains. It **may not** mention fluents.
-- **`on Act(…)` / `on Act[n](…)`**: update when that alphabet action fires. Binders are action arg names; `_` ignores. Use `[n]` iff the action is create-indexed in the AG system (mismatch is a compile error).
+- **`on Act(…)` / `on Act[n](…)`**: update when that alphabet action fires. Binders are action arg names; `_` ignores. Use `[n]` iff the action is create-indexed in the AG system (mismatch is a compile error). An `on` action absent from this AG system's alphabet is a no-op (frame) so parallel Obls can share one fluent formula.
 - **Targets (v1):** `true`, `false`, `Fluent(args)`, `~Fluent(args)`.
 - Fluents appear only in invariants / other fluent targets — not in proc bodies.
 - Formula assume (`<StoreAsm> Sys <G>`): fluents become TLA `VARIABLES`; actions update them; a post-state operator `StoreAsmOK` (fluents primed) is conjoined on steps (not a cfg `INVARIANT`). Guarantee `Sys |= StoreAsm` still lists `StoreAsm` as `INVARIANT`.
@@ -53,13 +53,75 @@ spec Plain := Counter                      // no assume, no guarantee  (== <true
 spec WithInv := Counter |= Bound           // no assume; guarantee Bound (== <true> Counter <Bound>)
 spec SafeInc := <Env> Counter <Bound>       // full assume-guarantee
 spec UnderAsm := <StoreAsm> Store <Inv>  // formula assume (named invariant / fluents)
+spec Obl := LocalInv |= <Asm> Sys <G>    // local inductive Inv; contract A/G stay on the AG
 ```
 
 - Left of the system (`<Env>` / `<StoreAsm>`): assumption — `true`, a **system**, or a **named invariant** (formula assume)
 - Middle: system expression (procs, **apis**, **leaf specs**, indexing, `||`)
-- Right / `|=` side: guarantee — a named invariant, an inline Boolean formula, or `true` (no guarantee)
+- Right / trailing `|=` on a bare system: guarantee — a named invariant, an inline Boolean formula, or `true` (no guarantee)
+- **`LocalInv |= <A> C <G>`**: [Local inductive invariant](#local-inductive-invariant-localinv--a-c-g) — `LocalInv` is checked; A/G are the AG contract names
 
 Invariant assume/guarantee formulas are type-checked against the AG **system** leaves (missing leaf state or wrong indexing is a compile error). Formula assumes do not compose env leaves into the TLC model.
+
+#### AG Obl `.cfg`: safety by default (no `*Terminates`)
+
+An assume–guarantee composition (`<Asm> Sys <G>` / `|=`) is an **obligation** (Obl): TLC proves the guarantee under the assume, typically against an open environment (unbound injectors / stubs). That model is for **safety** (invariants), not worker liveness.
+
+For every AG Obl, `julayc` therefore emits:
+
+| Artifact | Behavior |
+|----------|----------|
+| `.tla` | Still defines `Fairness`, `Spec == Init /\ [][Next]_vars /\ Fairness`, `SpecSafety == Init /\ [][Next]_vars`, and each dynamic leaf’s `<Class>Terminates`. |
+| `.cfg` | `SPECIFICATION SpecSafety` (no fairness). Lists guarantee `INVARIANT`s. **Does not** list `PROPERTY *Terminates`. |
+| `.apalache.cfg` | Only with `--opt-tla=apalache`: INIT/NEXT safety cfg (plus Snowcat `@type` in the `.tla`). Off by default. |
+
+Plain / non-AG specs keep `SPECIFICATION Spec` and `PROPERTY <Class>Terminates` for each dynamic leaf.
+
+**Why:** Open env actions (e.g. `goKeyCount`) can inject forever, so `constructed ~> ~constructed` fails even when the protocol is fine. That is a false liveness CE for the Obl cut, not a Go runtime bug. Re-enable liveness later with a closed/fairer env and a dedicated cfg (`SPECIFICATION Spec` + `PROPERTY …Terminates`), not as the default Obl check.
+
+#### Circular AG (comma slots)
+
+Pair two obligations so each assumes what the other guarantees:
+
+```jul
+export spec Obl1 := I1 |= <true, A> C1 <G>       // LocalInv I1; assume P∧A, guarantee G
+export spec Obl2 := I2 |= <G>      C2 <A, Safe> // LocalInv I2; assume G, guarantee A∧Safe
+```
+
+- Comma (not `&`) marks circular slots. Ordinary `<Asm> Sys <G>` is unchanged.
+- Optional `LocalInv |=` prefixes the AG (same as ordinary Obls); TLC/Apalache check `LocalInv`.
+- **A** and **G** must be **fluent** invariants (no leaf state in the formula closure).
+- **P** / **Safe** may be fluent or ordinary state invariants (`true` for P via `<true, A>`).
+- Specs are paired when Obl1/Obl2 share the same A and G names.
+
+Rule (informal): if `I₁ |= ⟨P, A⟩ C₁ ⟨G⟩` and `I₂ |= ⟨G⟩ C₂ ⟨A, Safe⟩`, then under side conditions `I₁ ∧ I₂ |= ⟨P⟩ C₁∥C₂ ⟨Safe⟩`.
+
+#### Local inductive invariant (`LocalInv |= <A> C <G>`)
+
+Separate the **contract** (`A`, `C`, `G` / circular commas) from the **inductive strengthening** checked by TLC/Apalache:
+
+```jul
+/* LocalInv ⇒ G (or ⇒ A ∧ Safe on the circular right). Conjuncts strengthen G. */
+invariant LocalInv := Inv1 & Inv2
+invariant Inv1 := ...
+invariant Inv2 := ...
+
+export spec Obl := LocalInv |= <Asm> Sys <G>
+export spec CircL := LocalInvL |= <true, A> C1 <G>
+export spec CircR := LocalInvR |= <G> C2 <A, Safe>
+```
+
+- Without `LocalInv |=`, the Obl checks the guarantee slot as before (`G`, or `A`/`Safe` on the circular right).
+- With `LocalInv |=`, the cfg lists `LocalInv` as `INVARIANT`; CircSide still pairs on the A/G **names** in the AG.
+
+When both premises are compiled, `julayc` also emits **`CircSide.tla`** for the product `C₁ ∥ C₂`:
+
+| Check | Encoding | Cfg |
+|-------|----------|-----|
+| SC1: `Init ∧ P ⇒ A ∧ G` | `SpecSC1` (Init + stuttering) + `INVARIANT SC1` | `CircSide.cfg` |
+| SC2: `Next ⇒ A′ ∨ G′` | `PROPERTY SC2Prop == [][Next => SC2]_vars` | `CircSide_SC2.cfg` |
+
+Side conditions are TLC modules, not unchecked `ASSUME`. See [`regression/input/spec/circular-ag.jul`](../../regression/input/spec/circular-ag.jul) and sharded KV `ShardEnvObl` / `StoreObl`.
 
 Plain `spec Name := System` is also what `--compile-tla Name` synthesizes for a proc or api. Apis work like procs in all three forms; procfuns listed in an api's `calls:` are coupled in TLA+ (see [Composition and actions — APIs](composition-and-actions.md#apis)).
 
@@ -195,7 +257,7 @@ spec ClusterSpec := RaftProtocol[n : NodeSet] {
 }
 ```
 
-Several `init:` lines, or `init: A & B`, all become Init `/\`. Bare names are the listed const-globals (`cluster`); `RaftProtocol.cluster` also works. An uninterpreted type identifier is a value of that type (TLA `CONSTANT`). Indexed `RaftProtocol[n].cluster` is an error (const-globals are scalars). Indexed **`const`** state that is not const-global is allowed (`RaftProtocol[n1].self`), so Init can constrain per-index constants. Mutable `var`s are not. Uninterpreted `.length` / `length(NodeSet)` is spec/TLA-only (`Cardinality` in TLA+). If `|NodeSet| > MaxListLen` (default 3), compile errors — Init would be empty.
+Several `init:` lines, or `init: A & B`, all become Init `/\`. Bare names are the listed const-globals (`cluster`); `RaftProtocol.cluster` also works. An uninterpreted type identifier is a value of that type (TLA `CONSTANT`). Indexed `RaftProtocol[n].cluster` is an error (const-globals are scalars). Indexed **`const`** state that is not const-global is allowed (`RaftProtocol[n1].self`), so Init can constrain per-index constants. Mutable `var`s are not. Uninterpreted `.length` / `length(NodeSet)` is spec/TLA-only (`Cardinality` in TLA+). If `|NodeSet| > MaxListLen` (default 5), compile errors — Init would be empty.
 
 ### Delayed models
 
@@ -329,16 +391,16 @@ TLA+ emit may rewrite the composed spec (JAR codegen is unchanged). Named ids, a
 
 Disable with `--disable-tla-opt` / `--disable-tla-opt=ID,...`.
 
-Open `Int` / `String` sites that still need a TLC universe (leaf index, remaining `\E`, havoc) get a `.cfg` assignment from literals in the emitted spec — not a fixed `{0..5}` or a 9-string set. Cfg `Int` is the contiguous range `{0, …, max(highest non-negative literal, MaxListLen)}` (default `MaxListLen` is `3`). If nothing enumerates `Int`/`String`, that CONSTANT is omitted. Always-on; not a named opt.
+Open `Int` / `String` sites that still need a TLC universe (leaf index, remaining `\E`, havoc) get a `.cfg` assignment from literals in the emitted spec — not a fixed `{0..5}` or a 9-string set. Cfg `Int` is the contiguous range `{0, …, max(highest non-negative literal, MaxListLen)}` (default `MaxListLen` is `5`). If nothing enumerates `Int`/`String`, that CONSTANT is omitted. Always-on; not a named opt.
 
-TLC also infers `CONSTRAINT StateConstraint` (not `INVARIANT`): each `Int` state variable inhabits cfg `Int` (union negative literals already in the model, so `votedFor = -1` stays allowed), and each list state variable has `Len(x) <= MaxListLen`. Parameterized leaves quantify `\A n \in NodeSet : currentTerm[n] \in Int`. Successors outside those bounds are discarded. That keeps `commitIndex` inside cfg `Int`, so `\A i \in Int` is complete for `StateMachineSafety` in this model. Always-on; not a `--disable-tla-opt` id.
+TLC also infers `CONSTRAINT StateConstraint` (not `INVARIANT`): each `Int` state variable inhabits cfg `Int` (union negative literals already in the model, so `votedFor = -1` stays allowed), and each list state variable has `Cardinality(DOMAIN x) <= MaxListLen`. Parameterized leaves quantify `\A n \in NodeSet : currentTerm[n] \in Int`. Successors outside those bounds are discarded. That keeps `commitIndex` inside cfg `Int`, so `\A i \in Int` is complete for `StateMachineSafety` in this model. Always-on; not a `--disable-tla-opt` id.
 
 When `init:` uniquely determines a const-global list (length plus identity `xs[i] = i`) or set (length plus covering membership `1..n` in the set), Init emits `xs = <<1, 2, …>>` or `xs = {1, 2, …}` instead of `\in BoundedSeq` / `SUBSET` plus those filters. TypeOK may add `Len(x[n]) = Len(cluster)` for lists assigned `cluster.map(...)`, `DOMAIN x[n] = cluster` for maps assigned `cluster.associateWith(...)`, `x[n] \subseteq Range(cluster)` for id sets drawn from a sequence, and `x[n] \subseteq cluster` when `cluster` is already a set. The `.cfg` lists each user invariant once: a named operator that is only `&` of other invariants in the closure is still emitted in the `.tla` but omitted from `INVARIANT` lines. `IF P THEN FALSE ELSE TRUE` emits `~P`; `IF P THEN TRUE ELSE FALSE` emits `P`. Always-on; not named opt ids.
 
 ### Lists and sequences
 
 - Julay lists are **1-based**, matching TLA `Sequences`. Reads and `EXCEPT` updates on list-typed state use the Julay index as-is.
-- List **action-argument / havoc domains** use a finite `BoundedSeq(S, MaxListLen)` (not bare `Seq(S)`, which TLC cannot enumerate). `MaxListLen` is a module `CONSTANT` (default `3` in the `.cfg`); raise it for longer lists.
+- List **action-argument / havoc domains** use a finite `BoundedSeq(S, MaxListLen)` (not bare `Seq(S)`, which TLC cannot enumerate). `MaxListLen` is a module `CONSTANT` (default `5` in the `.cfg`); raise it for longer lists. Lists are modeled as `Int ->` functions (Apalache-friendly) rather than `Seq`.
 - Emitted helpers sit under `\* TLA+ helpers`: `BoundedSeq(S, N) == UNION { [1..k -> S] : k \in 0..N }` when list domains appear, `Range(f) == { f[__i] : __i \in DOMAIN f }` when list `in` / `~in`, `.toSet()`, or `allDistinct` is used, and `SetToSeq` when `.toList()` is used.
 
 ### Collections emitted today
@@ -394,7 +456,7 @@ See also [Collections](collections.md).
 - Julay `when` becomes TLA `CASE` with `[]` arms and `OTHER` for the trailing else.
 - Invariants preserve multi-line structure (boolean trees). Consecutive `\A` / `\E` binders over the same domain are condensed like Next (`\A n1, n2 \in NodeSet`). Parentheses written in the `.jul` source are kept; other parentheses are omitted when operator precedence makes them unnecessary. A blank line separates consecutive user-specified invariant operators. List indices are 1-based: `i <= xs.length => xs[i]` is true for `i = 0` on an empty list (`0 <= 0`), and TLC then evaluates `<<>>[0]`. Guard with `i >= 1` as well.
 - A leaf’s **only** constructor, when it has no sync partner (not a client/service pair, not hybrid ctor+default, not a procfun `*_call` / havoc site), is folded into `Init`: constructor transits become Init assignments (RHS that depend on TLA-unsupported builtins / IO / action args become `\in` domains), `error:` arms that constrain process state become Init constraints under `\* <Proc> constructor assumption` immediately after that leaf’s state variables, and the constructor is omitted from `Next`. Assumptions that only mention unbound constructor args (e.g. `\E args \in … : Len(args) = 2`) are dropped — they do not constrain state after folding. `initially` constructors that are **not** folded (`initially` / `*_initially`) are emitted first after `Init`, both as operator definitions and as the leading disjuncts of `Next`. Consecutive `\E` binders in `Next` over the same domain are written `\E n, m \in NodeSet`. After each leaf’s `\* State variables for …` Init header, if `unused-vars` dropped any of that leaf’s state, a `\* unused-vars: omitted …` comment lists them in declaration order.
-- Two blank lines separate funs/helpers from `\* system definition`, then a blank line before `Init`. After `Spec == Init /\ [][Next]_vars`, two blank lines precede `\* Invariants`. A blank line precedes the closing `====`. Automatically generated operators (`TypeOKInt`, `TypeOK`, `StateConstraint` when Int/list state vars exist, and `SessionIntegrity` when present) sit under `\* automatically generated invariants`; named and inline guarantees sit under `\* user-specified invariants`. `TypeOK` is listed first in the `.cfg`, then `CONSTRAINT StateConstraint` when present. `TypeOKInt == Int \cup Nat \cup {lo..hi}` sits immediately above `TypeOK`. It unions cfg `Int` (a finite non-negative `\E` bound that cannot include negatives), `Nat` (so `x := x + 1` counters stay in-type when `Nat` is not overridden), and every integer from the lowest negative literal through `max(highest literal, MaxListLen+1)`. List vars use `Seq(S)` rather than `BoundedSeq` so membership stays pointwise. `StateConstraint` is the finite-model bound: Int vars inhabit cfg `Int` (plus those negatives), list `Len` is `<= MaxListLen`.
+- Two blank lines separate funs/helpers from `\* system definition`, then a blank line before `Init`. After `Spec == Init /\ [][Next]_vars`, two blank lines precede `\* Invariants`. A blank line precedes the closing `====`. Automatically generated operators (`TypeOKInt`, `TypeOK`, `StateConstraint` when Int/list state vars exist, and `SessionIntegrity` when present) sit under `\* automatically generated invariants`; named and inline guarantees sit under `\* user-specified invariants`. `TypeOK` is listed first in the `.cfg`, then `CONSTRAINT StateConstraint` when present. `TypeOKInt == Int \cup Nat \cup {lo..hi}` sits immediately above `TypeOK`. It unions cfg `Int` (a finite non-negative `\E` bound that cannot include negatives), `Nat` (so `x := x + 1` counters stay in-type when `Nat` is not overridden), and every integer from the lowest negative literal through `max(highest literal, MaxListLen+1)`. List vars use `BoundedSeq(S, MaxListLen)` (`Int ->` functions) rather than bare `Seq(S)`, so Apalache typechecking stays finite. `StateConstraint` is the finite-model bound: Int vars inhabit cfg `Int` (plus those negatives), list length is `Cardinality(DOMAIN x) <= MaxListLen`.
 - `BoundedSeq`, `Range`, and `SetToSeq` are emitted under `\* TLA+ helpers` (above `\* Julay lib funs`) when used. Julay `fun`s referenced from Init/action guards, transit RHS, **or invariants** (and their transitive callees) are emitted as TLA+ operators immediately above `Init`, grouped under `\* Julay lib funs` (stdlib funlib) or `\* user defined funs`. Operator parameters that collide with `VARIABLES` / `CONSTANT`s / other module operators are renamed (`p_…`).
 - `splice(xs, a, b)` becomes a call to a module-level `splice` operator (defined above `Init` under `\* Julay lib funs` when any call is used); splice params/binders are clash-renamed like fun params.
 - `startsWith` and `allDistinct` become module-level helpers (same Julay-lib section) when used.
@@ -451,3 +513,4 @@ Example: [`regression/input/spec/exit-proc.jul`](../../regression/input/spec/exi
 - [Inc server example](../examples/inc-server.md) — native binary + specs in one file
 - [Bugs found with Julay](../examples/bugs-found-with-julay.md) — historical Timer / session case study
 - [`regression/input/spec/safe-inc.jul`](../../regression/input/spec/safe-inc.jul) — small AG example
+- [`regression/input/spec/circular-ag.jul`](../../regression/input/spec/circular-ag.jul) — circular comma AG + CircSide

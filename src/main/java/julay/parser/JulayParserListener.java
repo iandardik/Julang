@@ -208,6 +208,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitAssume_expr(JulayParser.Assume_exprContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#guarantee_expr}.
+	 * @param ctx the parse tree
+	 */
+	void enterGuarantee_expr(JulayParser.Guarantee_exprContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#guarantee_expr}.
+	 * @param ctx the parse tree
+	 */
+	void exitGuarantee_expr(JulayParser.Guarantee_exprContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#system_expr}.
 	 * @param ctx the parse tree
 	 */

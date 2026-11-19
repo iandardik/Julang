@@ -14,13 +14,13 @@ Former Kotlin/JAR flags `--disable-opt` / ids `eq-unify`, `arg-ownership`, `dire
 
 ## TLA+ emission optimizations
 
-When compiling a `spec` (or `--compile-tla`), Julay may rewrite generated `.tla` / `.cfg` so TLC `\E` quantification is smaller. **Go codegen is unchanged.** Default: named TLA+ optimizations are **on**. Disable with `--disable-tla-opt` / `--disable-tla-opt=ID,...` (`=` is required when passing ids). `--opt-tla` remains for any future default-off rewrites (none currently).
+When compiling a `spec` (or `--compile-tla`), Julay may rewrite generated `.tla` / `.cfg` so TLC `\E` quantification is smaller. **Go codegen is unchanged.** Default: named TLA+ optimizations are **on**. Disable with `--disable-tla-opt` / `--disable-tla-opt=ID,...` (`=` is required when passing ids). Opt-in (default-off) features use `--opt-tla` / `--opt-tla=ID,...` (currently `apalache`).
 
 Some of these are **equivalent rewrites** of the same transition relation. Others are **projections**: they exclude values the Julay type would otherwise allow, so `=` / `in` / `~=` can diverge from the program.
 
-TLC `.cfg` `Int` / `String` universes are sized from literals in the emitted spec (open `\E` / index / havoc sites). Cfg `Int` is `{0, …, max(highest non-negative literal, MaxListLen)}`. That projection is always on and is not a `--disable-tla-opt` id. `MaxListLen` stays `3`.
+TLC `.cfg` `Int` / `String` universes are sized from literals in the emitted spec (open `\E` / index / havoc sites). Cfg `Int` is `{0, …, max(highest non-negative literal, MaxListLen)}`. That projection is always on and is not a `--disable-tla-opt` id. `MaxListLen` stays `5`.
 
-The compiler also infers a TLC `CONSTRAINT StateConstraint` (not an `INVARIANT`): each Julay-`Int` state variable must inhabit that cfg `Int`, union any negative literals already in the model (so `votedFor = -1` is allowed at Init), and each list state variable has `Len(x) <= MaxListLen`. Parameterized leaves use `\A n \in NodeSet : currentTerm[n] \in Int`. Successors that leave those bounds are discarded. Always-on; not a `--disable-tla-opt` id. Do not add a user `constraint` keyword.
+The compiler also infers a TLC `CONSTRAINT StateConstraint` (not an `INVARIANT`): each Julay-`Int` state variable must inhabit that cfg `Int`, union any negative literals already in the model (so `votedFor = -1` is allowed at Init), and each list state variable has `Cardinality(DOMAIN x) <= MaxListLen`. Parameterized leaves use `\A n \in NodeSet : currentTerm[n] \in Int`. Successors that leave those bounds are discarded. Always-on; not a `--disable-tla-opt` id. Do not add a user `constraint` keyword.
 
 TypeOK still uses `TypeOKInt` (`Int ∪ Nat ∪ extras`) so membership stays pointwise; CONSTRAINT is what keeps reachable Int state inside cfg `Int`. That also makes `\A i \in Int` complete for properties whose bound is an Int state var (Raft `StateMachineSafety` vs `commitIndex`).
 
@@ -39,6 +39,19 @@ Always-on (not named opt ids): singleton `init:` that uniquely determines a cons
 | `unused-lets` | Drop expression and transit `LET` bindings that the `IN` body (and later kept inits) never read; walk inner-to-outer so dropping `voteCondition` then drops `logOk` | Equivalent rewrite |
 | `field-vars` | When a retained obj state var is only read through one field, emit that field as `var_field` (e.g. `me` + `.url` → `me_url`) and Init comment `\* field-vars: me → me_url (omitted id)` | Projection |
 | `map-index-put` | Map `m[k] := v` as a `DOMAIN ∪ {k}` function rebuild instead of nested `EXCEPT` (avoids TLC “EXCEPT was applied to non-existing fields” warnings on inserts) | Equivalent rewrite |
+
+### Opt-in (`--opt-tla`, default off)
+
+| ID | Role |
+|----|------|
+| `apalache` | Emit Snowcat `\* @type:` annotations on `CONSTANT` / `VARIABLES` / actions / helpers, and write a sibling `Name.apalache.cfg` (`INIT`/`NEXT`, no Fairness / `*Terminates`) for Apalache BMC |
+
+```bash
+# Apalache-oriented emission (off by default)
+java -jar build/libs/julayc.jar --opt-tla=apalache --compile StoreObl path/to/file.jul
+```
+
+Without `--opt-tla=apalache`, TLC-oriented `.tla` / `.cfg` are unchanged aside from omitting those annotations and not writing `.apalache.cfg`.
 
 If a field is omitted from a type that still appears in whole-record comparison or set containment, `julayc` warns and points at `--disable-tla-opt=unused-fields`. Values that differed only in omitted fields become equal.
 

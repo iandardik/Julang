@@ -317,7 +317,18 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             )
         }
         val value = when {
-            ctx.ag_spec() != null -> visit(ctx.ag_spec())
+            ctx.ag_spec() != null -> {
+                val agRaw = visit(ctx.ag_spec())
+                if (agRaw !is AgSpecExprNode) {
+                    throw RuntimeException("Expected AgSpecExprNode but got $agRaw")
+                }
+                // LocalInv |= <A> C <G>  (second ID is the inductive invariant name)
+                if (ctx.MODELS() != null && ctx.ID().size >= 2) {
+                    agRaw.withLocalInv(ctx.ID(1).text)
+                } else {
+                    agRaw
+                }
+            }
             ctx.MODELS() != null -> {
                 val system = visit(ctx.system_expr())
                 val guaranteeRaw = visit(ctx.expr())
@@ -339,17 +350,126 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
 
     override fun visitAg_spec(ctx: JulayParser.Ag_specContext?): ASTNode {
         val assumeCtx = ctx!!.assume_expr()
-        val assume: ASTNode? = if (assumeCtx.TRUE() != null) {
-            null
+        val guaranteeCtx = ctx.guarantee_expr()
+        val loc = sourceLocation(ctx)
+
+        val circularGuarantee = guaranteeCtx.COMMA() != null
+        val guaranteeIds = if (circularGuarantee) {
+            guaranteeCtx.ID().map { it.text }
         } else {
-            visit(assumeCtx.system_expr())
+            emptyList()
         }
-        val system = visit(ctx.system_expr())
-        val guaranteeRaw = visit(ctx.expr())
-        if (guaranteeRaw !is ExprNode) {
-            throw RuntimeException("Expected guarantee to be an expression")
+
+        val circularAssumeTrueA = assumeCtx.TRUE() != null && assumeCtx.COMMA() != null
+        val circularAssumePA = assumeCtx.TRUE() == null &&
+            assumeCtx.system_expr() == null &&
+            assumeCtx.COMMA() != null &&
+            assumeCtx.ID().size >= 2
+
+        when {
+            circularAssumeTrueA || circularAssumePA -> {
+                // <true, A> C <G>  or  <P, A> C <G>
+                if (circularGuarantee) {
+                    throw RuntimeException(
+                        "circular left premise <P, A> C <G> cannot also use comma on the guarantee",
+                    )
+                }
+                val aName = if (circularAssumeTrueA) {
+                    assumeCtx.ID(0).text
+                } else {
+                    assumeCtx.ID(1).text
+                }
+                val pName = if (circularAssumeTrueA) null else assumeCtx.ID(0).text
+                val guaranteeRaw = visit(guaranteeCtx.expr())
+                if (guaranteeRaw !is ExprNode) {
+                    throw RuntimeException("Expected guarantee to be an expression")
+                }
+                val gNorm = normalizeGuarantee(guaranteeRaw)
+                val gName = (gNorm as? SymbolValueExprNode)?.symbol
+                    ?: throw RuntimeException(
+                        "circular left premise requires a named invariant guarantee",
+                    )
+                val assumeNode = if (pName == null) {
+                    // Effective assume is A only (P = true)
+                    AssumeInvariantExprNode(aName, loc)
+                } else {
+                    // Both P and A — store as special node list via AssumeInvariant for A;
+                    // P is carried in circular slots and conjoined at emit/typecheck.
+                    AssumeInvariantExprNode(aName, loc)
+                }
+                return AgSpecExprNode(
+                    assume = assumeNode,
+                    system = visit(ctx.system_expr()),
+                    guarantee = gNorm,
+                    loc = loc,
+                    circular = CircularAgSlots(
+                        pName = pName,
+                        aName = aName,
+                        gName = gName,
+                        safeName = null,
+                        isLeft = true,
+                    ),
+                )
+            }
+            circularGuarantee -> {
+                // <G> C <A, Safe>
+                if (assumeCtx.COMMA() != null) {
+                    throw RuntimeException(
+                        "circular right premise <G> C <A, Safe> cannot use comma on the assumption",
+                    )
+                }
+                val aName = guaranteeIds[0]
+                val safeName = guaranteeIds[1]
+                val assume: ASTNode? = when {
+                    assumeCtx.TRUE() != null -> null
+                    assumeCtx.system_expr() != null -> visit(assumeCtx.system_expr())
+                    else -> null
+                }
+                val gName = when (assume) {
+                    null -> throw RuntimeException(
+                        "circular right premise requires a named invariant assumption G",
+                    )
+                    is AssumeInvariantExprNode -> assume.assumeInvariantName()
+                    is ValueProcExprNode -> assume.valueProcName()
+                    else -> throw RuntimeException(
+                        "circular right premise requires a named invariant assumption G",
+                    )
+                }
+                return AgSpecExprNode(
+                    assume = when (assume) {
+                        is AssumeInvariantExprNode -> assume
+                        is ValueProcExprNode ->
+                            AssumeInvariantExprNode(assume.valueProcName(), assume.programLocation())
+                        else -> assume
+                    },
+                    system = visit(ctx.system_expr()),
+                    // Primary guarantee for display; Safe+A handled via circular slots
+                    guarantee = SymbolValueExprNode(aName, loc),
+                    loc = loc,
+                    circular = CircularAgSlots(
+                        pName = null,
+                        aName = aName,
+                        gName = gName,
+                        safeName = safeName,
+                        isLeft = false,
+                    ),
+                )
+            }
+            else -> {
+                val assume: ASTNode? = if (assumeCtx.TRUE() != null) {
+                    null
+                } else {
+                    visit(assumeCtx.system_expr())
+                }
+                val guaranteeRaw = visit(guaranteeCtx.expr())
+                if (guaranteeRaw !is ExprNode) {
+                    throw RuntimeException("Expected guarantee to be an expression")
+                }
+                return AgSpecExprNode(
+                    assume, visit(ctx.system_expr()), normalizeGuarantee(guaranteeRaw), loc,
+                )
+            }
         }
-        return AgSpecExprNode(assume, system, normalizeGuarantee(guaranteeRaw), sourceLocation(ctx))
     }
 
     override fun visitSystem_expr(ctx: JulayParser.System_exprContext?): ASTNode {

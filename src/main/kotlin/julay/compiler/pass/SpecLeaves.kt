@@ -12,7 +12,7 @@ import java.util.ArrayDeque
 const val DYN_PROC_MODEL = "DynProc"
 
 /** How many slots the implicit `DynProc` model provides. */
-const val DEFAULT_DYN_PROC_SLOT_COUNT = 3
+const val DEFAULT_DYN_PROC_SLOT_COUNT = 2
 
 /**
  * Default DynProc slot names: `dp1`..`dpN`, or `dpp1`.. / `dppp1`.. when those

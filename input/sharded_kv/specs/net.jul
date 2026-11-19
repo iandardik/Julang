@@ -16,19 +16,24 @@ import julay.funlib.setOf
  *
  * Unindexed: the network is not node state. `also (n : NodeSet)` is the node the
  * action runs on (unified with the `with (n)` index of the node it syncs with).
+ *
+ * PutEnv and InboundEnv both use PerfectNet. Open goMoveBatch under InboundEnv is
+ * constrained by formula-assume InboundAsm (MoveNetOk + in-flight fluents; see
+ * protocol.jul), not by stripping the injector (that under-approximates the
+ * product and is unsound for AG).
  */
 export type NodeSet := String
 export type Key := String
 export type Value := String
 
-type ClaimMsg {
+export type ClaimMsg {
     src : NodeSet
     dest : NodeSet
     k : Key
     owner : String
 }
 
-type MoveBatchMsg {
+export type MoveBatchMsg {
     src : NodeSet
     dest : NodeSet
     owner : String

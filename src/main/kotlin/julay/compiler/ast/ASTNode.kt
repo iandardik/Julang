@@ -324,6 +324,21 @@ class AssumeInvariantExprNode(
     override fun toString(): String = name
 }
 
+/**
+ * Circular AG slotting from comma syntax:
+ * - Left: `<P, A> C <G>` or `<true, A> C <G>` ([pName] null means `true`)
+ * - Right: `<G> C <A, Safe>`
+ */
+data class CircularAgSlots(
+    val pName: String?,
+    val aName: String,
+    val gName: String?,
+    val safeName: String?,
+    val isLeft: Boolean,
+) {
+    internal fun isRight(): Boolean = !isLeft
+}
+
 class AgSpecExprNode(
     /** null means `<true>` (no assumption). System leaf tree or [AssumeInvariantExprNode]. */
     private val assume: ASTNode?,
@@ -331,15 +346,38 @@ class AgSpecExprNode(
     /** null means `<true>` (no guarantee). */
     private val guarantee: ExprNode?,
     private val loc: ProgramLoc,
+    /** Non-null when this AG used comma circular slots. */
+    private val circular: CircularAgSlots? = null,
+    /**
+     * Optional local inductive invariant: `LocalInv |= <A> C <G>`.
+     * Checked as the Obl INVARIANT; contract A/G/Safe names stay on the AG slots.
+     */
+    private val localInvName: String? = null,
 ) : ASTNode(listOfNotNull(assume, system, guarantee)) {
     override fun programLocation() = loc
     internal fun assumeExpr() = assume
     internal fun systemExpr() = system
     internal fun guaranteeExpr() = guarantee
+    internal fun circularSlots() = circular
+    internal fun localInvName() = localInvName
+    /** Attach `LocalInv |= …` without changing A/G/circular slots. */
+    internal fun withLocalInv(name: String): AgSpecExprNode =
+        AgSpecExprNode(assume, system, guarantee, loc, circular, localInvName = name)
     override fun toString(): String {
-        val a = assume?.toString() ?: "true"
-        val g = guarantee?.toString() ?: "true"
-        return "<$a> $system <$g>"
+        val a = when {
+            circular != null && circular.isLeft -> {
+                val p = circular.pName ?: "true"
+                "$p, ${circular.aName}"
+            }
+            else -> assume?.toString() ?: "true"
+        }
+        val g = when {
+            circular != null && circular.isRight() ->
+                "${circular.aName}, ${circular.safeName}"
+            else -> guarantee?.toString() ?: "true"
+        }
+        val ag = "<$a> $system <$g>"
+        return localInvName?.let { "$it |= $ag" } ?: ag
     }
 }
 

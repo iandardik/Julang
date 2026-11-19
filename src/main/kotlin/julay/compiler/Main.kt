@@ -91,8 +91,9 @@ class Julayc : CliktCommand(name = "julayc") {
     private val optTla by option(
         "--opt-tla",
         metavar = "OPT,...",
-        help = "Enable opt-in TLA+ emission rewrites that stay off by default. " +
-            "Currently no default-off ids (map-index-put is default-on; use --disable-tla-opt=map-index-put). " +
+        help = "Enable opt-in TLA+ emission features that stay off by default. " +
+            "Ids: apalache (Snowcat @type annotations + sibling .apalache.cfg). " +
+            "Bare --opt-tla enables all opt-in ids. " +
             "The '=' form is required when passing ids so the input path is not consumed. " +
             "See docs/language/compiler-optimizations.md",
     ).optionalValue("ALL", acceptsUnattachedValue = false)

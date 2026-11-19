@@ -88,6 +88,8 @@ compile_decl
 
 spec
     : STATIC? SPEC ID (LBRACK ID COLON typeExpr RBRACK)? LCURLY leaf_spec_item* RCURLY
+    /* LocalInv |= <A> C <G>  (and circular comma forms) */
+    | SPEC ID ASGN_EQ ID MODELS ag_spec
     | SPEC ID ASGN_EQ ag_spec
     | SPEC ID ASGN_EQ system_expr MODELS expr
     | SPEC ID ASGN_EQ system_expr
@@ -101,13 +103,28 @@ leaf_spec_item
     ;
 
 ag_spec
-    : LT assume_expr GT system_expr LT expr GT
+    : LT assume_expr GT system_expr LT guarantee_expr GT
     ;
 
-/* TRUE / system; a bare ID that names an invariant is resolved as formula-assume later. */
+/*
+ * Assumption:
+ *   true | true, A | P, A     — circular left slots (comma)
+ *   system_expr               — system assume, or bare ID formula-assume (resolved later)
+ */
 assume_expr
-    : TRUE
+    : TRUE (COMMA ID)?
+    | ID COMMA ID
     | system_expr
+    ;
+
+/*
+ * Guarantee:
+ *   A, Safe                   — circular right slots (comma)
+ *   expr                      — ordinary guarantee (named inv or formula)
+ */
+guarantee_expr
+    : ID COMMA ID
+    | expr
     ;
 
 system_expr

@@ -105,10 +105,11 @@ serveHttp(port, HandleRpc.req ~> HandleRpc.resp)
 
 ## TLA
 
-- Every dynamic leaf is indexed by `DynProc`: `X[i]` or `X[n][i]` under a create-index. If the create-index omits `DynProc := { … }`, TLC gets `{"dp1", "dp2", "dp3"}` (or `dpp1`… when those strings are already used elsewhere in the model).
+- Every dynamic leaf is indexed by `DynProc`: `X[i]` or `X[n][i]` under a create-index. If the create-index omits `DynProc := { … }`, TLC gets `{"dp1", "dp2"}` (or `dpp1`… when those strings are already used elsewhere in the model).
 - Parent-bound classes get `<B>_parent` per slot. When the parent class has several occurrences, the link is `<<occurrence, slot>>`.
-- `<Class>Terminates == \A slot : constructed[slot] ~> ~constructed[slot]`.
+- `<Class>Terminates == \A slot : constructed[slot] ~> ~constructed[slot]` (always emitted in the `.tla`).
 - Spec includes strong fairness (`SF`) over every `Next` action. See [Composition and actions — Fairness](composition-and-actions.md#fairness).
+- **AG Obls:** the `.cfg` uses `SpecSafety` and omits `PROPERTY *Terminates` — open env injectors make termination meaningless for the default safety campaign. See [Specifications — AG Obl `.cfg`](specifications.md#ag-obl-cfg-safety-by-default-no-terminates).
 
 ## See also
 

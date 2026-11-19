@@ -1,5 +1,7 @@
 package julay.compiler
 
+import julay.compiler.ast.AgSpecExprNode
+import julay.compiler.ast.CompositeProcExprNode
 import julay.compiler.ast.LeafSpecNode
 import julay.compiler.ast.ProcClassNode
 import julay.compiler.ast.ProcNode
@@ -11,12 +13,14 @@ import julay.compiler.pass.CompilerOptConfig
 import julay.compiler.pass.TlaOptConfig
 import julay.compiler.pass.childParentPresenceErrors
 import julay.compiler.pass.childSyncErrors
+import julay.compiler.pass.findCircularAgPairs
 import julay.compiler.pass.handlerRuntimeActions
 import julay.compiler.pass.lifecycleErrors
 import julay.compiler.pass.computeCompositionAlphabet
 import julay.compiler.pass.expandLeavesToPclasses
 import julay.compiler.pass.leafActionMap
 import julay.compiler.pass.peerCompositionErrors
+import julay.compiler.pass.procPass
 import julay.compiler.pass.unboundExternalActionsWarning
 import java.nio.file.Path
 
@@ -121,6 +125,49 @@ fun compileJulFile(
             return
         }
         compileSpecToTla(specNode, ast, unit, tlaOptConfig = tlaOptConfig)
+    }
+
+    // Circular AG side conditions: product C1 ∥ C2 with TLC-checked SC1/SC2.
+    val circularPairs = findCircularAgPairs(compositionSpecs.values.toList())
+    for (pair in circularPairs) {
+        val leftAg = pair.left.specNodeValue() as AgSpecExprNode
+        val rightAg = pair.right.specNodeValue() as AgSpecExprNode
+        val loc = pair.left.programLocation()
+        val productSys = CompositeProcExprNode(
+            listOf(leftAg.systemExpr(), rightAg.systemExpr()),
+            loc,
+        )
+        val sideName = if (circularPairs.size == 1) {
+            "CircSide"
+        } else {
+            "${pair.left.specNodeName()}_${pair.right.specNodeName()}_CircSide"
+        }
+        val sideSpec = SpecNode(sideName, productSys, loc)
+        val sideProgram = sideSpec.procPass().first()
+        if (!runTlaStructuralPass(ast, sideProgram, procDecls, librariesInUse)) {
+            return
+        }
+        val invariantNames = unit.modules
+            .flatMap { it.root.declNodes().filterIsInstance<julay.compiler.ast.InvariantNode>() }
+            .map { it.name() }
+            .toSet()
+        val systemDeclNames = (
+            pclasses.keys + leafSpecs.keys + procAliases.keys + compositionSpecs.keys
+            ).toSet()
+        val leaves = expandLeavesToPclasses(
+            compositionLeavesOfSpec(sideSpec, invariantNames, systemDeclNames),
+            pclasses,
+            procAliases,
+            compositionSpecs,
+            leafSpecs,
+        )
+        val peerErrors = peerCompositionErrors(leaves, leafSpecs, pclasses)
+        if (peerErrors.isNotEmpty()) {
+            peerErrors.forEach { System.err.println(it) }
+            System.err.println("Found errors while compiling \"$sideName\"; exiting.")
+            return
+        }
+        compileSpecToTla(sideSpec, ast, unit, tlaOptConfig = tlaOptConfig, circularSide = pair)
     }
 
     for (proc in tlaProcTargets) {

@@ -34,7 +34,7 @@ Successful proc compile writes a **native binary** named after the target (e.g. 
 | `--verbose` | Reserved; former sync-path summary is no longer emitted |
 | `--disable-opt` / `--disable-opt=ID,...` | Accepted for compatibility; former JAR sync/fuse opts are no-ops. See [Compiler optimizations](language/compiler-optimizations.md) |
 | `--disable-tla-opt` / `--disable-tla-opt=ID,...` | Disable TLA+ emission optimizations (bare `--disable-tla-opt` = all). Ids: `unused-fields`, `unused-vars`, `determined-args`, `from-collection`, `literal-domains`, `unwrap-singletons`, `unused-lets`, `field-vars`, `map-index-put`. Use `=` when passing ids. See [Compiler optimizations](language/compiler-optimizations.md) |
-| `--opt-tla` / `--opt-tla=ID,...` | Enable opt-in TLA+ rewrites that stay off by default (none currently; `map-index-put` is default-on). Use `=` when passing ids. See [Compiler optimizations](language/compiler-optimizations.md) |
+| `--opt-tla` / `--opt-tla=ID,...` | Enable opt-in TLA+ features that stay off by default. Ids: `apalache` (Snowcat `@type` + `.apalache.cfg`). Bare `--opt-tla` enables all. Use `=` when passing ids. See [Compiler optimizations](language/compiler-optimizations.md) |
 
 ### Environment
 

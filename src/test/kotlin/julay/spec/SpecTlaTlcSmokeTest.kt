@@ -45,17 +45,19 @@ private fun tlaAfterNext(tlaText: String): String {
 class SpecTlaTlcSmokeTest {
 
     @Test
-    fun cfgStringModelEscapesControlChars() {
+    fun cfgStringModelDropsControlAndUnsafeChars() {
         assertEquals("\\n", escapeTlaStringLiteral("\n"))
         assertEquals("a\\\"b", escapeTlaStringLiteral("a\"b"))
         assertEquals("x\\\\y", escapeTlaStringLiteral("x\\y"))
+        // TLC .cfg rejects escapes; cfgStringModel drops control / quote / backslash chars.
         val model = cfgStringModel(setOf("", "\n", "\t", "#", "a\"b"), emptySet(), false)
         assertFalse('\n' in model, "raw newline must not appear in cfg String model:\n$model")
         assertFalse('\t' in model, "raw tab must not appear in cfg String model:\n$model")
-        assertTrue(model.contains("\"\\n\""), model)
-        assertTrue(model.contains("\"\\t\""), model)
-        assertTrue(model.contains("\"a\\\"b\""), model)
+        assertFalse(model.contains("\\n"), model)
+        assertFalse(model.contains("\\t"), model)
+        assertFalse(model.contains("a\\\"b") || model.contains("a\"b"), model)
         assertTrue(model.contains("\"#\""), model)
+        assertTrue(model.contains("\"\""), model)
     }
 
     @Test
@@ -954,6 +956,50 @@ class SpecTlaTlcSmokeTest {
             putDef.contains("DOMAIN __m"),
             "disabled map-index-put should not rebuild DOMAIN ∪;\n$putDef",
         )
+    }
+
+    @Test
+    fun circularAgEmitsObligationsAndCircSide() {
+        assumeTlcPresent()
+        val source = File("regression/input/spec/circular-ag.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        val work = Files.createTempDirectory("julay-circular-ag").toFile()
+        try {
+            compileJulFile(source.toPath(), keepBuild = false)
+            val artifacts = listOf(
+                "Obl1.tla", "Obl1.cfg",
+                "Obl2.tla", "Obl2.cfg",
+                "CircSide.tla", "CircSide.cfg", "CircSide_SC2.cfg",
+            )
+            artifacts.forEach { name ->
+                val f = File(name)
+                assertTrue(f.exists(), "expected $name")
+                f.copyTo(File(work, name), overwrite = true)
+                f.delete()
+            }
+            val circ = File(work, "CircSide.tla").readText()
+            val circCfg = File(work, "CircSide.cfg").readText()
+            val circSc2 = File(work, "CircSide_SC2.cfg").readText()
+            assertTrue(circ.contains("SC1 =="), "CircSide should define SC1;\n$circ")
+            assertTrue(circ.contains("SC2 =="), "CircSide should define SC2;\n$circ")
+            assertTrue(circ.contains("SpecSC1 =="), "CircSide should define SpecSC1;\n$circ")
+            assertTrue(circ.contains("SC2Prop =="), "CircSide should define SC2Prop;\n$circ")
+            assertTrue(
+                circCfg.contains("SPECIFICATION SpecSC1") && circCfg.contains("INVARIANT SC1"),
+                "CircSide.cfg should check SC1 under SpecSC1;\n$circCfg",
+            )
+            assertTrue(
+                circSc2.contains("SPECIFICATION Spec") && circSc2.contains("PROPERTY SC2Prop"),
+                "CircSide_SC2.cfg should check SC2Prop;\n$circSc2",
+            )
+            assertTlcCompletesWithoutEvalError(work, "CircSide")
+        } finally {
+            work.deleteRecursively()
+            listOf(
+                "Obl1.tla", "Obl1.cfg", "Obl2.tla", "Obl2.cfg",
+                "CircSide.tla", "CircSide.cfg", "CircSide_SC2.cfg",
+            ).forEach { File(it).delete() }
+        }
     }
 
     @Test

@@ -176,11 +176,8 @@ internal fun typePassFluentOnAgainstSystem(
     fluent.fluentOnClauses().forEach { clause ->
         val offers = byName[clause.actionName]
         if (offers.isNullOrEmpty()) {
-            errors += OneLocCompileError(
-                clause.loc,
-                "fluent \"${fluent.name()}\" on-clause action \"${clause.actionName}\" " +
-                    "is not in the system alphabet",
-            )
+            // Frame: compositional Obls may share a fluent formula whose on-clauses
+            // span a larger alphabet; missing actions simply never update the fluent.
             return@forEach
         }
         val indexed = offers.any { it.leaf.isParameterized }

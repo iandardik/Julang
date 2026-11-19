@@ -89,9 +89,24 @@ class DisableTlaOptFlagTest {
     }
 
     @Test
+    fun apalacheDefaultOff() {
+        assertEquals(false, TlaOptConfig.ALL_ON.apalache)
+        assertEquals(false, TlaOptConfig.fromOptTlaFlag(null).apalache)
+    }
+
+    @Test
+    fun optTlaApalacheEnables() {
+        assertEquals(true, TlaOptConfig.fromOptTlaFlag("apalache").apalache)
+        assertEquals(true, TlaOptConfig.fromOptTlaFlag("ALL").apalache)
+        assertEquals(true, TlaOptConfig.fromFlags(null, "apalache").apalache)
+        assertEquals(false, TlaOptConfig.fromFlags("ALL", null).apalache)
+    }
+
+    @Test
     fun optTlaLegacyMapIndexPutIsNoOp() {
         val cfg = TlaOptConfig.fromOptTlaFlag("map-index-put")
         assertEquals(true, cfg.mapIndexPutRebuild)
+        assertEquals(false, cfg.apalache)
     }
 
     @Test

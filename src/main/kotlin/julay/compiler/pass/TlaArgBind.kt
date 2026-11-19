@@ -251,9 +251,11 @@ internal fun analyzeTlaArgBind(
         // Fixpoint: determined exprs may mention args bound from collections, and vice versa.
     }
 
-    val determined = bound.entries.mapNotNull { (n, b) ->
-        (b as? Bound.Determined)?.let { n to it.expr }
-    }
+    val determined = topoSortDetermined(
+        bound.entries.mapNotNull { (n, b) ->
+            (b as? Bound.Determined)?.let { n to it.expr }
+        },
+    )
     val listBinds = bound.entries.mapNotNull { (n, b) ->
         (b as? Bound.ListIndex)?.let { ListIndexBind(n, it.index, it.list) }
     }
@@ -286,6 +288,32 @@ private sealed class Bound {
     data class Projected(val sources: List<ProjectedFilterSource>) : Bound()
 }
 
+/** Order determined LETs so a binding's RHS only refers to earlier determined names. */
+private fun topoSortDetermined(
+    pairs: List<Pair<String, ExprNode>>,
+): List<Pair<String, ExprNode>> {
+    if (pairs.size <= 1) return pairs
+    val byName = pairs.associate { it.first to it.second }
+    val names = byName.keys
+    val remaining = names.toMutableSet()
+    val ordered = mutableListOf<Pair<String, ExprNode>>()
+    while (remaining.isNotEmpty()) {
+        val ready = remaining.filter { n ->
+            names.none { dep -> dep != n && dep in remaining && exprReferencesSymbol(byName.getValue(n), dep) }
+        }
+        if (ready.isEmpty()) {
+            // Cycle: append rest in original order.
+            pairs.filter { it.first in remaining }.forEach { ordered += it }
+            break
+        }
+        ready.sorted().forEach { n ->
+            ordered += n to byName.getValue(n)
+            remaining -= n
+        }
+    }
+    return ordered
+}
+
 private data class CaseDeterminedHit(
     val expr: ExprNode,
     val skipNodes: List<ExprNode>,
@@ -307,17 +335,17 @@ internal fun isDesugaredIff(expr: ExprNode): Boolean {
 private fun matchDetermined(
     conjunct: ExprNode,
     argNames: Set<String>,
-    alreadyBound: Set<String>,
+    @Suppress("UNUSED_PARAMETER") alreadyBound: Set<String>,
     conflicted: Set<String>,
-    extraArgNames: Set<String>,
+    @Suppress("UNUSED_PARAMETER") extraArgNames: Set<String>,
 ): Pair<String, ExprNode>? {
     val e = unwrapParen(conjunct)
     fun oneSide(argSide: ExprNode, other: ExprNode): Pair<String, ExprNode>? {
         val a = (argSide as? SymbolValueExprNode)?.symbol ?: return null
         if (a !in argNames || a in conflicted) return null
+        // No self-reference; sibling args on the RHS stay as `\E` params or earlier LETs
+        // (e.g. `entries = reshardEntries(store, excludeKey)`).
         if (exprReferencesSymbol(other, a)) return null
-        val unbound = argNames.filter { it != a && it !in alreadyBound && it !in extraArgNames }
-        if (unbound.any { exprReferencesSymbol(other, it) }) return null
         return a to other
     }
     if (e is BinaryOpExprNode && e.op() == "<=>") {

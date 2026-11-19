@@ -98,6 +98,10 @@ export static proc Store {
         newOwner : String,
         entries : List<KvPair>
     ) {
+        /* Self-donate would drop store keys while leaving owners[k] = me (OwnerHasValue).
+         * error: (not guard) so the hub still binds entries for channel direction. */
+        error:
+            (newOwner = me.url) -> "dropReshardBatch: newOwner must be a peer, not self"
         guard: entries = reshardEntries(store, excludeKey)
         transit:
             /* Remove exactly the keys named in `entries` (same value as the guard).
