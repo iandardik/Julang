@@ -427,6 +427,11 @@ private fun emitProjectedTla(
         leaf.initExprs.forEach { collectCfgLiteralsFromExpr(it, intModelValues, stringModelValues) }
     }
     usedFunOps.forEach { collectCfgLiteralsFromExpr(it.funBody(), intModelValues, stringModelValues) }
+    // Delayed models bound TypeOK / `\E`; carrier literals written to those sites (e.g.
+    // `value := ""` for typedef Value) must be in the CONSTANT or TypeOK is false after the write.
+    widenDomainModelsFromAssignedLiterals(
+        domains, cfgDomainModels, leaves, pclassesForTla, emittedOffers, stringModelValues,
+    )
     // Typedef/uninterpreted domains over String (Key, NodeSet, …) have their own CONSTANT
     // models; TypeOK often types the same slots as String, so domain elements must ⊆ String.
     addStringCarrierDomainElements(domains, stringModelValues)
@@ -1539,7 +1544,38 @@ private fun typeOkMapConjunct(
     }
 }
 
-/** TypeOK conjunct for a leaf state var (maps get sparse DOMAIN checks). */
+/**
+ * Pointwise list TypeOK (like sparse maps). Avoids `var \in BoundedSeq(S, MaxListLen)`,
+ * which TLC may fully construct and reject when |S|^MaxListLen exceeds 1e6.
+ * Length is bounded by StateConstraint's `Cardinality(DOMAIN) <= MaxListLen`.
+ */
+private fun typeOkListConjunct(
+    name: String,
+    listType: ListType,
+    intRange: String,
+    paramDomain: String?,
+    instDomain: String? = null,
+    leafClass: String? = null,
+    varName: String? = null,
+): String {
+    val elemRange = typeOkVarRange(
+        listType.elementType, intRange, leafClass = leafClass, varName = varName,
+    )
+    return when {
+        paramDomain != null && instDomain != null ->
+            "/\\ \\A n__tok \\in $paramDomain, i__tok \\in $instDomain :\n" +
+                "     \\A j__tok \\in DOMAIN $name[n__tok][i__tok] : " +
+                "$name[n__tok][i__tok][j__tok] \\in $elemRange"
+        paramDomain != null ->
+            "/\\ \\A n__tok \\in $paramDomain :\n" +
+                "     \\A j__tok \\in DOMAIN $name[n__tok] : " +
+                "$name[n__tok][j__tok] \\in $elemRange"
+        else ->
+            "/\\ \\A j__tok \\in DOMAIN $name : $name[j__tok] \\in $elemRange"
+    }
+}
+
+/** TypeOK conjunct for a leaf state var (maps/lists get sparse DOMAIN checks). */
 private fun typeOkForStateVar(
     leaf: SpecLeaf,
     vn: VarNode,
@@ -1563,6 +1599,12 @@ private fun typeOkForStateVar(
         val mapKey = shapes.domainEq[leaf.tlaName to vn.name]?.let { srcRead(it) }
         return typeOkMapConjunct(
             tlaName, ty, intRange, paramDom, instDom, mapKey,
+            leafClass = leaf.name, varName = vn.name,
+        )
+    }
+    if (ty is ListType) {
+        return typeOkListConjunct(
+            tlaName, ty, intRange, paramDom, instDom,
             leafClass = leaf.name, varName = vn.name,
         )
     }
@@ -3205,6 +3247,165 @@ internal fun addStringCarrierDomainElements(
     }
 }
 
+/**
+ * Union carrier literals assigned (or packed into obj fields) at DomainType sites into the
+ * delayed-model CONSTANT used by TypeOK / action `\E`. Otherwise e.g. `value := ""` with
+ * `Value := {"v1","v2"}` yields a TypeOK violation on the successor.
+ */
+internal fun widenDomainModelsFromAssignedLiterals(
+    domains: Map<String, DomainType>,
+    cfgDomainModels: MutableMap<String, String>,
+    leaves: List<SpecLeaf>,
+    pclasses: Map<String, ProcClassNode>,
+    emittedOffers: List<TlaActionOffer>,
+    stringModelValues: MutableSet<String>,
+) {
+    val extras = linkedMapOf<String, LinkedHashSet<String>>()
+
+    fun noteCfgToken(domain: DomainType, cfgTok: String) {
+        val base = domain.cfgElements ?: return
+        if (cfgTok in base) return
+        if (cfgTok in (extras[domain.name] ?: emptySet())) return
+        extras.getOrPut(domain.name) { linkedSetOf() }.add(cfgTok)
+    }
+
+    fun noteLiteral(type: Type, expr: ExprNode) {
+        val domain = type as? DomainType ?: return
+        if (!domain.hasModel || domain.name !in cfgDomainModels) return
+        val lit = unwrapParens(expr)
+        when {
+            lit is LiteralValueExprNode -> {
+                val litTy = lit.inferType(emptyMap())
+                val tok = when {
+                    domain.carrierType is StringType && litTy is StringType ->
+                        "\"${escapeTlaStringLiteral(lit.literalText())}\""
+                    domain.carrierType is IntType && (litTy is IntType || litTy is RealType) ->
+                        lit.literalText()
+                    domain.carrierType is BoolType && litTy is BoolType ->
+                        lit.literalText().uppercase()
+                    else -> return
+                }
+                noteCfgToken(domain, tok)
+            }
+            lit is UnaryOpExprNode && lit.op() == "-" &&
+                domain.carrierType is IntType &&
+                unwrapParens(lit.operand()) is LiteralValueExprNode -> {
+                val n = (unwrapParens(lit.operand()) as LiteralValueExprNode).literalText()
+                noteCfgToken(domain, "-$n")
+            }
+            lit is IfElseExprNode -> {
+                noteLiteral(type, lit.thenExpr())
+                noteLiteral(type, lit.elseExpr())
+            }
+            lit is WhenExprNode -> {
+                lit.arms().forEach { arm ->
+                    when (arm) {
+                        is WhenArm.Subject -> noteLiteral(type, arm.expr)
+                        is WhenArm.Guard -> noteLiteral(type, arm.expr)
+                        is WhenArm.Else -> noteLiteral(type, arm.expr)
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+
+    fun walkObjFields(expr: ExprNode) {
+        when (val e = unwrapParens(expr)) {
+            is ObjClassLiteralExprNode -> {
+                val objType = try {
+                    e.structType
+                } catch (_: RuntimeException) {
+                    null
+                }
+                if (objType is ObjClassType) {
+                    e.fieldEntries.forEach { (fname, value) ->
+                        val ft = objType.fields.firstOrNull { it.name == fname }?.type
+                        if (ft != null) {
+                            noteLiteral(ft, value)
+                            walkObjFields(value)
+                        }
+                    }
+                }
+            }
+            is IfElseExprNode -> {
+                walkObjFields(e.thenExpr())
+                walkObjFields(e.elseExpr())
+                walkObjFields(e.condExpr())
+            }
+            is WhenExprNode -> {
+                e.arms().forEach { arm ->
+                    when (arm) {
+                        is WhenArm.Subject -> walkObjFields(arm.expr)
+                        is WhenArm.Guard -> {
+                            walkObjFields(arm.cond)
+                            walkObjFields(arm.expr)
+                        }
+                        is WhenArm.Else -> walkObjFields(arm.expr)
+                    }
+                }
+            }
+            else -> e.children.filterIsInstance<ExprNode>().forEach { walkObjFields(it) }
+        }
+    }
+
+    fun leafVarType(leaf: SpecLeaf, name: String): Type? {
+        val pc = pclasses[leaf.name] ?: return null
+        val vn = pc.localDecls().filterIsInstance<VarNode>().find { it.name == name } ?: return null
+        return effectiveVarType(leaf, vn)
+    }
+
+    emittedOffers.forEach { offer ->
+        offer.decl.transits.forEach { update ->
+            when (update) {
+                is TransitUpdate.Assign -> {
+                    val ty = leafVarType(offer.leaf, update.transitRootVar())
+                    if (ty != null) noteLiteral(ty, update.expr)
+                    walkObjFields(update.expr)
+                }
+                is TransitUpdate.IndexPut -> {
+                    val ty = leafVarType(offer.leaf, update.collectionVar)
+                    when (ty) {
+                        is MapType -> {
+                            noteLiteral(ty.keyType, update.index)
+                            noteLiteral(ty.valueType, update.value)
+                        }
+                        is ListType -> noteLiteral(ty.elementType, update.value)
+                        else -> {}
+                    }
+                    walkObjFields(update.index)
+                    walkObjFields(update.value)
+                }
+                is TransitUpdate.Let -> {
+                    noteLiteral(update.type, update.init)
+                    walkObjFields(update.init)
+                }
+            }
+        }
+        offer.decl.guards.forEach { walkObjFields(it) }
+    }
+    leaves.forEach { leaf ->
+        val pc = pclasses[leaf.name] ?: return@forEach
+        pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
+            val init = vn.initExpr ?: return@forEach
+            noteLiteral(effectiveVarType(leaf, vn), init)
+            walkObjFields(init)
+        }
+    }
+
+    if (extras.isEmpty()) return
+    extras.forEach { (name, toks) ->
+        val domain = domains[name] ?: return@forEach
+        val merged = linkedSetOf<String>()
+        domain.cfgElements?.let { merged.addAll(it) }
+        merged.addAll(toks)
+        cfgDomainModels[name] = "{${merged.joinToString(", ")}}"
+        if (domain.carrierType is StringType) {
+            toks.forEach { tok -> rawStringFromCfgElement(tok)?.let { stringModelValues += it } }
+        }
+    }
+}
+
 /** DynProc create-index models are string literals; include them in cfg String when present. */
 private fun addDynProcStringElements(leaves: List<SpecLeaf>, into: MutableSet<String>) {
     leaves.mapNotNull { it.dynProcModel }.distinctBy { it.name() }.forEach { model ->
@@ -4623,6 +4824,17 @@ internal fun emitFieldVarProjectedRhs(
         if (entry != null) return emitExpr(entry.second, linePrefix)
     }
     val rhs = emitExpr(expr, linePrefix)
+    // unwrap-singletons already emits the kept field's type as a scalar (e.g. emptyNodeInfo == "").
+    // Appending ".$kept" would become "".url and crash TLC.
+    val rhsType = try {
+        expr.getType()
+    } catch (_: RuntimeException) {
+        null
+    }
+    if (rhsType is ObjClassType) {
+        val single = TlaFieldProjection.get().singletonField(rhsType)
+        if (single != null && single.name == kept) return rhs
+    }
     return "$rhs.$kept"
 }
 

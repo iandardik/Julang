@@ -920,6 +920,20 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun fieldVarsAssignOfUnwrappedObjOmitsRedundantFieldSelect() {
+        val source = File("regression/input/spec/field-vars-unwrap-fun.jul")
+        val (tlaText, _) = compileSpecTla(source, "FieldVarsUnwrapFun")
+        assertTrue(
+            tlaText.contains("keyOwner_url") && tlaText.contains("emptyNodeInfo =="),
+            "expected field-vars keyOwner_url and emptyNodeInfo operator;\n$tlaText",
+        )
+        assertFalse(
+            tlaText.contains("emptyNodeInfo.url"),
+            "assign to keyOwner_url must not append .url onto already-unwrapped emptyNodeInfo;\n$tlaText",
+        )
+    }
+
+    @Test
     fun mapIndexPutDefaultEmitsDomainUnionRebuild() {
         val source = File("regression/input/spec/map-index-put-tla.jul")
         val (tlaText, _) = compileSpecTla(source, "MapPutSpec")
@@ -1086,6 +1100,24 @@ class SpecTlaTlcSmokeTest {
         assertTrue(
             tlaText.contains("DOMAIN table") && tlaText.contains("\\subseteq Key"),
             "TypeOK should still constrain map keys to Key;\n$tlaText",
+        )
+    }
+
+    @Test
+    fun typedefAssignOfCarrierLiteralWidensDelayedModel() {
+        val source = File("regression/input/spec/typedef-assign-widen-domain.jul")
+        val emit = compileSpecEmit(source, "TypedefWidenSpec")
+        val valueLine = emit.cfgText.lines().firstOrNull { it.startsWith("CONSTANT Value =") }
+            ?: fail("missing CONSTANT Value in cfg;\n${emit.cfgText}")
+        assertTrue(
+            valueLine.contains("\"\""),
+            "Value cfg model must include \"\" written by pending := \"\";\n$valueLine",
+        )
+        val keyLine = emit.cfgText.lines().firstOrNull { it.startsWith("CONSTANT Key =") }
+            ?: fail("missing CONSTANT Key in cfg;\n${emit.cfgText}")
+        assertFalse(
+            keyLine.contains("\"\""),
+            "Key should not widen with \"\" (no Key-typed assign of \"\");\n$keyLine",
         )
     }
 

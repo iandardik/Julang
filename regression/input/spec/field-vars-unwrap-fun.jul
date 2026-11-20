@@ -1,0 +1,29 @@
+type N
+type NodeInfo {
+    id : Int
+    url : String
+}
+
+fun emptyNodeInfo() : NodeInfo =
+    NodeInfo { id := -1, url := "" }
+
+static proc Box {
+    var keyOwner : NodeInfo
+
+    constructor initially(args : List<String>) {
+        transit:
+            keyOwner := emptyNodeInfo()
+    }
+
+    internal transition useUrl() {
+        /* Only .url is read → field-vars + unused-fields + unwrap-singletons. */
+        guard: keyOwner.url = ""
+        transit: keyOwner := emptyNodeInfo()
+    }
+}
+
+spec FieldVarsUnwrapFun := <true> Box[i : N] {
+    N := {"a"}
+} <true>
+
+compile FieldVarsUnwrapFun
