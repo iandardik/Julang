@@ -104,7 +104,36 @@ internal fun rewriteSyntaxError(
         return "Unexpected trailing comma in collection literal"
     }
 
-    return "Syntax error: $msg"
+    // ANTLR often embeds the rest of the file in `at input '...'` / `at: '...'`
+    // after a bad string or recover-fail; keep a short one-line snippet.
+    return "Syntax error: ${compactAntlrMessage(msg)}"
+}
+
+/** Collapse newlines and truncate long quoted payloads in ANTLR messages. */
+internal fun compactAntlrMessage(msg: String, maxSnippet: Int = 60): String {
+    // Prefer truncating quoted regions ANTLR uses for the offending text.
+    val quoted = Regex("""'(?:\\'|[^'])*'""")
+    return quoted.replace(msg) { mr ->
+        val raw = mr.value
+        // Strip surrounding quotes for shortening, then re-wrap.
+        val inner = raw.substring(1, raw.length - 1)
+            .replace("\\n", "\n")
+            .replace("\\r", "")
+            .replace("\\t", " ")
+            .replace('\n', ' ')
+            .replace('\r', ' ')
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+        val short = if (inner.length <= maxSnippet) {
+            inner
+        } else {
+            inner.take(maxSnippet).trimEnd() + "…"
+        }
+        "'$short'"
+    }.let { compacted ->
+        // Also flatten any remaining newlines outside quotes.
+        compacted.replace('\n', ' ').replace(Regex("""\s+"""), " ").trim()
+    }
 }
 
 /**

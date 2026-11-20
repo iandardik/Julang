@@ -1,0 +1,131 @@
+import julay.funlib.length
+import julay.funlib.parseInt
+import julay.funlib.listOf
+import julay.funlib.setOf
+import julay.funlib.mapOf
+import julay.funlib.splice
+import node.lib.NodeInfo
+import node.lib.CfgPair
+import node.lib.KvPair
+import node.lib.OwnerEntry
+import node.lib.parseCfg
+import specs.net.Key
+import specs.net.Value
+
+export fun reshardEntries(store : Map<Key, Value>, excludeKey : Key) : List<KvPair> =
+    let (candidates : List<Key> := store.keys.filter(x -> x ~= excludeKey).toList())
+    let (limit : Int := length(candidates) / 4)
+    let (taken : List<Key> := splice(candidates, 1, limit)) {
+        taken.map(key -> KvPair { k := key, v := store[key] })
+    }
+
+/*
+ * Per-process KV shard: local store + ownership directory.
+ * Handlers sync via service/client; peer RPCs are done from handlers over HTTP.
+ *
+ * Action arg names are unique across actions that share a procfun so Go emit
+ * does not redeclare the same := binder in one function.
+ */
+export static proc Store {
+    const me : NodeInfo
+    const cluster : List<NodeInfo>
+    var store : Map<Key, Value>
+    var owners : Map<Key, String>
+
+    constructor initially(args : List<String>) {
+        transit:
+            let id : Int := parseInt(args[2])
+            let cfg : CfgPair := parseCfg(args[1], id)
+            me := cfg.me
+            cluster := cfg.cluster
+            store := mapOf()
+            owners := mapOf()
+        error:
+            (length(args) ~= 2) -> "usage: ShardNode <config_file> <node_id>"
+    }
+
+    service transition getMe(url : String) {
+        guard: url = me.url
+    }
+
+    service transition getClusterSize(clusterN : Int) {
+        guard: clusterN = length(cluster)
+    }
+
+    /* Client binds peerI; hub replies with peerUrl/peerId. */
+    service transition peerAt(peerI : Int, atUrl : String, atId : Int) {
+        guard:
+            & atUrl = cluster[peerI].url
+            & atId = cluster[peerI].id
+    }
+
+    /* Client binds ownKey; hub replies with owner ("" if unowned). */
+    service transition ownerOf(ownKey : Key, owner : String) {
+        guard: owner = if (ownKey in owners) { owners[ownKey] } else { "" }
+    }
+
+    /* Client binds getKey; hub replies with getVal. */
+    service transition getValue(getKey : Key, getVal : Value) {
+        guard: getVal = store[getKey]
+    }
+
+    /* Bound by Shard clients; named apart from PerfectNet/Shard wire `keyCount`. */
+    service transition storeKeyCount(countN : Int) {
+        guard: countN = store.length
+    }
+
+    /* Client binds putKey and putVal. */
+    service transition putLocal(putKey : Key, putVal : Value) {
+        transit:
+            store[putKey] := putVal
+            owners[putKey] := me.url
+    }
+
+    /* Client binds claimKey and claimOwner. */
+    service transition applyClaim(claimKey : Key, claimOwner : String) {
+        transit:
+            owners[claimKey] := claimOwner
+    }
+
+    /*
+     * Drop a reshard slice from this node (hub replies fix entries):
+     *   excludeKey — omitted from the donated batch (the key this put is writing)
+     *   newOwner   — peer URL that will own the moved keys
+     *   entries    — KV pairs removed here and sent via goMoveBatch
+     */
+    service transition dropReshardBatch(
+        excludeKey : Key,
+        newOwner : String,
+        entries : List<KvPair>
+    ) {
+        /* Self-donate would drop store keys while leaving owners[k] = me (OwnerHasValue).
+         * error: (not guard) so the hub still binds entries for channel direction. */
+        error:
+            (newOwner = me.url) -> "dropReshardBatch: newOwner must be a peer, not self"
+        guard: entries = reshardEntries(store, excludeKey)
+        transit:
+            /* Remove exactly the keys named in `entries` (same value as the guard).
+             * Do not re-sample store.keys — map iteration order is not stable across calls. */
+            let takenSet : Set<Key> := entries.map(e -> e.k).toSet()
+            let ownerKeys : Set<Key> := owners.keys.filter(x -> x ~in takenSet) + takenSet
+            store := store.keys.filter(x -> x ~in takenSet).associateWith(x -> store[x])
+            owners := ownerKeys.associateWith(k ->
+                if (k in takenSet) { newOwner } else { owners[k] })
+    }
+
+    /* Client binds moveKey, moveVal, moveOwner. */
+    service transition putFromMove(moveKey : Key, moveVal : Value, moveOwner : String) {
+        transit:
+            store[moveKey] := moveVal
+            owners[moveKey] := moveOwner
+    }
+
+    /* Client receives typed ownership rows; RpcIn encodes the HTTP body. */
+    service transition ownersEntries(entries : List<OwnerEntry>) {
+        guard:
+            entries = owners.keys.toList().map(key -> OwnerEntry {
+                k := key,
+                owner := owners[key]
+            })
+    }
+}

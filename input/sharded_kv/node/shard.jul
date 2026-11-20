@@ -1,5 +1,7 @@
 import julay.funlib.length
 import julay.funlib.listOf
+import julay.funlib.setOf
+import node.lib.emptyNodeInfo
 import node.lib.PutResult
 import node.lib.GetResult
 import node.lib.KvPair
@@ -8,288 +10,77 @@ import node.lib.PeerPick
 import specs.net.Key
 import specs.net.Value
 
-/*
- * Shard domain: ownership, reshard, claim fan-out. No HTTP wire strings —
- * RpcIn/RpcOut handle marshalling; Store holds maps.
- *
- * Every worker is a proc; its parent is bound by the composition:
- * HandleRpc (JAR) / PerfectNet (TLA) for the request workers, Put /
- * ApplyMoveBatch for the helpers. Outbound peer messages (goClaim / goMoveBatch /
- * goKeyCount) spawn RpcOut children in the JAR and enqueue on PerfectNet in TLA.
- * In ShardSpec, Put's put / putDone stay unsynced (env clients; SF_vars(Next)).
- *
- * Action arg names are unique within each proc so Go emit does not redeclare the
- * same := binder in one run loop.
- */
+export proc ShardLogic := PathLogic || ClusterInfo
 
-/* Ask every other peer for its key count; return the lightest one. */
-export proc FindLightestPeer {
-    const meUrl : String
+proc PathLogic := (Put || BroadcastOwnership) || Get || Owners
+
+
+proc Put {
+    const putKey : Key
+    const putVal : Value
     var step : String
-    var clusterSize : Int
-    var peerIdx : Int
-    var curUrl : String
-    var curId : Int
-    var bestPeerUrl : String
-    var bestPeerId : Int
-    var bestPeerCount : Int
-    var haveBest : Boolean
+    var me : NodeInfo
+    var keyOwner : NodeInfo
 
-    constructor findLightestPeer(scanFrom : String) {
+    constructor put(key : Key, val : Value) {
         transit:
-            meUrl := scanFrom
-            step := "clustersize"
-            clusterSize := 0
-            peerIdx := 1
-            curUrl := ""
-            curId := 0
-            bestPeerUrl := ""
-            bestPeerId := 0
-            bestPeerCount := 0
-            haveBest := false
+            putKey := put
+            putVal := val
+            step := "getMyInfo"
+            me := emptyNodeInfo()
+            keyOwner := emptyNodeInfo()
     }
 
-    client transition getClusterSize(clusterN : Int) {
-        guard: step = "clustersize"
-        transit:
-            clusterSize := clusterN
-            peerIdx := 1
-            step := if (clusterN = 0) { "done" } else { "peers" }
-    }
-
-    client transition peerAt(peerI : Int, atUrl : String, atId : Int) {
-        guard: step = "peers" & peerI = peerIdx & peerIdx <= clusterSize
-        transit:
-            curUrl := atUrl
-            curId := atId
-            step := if (atUrl = meUrl) { "next" } else { "ask" }
-    }
-
-    /* Return address is this node: the reply comes back as keyCountReply(peerUrl, count). */
-    transition goKeyCount(peerUrl : String, fromUrl : String) {
-        guard: step = "ask" & peerUrl = curUrl & fromUrl = meUrl
-        transit: step := "wait"
-    }
-
-    transition keyCountReply(replyFrom : String, count : Int) {
-        guard: step = "wait" & replyFrom = curUrl
-        transit:
-            let better : Boolean := ~haveBest
-                | count < bestPeerCount
-                | (count = bestPeerCount & curId < bestPeerId)
-            haveBest := if (better) { true } else { haveBest }
-            bestPeerUrl := if (better) { curUrl } else { bestPeerUrl }
-            bestPeerId := if (better) { curId } else { bestPeerId }
-            bestPeerCount := if (better) { count } else { bestPeerCount }
-            step := "next"
-    }
-
-    internal transition advance() {
-        guard: step = "next"
-        transit:
-            let nextPeerIdx : Int := peerIdx + 1
-            peerIdx := nextPeerIdx
-            step := if (nextPeerIdx > clusterSize) { "done" } else { "peers" }
-    }
-
-    return lightestPeer(found : PeerPick) {
+    client transition getMyInfo(myInfo : NodeInfo) {
         guard:
-            step = "done" & found = PeerPick {
-                haveBest := haveBest,
-                url := bestPeerUrl,
-                id := bestPeerId,
-                count := bestPeerCount
+            step = "getMyInfo"
+        transit:
+            me := myInfo
+            step := "ownerOf"
+    }
+
+    client transition ownerOf(key : Key, owner : NodeInfo) {
+        guard:
+            & step = "ownerOf"
+            & key = putKey
+        transit:
+            let meIsOwner : Boolean := (owner = emptyNodeInfo() | owner = me)
+            keyOwner := if (meIsOwner) { me } else { owner }
+            step := if (meIsOwner) { "broadcast" } else { "redirect" }
+    }
+
+    transition broadcastOwnership(key : Key, myInfo : NodeInfo) {
+        guard:
+            & step = "broadcast"
+            & key = putKey
+            & myInfo = me
+        transit:
+            step := "midBroadcast"
+    }
+
+    transition broadcastDone(resolvedOwner : NodeInfo) {
+        guard:
+            step = "midBroadcast"
+        transit:
+            keyOwner := resolvedOwner 
+            step := if (keyOwner = me) {
+                "put"
+            } else {
+                // if another node ended up owning the key then don't add it
+                // to the store; instead, redirect to that node and wait for
+                // their broadcast for adding the ownership info to the store.
+                "redirect"
             }
     }
-}
 
-/* Fan-out claim to every peer except self (fire-and-forget). */
-export proc BroadcastClaim {
-    const claimKey : Key
-    const claimOwner : String
-    const meUrl : String
-    var step : String
-    var clusterSize : Int
-    var peerIdx : Int
-    var curUrl : String
-
-    constructor broadcastClaim(bcKey : Key, bcOwner : String, bcFrom : String) {
-        transit:
-            claimKey := bcKey
-            claimOwner := bcOwner
-            meUrl := bcFrom
-            step := "clustersize"
-            clusterSize := 0
-            peerIdx := 1
-            curUrl := ""
-    }
-
-    client transition getClusterSize(clusterN : Int) {
-        guard: step = "clustersize"
-        transit:
-            clusterSize := clusterN
-            peerIdx := 1
-            step := if (clusterN = 0) { "done" } else { "peers" }
-    }
-
-    client transition peerAt(peerI : Int, atUrl : String, atId : Int) {
-        guard: step = "peers" & peerI = peerIdx & peerIdx <= clusterSize
-        transit:
-            curUrl := atUrl
-            step := if (atUrl = meUrl | atId < 0) { "next" } else { "send" }
-    }
-
-    transition goClaim(peerUrl : String, key : Key, owner : String) {
-        guard: step = "send" & peerUrl = curUrl & key = claimKey & owner = claimOwner
-        transit: step := "next"
-    }
-
-    internal transition advance() {
-        guard: step = "next"
-        transit:
-            let nextPeerIdx : Int := peerIdx + 1
-            peerIdx := nextPeerIdx
-            step := if (nextPeerIdx > clusterSize) { "done" } else { "peers" }
-    }
-
-    return broadcastDone() {
-        guard: step = "done"
-    }
-}
-
-/*
- * Hand off up to 25% of keys (excluding exKey) to the peer, one goMoveBatch per entry.
- * The receiving ApplyMoveBatch stores each entry, takes ownership, and broadcasts the claim.
- */
-export proc ReshardToPeer {
-    const exportKey : Key
-    const peer : String
-    var step : String
-    var movedEntries : List<KvPair>
-    var moveIdx : Int
-
-    constructor reshardToPeer(exKey : Key, reshardPeer : String) {
-        transit:
-            exportKey := exKey
-            peer := reshardPeer
-            step := "export"
-            movedEntries := listOf<KvPair>()
-            moveIdx := 1
-    }
-
-    client transition dropReshardBatch(
-        excludeKey : Key,
-        newOwner : String,
-        entries : List<KvPair>
-    ) {
-        guard: step = "export" & excludeKey = exportKey & newOwner = peer
-        transit:
-            movedEntries := entries
-            moveIdx := 1
-            step := if (length(entries) > 0) { "send" } else { "done" }
-    }
-
-    transition goMoveBatch(peerUrl : String, ownerUrl : String, key : Key, val : Value) {
+    client transition putKV(key : Key, val : Value, owner : NodeInfo) {
         guard:
-            & step = "send"
-            & moveIdx <= length(movedEntries)
-            & peerUrl = peer
-            & ownerUrl = peer
-            & key = movedEntries[moveIdx].k
-            & val = movedEntries[moveIdx].v
+            & step = "put"
+            & key = putKey
+            & val = putVal
+            & owner = keyOwner
         transit:
-            let nextIdx : Int := moveIdx + 1
-            moveIdx := nextIdx
-            step := if (nextIdx > length(movedEntries)) { "done" } else { "send" }
-    }
-
-    return reshardDone() {
-        guard: step = "done"
-    }
-}
-
-export proc Put {
-    const key : Key
-    const val : Value
-    var step : String
-    var meUrl : String
-    var ownerUrl : String
-    var myCount : Int
-    var wasUnowned : Boolean
-    var pick : PeerPick
-
-    constructor put(putK : Key, putV : Value) {
-        transit:
-            key := putK
-            val := putV
-            step := "lookup"
-            meUrl := ""
-            ownerUrl := ""
-            myCount := 0
-            wasUnowned := false
-            pick := PeerPick { haveBest := false, url := "", id := 0, count := 0 }
-    }
-
-    client transition getMe(url : String) {
-        guard: step = "lookup"
-        transit:
-            meUrl := url
-            step := "owner"
-    }
-
-    client transition ownerOf(ownKey : Key, owner : String) {
-        guard: step = "owner" & ownKey = key
-        transit:
-            ownerUrl := owner
-            wasUnowned := owner = ""
-            step := if (owner = "" | owner = meUrl) { "count" } else { "redirect" }
-    }
-
-    client transition storeKeyCount(countN : Int) {
-        guard: step = "count"
-        transit:
-            myCount := countN
-            step := "scan"
-    }
-
-    transition findLightestPeer(scanFrom : String) {
-        guard: step = "scan" & scanFrom = meUrl
-        transit: step := "scanning"
-    }
-
-    transition lightestPeer(found : PeerPick) {
-        guard: step = "scanning"
-        transit:
-            pick := found
-            let shouldReshard : Boolean := found.haveBest
-                & found.count < myCount / 2
-                & myCount - found.count >= 4
-            step := if (shouldReshard) { "reshard" } else { "put" }
-    }
-
-    transition reshardToPeer(exKey : Key, reshardPeer : String) {
-        guard: step = "reshard" & exKey = key & reshardPeer = pick.url
-        transit: step := "resharding"
-    }
-
-    transition reshardDone() {
-        guard: step = "resharding"
-        transit: step := "put"
-    }
-
-    client transition putLocal(putKey : Key, putVal : Value) {
-        guard: step = "put" & putKey = key & putVal = val
-        transit: step := if (wasUnowned) { "claim" } else { "done" }
-    }
-
-    transition broadcastClaim(bcKey : Key, bcOwner : String, bcFrom : String) {
-        guard: step = "claim" & bcKey = key & bcOwner = meUrl & bcFrom = meUrl
-        transit: step := "claiming"
-    }
-
-    transition broadcastDone() {
-        guard: step = "claiming"
-        transit: step := "done"
+            step := "done"
     }
 
     return putDone(result : PutResult) {
@@ -298,47 +89,53 @@ export proc Put {
             & result = if (step = "done") {
                 PutResult { kind := "ok", ownerUrl := "" }
             } else {
-                PutResult { kind := "redirect", ownerUrl := ownerUrl }
+                PutResult { kind := "redirect", ownerUrl := keyOwner.url }
             }
     }
 }
 
-export proc Get {
-    const key : Key
+proc Get {
+    const getKey : Key
     var step : String
-    var meUrl : String
-    var ownerUrl : String
+    var me : NodeInfo
+    var keyOwner : NodeInfo
     var value : Value
 
-    constructor get(getK : Key) {
+    constructor get(key : Key) {
         transit:
-            key := getK
-            step := "lookup"
-            meUrl := ""
-            ownerUrl := ""
+            getKey := key
+            step := "getMyInfo"
+            me := emptyNodeInfo()
+            keyOwner := emptyNodeInfo()
             value := ""
     }
 
-    client transition getMe(url : String) {
-        guard: step = "lookup"
+    client transition getMyInfo(myInfo : NodeInfo) {
+        guard:
+            step = "getMyInfo"
         transit:
-            meUrl := url
-            step := "owner"
+            me := myInfo
+            step := "ownerOf"
     }
 
-    client transition ownerOf(ownKey : Key, owner : String) {
-        guard: step = "owner" & ownKey = key
+    client transition ownerOf(key : Key, owner : NodeInfo) {
+        guard:
+            & step = "ownerOf"
+            & key = getKey
         transit:
-            ownerUrl := owner
-            step := if (owner = "") {
-                "missing"
-            } else {
-                if (owner = meUrl) { "getvalue" } else { "redirect" }
+            keyOwner := owner
+            step := when (owner) {
+                emptyNodeInfo() -> "missing"
+                me -> "getvalue"
+                else -> "redirect"
             }
     }
 
+    // look up the value of the key if this node owns it.
     client transition getValue(getKey : Key, getVal : Value) {
-        guard: step = "getvalue" & getKey = key
+        guard:
+            & step = "getvalue"
+            & getKey = key
         transit:
             value := getVal
             step := "ok"
@@ -346,120 +143,143 @@ export proc Get {
 
     return getDone(result : GetResult) {
         guard:
-            & (step = "ok" | step = "redirect" | step = "missing")
+            & step in setOf("ok", "redirect", "missing")
             & result = when (step) {
-                "ok" -> GetResult { kind := "ok", value := value, ownerUrl := "" }
-                "redirect" -> GetResult { kind := "redirect", value := "", ownerUrl := ownerUrl }
-                else -> GetResult { kind := "missing", value := "", ownerUrl := "" }
+                "ok" -> GetResult {
+                    kind := "ok",
+                    value := value,
+                    ownerUrl := ""
+                }
+                "redirect" -> GetResult {
+                    kind := "redirect",
+                    value := "",
+                    ownerUrl := keyOwner.url
+                }
+                else -> GetResult {
+                    kind := "missing",
+                    value := "",
+                    ownerUrl := ""
+                }
             }
     }
 }
 
-/* Ownership directory as typed rows — RpcIn encodes the HTTP body. */
-export proc Owners {
+proc Owners {
     var step : String
-    var outEntries : List<OwnerEntry>
+    var owners : List<OwnerEntry>
 
     constructor owners() {
         transit:
-            step := "call"
-            outEntries := listOf<OwnerEntry>()
+            step := "getAllOwners"
+            owners := listOf<OwnerEntry>()
     }
 
-    client transition ownersEntries(entries : List<OwnerEntry>) {
-        guard: step = "call"
+    client transition getAllOwners(allOwners : List<OwnerEntry>) {
+        guard:
+            step = "getAllOwners"
         transit:
-            step := "respond"
-            outEntries := entries
+            step := "done"
+            owners := allOwners
     }
 
-    return ownersDone(rows : List<OwnerEntry>) {
-        guard: step = "respond" & rows = outEntries
+    return ownersDone(allOwners : List<OwnerEntry>) {
+        guard:
+            & step = "done"
+            & allOwners = owners
     }
 }
 
-/* Answer a peer's key-count query; the reply goes back to `requester`. */
-export proc KeyCount {
-    const requester : String
-    var step : String
-    var outN : Int
-
-    constructor keyCount(fromUrl : String) {
-        transit:
-            requester := fromUrl
-            step := "call"
-            outN := 0
-    }
-
-    client transition storeKeyCount(countN : Int) {
-        guard: step = "call"
-        transit:
-            step := "respond"
-            outN := countN
-    }
-
-    return keyCountDone(toUrl : String, replyCount : Int) {
-        guard: step = "respond" & toUrl = requester & replyCount = outN
-    }
-}
-
-export proc ApplyClaim {
-    const key : Key
-    const owner : String
-    var step : String
-
-    constructor claim(claimKey : Key, claimOwner : String) {
-        transit:
-            key := claimKey
-            owner := claimOwner
-            step := "call"
-    }
-
-    client transition applyClaim(claimKey : Key, claimOwner : String) {
-        guard: step = "call" & claimKey = key & claimOwner = owner
-        transit: step := "done"
-    }
-
-    internal return claimApplied() {
-        guard: step = "done"
-    }
-}
-
-/*
- * Store one moved KV and take ownership of it in the same step, then broadcast the
- * claim so peers point at this node. OwnerHasValue holds by construction.
+/* Broadcast to the other nodes that we own the key. It may be the
+ * case that another node is also trying to add the same key to their
+ * store, in which case the node with the higher id wins.
  */
-export proc ApplyMoveBatch {
-    const key : Key
-    const val : Value
-    const meUrl : String
+proc BroadcastOwnership {
+    const bcKey : Key
+    const me : NodeInfo
     var step : String
+    var clusterSize : Int
+    var peerIdx : Int
+    var peerInfo : NodeInfo
+    var knownOwner : NodeInfo
 
-    /* moveOwner is this node (the sender addressed the batch to its new owner). */
-    constructor moveBatch(moveOwner : String, moveKey : Key, moveVal : Value) {
+    constructor broadcastOwnership(key : Key, myInfo : NodeInfo) {
         transit:
-            key := moveKey
-            val := moveVal
-            meUrl := moveOwner
-            step := "store"
+            bcKey := key
+            me := myInfo
+            step := "getClusterSize"
+            clusterSize := 0
+            peerIdx := 1
+            peerInfo := emptyNodeInfo()
+            knownOwner := me
     }
 
-    client transition putFromMove(moveKey : Key, moveVal : Value, moveOwner : String) {
-        guard: step = "store" & moveKey = key & moveVal = val & moveOwner = meUrl
-        transit: step := "claim"
+    client transition getClusterSize(size : Int) {
+        guard:
+            step = "getClusterSize"
+        transit:
+            clusterSize := size
+            step := "peerAt"
     }
 
-    transition broadcastClaim(bcKey : Key, bcOwner : String, bcFrom : String) {
-        guard: step = "claim" & bcKey = key & bcOwner = meUrl & bcFrom = meUrl
-        transit: step := "claiming"
+    client transition peerAt(idx : Int, peer : NodeInfo) {
+        guard:
+            & step = "peerAt"
+            & peerIdx <= clusterSize
+            & idx = peerIdx
+        transit:
+            peerInfo := peer
+            step := if (peer = me | peer = emptyNodeInfo()) {
+                "nextPeer"
+            } else {
+                "broadcast"
+            }
     }
 
-    transition broadcastDone() {
-        guard: step = "claiming"
-        transit: step := "done"
+    transition broadcastOwnershipToPeer(peer : NodeInfo, key : Key, myInfo : NodeInfo) {
+        guard:
+            & step = "broadcast"
+            & peer = peerInfo
+            & key = bcKey
+            & myInfo = me
+        transit:
+            step := "midBroadcast"
     }
 
-    internal return moveApplied() {
-        guard: step = "done"
+    transition doneBroadcastOwnershipToPeer(owner : NodeInfo) {
+        guard:
+            & step = "midBroadcast"
+        transit:
+            knownOwner := owner
+            step := "nextPeer"
+    }
+
+    internal transition nextPeer() {
+        guard:
+            step = "nextPeer"
+        transit:
+            peerIdx := if (knownOwner = me) {
+                peerIdx + 1
+            } else {
+                // if we find a different owner of the same key then abort the broadcast
+                clusterSize + 1
+            }
+            step := "peerAt"
+    }
+
+    return broadcastDone(resolvedOwner : NodeInfo) {
+        guard:
+            & resolvedOwner = knownOwner
+            & peerIdx > clusterSize
+    }
+}
+
+// TODO implement
+proc RecvBroadcastOwnership {
+    constructor recvBroadcastOwnership(key : Key) {
+    }
+
+    return doneRecvBroadcastOwnership(owner : NodeInfo) {
+        guard:
+            owner = emptyNodeInfo()
     }
 }

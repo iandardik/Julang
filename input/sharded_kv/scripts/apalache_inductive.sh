@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Apalache inductive-invariance checks for Obl LocalInvs:
+# Apalache inductive-invariance checks for Obl LocalInvs on full Next:
 #   (1) Init ⇒ Inv            --init=Init --inv=Inv --length=0
 #   (2) Inv ∧ Next ⇒ Inv'     --init=InvInit --inv=Inv --length=1
 #       where InvInit == TypeOK /\ Inv  (Inv alone is not an Apalache assignment-init)
@@ -9,12 +9,12 @@
 #   ./input/sharded_kv/scripts/apalache_inductive.sh              # all Obls
 #   ./input/sharded_kv/scripts/apalache_inductive.sh InboundEnvObl
 #
-# Default JVM_ARGS=-Xmx8G. Tiny CONSTANTS: String is only node URLs (step
-# labels live in TypeOK enums). SUBSET(msg) size is 2^(|N|^2*|K|*|S|…) — keep |S|<=3.
-# Inbound inv-step uses NextInd (Next minus open goMoveBatch): AssumeOK does not
-# prime moveBatchMsgs, so the injector can break UniqueKey under a true AsmOK.
-# Put/Shard inv-step uses NextInd: putLocal/goMoveBatch gated by Inv'
-# (closed product syncs putLocal with store AsmOK; bag inject must keep MoveNetOk).
+# Default JVM_ARGS=-Xmx8G. Tiny CONSTANTS (bound B for inductive discharge):
+#   NodeSet={n1,n2}, Key={a}, DynProc={dp1}, String={"","n1","n2"}, bags |·|≤1.
+# Full Obl Next including open goMoveBatch. Put/Shard write syncs (putLocal,
+# applyClaim, putFromMove, dropReshardBatch) conjoin StoreAsmOK — the same gate
+# StoreObl applies under assume StoreAsm — modeling Julang client/service sync
+# in the product (not an Inv'-filter under-approx of unrelated transitions).
 
 set -euo pipefail
 
@@ -44,7 +44,7 @@ inv_for() {
 write_inductive_cfg() {
   local dst="$1"
   cat > "$dst" <<'EOF'
-\* Apalache inductive-check model (minimal CONSTANTS; Nat finite for TypeOK)
+\* Apalache inductive-check model (bound B; Nat finite for TypeOK)
 INIT Init
 NEXT Next
 CHECK_DEADLOCK FALSE
@@ -76,12 +76,8 @@ write_wrapper() {
       '  /\ Cardinality(keyCountReplies) <= 1'
     )
   fi
-  # Inbound: start under assume; couple ApplyClaim slot owner to StoreAsm (fluent
-  # PendingClaimApply alone can desync from TypeOK's free constructed/owner).
+  # Inbound: start under assume; couple ApplyClaim / MoveApply slots to fluents.
   if [[ "$name" == "InboundEnvObl" ]]; then
-    # Couple TypeOK's free ApplyClaim slots to PendingClaimApply / ClaimSeen so
-    # InvInit cannot arm applyClaim against StoreAsm while fluents stay false.
-    # PendingClaimApply must exactly match constructed slots (no extra ghost cells).
     extras+=(
       '  /\ InboundAsm'
       '  /\ \A n \in NodeSet, i \in DynProc:'
@@ -114,14 +110,14 @@ write_wrapper() {
       '            /\ step_ApplyMoveBatch[n][i] = "store"'
       '            /\ key_ApplyMoveBatch[n][i] = k'
       '            /\ meUrl_ApplyMoveBatch[n][i] = o'
+      # Bag inject pending: every move msg has MoveBagPending (InboundAsm shape).
+      '  /\ \A msg \in moveBatchMsgs: MoveBagPending[msg.k]'
     )
   fi
   {
     echo "---- MODULE ${name}_IndCheck ----"
     echo "EXTENDS ${name}, FiniteSets"
     echo ""
-    # StoreObl TypeOK uses DOMAIN ⊆ predicates for store/owners — not Apalache
-    # assignments. Use explicit \in over partial-map ranges instead.
     if [[ "$name" == "StoreObl" ]]; then
       cat <<'STORE'
 \* Nondet assignment of every var (Apalache), then the inductive predicate.
@@ -131,7 +127,8 @@ ApaTypeOK ==
   /\ AppliedClaim \in [NodeSet \X Key \X String -> BOOLEAN]
   /\ Held \in [NodeSet \X Key -> BOOLEAN]
   /\ ClaimSeen \in [Key \X String -> BOOLEAN]
-  /\ IfaceBroken \in BOOLEAN
+  /\ MeTold \in [NodeSet \X String -> BOOLEAN]
+  /\ OwnerTold \in [NodeSet \X Key \X String -> BOOLEAN]
   /\ me \in [NodeSet -> [id: TypeOKInt, url: String]]
   /\ \E storeDom \in [NodeSet -> SUBSET Key] :
        \E storeTot \in [NodeSet -> [Key -> Value]] :
@@ -148,7 +145,6 @@ InvInit ==
 STORE
     elif [[ "$name" == "PutEnvObl" || "$name" == "ShardEnvObl" ]]; then
       # TypeOK uses BoundedSeq = UNION {[1..k->S]} which Apalache refuses to expand.
-      # MaxListLen=1: assign movedEntries over {<<>>} ∪ singletons instead.
       python3 - "$SKV_DIR/${name}.tla" "$inv" <<'PY'
 import re, sys
 from pathlib import Path
@@ -159,7 +155,6 @@ if not m:
     raise SystemExit("TypeOK not found")
 body = m.group(1)
 pat = r"  /\\ movedEntries \\in \[NodeSet -> \[DynProc -> BoundedSeq\(.*\)\]\]\n"
-# MaxListLen=1: empty fun or singleton [1 |-> entry] (same shape as Init/BoundedSeq).
 repl = (
     "  /\\ movedEntries \\in [NodeSet -> [DynProc -> "
     "{ [x \\in {} |-> [k |-> \"a\", v |-> \"v1\"]] } \\cup "
@@ -181,23 +176,35 @@ print("  /\\ Cardinality(keyCountReplies) <= 1")
 print("  /\\ StoreIface")
 print(f"  /\\ {inv}")
 print()
-# PutEnv/ShardEnv emit fluent mutators under StoreIface only. Closed product
-# syncs putLocal/applyClaim/putFromMove/drop with IndexedStore AsmOK; bag
-# inject must keep MoveNetOk. Gate those actions with Inv' when present.
+# Product write-sync: StoreAsmOK (IndexedStore assume). Held/bag mutators also
+# require MoveNetOk' so putLocal cannot arm Held while a move msg names that key.
+print("StoreAsmOK ==")
+print("  /\\ \\A n \\in NodeSet, k \\in Key: ~AppliedClaim[n, k, n]'")
+print("  /\\ \\A k \\in Key, n1, n2 \\in NodeSet:")
+print("        (Held[n1, k]' /\\ Held[n2, k]') => n1 = n2")
+print("  /\\ \\A k \\in Key, o1, o2 \\in String:")
+print("        (ClaimSeen[k, o1]' /\\ ClaimSeen[k, o2]') => o1 = o2")
+print()
+print("MoveNetOkOK == MoveNetOk_BagShape' /\\ MoveNetOk_UniqueKey'")
+print()
 t = Path(sys.argv[1]).read_text()
 gates = [
-    ("putLocal(n, i)", "putLocalInd", "(Str, Str)", f"putLocal(n, i) /\\ {inv}'"),
-    ("goMoveBatch(n, i, dest, peerUrl)", "goMoveBatchInd", "(Str, Str, Str, Str)",
-     f"goMoveBatch(n, i, dest, peerUrl) /\\ {inv}'"),
-    ("applyClaim(n, i)", "applyClaimInd", "(Str, Str)", f"applyClaim(n, i) /\\ {inv}'"),
-    ("putFromMove(n, i)", "putFromMoveInd", "(Str, Str)", f"putFromMove(n, i) /\\ {inv}'"),
-    ("dropReshardBatch(n, i, entries)", "dropReshardBatchInd",
+    ("putLocal(n, i)", "putLocalSync", "(Str, Str)",
+     "putLocal(n, i) /\\ StoreAsmOK /\\ MoveNetOkOK"),
+    ("applyClaim(n, i)", "applyClaimSync", "(Str, Str)",
+     "applyClaim(n, i) /\\ StoreAsmOK"),
+    ("putFromMove(n, i)", "putFromMoveSync", "(Str, Str)",
+     "putFromMove(n, i) /\\ StoreAsmOK /\\ MoveNetOkOK"),
+    ("dropReshardBatch(n, i, entries)", "dropReshardBatchSync",
      "(Str, Str, Int -> {k: Str, v: Str})",
-     f"dropReshardBatch(n, i, entries) /\\ {inv}'"),
+     "dropReshardBatch(n, i, entries) /\\ StoreAsmOK /\\ MoveNetOkOK"),
+    ("goMoveBatch(n, i, dest, peerUrl)", "goMoveBatchSync",
+     "(Str, Str, Str, Str)",
+     "goMoveBatch(n, i, dest, peerUrl) /\\ MoveNetOkOK"),
 ]
 m = re.search(r"^Next ==\n((?:  .*\n)+)", t, re.M)
 if not m:
-    raise SystemExit("Next not found for NextInd")
+    raise SystemExit("Next not found for NextSync")
 body = m.group(1)
 for call, name, typ, rhs in gates:
     if call not in body:
@@ -207,7 +214,7 @@ for call, name, typ, rhs in gates:
     print(f"{name}{args} == {rhs}")
     print()
     body = body.replace(call, f"{name}{args}")
-print("NextInd ==")
+print("NextSync ==")
 print(body, end="")
 print()
 PY
@@ -222,21 +229,48 @@ PY
       echo "  /\ ${inv}"
       echo ""
     fi
+    # InboundAsmOK primes fluents but not moveBatchMsgs — open goMoveBatch can
+    # inject a second key duplicate under a still-true AsmOK. Conjoin primed bag
+    # UniqueKey/BagShape on goMoveBatch (product-faithful bag discipline).
     if [[ "$name" == "InboundEnvObl" ]]; then
-      # AssumeOK primes fluents but not moveBatchMsgs; open goMoveBatch can
-      # therefore break UniqueKey under a still-true AsmOK. Strip the injector
-      # (under-approx of the product; see protocol.jul Rest notes).
-      # Cannot write Next /\ ~goMoveBatch — Apalache rejects assignments under ~.
       python3 - "$SKV_DIR/${name}.tla" <<'PY'
 import re, sys
 from pathlib import Path
 t = Path(sys.argv[1]).read_text()
+print("MoveBagShapeOK ==")
+print("  /\\ \\A msgSrc, msgDest \\in NodeSet, msgOwner \\in String, msgKey \\in Key, msgVal \\in Value:")
+print("        ([src |-> msgSrc, dest |-> msgDest, owner |-> msgOwner,")
+print("          k |-> msgKey, v |-> msgVal] \\in moveBatchMsgs') =>")
+print("          /\\ msgOwner = msgDest")
+print("          /\\ msgSrc # msgDest")
+print("          /\\ ~Held[msgSrc, msgKey]'")
+print("          /\\ ~Held[msgDest, msgKey]'")
+print("          /\\ MoveBagPending[msgKey]'")
+print("          /\\ ~MoveApplyPending[msgKey]'")
+print()
+print("MoveBagUniqueOK ==")
+print("  /\\ \\A msgSrc1, msgDest1 \\in NodeSet, msgOwner1 \\in String, msgKey \\in Key, msgVal1 \\in Value,")
+print("         msgSrc2, msgDest2 \\in NodeSet, msgOwner2 \\in String, msgVal2 \\in Value:")
+print("        (([src |-> msgSrc1, dest |-> msgDest1, owner |-> msgOwner1,")
+print("           k |-> msgKey, v |-> msgVal1] \\in moveBatchMsgs')")
+print("         /\\ ([src |-> msgSrc2, dest |-> msgDest2, owner |-> msgOwner2,")
+print("              k |-> msgKey, v |-> msgVal2] \\in moveBatchMsgs')) =>")
+print("          /\\ msgSrc1 = msgSrc2 /\\ msgDest1 = msgDest2")
+print("          /\\ msgOwner1 = msgOwner2 /\\ msgVal1 = msgVal2")
+print()
+print("\\* @type: (Str, Str, Str, Str, Str) => Bool;")
+print("goMoveBatchSync(n, dest, ownerUrl, key, val_) ==")
+print("  goMoveBatch(n, dest, ownerUrl, key, val_) /\\ MoveBagShapeOK /\\ MoveBagUniqueOK")
+print()
 m = re.search(r"^Next ==\n((?:  .*\n)+)", t, re.M)
 if not m:
-    raise SystemExit("Next not found for NextInd")
-lines = [l for l in m.group(1).splitlines() if l.strip() and "goMoveBatch" not in l]
-print("NextInd ==")
-print("\n".join(lines))
+    raise SystemExit("Next not found for NextSync")
+body = m.group(1).replace(
+    "goMoveBatch(n, dest, ownerUrl, key, val_)",
+    "goMoveBatchSync(n, dest, ownerUrl, key, val_)",
+)
+print("NextSync ==")
+print(body, end="")
 print()
 PY
     fi
@@ -245,8 +279,8 @@ PY
 }
 
 run_check() {
-  local obl="$1"       # Obl base name (for cfg/log)
-  local module="$2"    # .tla module stem to check
+  local obl="$1"
+  local module="$2"
   local init="$3"
   local inv="$4"
   local length="$5"
@@ -292,12 +326,10 @@ run_one() {
   fi
   write_inductive_cfg "$OUT_DIR/${name}.inductive.cfg"
   write_wrapper "$name" "$inv"
-  # (1) Init ⇒ Inv on the Obl module
   run_check "$name" "$name" "Init" "$inv" 0 "init-implies-inv" || return 1
-  # (2) Inv ∧ Next ⇒ Inv' via TypeOK/\Inv as assignment-init
   local next="Next"
-  if [[ "$name" == "InboundEnvObl" || "$name" == "PutEnvObl" || "$name" == "ShardEnvObl" ]]; then
-    next="NextInd"
+  if [[ "$name" == "PutEnvObl" || "$name" == "ShardEnvObl" || "$name" == "InboundEnvObl" ]]; then
+    next="NextSync"
   fi
   run_check "$name" "${name}_IndCheck" "InvInit" "$inv" 1 "inv-step" "$next" || return 1
 }

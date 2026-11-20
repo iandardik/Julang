@@ -3060,8 +3060,10 @@ private fun emitInvariantDefs(
     val byClass = leaves.groupBy { it.name }
     val multiClasses = bases.filter { (byClass[it]?.size ?: 0) > 1 }
     fun formatInv(name: String, remapped: Map<Pair<String, String>, String>): String {
+        // `mp[k] = v` → `k in mp & mp[k] = v` so TLA application is domain-guarded.
+        val formula = withMapIndexDomainGuards(node.invariantFormula())
         val body = exprToTla(
-            node.invariantFormula(),
+            formula,
             leafCtx = emptyMap(),
             argNames = emptySet(),
             self = null,
@@ -3072,7 +3074,7 @@ private fun emitInvariantDefs(
             parentPrec = PREC_BOTTOM,
             globalByLeaf = globalVarsByLeaf(leaves),
         )
-        return if (body.contains('\n') || isMultiLineExpr(node.invariantFormula())) {
+        return if (body.contains('\n') || isMultiLineExpr(formula)) {
             val indented = body.lineSequence().joinToString("\n") { "  $it" }
             "$name ==\n$indented"
         } else {
@@ -3849,9 +3851,9 @@ internal fun offersUseSlice(offers: List<TlaActionOffer>): Boolean =
     }
 
 /**
- * Julay `splice(xs, s, e)` helper: 1-based inclusive with clamp, via TLA `SubSeq`.
- * `e < 1` → empty (empty prefix); else `hi = min(e, Len)`; `lo = s`; empty if `lo > hi`;
- * else `SubSeq(xs, lo, hi)`.
+ * Julay `splice(xs, s, e)` helper: 1-based inclusive with clamp.
+ * Default (TLC): `SubSeq` / `Len`. With `--opt-tla=apalache`: finite CASE on
+ * result length (Apalache forbids symbolic `1..(hi-lo+1)`).
  * Parameter / binder names are clash-renamed against [reservedNames].
  */
 internal fun emitSpliceOperatorDef(reservedNames: Set<String>): String {
@@ -3861,26 +3863,34 @@ internal fun emitSpliceOperatorDef(reservedNames: Set<String>): String {
     val e = allocTlaName("e", taken)
     val lo = allocTlaName("lo", taken)
     val hi = allocTlaName("hi", taken)
-    // CASE on result length (≤ MaxListLen) — Apalache forbids symbolic `1..(hi-lo+1)`.
-    val spliceArms = (1..DEFAULT_MAX_LIST_LEN).joinToString("\n") { n ->
-        val funExpr = if (n == 1) {
-            "(1 :> $xs[$lo])"
-        } else {
-            (1..n).joinToString(" @@ ") { i ->
-                "($i :> $xs[$lo + ${i - 1}])"
+    val body = if (TlaEmitOpts.get().apalache) {
+        // CASE on result length (≤ MaxListLen) — Apalache forbids symbolic ranges.
+        val spliceArms = (1..DEFAULT_MAX_LIST_LEN).joinToString("\n") { n ->
+            val funExpr = if (n == 1) {
+                "(1 :> $xs[$lo])"
+            } else {
+                (1..n).joinToString(" @@ ") { i ->
+                    "($i :> $xs[$lo + ${i - 1}])"
+                }
             }
+            "             [] outLen = $n -> $funExpr"
         }
-        "             [] outLen = $n -> $funExpr"
+        "splice($xs, $s, $e) ==\n" +
+            "  LET empty == [__j \\in {} |-> $xs[__j]]\n" +
+            "  IN IF $e < 1 THEN empty\n" +
+            "     ELSE LET $hi == IF $e > Cardinality(DOMAIN $xs) THEN Cardinality(DOMAIN $xs) ELSE $e\n" +
+            "              $lo == $s\n" +
+            "              outLen == IF $lo > $hi THEN 0 ELSE $hi - $lo + 1\n" +
+            "          IN CASE outLen = 0 -> empty\n" +
+            spliceArms + "\n" +
+            "             [] OTHER -> empty"
+    } else {
+        "splice($xs, $s, $e) ==\n" +
+            "  IF $e < 1 THEN <<>>\n" +
+            "  ELSE LET $hi == IF $e > Len($xs) THEN Len($xs) ELSE $e\n" +
+            "           $lo == $s\n" +
+            "       IN IF $lo > $hi THEN <<>> ELSE SubSeq($xs, $lo, $hi)"
     }
-    val body = "splice($xs, $s, $e) ==\n" +
-        "  LET empty == [__j \\in {} |-> $xs[__j]]\n" +
-        "  IN IF $e < 1 THEN empty\n" +
-        "     ELSE LET $hi == IF $e > Cardinality(DOMAIN $xs) THEN Cardinality(DOMAIN $xs) ELSE $e\n" +
-        "              $lo == $s\n" +
-        "              outLen == IF $lo > $hi THEN 0 ELSE $hi - $lo + 1\n" +
-        "          IN CASE outLen = 0 -> empty\n" +
-        spliceArms + "\n" +
-        "             [] OTHER -> empty"
     val ann = apalacheTypeComment("((Int -> a), Int, Int) => (Int -> a)")
     return if (ann != null) "$ann\n$body" else body
 }
@@ -3987,37 +3997,46 @@ internal fun emitRangeOperatorDef(reservedNames: Set<String>): String {
 
 /**
  * Julay `s.toList()`: arbitrary enumeration (order unspecified).
- * Explicit CASE on Cardinality up to [DEFAULT_MAX_LIST_LEN] avoids Apalache
- * `1..Cardinality(S)` / BoundedSeq expansion.
+ * Default (TLC): recursive `CHOOSE` + `\o`. With `--opt-tla=apalache`: finite
+ * CASE on Cardinality (avoids `1..Cardinality(S)` / BoundedSeq expansion).
  */
 internal fun emitSetToSeqOperatorDef(reservedNames: Set<String>): String {
     val taken = reservedNames.toMutableSet()
     val s = allocTlaName("S", taken)
-    val j = allocTlaName("j", taken)
     val x = allocTlaName("x", taken)
-    val empty = "[$j \\in {} |-> CHOOSE $x \\in $s : TRUE]"
-    val arms = (1..DEFAULT_MAX_LIST_LEN).joinToString("\n") { n ->
-        val lets = (1..n).joinToString("\n             ") { i ->
-            val binder = "z$i"
-            val exclude =
-                if (i == 1) ""
-                else " \\ {${(1 until i).joinToString(", ") { "e$it" }}}"
-            "e$i == CHOOSE $binder \\in $s$exclude : TRUE"
+    val body = if (TlaEmitOpts.get().apalache) {
+        val j = allocTlaName("j", taken)
+        val empty = "[$j \\in {} |-> CHOOSE $x \\in $s : TRUE]"
+        val arms = (1..DEFAULT_MAX_LIST_LEN).joinToString("\n") { n ->
+            val lets = (1..n).joinToString("\n             ") { i ->
+                val binder = "z$i"
+                val exclude =
+                    if (i == 1) ""
+                    else " \\ {${(1 until i).joinToString(", ") { "e$it" }}}"
+                "e$i == CHOOSE $binder \\in $s$exclude : TRUE"
+            }
+            // Use :> / @@ so CASE does not confuse `1 |->` with arm syntax.
+            val funExpr = if (n == 1) {
+                "(1 :> e1)"
+            } else {
+                (1..n).joinToString(" @@ ") { i -> "($i :> e$i)" }
+            }
+            "    [] Cardinality($s) = $n ->\n" +
+                "         LET $lets\n" +
+                "         IN $funExpr"
         }
-        // Use :> / @@ so CASE does not confuse `1 |->` with arm syntax.
-        val funExpr = if (n == 1) {
-            "(1 :> e1)"
-        } else {
-            (1..n).joinToString(" @@ ") { i -> "($i :> e$i)" }
-        }
-        "    [] Cardinality($s) = $n ->\n" +
-            "         LET $lets\n" +
-            "         IN $funExpr"
+        "SetToSeq($s) ==\n" +
+            "  CASE Cardinality($s) = 0 -> $empty\n" +
+            arms + "\n" +
+            "    [] OTHER -> $empty"
+    } else {
+        val e = allocTlaName("e", taken)
+        "RECURSIVE SetToSeq(_)\n" +
+            "SetToSeq($s) ==\n" +
+            "  IF $s = {} THEN <<>>\n" +
+            "  ELSE LET $e == CHOOSE $x \\in $s : TRUE\n" +
+            "       IN <<$e>> \\o SetToSeq($s \\ {$e})"
     }
-    val body = "SetToSeq($s) ==\n" +
-        "  CASE Cardinality($s) = 0 -> $empty\n" +
-        arms + "\n" +
-        "    [] OTHER -> $empty"
     val ann = apalacheTypeComment("(Set(a) => (Int -> a))")
     return if (ann != null) "$ann\n$body" else body
 }

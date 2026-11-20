@@ -44,7 +44,7 @@ Always-on (not named opt ids): singleton `init:` that uniquely determines a cons
 
 | ID | Role |
 |----|------|
-| `apalache` | Emit Snowcat `\* @type:` annotations on `CONSTANT` / `VARIABLES` / actions / helpers, and write a sibling `Name.apalache.cfg` (`INIT`/`NEXT`, no Fairness / `*Terminates`) for Apalache BMC |
+| `apalache` | Emit Snowcat `\* @type:` annotations on `CONSTANT` / `VARIABLES` / actions / helpers; write sibling `Name.apalache.cfg` (`INIT`/`NEXT`, no Fairness / `*Terminates`); emit Apalache-safe `SetToSeq` / `splice` (finite `CASE`) instead of TLC `RECURSIVE`/`SubSeq` |
 
 ```bash
 # Apalache-oriented emission (off by default)

@@ -71,4 +71,33 @@ class RewriteSyntaxErrorTest {
         val raw = "missing '{' at 'proc'"
         assertEquals("Syntax error: $raw", rewriteSyntaxError(raw))
     }
+
+    @Test
+    fun longNoViableAlternativeIsTruncated() {
+        val huge = "spec StoreSpec := Store[n : NodeSet] {\\n    Key := { \"k1\", \"k2\", \"k3\", \"k4 \"k5"
+        val raw = "no viable alternative at input '$huge'"
+        val msg = rewriteSyntaxError(raw)
+        assertTrue(msg.startsWith("Syntax error: no viable alternative at input '"), msg)
+        assertTrue(msg.contains("…"), msg)
+        assertTrue(msg.length < raw.length, "expected shorter than raw (${msg.length} vs ${raw.length}): $msg")
+        assertTrue(!msg.contains('\n'), msg)
+    }
+
+    @Test
+    fun tokenRecognitionErrorIsTruncated() {
+        val rest = "\" }\\n}\\n\\n\\n/* Desired Store Safe */\\ninvariant AtMostOneStore := forall k : Key"
+        val raw = "token recognition error at: '$rest'"
+        val msg = rewriteSyntaxError(raw)
+        assertTrue(msg.startsWith("Syntax error: token recognition error at: '"), msg)
+        assertTrue(msg.contains("…") || msg.length < 120, msg)
+        assertTrue(!msg.contains('\n'), msg)
+    }
+
+    @Test
+    fun compactAntlrMessageShortQuotesUnchanged() {
+        assertEquals(
+            "no viable alternative at input 'foo'",
+            compactAntlrMessage("no viable alternative at input 'foo'"),
+        )
+    }
 }

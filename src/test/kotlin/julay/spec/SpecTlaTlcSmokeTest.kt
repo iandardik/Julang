@@ -959,6 +959,20 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun mapIndexInInvariantEmitsDomainGuards() {
+        val source = File("regression/input/spec/map-index-domain-inv.jul")
+        val (tlaText, _) = compileSpecTla(source, "MapIndexDomainInv")
+        val inv = tlaText.substringAfter("Unique ==").substringBefore("\n====")
+        assertTrue(
+            inv.contains("k \\in DOMAIN store[n1]") &&
+                inv.contains("store[n1][k] = v1") &&
+                inv.contains("k \\in DOMAIN store[n2]") &&
+                inv.contains("store[n2][k] = v2"),
+            "map index equality in invariants should desugar with DOMAIN guards;\n$inv",
+        )
+    }
+
+    @Test
     fun circularAgEmitsObligationsAndCircSide() {
         assumeTlcPresent()
         val source = File("regression/input/spec/circular-ag.jul")

@@ -1,0 +1,28 @@
+import julay.funlib.mapOf
+
+type N
+
+static proc Box {
+    var store : Map<String, String>
+
+    constructor initially(args : List<String>) {
+        transit:
+            store := mapOf()
+    }
+
+    internal transition put(k : String, v : String) {
+        guard:
+            true
+        transit:
+            store[k] := v
+    }
+}
+
+invariant Unique := forall n1, n2 : N, forall k : String, forall v1, v2 : String,
+    (Box[n1].store[k] = v1 & Box[n2].store[k] = v2) => (n1 = n2 & v1 = v2)
+
+spec MapIndexDomainInv := Box[n : N] {
+    N := {"a", "b"}
+} |= Unique
+
+compile MapIndexDomainInv

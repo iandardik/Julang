@@ -1,9 +1,5 @@
 import node.main.ShardNode
 import client.logic.ShardClient
-import specs.protocol.System
-import specs.protocol.PutEnvObl
-import specs.protocol.InboundEnvObl
-import specs.protocol.StoreObl
-import specs.protocol.ShardEnvObl
+import specs.protocol.StoreSpec
 
-compile ShardNode, ShardClient, System, PutEnvObl, InboundEnvObl, StoreObl, ShardEnvObl
+compile ShardNode, ShardClient, StoreSpec

@@ -340,8 +340,9 @@ expr
     | LET LPAREN ID COLON typeExpr ASGN_EQ expr RPAREN (LCURLY expr RCURLY | expr)
     | WHEN LPAREN expr RPAREN LCURLY when_subject_arm+ RCURLY
     | WHEN LCURLY when_guard_arm+ RCURLY
-    | FORALL ID COLON typeExpr COMMA expr
-    | EXISTS ID COLON typeExpr COMMA expr
+    // Multi-binder sugar: `forall n1, n2 : T, body` ≡ nested single binders.
+    | FORALL ID (COMMA ID)* COLON typeExpr COMMA expr
+    | EXISTS ID (COMMA ID)* COLON typeExpr COMMA expr
     ;
 
 when_subject_arm

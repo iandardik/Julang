@@ -1012,7 +1012,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 IfElseExprNode(condNode, thenNode, elseNode, sourceLocation(ctx))
             }
             ternaryOpMapper() == "let" -> {
-                val name = ctx.ID().text
+                val name = ctx.ID(0).text
                 val typeExpr = parseTypeExpr(ctx.typeExpr())
                 val letInitNode = visit(ctx.expr(0))
                 val bodyNode = visit(ctx.expr(1))
@@ -1035,19 +1035,24 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 }
             }
             ctx.FORALL() != null || ctx.EXISTS() != null -> {
-                val binder = ctx.ID().text
+                val binders = ctx.ID().map { it.text }
                 val binderType = parseTypeExpr(ctx.typeExpr())
                 val bodyNode = visit(ctx.expr(0))
                 if (bodyNode !is ExprNode) {
                     throw RuntimeException("Expected quantified body to be an expression")
                 }
-                QuantifiedExprNode(
-                    universal = ctx.FORALL() != null,
-                    binder = binder,
-                    binderType = binderType,
-                    body = bodyNode,
-                    loc = sourceLocation(ctx),
-                )
+                val universal = ctx.FORALL() != null
+                val loc = sourceLocation(ctx)
+                // `forall n1, n2 : T, body` → nest rightmost binder innermost.
+                binders.asReversed().fold(bodyNode as ExprNode) { body, binder ->
+                    QuantifiedExprNode(
+                        universal = universal,
+                        binder = binder,
+                        binderType = binderType,
+                        body = body,
+                        loc = loc,
+                    )
+                }
             }
             ctx.LPAREN() != null -> {
                 val innerNode = visit(ctx.expr(0))

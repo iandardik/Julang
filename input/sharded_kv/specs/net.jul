@@ -26,14 +26,14 @@ export type NodeSet := String
 export type Key := String
 export type Value := String
 
-export type ClaimMsg {
+type ClaimMsg {
     src : NodeSet
     dest : NodeSet
     k : Key
     owner : String
 }
 
-export type MoveBatchMsg {
+type MoveBatchMsg {
     src : NodeSet
     dest : NodeSet
     owner : String

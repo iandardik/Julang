@@ -156,7 +156,7 @@ See [Specifications — delayed models](specifications.md#delayed-models) for cr
 - Logic: `&`, `|`, `~`, `=>`, `<=>`
 - `if` / `else`, `let`, `when` (subject and guard forms)
 - Membership: `in`, `~in` (not in)
-- Quantifiers (especially in invariants): `forall`, `exists`
+- Quantifiers (especially in invariants): `forall`, `exists` — multi-binder sugar `forall n1, n2 : T, body` nests as `forall n1 : T, forall n2 : T, body`
 - In proc action bodies: `this.x` for state when an arg shadows the same name ([Processes](processes.md#this-vs-action-args))
 
 Example (braces optional; useful for multi-line arms):

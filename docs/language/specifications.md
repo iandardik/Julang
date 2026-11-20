@@ -10,7 +10,7 @@ invariant AllInvs := NonNegative & CorrectCounter
 invariant Bound := forall k : Int, Counter.n <= 3
 ```
 
-Invariants are Boolean expressions over proc state and/or **fluents**. Quantifiers (`forall`, `exists`) are common. Indexed state uses `Leaf[i].var`; collection properties and nested record fields are allowed (`Leaf[i].log.length`, `Leaf[i].log[j]`).
+Invariants are Boolean expressions over proc state and/or **fluents**. Quantifiers (`forall`, `exists`) are common; multiple binders may share a type (`forall n1, n2 : NodeSet, …` ≡ nested `forall n1 : NodeSet, forall n2 : NodeSet, …`). Indexed state uses `Leaf[i].var`; collection properties and nested record fields are allowed (`Leaf[i].log.length`, `Leaf[i].log[j]`).
 
 ## Fluents
 
@@ -409,11 +409,12 @@ When `init:` uniquely determines a const-global list (length plus identity `xs[i
 |-------|------|
 | `e in xs` / `e ~in xs` on lists | `e \in Range(xs)` / `e \notin Range(xs)` (`Range` under `\* TLA+ helpers`) |
 | `k in mp` / `k ~in mp` on maps | `k \in DOMAIN mp` / `k \notin DOMAIN mp` |
+| `mp[k] = v` (and other comparisons) in invariants | Desugars to `k in mp & mp[k] = v` so TLA+ only applies `mp` when `k \in DOMAIN mp` |
 | `e in s` / `e ~in s` on sets | `e \in s` / `e \notin s` |
 | `listOf()` / list literals | `<<>>` / `<<…>>` |
 | `setOf()` / set literals | `{}` / `{…}` |
 | `mapOf()` / map literals | `[x \in {} \|-> 0]` / `[k \|-> v, …]` |
-| `splice(xs, a, b)` | `splice(xs, a, b)` (helper above `Init`; 1-based inclusive; `b < 1` → `<<>>`; else clamp `b` to `Len` and `SubSeq`) |
+| `splice(xs, a, b)` | `splice` helper above `Init` (1-based inclusive). Default TLC: `Len`/`SubSeq`. With `--opt-tla=apalache`: finite `CASE` on slice length (no symbolic ranges). |
 | `length(xs)` / `xs.length` on lists | `Len(xs)` |
 | `length` / `.length` on sets | `Cardinality(…)` |
 | list/set `.map` (lambda) | function/set comprehension |
@@ -421,7 +422,7 @@ When `init:` uniquely determines a const-global list (length plus identity `xs[i
 | list `.filter` | `SelectSeq` |
 | set `.filter` | set comprehension |
 | `xs.toSet()` | `Range(xs)` |
-| `s.toList()` | `SetToSeq(s)` (helper; order unspecified) |
+| `s.toList()` | `SetToSeq(s)` (order unspecified). Default TLC: recursive `CHOOSE`+`\o`. With `--opt-tla=apalache`: finite `CASE` on `Cardinality`. |
 | `allDistinct(xs)` | `allDistinct(xs)` helper: `Len(xs) = Cardinality(Range(xs))` |
 | `startsWith(s, p)` | `startsWith` helper above `Init` (`SubSeq` prefix check) |
 | `when` | TLA `CASE` … `[]` … `OTHER` |

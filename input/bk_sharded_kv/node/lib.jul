@@ -1,0 +1,67 @@
+import julay.funlib.length
+import julay.funlib.split
+import julay.funlib.trim
+import julay.funlib.parseInt
+import julay.funlib.readFile
+import julay.funlib.listOf
+import julay.funlib.startsWith
+import specs.net.Key
+import specs.net.Value
+
+export type NodeInfo {
+    id : Int
+    url : String
+}
+
+export type CfgPair {
+    me : NodeInfo
+    cluster : List<NodeInfo>
+}
+
+export type KvPair {
+    k : Key
+    v : Value
+}
+
+export type OwnerEntry {
+    k : Key
+    owner : String
+}
+
+/* Domain results — RpcIn encodes these to HTTP. */
+export type PutResult {
+    kind : String
+    ownerUrl : String
+}
+
+export type GetResult {
+    kind : String
+    value : Value
+    ownerUrl : String
+}
+
+export type PeerPick {
+    haveBest : Boolean
+    url : String
+    id : Int
+    count : Int
+}
+
+export fun isBlankOrComment(line : String) : Boolean =
+    line = "" | startsWith(line, "#")
+
+export fun fieldValue(line : String) : String =
+    split(line, "=")[2]
+
+/*
+ * Parse cluster.conf: trim lines, skip blanks/#, ids 1..n in order.
+ * myIdx is the 1-based node id for this process.
+ */
+export fun parseCfg(cfgPath : String, myIdx : Int) : CfgPair =
+    let (entries : List<String> := split(readFile(cfgPath), "\n")
+        .map(line -> trim(line))
+        .filter(line -> ~isBlankOrComment(line)))
+    let (cluster : List<NodeInfo> := entries.fold(listOf<NodeInfo>(), (acc, line) ->
+        acc + listOf(NodeInfo { id := length(acc) + 1, url := line }))) {
+        CfgPair { me := cluster[myIdx], cluster := cluster }
+    }

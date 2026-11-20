@@ -2747,6 +2747,7 @@ class CompositeProcExprNode(
 
 /**
  * First-order quantifier for invariant formulas: `forall x : T, body` / `exists x : T, body`.
+ * Multi-binder sugar `forall x, y : T, body` desugars to nested single-binder nodes.
  */
 class QuantifiedExprNode(
     private val universal: Boolean,

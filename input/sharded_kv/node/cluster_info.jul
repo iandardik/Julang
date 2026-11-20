@@ -1,0 +1,30 @@
+import julay.funlib.parseInt
+import node.lib.parseCfg
+
+export static proc ClusterInfo {
+    const me : NodeInfo
+    const cluster : List<NodeInfo>
+
+    constructor initially(args : List<String>) {
+        transit:
+            let id : Int := parseInt(args[2])
+            let cfg : CfgPair := parseCfg(args[1], id)
+            me := cfg.me
+            cluster := cfg.cluster
+        error:
+            (length(args) ~= 2) -> "usage: ShardNode <config_file> <node_id>"
+    }
+
+    service transition getMyInfo(myInfo : NodeInfo) {
+        guard: myInfo = me
+    }
+
+    service transition getClusterSize(size : Int) {
+        guard: size = cluster.length
+    }
+
+    service transition peerAt(idx : Int, peer : NodeInfo) {
+        guard:
+            peer = cluster[idx]
+    }
+}

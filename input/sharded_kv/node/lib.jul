@@ -24,8 +24,8 @@ export type KvPair {
 }
 
 export type OwnerEntry {
-    k : Key
-    owner : String
+    key : Key
+    owner : NodeInfo
 }
 
 /* Domain results — RpcIn encodes these to HTTP. */
@@ -46,6 +46,12 @@ export type PeerPick {
     id : Int
     count : Int
 }
+
+export fun emptyNodeInfo() : NodeInfo =
+    NodeInfo {
+        id := -1,
+        url := ""
+    }
 
 export fun isBlankOrComment(line : String) : Boolean =
     line = "" | startsWith(line, "#")

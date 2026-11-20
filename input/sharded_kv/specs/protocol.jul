@@ -1,245 +1,30 @@
 import node.store.Store
-import node.shard.Put
-import node.shard.KeyCount
-import node.shard.ApplyClaim
-import node.shard.ApplyMoveBatch
-import node.shard.FindLightestPeer
-import node.shard.BroadcastClaim
-import node.shard.ReshardToPeer
+import node.shard.ShardLogic
 import specs.net.PerfectNet
 import specs.net.NodeSet
 import specs.net.Key
 import specs.net.Value
-import specs.net.MoveBatchMsg
-import specs.net.ClaimMsg
 
-/*
- * Circular AG — one Rest Obl only (LocalInv |= <P, A> C <G> / <G> C <A, Safe>):
- *   ShardEnvInv |= <true, StoreIface> ShardEnv <StoreAsm>
- *   StoreInv    |= <StoreAsm> IndexedStore <StoreIface, StoreInvs>
- * CircSide pairs on A/G names; LocalInv is what TLC/Apalache check.
- *
- * Rest-internal RG (LocalInv |= <A> C <G>):
- *   PutInv     |= <StoreIface> PutEnv <StoreAsm>
- *   InboundInv |= <InboundAsm> InboundEnv <StoreAsm>
- * Both halves use PerfectNet. Open goMoveBatch under Inbound is constrained by
- * AssumeOK(InboundAsm'); stripping the injector under-approximates the product.
- *
- * Manual lemma: PutEnvObl ∧ InboundEnvObl ∧ shared PerfectNet ⇒ ShardEnv ⊢ StoreAsm
- * under StoreIface.
- *
- * A = StoreIface (fluent); G = StoreAsm (fluent); Safe = StoreInvs.
- */
-
-/* Client put path: Put + helpers (FindLightestPeer / BroadcastClaim / ReshardToPeer). */
-spec VerifPutPath := Put
-    || FindLightestPeer
-    || BroadcastClaim
-    || ReshardToPeer
-
-/* Inbound move-batch worker and its claim fan-out. */
-spec VerifApplyMovePath := ApplyMoveBatch || BroadcastClaim
-
-/* Peer RPC workers (PerfectNet is composed beside the indexed workers, not under them). */
-spec PeerInbound := KeyCount || ApplyClaim || VerifApplyMovePath
-
-spec ShardEnvCore := VerifPutPath || PeerInbound
-
-/* Trimmed sorts: min for StoreInvs + non-empty reshardEntries (candidates/4). */
-spec ShardEnv := ShardEnvCore[n : NodeSet] {
+spec ClusterStore := Store[n : NodeSet] {
     NodeSet := { "n1", "n2" }
-    Key := { "a", "b", "c", "d", "e" }
+    Key := { "k1", "k2", "k3", "k4", "k5" }
     Value := { "v1", "v2" }
-} || PerfectNet
-
-/* Put half: binds goMoveBatch via ReshardToPeer. */
-spec PutEnv := VerifPutPath[n : NodeSet] {
-    NodeSet := { "n1", "n2" }
-    Key := { "a", "b", "c", "d", "e" }
-    Value := { "v1", "v2" }
-} || PerfectNet
-
-/* Inbound half: same PerfectNet; InboundAsm assume constrains open goMoveBatch. */
-spec InboundEnv := PeerInbound[n : NodeSet] {
-    NodeSet := { "n1", "n2" }
-    Key := { "a", "b", "c", "d", "e" }
-    Value := { "v1", "v2" }
-} || PerfectNet
-
-spec IndexedStore := Store[n : NodeSet] {
-    NodeSet := { "n1", "n2" }
-    Key := { "a", "b", "c", "d", "e" }
-    Value := { "v1", "v2" }
-    init: forall n : NodeSet, Store[n].me.url = n
 }
 
-/*
- * StoreIface (A): reply honesty ghost. IfaceBroken stays false unless a reply sync
- * is observed as inconsistent; v1 never arms it so the iface is vacuously true,
- * constraining Rest's open Store hubs via AssumeOK while Store trivially guarantees it.
- */
-fluent IfaceBroken {
-    initially false
-}
 
-invariant StoreIface := ~IfaceBroken
+// system invariants
 
-/* No applyClaim installs self-ownership (BroadcastClaim skips self). */
-fluent AppliedClaim(n : NodeSet, k : Key, owner : String) {
-    initially false
-    on applyClaim[n](claimKey, claimOwner) := true
-}
+invariant KeysUnique := forall n1,n2 : NodeSet, forall k : Key, forall v1,v2 : Value,
+    (Store[n1].store[k] = v1 & Store[n2].store[k] = v2) => (n1 = n2 & v1 = v2)
 
-/*
- * Exclusive store presence ghost. Rest putLocal/putFromMove only when no other
- * holder; dropReshardBatch clears Held for donated keys (bulk entries update).
- */
-fluent Held(n : NodeSet, k : Key) {
-    initially false
-    on putLocal[n](putKey, _) := true
-    on putFromMove[n](moveKey, _, _) := true
-    on dropReshardBatch[n](_, _, entries) := false
-}
-
-/*
- * Directory ghost for OwnersAgree. putLocal records owner=n (index fills owner);
- * applyClaim records claimOwner; drop replaces owners for donated keys with newOwner.
- */
-fluent ClaimSeen(k : Key, owner : String) {
-    initially false
-    on putLocal[n](putKey, _) := true
-    on applyClaim[n](claimKey, claimOwner) := true
-    on putFromMove[n](moveKey, _, moveOwner) := true
-    on dropReshardBatch[n](_, newOwner, entries) := true
-}
-
-/*
- * StoreAsm (G) must mention fluents directly (not via named &-invs) so AssumeOK primes
- * cells. Keep the formula on fewer source lines so TLA quantifier/& layout stays valid.
- */
-invariant StoreAsm := (forall n : NodeSet, forall k : Key, ~AppliedClaim(n, k, n)) & (forall k : Key, forall n1 : NodeSet, forall n2 : NodeSet, (Held(n1, k) & Held(n2, k)) => n1 = n2) & (forall k : Key, forall o1 : String, forall o2 : String, (ClaimSeen(k, o1) & ClaimSeen(k, o2)) => o1 = o2)
-
-/*
- * Move-bag glue. Real ReshardToPeer drops then sends with owner=peer.
- * Binders avoid leaf var names (e.g. ApplyClaim.owner) so TLA `\A` does not clash.
- * Keep these on fewer source lines: multiline MoveBatchMsg under `&` emits a
- * SANY-invalid `(/\ … /\ …)` junction (TLC may accept; Apalache rejects).
- */
-invariant MoveNetOk_BagShape := forall msgSrc : NodeSet, forall msgDest : NodeSet, forall msgOwner : String, forall msgKey : Key, forall msgVal : Value, (MoveBatchMsg { src := msgSrc, dest := msgDest, owner := msgOwner, k := msgKey, v := msgVal } in MoveBatchMsgs.moveBatchMsgs) => (msgOwner = msgDest & ~Held(msgSrc, msgKey) & ~Held(msgDest, msgKey) & msgSrc ~= msgDest)
-
-invariant MoveNetOk_UniqueKey := forall msgSrc1 : NodeSet, forall msgDest1 : NodeSet, forall msgOwner1 : String, forall msgKey : Key, forall msgVal1 : Value, forall msgSrc2 : NodeSet, forall msgDest2 : NodeSet, forall msgOwner2 : String, forall msgVal2 : Value, ((MoveBatchMsg { src := msgSrc1, dest := msgDest1, owner := msgOwner1, k := msgKey, v := msgVal1 } in MoveBatchMsgs.moveBatchMsgs) & (MoveBatchMsg { src := msgSrc2, dest := msgDest2, owner := msgOwner2, k := msgKey, v := msgVal2 } in MoveBatchMsgs.moveBatchMsgs)) => (msgSrc1 = msgSrc2 & msgDest1 = msgDest2 & msgOwner1 = msgOwner2 & msgVal1 = msgVal2)
-
-invariant MoveNetOk := MoveNetOk_BagShape & MoveNetOk_UniqueKey
-
-fluent MoveBagPending(k : Key) {
-    initially false
-    on goMoveBatch(_, _, key, _) := true
-    on moveBatch[n](_, moveKey, _) := false
-}
-
-fluent MoveApplyPending(k : Key) {
-    initially false
-    on moveBatch[n](_, moveKey, _) := true
-    on putFromMove[n](moveKey, _, _) := false
-}
-
-/* Owner of the in-flight ApplyMoveBatch (meUrl); pairs with MoveApplyPending. */
-fluent MoveApplyOwner(k : Key, owner : String) {
-    initially false
-    on moveBatch[n](moveOwner, moveKey, _) := true
-    on putFromMove[n](moveKey, _, moveOwner) := false
-}
-
-/*
- * InboundAsm (formula assume): single named inv — do not `&` named MoveNetOk
- * (AssumeOK mis-formats nested forall). Inline bag+pending.
- * Claim bag: no self-ownership deliver (BroadcastClaim skips self; open goClaim
- * must not inject owner=dest — that would arm applyClaim to break StoreAsm).
- */
-invariant InboundAsm := (forall msgSrc : NodeSet, forall msgDest : NodeSet, forall msgOwner : String, forall msgKey : Key, forall msgVal : Value, (MoveBatchMsg { src := msgSrc, dest := msgDest, owner := msgOwner, k := msgKey, v := msgVal } in MoveBatchMsgs.moveBatchMsgs) => (msgOwner = msgDest & ~Held(msgSrc, msgKey) & ~Held(msgDest, msgKey) & msgSrc ~= msgDest & MoveBagPending(msgKey) & ~MoveApplyPending(msgKey) & (forall co : String, ClaimSeen(msgKey, co) => co = msgOwner) & (forall pn : NodeSet, forall po : String, PendingClaimApply(pn, msgKey, po) => po = msgOwner))) & (forall mk : Key, ~(MoveBagPending(mk) & MoveApplyPending(mk))) & (forall mk : Key, forall n : NodeSet, MoveApplyPending(mk) => ~Held(n, mk)) & (forall msgSrc1 : NodeSet, forall msgDest1 : NodeSet, forall msgOwner1 : String, forall msgKey : Key, forall msgVal1 : Value, forall msgSrc2 : NodeSet, forall msgDest2 : NodeSet, forall msgOwner2 : String, forall msgVal2 : Value, ((MoveBatchMsg { src := msgSrc1, dest := msgDest1, owner := msgOwner1, k := msgKey, v := msgVal1 } in MoveBatchMsgs.moveBatchMsgs) & (MoveBatchMsg { src := msgSrc2, dest := msgDest2, owner := msgOwner2, k := msgKey, v := msgVal2 } in MoveBatchMsgs.moveBatchMsgs)) => (msgSrc1 = msgSrc2 & msgDest1 = msgDest2 & msgOwner1 = msgOwner2 & msgVal1 = msgVal2)) & (forall cSrc : NodeSet, forall cDest : NodeSet, forall cKey : Key, forall cOwner : String, (ClaimMsg { src := cSrc, dest := cDest, k := cKey, owner := cOwner } in ClaimMsgs.claimMsgs) => (cOwner ~= cDest & (forall co : String, ClaimSeen(cKey, co) => co = cOwner) & (forall pn : NodeSet, forall po : String, PendingClaimApply(pn, cKey, po) => po = cOwner) & (MoveApplyPending(cKey) => MoveApplyOwner(cKey, cOwner)))) & (forall cSrc1 : NodeSet, forall cDest1 : NodeSet, forall cOwner1 : String, forall cKey : Key, forall cSrc2 : NodeSet, forall cDest2 : NodeSet, forall cOwner2 : String, ((ClaimMsg { src := cSrc1, dest := cDest1, k := cKey, owner := cOwner1 } in ClaimMsgs.claimMsgs) & (ClaimMsg { src := cSrc2, dest := cDest2, k := cKey, owner := cOwner2 } in ClaimMsgs.claimMsgs)) => cOwner1 = cOwner2) & (forall pn : NodeSet, forall pk : Key, forall po : String, (PendingClaimApply(pn, pk, po) & MoveApplyPending(pk)) => MoveApplyOwner(pk, po))
-
-/* Desired Store Safe (circular right Safe / System guarantee). */
-invariant AtMostOneStore := forall k : Key, forall n1 : NodeSet, forall n2 : NodeSet,
-    (k in Store[n1].store & k in Store[n2].store) => n1 = n2
+invariant KeyUniquelyOwned := forall n1,n2,owner1,owner2 : NodeSet, forall k : Key,
+    (Store[n1].owner[k] = owner1 & Store[n2].owner[k] = owner2) => owner1 = owner2
 
 invariant OwnerHasValue := forall n : NodeSet, forall k : Key,
-    (k in Store[n].owners & Store[n].owners[k] = n) => k in Store[n].store
+    Store[n].owners[k] = n <=> k in Store[n].store
 
-invariant OwnersAgree := forall n1 : NodeSet, forall n2 : NodeSet, forall k : Key,
-    (k in Store[n1].owners & k in Store[n2].owners) =>
-        Store[n1].owners[k] = Store[n2].owners[k]
+// just KeysUnique for now
+invariant ProtocolInvs := KeysUnique
 
-invariant StoreInvs := AtMostOneStore & OwnerHasValue & OwnersAgree
 
-/*
- * Local inductive invariants: LocalInv |= <A> C <G>.
- * LocalInv ⇒ contract G (or A∧Safe on the circular right). Conjuncts below are
- * strengthenings — not the desired AG property itself.
- */
-
-/*
- * StoreInv for StoreObl: inductive for Safe=StoreInvs under assume StoreAsm.
- * HeldAbs: Held mirrors store presence so StoreAsm's unique-Held blocks putLocal/
- * putFromMove from creating dual stores (actions only check AsmOK on Held').
- * MeUrl: create-index init fact; needed so dropReshardBatch's me.url guard is stable.
- * OwnersClaimSeen: owners entries are reflected in ClaimSeen, so StoreAsm's
- * unique-ClaimSeen keeps OwnersAgree under putLocal/putFromMove.
- */
-invariant StoreInv := StoreInvs & StoreInv_Iface & StoreInv_HeldAbs & StoreInv_MeUrl & StoreInv_OwnersClaimSeen
-invariant StoreInv_Iface := StoreIface
-invariant StoreInv_HeldAbs := forall n : NodeSet, forall k : Key, Held(n, k) <=> (k in Store[n].store)
-invariant StoreInv_MeUrl := forall n : NodeSet, Store[n].me.url = n
-invariant StoreInv_OwnersClaimSeen := forall n : NodeSet, forall k : Key, (k in Store[n].owners) => ClaimSeen(k, Store[n].owners[k])
-
-/*
- * PutInv for PutEnvObl: inductive for G=StoreAsm under assume StoreIface.
- * MoveNetOk_* constrain the move bag so Put cannot break Held/ClaimSeen exclusivity.
- */
-invariant PutInv := StoreAsm & MoveNetOk_BagShape & MoveNetOk_UniqueKey
-
-/*
- * In-flight ApplyClaim (claim → applyClaim). InboundInv strengthenings use this
- * fluent — protocol.jul cannot read ApplyClaim[n][i] (create-index shape varies
- * across Obls). Apalache InvInit also couples ApplyClaim_constructed ⇒ owner≠n.
- */
-fluent PendingClaimApply(n : NodeSet, k : Key, owner : String) {
-    initially false
-    on claim[n](claimKey, claimOwner) := true
-    on applyClaim[n](claimKey, claimOwner) := false
-}
-
-/*
- * InboundInv for InboundEnvObl: inductive for G=StoreAsm under assume InboundAsm.
- * Pending fluents block dual in-flight moves for the same key (dual-Held CE).
- * NoSelfOwner / ApplyClaimSeen: mid-flight ApplyClaim must not arm StoreAsm breaks.
- */
-invariant InboundInv := StoreAsm & InboundInv_XorPending & InboundInv_ApplyNotHeld & InboundInv_UniqueKey & InboundInv_NoSelfOwner & InboundInv_ApplyClaimSeen & InboundInv_PendingClaimOwnerUnique & InboundInv_MoveApplyClaimSeen & InboundInv_MoveApplyOwner & InboundInv_NoClaimDuringMove
-invariant InboundInv_XorPending := forall mk : Key, ~(MoveBagPending(mk) & MoveApplyPending(mk))
-invariant InboundInv_ApplyNotHeld := forall mk : Key, forall n : NodeSet, MoveApplyPending(mk) => ~Held(n, mk)
-invariant InboundInv_UniqueKey := MoveNetOk_UniqueKey
-invariant InboundInv_NoSelfOwner := forall n : NodeSet, forall k : Key, forall o : String, PendingClaimApply(n, k, o) => o ~= n
-invariant InboundInv_ApplyClaimSeen := forall n : NodeSet, forall k : Key, forall o : String, forall co : String, (PendingClaimApply(n, k, o) & ClaimSeen(k, co)) => co = o
-/* Concurrent ApplyClaims for one key must agree on owner (else first applyClaim breaks ClaimSeen exclusivity). */
-invariant InboundInv_PendingClaimOwnerUnique := forall k : Key, forall n1 : NodeSet, forall o1 : String, forall n2 : NodeSet, forall o2 : String, (PendingClaimApply(n1, k, o1) & PendingClaimApply(n2, k, o2)) => o1 = o2
-/* putFromMove sets ClaimSeen(k, meUrl); conflicting ClaimSeen would break StoreAsm. */
-invariant InboundInv_MoveApplyClaimSeen := forall mk : Key, forall o : String, forall mo : String, (MoveApplyPending(mk) & MoveApplyOwner(mk, mo) & ClaimSeen(mk, o)) => o = mo
-invariant InboundInv_MoveApplyOwner := forall mk : Key, forall o1 : String, forall o2 : String, (MoveApplyOwner(mk, o1) & MoveApplyOwner(mk, o2)) => o1 = o2
-/* applyClaim during MoveApplyPending can stamp a different ClaimSeen owner. */
-invariant InboundInv_NoClaimDuringMove := forall n : NodeSet, forall k : Key, forall o : String, (PendingClaimApply(n, k, o) & MoveApplyPending(k)) => MoveApplyOwner(k, o)
-
-/*
- * ShardEnvInv for ShardEnvObl: inductive for G=StoreAsm under assume StoreIface.
- * MoveNetOk_* are the same bag strengthenings as on the Put half.
- */
-invariant ShardEnvInv := StoreAsm & MoveNetOk_BagShape & MoveNetOk_UniqueKey
-
-/* Monolithic closed system (smoke / regression). */
-export spec System := <true> (ShardEnv || IndexedStore) <StoreInvs>
-
-/*
- * AG Obls: LocalInv |= <A> C <G> (circular uses commas). Cfg SpecSafety (no *Terminates).
- */
-export spec PutEnvObl := PutInv |= <StoreIface> PutEnv <StoreAsm>
-export spec InboundEnvObl := InboundInv |= <InboundAsm> InboundEnv <StoreAsm>
-export spec StoreObl := StoreInv |= <StoreAsm> IndexedStore <StoreIface, StoreInvs>
-export spec ShardEnvObl := ShardEnvInv |= <true, StoreIface> ShardEnv <StoreAsm>
+export spec StoreSpec := <true> ClusterStore <ProtocolInvs>

@@ -1,0 +1,30 @@
+import node.store.Store
+import node.shard.ShardLogic
+import specs.net.PerfectNet
+import specs.net.NodeSet
+import specs.net.Key
+import specs.net.Value
+
+spec ClusterStore := Store[n : NodeSet] {
+    NodeSet := { "n1", "n2" }
+    Key := { "k1", "k2", "k3", "k4", "k5" }
+    Value := { "v1", "v2" }
+}
+
+
+// system invariants
+
+invariant KeysUnique := forall n1,n2 : NodeSet, forall k : Key, forall v1,v2 : Value,
+    (Store[n1].store[k] = v1 & Store[n2].store[k] = v2) => (n1 = n2 & v1 = v2)
+
+invariant KeyUniquelyOwned := forall n1,n2,owner1,owner2 : NodeSet, forall k : Key,
+    (Store[n1].owner[k] = owner1 & Store[n2].owner[k] = owner2) => owner1 = owner2
+
+invariant OwnerHasValue := forall n : NodeSet, forall k : Key,
+    Store[n].owners[k] = n <=> k in Store[n].store
+
+// just KeysUnique for now
+invariant ProtocolInvs := KeysUnique
+
+
+export spec StoreSpec := <true> ClusterStore <ProtocolInvs>

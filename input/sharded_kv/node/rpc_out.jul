@@ -4,96 +4,39 @@ import node.lib.fieldValue
 import specs.net.Key
 import specs.net.Value
 
-/*
- * Outbound peer RPCs for ShardNode: one child per message. Ctor names match the
- * PerfectNet send actions (specs/net.jul), so Shard syncs the same actions in the
- * JAR (spawning these children) and in TLA (enqueueing on the network).
- *
- *   goClaim / goMoveBatch: fire-and-forget; the child sends, then returns internally.
- *   goKeyCount: the child returns the peer's count to its parent via keyCountReply.
- */
+export proc RpcOut := SendOwnershipBroadcast
 
-export proc SendClaim {
+proc SendOwnershipBroadcast {
     const dest : String
     const body : String
     var sent : Boolean
+    var knownOwner : NodeInfo
 
-    constructor goClaim(peerUrl : String, key : Key, owner : String) {
+    constructor broadcastOwnershipToPeer(peer : NodeInfo, key : Key, myInfo : NodeInfo) {
         transit:
-            dest := peerUrl
-            body := "k=" + key + "|owner=" + owner
+            dest := peer.url
+            body := "k=" + key + "|owner=" + myInfo
             sent := false
+            knownOwner := myInfo
     }
 
     internal transition send() {
-        guard: ~sent
+        guard:
+            ~sent
         transit:
-            sent := doHttpRequest(HttpClientRequest {
-                url := dest + "/rpc/claim",
+            let resp := doHttpRequest(HttpClientRequest {
+                url := dest + "/rpc/ownership",
                 method := "POST",
                 body := body
-            }).code >= 0
+            }
+            sent = resp.code >= 0
+            knownOwner := getBody(resp.body,1)
     }
 
-    internal return claimSent() {
-        guard: sent
-    }
-}
-
-export proc SendMoveBatch {
-    const dest : String
-    const body : String
-    var sent : Boolean
-
-    /* One KV per message: <ownerUrl>|<k>=<v> */
-    constructor goMoveBatch(peerUrl : String, ownerUrl : String, key : Key, val : Value) {
-        transit:
-            dest := peerUrl
-            body := ownerUrl + "|" + key + "=" + val
-            sent := false
-    }
-
-    internal transition send() {
-        guard: ~sent
-        transit:
-            sent := doHttpRequest(HttpClientRequest {
-                url := dest + "/rpc/moveBatch",
-                method := "POST",
-                body := body
-            }).code >= 0
-    }
-
-    internal return moveSent() {
-        guard: sent
+    return doneBroadcastOwnershipToPeer(owner : NodeInfo) {
+        guard:
+            & sent
+            & owner = knownOwner
     }
 }
 
-export proc SendKeyCount {
-    const dest : String
-    const from : String
-    var reply : Int
-    var sent : Boolean
-
-    constructor goKeyCount(peerUrl : String, fromUrl : String) {
-        transit:
-            dest := peerUrl
-            from := fromUrl
-            reply := 0
-            sent := false
-    }
-
-    internal transition send() {
-        guard: ~sent
-        transit:
-            reply := parseInt(fieldValue(doHttpRequest(HttpClientRequest {
-                url := dest + "/rpc/keyCount",
-                method := "POST",
-                body := "from=" + from
-            }).body))
-            sent := true
-    }
-
-    return keyCountReply(replyFrom : String, count : Int) {
-        guard: sent & replyFrom = dest & count = reply
-    }
-}
