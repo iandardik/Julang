@@ -60,6 +60,7 @@ data class SpecLeaf(
     /**
      * Create-index `global` / `const global` state vars: emitted as scalar TLA VARIABLES
      * (not functions of the index). Model-only; does not affect JAR codegen.
+     * Only vars listed as `global ThisLeaf.var` / `const global ThisLeaf.var` apply here.
      */
     val globalVars: Set<String> = emptySet(),
     /**
@@ -67,6 +68,14 @@ data class SpecLeaf(
      * constructors never prime the variable.
      */
     val globalConstVars: Set<String> = emptySet(),
+    /**
+     * Qualified create-index global refs not yet bound to a concrete leaf (e.g. listed on
+     * `(Store || ShardLogic)[n]` as `ClusterInfo.cluster` before `ShardLogic` expands).
+     * Materialized into [globalVars] when the leaf name matches.
+     */
+    val pendingGlobalRefs: List<GlobalVarRef> = emptyList(),
+    /** Like [pendingGlobalRefs] but for `const global` only. */
+    val pendingConstGlobalRefs: List<GlobalVarRef> = emptyList(),
     /**
      * Create-index `init:` Boolean exprs: extra Init conjuncts (const-global constraints).
      */
@@ -142,29 +151,33 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
             }
             is ParamProcExprNode -> {
                 val paramName = n.paramName()
-                val globals = n.globalVarNames().toSet()
-                val constGlobals = n.globalConstVarNames().toSet()
+                val globalRefs = n.globalVarRefs()
+                val constGlobalRefs = n.globalDecls().filter { it.isConst }.flatMap { it.refs }
                 val inits = n.initExprs()
                 val typeModels = n.typeModels()
                 val funModels = n.funModels()
                 // DynProc is a reserved create-index slot set, not a domain type.
                 val dynProcModel = typeModels.firstOrNull { it.name() == DYN_PROC_MODEL }
                 val domainTypeModels = typeModels.filter { it.name() != DYN_PROC_MODEL }
-                fun withGlobals(child: SpecLeaf): SpecLeaf =
-                    if (globals.isEmpty() && inits.isEmpty() && domainTypeModels.isEmpty() &&
+                fun withGlobals(child: SpecLeaf): SpecLeaf {
+                    // Keep all qualified refs until alias expansion (ShardLogic → ClusterInfo);
+                    // materialize matching Leaf.var in expandLeavesToPclasses.
+                    val hasPending = globalRefs.isNotEmpty() || constGlobalRefs.isNotEmpty()
+                    return if (!hasPending && inits.isEmpty() && domainTypeModels.isEmpty() &&
                         funModels.isEmpty() && dynProcModel == null
                     ) {
                         child
                     } else {
                         child.copy(
-                            globalVars = child.globalVars + globals,
-                            globalConstVars = child.globalConstVars + constGlobals,
+                            pendingGlobalRefs = child.pendingGlobalRefs + globalRefs,
+                            pendingConstGlobalRefs = child.pendingConstGlobalRefs + constGlobalRefs,
                             initExprs = child.initExprs + inits,
                             typeModels = child.typeModels + domainTypeModels,
                             funModels = child.funModels + funModels,
                             dynProcModel = child.dynProcModel ?: dynProcModel,
                         )
                     }
+                }
                 when {
                     n.isApplyIndex() -> {
                         // Apply: share binder / with-scope only. Do not lift unindexed state.
@@ -312,6 +325,8 @@ fun expandLeavesToPclasses(
             withScopeId = outer.withScopeId ?: child.withScopeId,
             globalVars = child.globalVars + outer.globalVars,
             globalConstVars = child.globalConstVars + outer.globalConstVars,
+            pendingGlobalRefs = child.pendingGlobalRefs + outer.pendingGlobalRefs,
+            pendingConstGlobalRefs = child.pendingConstGlobalRefs + outer.pendingConstGlobalRefs,
             initExprs = child.initExprs + outer.initExprs,
             typeModels = child.typeModels + outer.typeModels,
             funModels = child.funModels + outer.funModels,
@@ -342,19 +357,28 @@ fun expandLeavesToPclasses(
         return pc.localDecls().filterIsInstance<VarNode>().map { it.name }.toSet()
     }
 
-    fun filterGlobals(leaf: SpecLeaf): SpecLeaf {
-        if (leaf.globalVars.isEmpty()) return leaf
-        val declared = declaredStateNames(leaf.name)
-        if (declared.isEmpty()) return leaf
-        return leaf.copy(
-            globalVars = leaf.globalVars.intersect(declared),
-            globalConstVars = leaf.globalConstVars.intersect(declared),
+    fun materializeGlobals(leaf: SpecLeaf): SpecLeaf {
+        val matched = leaf.pendingGlobalRefs.filter { it.leafName == leaf.name }.map { it.varName }.toSet()
+        val matchedConst =
+            leaf.pendingConstGlobalRefs.filter { it.leafName == leaf.name }.map { it.varName }.toSet()
+        val withPending = leaf.copy(
+            globalVars = leaf.globalVars + matched,
+            globalConstVars = leaf.globalConstVars + matchedConst,
+            pendingGlobalRefs = emptyList(),
+            pendingConstGlobalRefs = emptyList(),
+        )
+        if (withPending.globalVars.isEmpty()) return withPending
+        val declared = declaredStateNames(withPending.name)
+        if (declared.isEmpty()) return withPending
+        return withPending.copy(
+            globalVars = withPending.globalVars.intersect(declared),
+            globalConstVars = withPending.globalConstVars.intersect(declared),
         )
     }
 
     fun expand(leaf: SpecLeaf) {
         when {
-            leaf.name in leafSpecs || leaf.name in pclasses -> out += filterGlobals(leaf)
+            leaf.name in leafSpecs || leaf.name in pclasses -> out += materializeGlobals(leaf)
             leaf.name in procAliases -> {
                 val proc = procAliases.getValue(leaf.name)
                 flattenSpecLeaves(proc.procNodeValue(), leaf.name).forEach { child ->
@@ -374,7 +398,7 @@ fun expandLeavesToPclasses(
                     visiting.remove(leaf.name)
                 }
             }
-            else -> out += filterGlobals(leaf)
+            else -> out += materializeGlobals(leaf)
         }
     }
     leaves.forEach { expand(it) }

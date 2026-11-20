@@ -54,14 +54,14 @@ spec Name := System |= Guarantee
 spec Name := System
 spec Name := System { unsynced act1, act2 } // exact open-env ordinary allowlist (TLA)
 spec Name := with (v : T) { System }       // shared apply-binder scope
-spec Name := System[v : T] { const global x } // create-index; x unindexed & immutable in TLA+
-spec Name := System[v : T] { const global x; init: expr } // extra Init conjuncts (const-global)
-spec Name := System[v : T] { global y }       // create-index; y unindexed (mutable) in TLA+
+spec Name := System[v : T] { const global Leaf.x } // create-index; x unindexed & immutable in TLA+
+spec Name := System[v : T] { const global Leaf.x; init: expr } // extra Init conjuncts (const-global)
+spec Name := System[v : T] { global Leaf.y }       // create-index; y unindexed (mutable) in TLA+
 spec Name := System[v : T] { DynProc := { … } } // optional; default {"dp1","dp2"}
 compile Name1, Name2, ...
 ```
 
-System atoms: `Name[v : T]` **creates** an index (lifts state); `{ const global x }` / `{ global y }` on create-index leave those vars scalar in TLA+ (`const global` also freezes them; does not affect the native binary). Inside `with`, only `Name[v]` **applies** a shared binder. Shorthand `(A || B)[n : T]` desugars to create-temps + `with` + applies — see [Specifications](specifications.md#indexes-create-with-and-apply). Parent/child edges are inferred from nested `||` — see [Parent/child inference](children.md).
+System atoms: `Name[v : T]` **creates** an index (lifts state); `{ const global Leaf.x }` / `{ global Leaf.y }` on create-index leave those vars scalar in TLA+ (`const global` also freezes them; does not affect the native binary). Names must be proc-qualified. Inside `with`, only `Name[v]` **applies** a shared binder. Shorthand `(A || B)[n : T]` desugars to create-temps + `with` + applies — see [Specifications](specifications.md#indexes-create-with-and-apply). Parent/child edges are inferred from nested `||` — see [Parent/child inference](children.md).
 
 Leaf-spec actions: `transition name(args) also (aux : T) { … }` (leaf specs only). Bodies may read peer state `P.var` / `P[idx].var` (compile checks composition + indexing).
 

@@ -159,8 +159,13 @@ create_index_item
     | fun_model
     ;
 
+// Create-index: `global Leaf.var` or `const global Leaf.var` (proc-qualified; required).
 global_decl
-    : CONST? GLOBAL ID (COMMA ID)*
+    : CONST? GLOBAL global_var_ref (COMMA global_var_ref)*
+    ;
+
+global_var_ref
+    : ID DOT ID
     ;
 
 init_clause

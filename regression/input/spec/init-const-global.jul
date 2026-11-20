@@ -13,7 +13,7 @@ static proc Peer {
 
 spec Indexed := Peer[n : Node] {
     Node := {"n1", "n2"}
-  const global cluster
+  const global Peer.cluster
   init: cluster.length = Node.length
 } {
     unsynced start

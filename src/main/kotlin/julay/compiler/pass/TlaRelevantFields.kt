@@ -127,11 +127,14 @@ internal fun analyzeTlaRelevantFields(
     offers: List<TlaActionOffer>,
     usedFuns: Collection<FunNode>,
     invClosure: List<InvariantNode>,
+    initExprs: List<Pair<String, ExprNode>> = emptyList(),
 ): TlaRelevantFields {
     val analysis = RelevantFieldCollector(pclasses)
     offers.forEach { analysis.walkOffer(it) }
     usedFuns.forEach { analysis.walkFun(it) }
     invClosure.forEach { analysis.walkExpr(it.invariantFormula(), emptyMap(), inComparison = false) }
+    // create-index `init:` may pin fields (e.g. cluster[i].id) that actions never read
+    initExprs.forEach { (leafName, expr) -> analysis.walkInit(leafName, expr) }
     return analysis.build()
 }
 
@@ -193,6 +196,16 @@ private class RelevantFieldCollector(
             noteType(arg.type)
         }
         walkExpr(funNode.funBody(), env, inComparison = false)
+    }
+
+    fun walkInit(leafName: String, expr: ExprNode) {
+        val env = mutableMapOf<String, Type>()
+        pclasses[leafName]?.localDecls()?.filterIsInstance<VarNode>()?.forEach { vn ->
+            val ty = safeTypeOf(vn)
+            env[vn.name] = ty
+            noteType(ty)
+        }
+        walkExpr(expr, env, inComparison = false)
     }
 
     fun walkExpr(expr: ExprNode, env: Map<String, Type>, inComparison: Boolean) {

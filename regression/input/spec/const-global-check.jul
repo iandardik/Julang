@@ -17,7 +17,7 @@ static proc Peer {
 
 spec ConstCheck := Peer[n : Node] {
     Node := {"n1"}
-  const global cluster
+  const global Peer.cluster
 } {
     unsynced start
 }

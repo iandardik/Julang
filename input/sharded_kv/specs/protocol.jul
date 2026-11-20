@@ -1,5 +1,6 @@
 import node.store.Store
 import node.shard.ShardLogic
+import node.cluster_info.ClusterInfo
 import specs.net.PerfectNet
 import specs.net.NodeSet
 import node.lib.Key
@@ -12,9 +13,14 @@ spec ClusterStore := Store[n : NodeSet] {
 }
 
 spec Cluster := (Store || ShardLogic)[n : NodeSet] {
+    const global ClusterInfo.cluster
     NodeSet := { "n1", "n2" }
     Key := { "k1", "k2"}
     Value := { "v1", "v2" }
+    init: cluster.length = NodeSet.length
+    init: forall i : Int, (i >= 1 & i <= cluster.length) => cluster[i].id = i
+    init: forall n1 : NodeSet, forall n2 : NodeSet,
+        (ClusterInfo[n1].me = ClusterInfo[n2].me) => (n1 = n2)
 }
 
 

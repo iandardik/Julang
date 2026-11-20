@@ -289,6 +289,7 @@ fun tlaCodegenPass(
         tlaOptConfig.unusedFields ->
             analyzeTlaRelevantFields(
                 pclassesForTla, offers, usedFunOps, invClosure,
+                initExprs = leaves.flatMap { leaf -> leaf.initExprs.map { leaf.name to it } },
             ).withUnwrap(tlaOptConfig.unwrapSingletons)
         tlaOptConfig.unwrapSingletons -> TlaRelevantFields.UNWRAP_ONLY
         else -> TlaRelevantFields.IDENTITY
@@ -762,17 +763,38 @@ private fun emitProjectedTla(
     emitInitConstraintParts(leaves, stateVarNames, constants, initParts, consumedInitExprs)
     // Open `\in BoundedSeq([id:Int,url:String], …)` is infinite for Apalache and can
     // blow TLC's set limit — pin concrete Init (CircSide / System Store product).
+    // Prefer singleton const-global `cluster = <<…>>` from create-index `init:` when present;
+    // only empty-pin indexed (non-const-global) open membership.
+    val clusterSingletonInit = initParts.any { it.trimStart().startsWith("/\\ cluster = <<") }
+    val meInPin = Regex("""^/\\ me(_[A-Za-z0-9]+)? \\in """)
     for (i in initParts.indices) {
         val line = initParts[i]
+        val trimmed = line.trimStart()
         when {
             "me_url \\in" in line ->
                 initParts[i] = "/\\ me_url = [n \\in NodeSet |-> n]"
-            Regex("""/\s*me \\in """).containsMatchIn(line) || line.trimStart().startsWith("/\\ me \\in ") ->
-                initParts[i] = "/\\ me = [n \\in NodeSet |-> [id |-> 0, url |-> n]]"
-            "cluster \\in" in line ->
+            meInPin.containsMatchIn(trimmed) -> {
+                val meVar = Regex("""^/\\ (me(?:_[A-Za-z0-9]+)?) \\in """)
+                    .find(trimmed)?.groupValues?.get(1) ?: "me"
+                initParts[i] = if (clusterSingletonInit) {
+                    // Align me with const-global cluster peers (url = NodeSet index).
+                    "/\\ $meVar = [n \\in NodeSet |-> " +
+                        "cluster[CHOOSE i \\in DOMAIN cluster : cluster[i].url = n]]"
+                } else {
+                    "/\\ $meVar = [n \\in NodeSet |-> [id |-> 0, url |-> n]]"
+                }
+            }
+            "cluster \\in" in line && "NodeSet ->" in line ->
                 initParts[i] =
                     "/\\ cluster = [n \\in NodeSet |-> [__j \\in {} |-> [id |-> 0, url |-> \"\"]]]"
         }
+    }
+    // TLC evaluates Init conjuncts in order; me's CHOOSE over cluster must follow cluster = <<…>>.
+    val clusterAssignIdx = initParts.indexOfFirst { it.trimStart().startsWith("/\\ cluster = <<") }
+    val meUsesClusterIdx = initParts.indexOfFirst { "CHOOSE i \\in DOMAIN cluster" in it }
+    if (clusterAssignIdx >= 0 && meUsesClusterIdx >= 0 && meUsesClusterIdx < clusterAssignIdx) {
+        val clusterLine = initParts.removeAt(clusterAssignIdx)
+        initParts.add(meUsesClusterIdx, clusterLine)
     }
 
     val typeOkDef = buildString {
@@ -2087,6 +2109,16 @@ private fun emitConjoined(
     }
 
     fun pickOfferFor(expr: ExprNode): TlaActionOffer {
+        // `this.x` does not count as a symbol ref (never an arg), so match the leaf that
+        // owns state x before falling back — otherwise determined-args LET RHS can bind the
+        // unindexed VARIABLE map (e.g. getKey_ == getKey instead of getKey[n][i]).
+        val thisVars = collectThisAccessStateVars(expr)
+        if (thisVars.isNotEmpty()) {
+            offers.firstOrNull { offer ->
+                val bare = stateVarsByLeaf[offer.leaf.tlaName].orEmpty()
+                thisVars.any { it in bare }
+            }?.let { return it }
+        }
         for (offer in offers) {
             val bare = stateVarsByLeaf[offer.leaf.tlaName].orEmpty()
             if (bare.any { exprReferencesSymbol(expr, it) }) return offer
@@ -2670,10 +2702,12 @@ private fun emitInitConstraintParts(
     }
     if (withInits.isEmpty()) return
     initParts += "\\* init constraints"
+    // Create-index inits are copied onto every child leaf; emit each ExprNode once.
+    val seen = mutableSetOf<ExprNode>()
     withInits.forEach { leaf ->
         val leafCtx = mapOf(leaf.name to leaf, leaf.tlaName to leaf)
         leaf.initExprs.forEach { expr ->
-            if (expr in skipExprs) return@forEach
+            if (expr in skipExprs || !seen.add(expr)) return@forEach
             val body = exprToTla(
                 expr,
                 leafCtx = leafCtx,
@@ -2942,9 +2976,13 @@ private fun emitFoldedCtorAssumptions(
             existsWrap
         }
     }
-    if (constChecks.isEmpty() && errorFormulas.isEmpty()) return
+    val liveConstChecks = constChecks.filter { update ->
+        // Unsupported/IO RHS cannot constrain Init; create-index `init:` / singleton handles it.
+        !foldedCtorAssignNeedsDomainInit(offer, update)
+    }
+    if (liveConstChecks.isEmpty() && errorFormulas.isEmpty()) return
     initParts += "\\* ${leaf.name} constructor assumption"
-    constChecks.forEach { update ->
+    liveConstChecks.forEach { update ->
         val v = stateTlaName(leaf.tlaName, update.transitRootVar(), stateVarNames)
         val rhs = exprToTla(
             update.expr,
@@ -5386,6 +5424,12 @@ internal fun exprToTla(
             // Force state: never treat the root as an action arg even when names collide.
             val root = expr.stateVarName()
             val rest = expr.nestedFieldPath()
+            val owner = leafCtx.values.toSet().firstOrNull { leaf ->
+                (leaf.tlaName to root) in stateVarNames
+            }
+            if (owner != null && rest.isEmpty()) {
+                return stateRead(owner, root)
+            }
             val forcedArgs = argNames - root
             val inner: ExprNode = if (rest.isEmpty()) {
                 SymbolValueExprNode(root, expr.programLocation())

@@ -1,0 +1,57 @@
+import julay.funlib.mapOf
+
+/*
+ * determined-args with `arg = this.state` on a create-indexed client/service sync must
+ * LET-bind the indexed state read (getKey[n][i]), not the bare VARIABLE map.
+ */
+type Node
+type Key := String
+type Value := String
+
+static proc Store {
+    var store : Map<Key, Value>
+
+    constructor initially(args : List<String>) {
+        transit:
+            store := mapOf()
+    }
+
+    service transition getValue(getKey : Key, getVal : Value) {
+        guard:
+            getVal = store[getKey]
+    }
+}
+
+proc Get {
+    var getKey : Key
+    var step : String
+    var value : Value
+
+    constructor get(key : Key) {
+        transit:
+            getKey := key
+            step := "getvalue"
+            value := ""
+    }
+
+    client transition getValue(getKey : Key, getVal : Value) {
+        guard:
+            & step = "getvalue"
+            & getKey = this.getKey
+        transit:
+            value := getVal
+            step := "ok"
+    }
+
+    return done() {
+        guard: step = "ok"
+    }
+}
+
+spec ThisDeterminedArg := (Store || Get)[n : Node] {
+    Node := { "n1" }
+    Key := { "k1" }
+    Value := { "v1", "" }
+}
+
+compile ThisDeterminedArg

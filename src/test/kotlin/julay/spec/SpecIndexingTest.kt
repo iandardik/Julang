@@ -132,12 +132,12 @@ class SpecIndexingTest {
                 constructor spawnWorker(id : Int) { transit: id := id }
             }
             spec Bad := Worker[i : N] {
-              global nope
+              global Worker.nope
             }
             """.trimIndent(),
         )
         assertTrue(
-            result.errors.any { it.toString().contains("global \"nope\"") },
+            result.errors.any { it.toString().contains("global \"Worker.nope\"") },
             result.toString(),
         )
     }
@@ -153,12 +153,12 @@ class SpecIndexingTest {
                 constructor spawnWorker(id : Int) { transit: id := id }
             }
             spec Bad := Worker[i : N] {
-              global id, id
+              global Worker.id, Worker.id
             }
             """.trimIndent(),
         )
         assertTrue(
-            result.errors.any { it.toString().contains("duplicate global variable \"id\"") },
+            result.errors.any { it.toString().contains("duplicate global variable \"Worker.id\"") },
             result.toString(),
         )
     }
@@ -174,7 +174,7 @@ class SpecIndexingTest {
                 constructor spawnWorker(id : Int) { transit: id := id }
             }
             spec Bad := Worker[i : N] {
-              global constructed
+              global Worker.constructed
             }
             """.trimIndent(),
         )
@@ -194,14 +194,14 @@ class SpecIndexingTest {
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
             spec Bad := Worker[i : N] {
-              global cluster
+              global Worker.cluster
             }
             """.trimIndent(),
         )
         assertTrue(
             result.errors.any {
                 it.toString().contains(
-                    "\"cluster\" may change without declaring it \"const global cluster\", so either make it \"const global cluster\" or change the state var to be \"var cluster\" instead of \"const cluster\"",
+                    "\"Worker.cluster\" may change without declaring it \"const global Worker.cluster\", so either make it \"const global Worker.cluster\" or change the state var to be \"var cluster\" instead of \"const cluster\"",
                 )
             },
             result.toString(),
@@ -218,13 +218,13 @@ class SpecIndexingTest {
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
             spec Bad := Worker[i : N] {
-              const global cluster
+              const global Worker.cluster
             }
             """.trimIndent(),
         )
         assertTrue(
             result.errors.any {
-                it.toString().contains("\"cluster\" is a var") &&
+                it.toString().contains("\"Worker.cluster\" is a var") &&
                     it.toString().contains("drop \"const\"") &&
                     it.toString().contains("const cluster")
             },
@@ -242,7 +242,7 @@ class SpecIndexingTest {
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
             spec Ok := Worker[i : N] {
-              const global cluster
+              const global Worker.cluster
             }
             """.trimIndent(),
         )
@@ -259,7 +259,7 @@ class SpecIndexingTest {
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
             spec Ok := Worker[i : N] {
-              const global cluster
+              const global Worker.cluster
               init: cluster.length = N.length
             }
             """.trimIndent(),
@@ -277,7 +277,7 @@ class SpecIndexingTest {
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
             spec Ok := Worker[i : N] {
-              const global cluster
+              const global Worker.cluster
               init: length(cluster) = length(N)
             }
             """.trimIndent(),
@@ -295,7 +295,7 @@ class SpecIndexingTest {
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
             spec Bad := Worker[i : N] {
-              const global cluster
+              const global Worker.cluster
               init: cluster.length
             }
             """.trimIndent(),
@@ -321,8 +321,8 @@ class SpecIndexingTest {
                 }
             }
             spec Bad := Worker[i : N] {
-              const global cluster
-              global extra
+              const global Worker.cluster
+              global Worker.extra
               init: extra = 0
             }
             """.trimIndent(),
@@ -346,7 +346,7 @@ class SpecIndexingTest {
             }
             spec Bad := Worker[i : N] {
               N := {"a", "b", "c", "d"}
-              const global cluster
+              const global Worker.cluster
               init: cluster.length = N.length
             }
             """.trimIndent(),
@@ -369,7 +369,7 @@ class SpecIndexingTest {
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
             spec Bad := Worker[i : N] {
-              const global cluster
+              const global Worker.cluster
               init: Worker[i].cluster.length = N.length
             }
             """.trimIndent(),
@@ -395,7 +395,7 @@ class SpecIndexingTest {
                 }
             }
             spec Ok := Worker[i : N] {
-              const global cluster
+              const global Worker.cluster
               init: forall n1 : N, forall n2 : N, (Worker[n1].me = Worker[n2].me) => (n1 = n2)
             }
             """.trimIndent(),
@@ -418,7 +418,7 @@ class SpecIndexingTest {
                 }
             }
             spec Bad := Worker[i : N] {
-              const global cluster
+              const global Worker.cluster
               init: Worker[i].extra = 0
             }
             """.trimIndent(),

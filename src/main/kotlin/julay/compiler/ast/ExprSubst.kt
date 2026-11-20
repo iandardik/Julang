@@ -201,6 +201,7 @@ fun exprReferencesSymbol(expr: ExprNode, symbol: String): Boolean {
         }
         is LiteralValueExprNode -> false
         // `this.x` is always process state, never a binder / action arg named x.
+        // Callers that need the state root should use [collectThisAccessStateVars].
         is ThisAccessExprNode -> false
         is FieldAccessExprNode -> expr.baseSymbol == symbol
         is MemberAccessExprNode -> exprReferencesSymbol(expr.baseExpr, symbol)
@@ -230,6 +231,57 @@ fun exprReferencesSymbol(expr: ExprNode, symbol: String): Boolean {
             }
         }
         else -> throw RuntimeException("Unexpected expression node ${expr.javaClass.simpleName} during symbol reference check")
+    }
+}
+
+/** State-variable roots of every `this.x` / `this.x.f` under [expr]. */
+fun collectThisAccessStateVars(expr: ExprNode): Set<String> {
+    return when (expr) {
+        is ThisAccessExprNode -> setOf(expr.stateVarName())
+        is UnaryOpExprNode -> collectThisAccessStateVars(expr.operand())
+        is ParenExprNode -> collectThisAccessStateVars(expr.innerExpr())
+        is BinaryOpExprNode ->
+            collectThisAccessStateVars(expr.lhsOperand()) + collectThisAccessStateVars(expr.rhsOperand())
+        is IfElseExprNode ->
+            collectThisAccessStateVars(expr.condExpr()) +
+                collectThisAccessStateVars(expr.thenExpr()) +
+                collectThisAccessStateVars(expr.elseExpr())
+        is LetExprNode ->
+            collectThisAccessStateVars(expr.letInitExpr()) + collectThisAccessStateVars(expr.bodyExpr())
+        is WhenExprNode -> {
+            val subject = expr.subjectExpr()?.let { collectThisAccessStateVars(it) } ?: emptySet()
+            subject + expr.arms().flatMap { arm ->
+                when (arm) {
+                    is WhenArm.Subject ->
+                        when (val pattern = arm.pattern) {
+                            is WhenPattern.Primitive -> emptySet()
+                            is WhenPattern.Struct -> collectThisAccessStateVars(pattern.literal)
+                        } + collectThisAccessStateVars(arm.expr)
+                    is WhenArm.Guard ->
+                        collectThisAccessStateVars(arm.cond) + collectThisAccessStateVars(arm.expr)
+                    is WhenArm.Else -> collectThisAccessStateVars(arm.expr)
+                }
+            }
+        }
+        is MemberAccessExprNode -> collectThisAccessStateVars(expr.baseExpr)
+        is MethodCallExprNode ->
+            collectThisAccessStateVars(expr.baseExpr) +
+                expr.args.flatMap { collectThisAccessStateVars(it) } +
+                (expr.hofBodyOrNull()?.let { collectThisAccessStateVars(it) } ?: emptySet())
+        is LambdaExprNode -> collectThisAccessStateVars(expr.body)
+        is FieldAccessOnExprNode -> collectThisAccessStateVars(expr.baseExpr)
+        is ObjClassLiteralExprNode -> expr.fieldEntries.flatMap { collectThisAccessStateVars(it.second) }.toSet()
+        is ListLiteralExprNode -> expr.elements.flatMap { collectThisAccessStateVars(it) }.toSet()
+        is SetLiteralExprNode -> expr.elements.flatMap { collectThisAccessStateVars(it) }.toSet()
+        is MapLiteralExprNode ->
+            expr.entries.flatMap {
+                collectThisAccessStateVars(it.first) + collectThisAccessStateVars(it.second)
+            }.toSet()
+        is IndexExprNode ->
+            collectThisAccessStateVars(expr.base) + collectThisAccessStateVars(expr.index)
+        is FunCallExprNode -> expr.callArgs().flatMap { collectThisAccessStateVars(it) }.toSet()
+        is QuantifiedExprNode -> collectThisAccessStateVars(expr.quantifiedBody())
+        else -> emptySet()
     }
 }
 

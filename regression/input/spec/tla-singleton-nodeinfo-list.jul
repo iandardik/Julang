@@ -1,0 +1,35 @@
+type NodeSet
+
+type NodeInfo {
+    id : Int
+    url : String
+}
+
+static proc Peer {
+    const cluster : List<NodeInfo>
+    var n : Int
+    var lastUrl : String
+
+    constructor initially(args : List<String>) {
+        transit:
+            n := 0
+            lastUrl := ""
+    }
+
+    transition bump() {
+        transit:
+            n := n + 1
+            lastUrl := cluster[1].url
+    }
+}
+
+spec SingletonNodeInfoList := Peer[i : NodeSet] {
+    NodeSet := { "n1", "n2" }
+    const global Peer.cluster
+    init: cluster.length = NodeSet.length
+    init: forall i : Int, (i >= 1 & i <= cluster.length) => cluster[i].id = i
+} {
+    unsynced bump
+}
+
+compile SingletonNodeInfoList

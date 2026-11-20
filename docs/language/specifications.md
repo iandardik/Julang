@@ -188,9 +188,9 @@ Three roles:
 | Role | Syntax | Meaning |
 |------|--------|---------|
 | **Create index** | `Name[v : Type]` | Lift `Name`’s state to functions of a new index |
-| **Global vars** | `Name[v : T] { global x, y }` | Leave listed **var**s unindexed (one mutable TLA VARIABLE for all `v`) |
-| **Const-global vars** | `Name[v : T] { const global x }` | Leave listed **const**s unindexed and immutable in TLA+ |
-| **Init constraints** | `Name[v : T] { const global x; init: expr }` | Extra Init conjuncts over const-globals / uninterpreted `.length` |
+| **Global vars** | `Name[v : T] { global Leaf.x, Leaf.y }` | Leave listed **var**s unindexed (one mutable TLA VARIABLE for all `v`) |
+| **Const-global vars** | `Name[v : T] { const global Leaf.x }` | Leave listed **const**s unindexed and immutable in TLA+ |
+| **Init constraints** | `Name[v : T] { const global Leaf.x; init: expr }` | Extra Init conjuncts over const-globals / uninterpreted `.length` |
 | **Delayed model** | `Name[v : T] { NodeSet := { … } }` | Finite set for an uninterpreted or typedef name (see below) |
 | **Shared binder** | `with (v : Type) { system }` | Scope where `v` may be applied; one `\E v` for the group |
 | **Apply index** | `Name[v]` | Use binder `v` from an enclosing `with` (no type). Does not create an index |
@@ -201,7 +201,7 @@ Hard rule: inside `with`, **create-index `Name[n : T]` is illegal** — create o
 spec PeerIndexed := Peer[n : NodeSet]          // create (lift state)
 
 spec ClusterSpec := RaftProtocol[n : NodeSet] {
-  const global cluster
+  const global RaftProtocol.cluster
   NodeSet := { "n1", "n2", "n3" }
   init: cluster.length = NodeSet.length
   init: forall i : Int, (i >= 1 & i <= cluster.length) =>
@@ -217,23 +217,23 @@ spec Sys := with (n : NodeSet) {
 
 **`global` / `const global` are model state only.** TLA+ emits listed variables as scalars (not functions of the index): TypeOK / reads omit `[n]`, and `Peer[i].cluster` in an invariant becomes the unindexed `cluster` when that name is unique across leaves (a true two-leaf clash is `{var}_{leaf}`, e.g. `cluster_RaftProtocol`). JAR codegen is unchanged — each runtime instance still has its own copy; this is not shared memory.
 
-Do **not** infer immutability from a proc `const` plus `{ global x }`. The create-index block must say `const global x` explicitly. Mixed decls are allowed:
+Names must be **proc-qualified** (`Leaf.var`): bare `cluster` is a parse error. The leaf must be an indexed leaf of that create-index; only that leaf’s copy is marked global. Do **not** infer immutability from a proc `const` plus `{ global Leaf.x }`. The create-index block must say `const global Leaf.x` explicitly. Mixed decls are allowed:
 
 ```jul
 Peer[n : Node] {
-    const global cluster
-    global extra
+    const global Peer.cluster
+    global Peer.extra
 }
 ```
 
-`const global a, b` marks every name on that line const-global. Only `const` before `global` is legal (`global const x` is not).
+`const global Peer.a, Peer.b` marks every name on that line const-global. Only `const` before `global` is legal (`global const …` is not).
 
 **Mismatch is a compile error** (reported at the `global` / `const global` line):
 
-- `{ global cluster }` when the proc has `const cluster`: `"cluster" may change without declaring it "const global cluster", …`
-- `{ const global cluster }` when the proc has `var cluster`: it is a `var`, so drop `const` or declare `const cluster` on the proc.
+- `{ global Peer.cluster }` when the proc has `const cluster`: `"Peer.cluster" may change without declaring it "const global Peer.cluster", …`
+- `{ const global Peer.cluster }` when the proc has `var cluster`: it is a `var`, so drop `const` or declare `const cluster` on the proc.
 
-Unknown names, duplicates, and synthetic bookkeeping vars (`constructed` / `killed` / `terminated`) are also compile errors. On shorthand `(A || B)[n : T] { global cluster }`, each name applies to every child that declares it.
+Unknown leaves/vars, duplicates, and synthetic bookkeeping vars (`constructed` / `killed` / `terminated`) are also compile errors. On shorthand `(Store || ShardLogic)[n : T] { const global ClusterInfo.cluster }`, only the `ClusterInfo` leaf is marked (not every child that happens to declare `cluster`).
 
 **TLA+ for `const global` (not plain `global`):**
 
@@ -248,7 +248,7 @@ Plain `global extra` (a `var`) is unchanged: Init default, primed writes, scalar
 
 ```jul
 spec ClusterSpec := RaftProtocol[n : NodeSet] {
-    const global cluster
+    const global RaftProtocol.cluster
     init: cluster.length = NodeSet.length
     init: forall i : Int, (i >= 1 & i <= cluster.length) =>
         (exists node : Node, node in cluster & node.id = i)

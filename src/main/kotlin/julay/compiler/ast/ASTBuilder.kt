@@ -509,7 +509,12 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                     val decl = item.global_decl()
                     if (decl != null) {
                         globalDecls += GlobalDeclNames(
-                            names = decl.ID().map { it.text },
+                            refs = decl.global_var_ref().map { ref ->
+                                GlobalVarRef(
+                                    leafName = ref.ID(0).text,
+                                    varName = ref.ID(1).text,
+                                )
+                            },
                             isConst = decl.CONST() != null,
                             loc = sourceLocation(decl),
                         )

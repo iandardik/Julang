@@ -28,8 +28,8 @@ invariant All := forall i : Node,
 
 spec Indexed := Peer[n : Node] {
     Node := {"n1", "n2"}
-  const global cluster
-  global extra
+  const global Peer.cluster
+  global Peer.extra
 } |= All {
     unsynced start
 }

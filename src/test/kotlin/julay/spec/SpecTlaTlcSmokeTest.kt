@@ -631,6 +631,17 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun determinedArgsThisStateUsesIndexedRead() {
+        val source = File("regression/input/spec/tla-this-determined-arg.jul")
+        val (tlaText, _) = compileSpecTla(source, "ThisDeterminedArg")
+        assertTrue(
+            Regex("""getKey_\s*==\s*getKey\[n\]\[i\]""").containsMatchIn(tlaText),
+            "this.getKey determined-arg must LET-bind getKey[n][i], not the bare map;\n" +
+                tlaText.substringAfter("getValue").take(800),
+        )
+    }
+
+    @Test
     fun determinedArgsBindsCaseBranches() {
         val source = File("regression/input/spec/tla-case-determined.jul")
         val (tlaText, _) = compileSpecTla(source, "CaseDetermined")
@@ -859,6 +870,26 @@ class SpecTlaTlcSmokeTest {
         assertTrue(
             !Regex("""\\A i \\in Int :""").containsMatchIn(initBlock),
             "singleton set init should drop covering filters;\n$initBlock",
+        )
+    }
+
+    @Test
+    fun singletonNodeInfoListInitEmitsRecordSequence() {
+        val source = File("regression/input/spec/tla-singleton-nodeinfo-list.jul")
+        val (tlaText, _) = compileSpecTla(source, "SingletonNodeInfoList")
+        val initBlock = tlaText.substringAfter("Init ==").substringBefore("\n\n")
+        assertTrue(
+            initBlock.contains(
+                "cluster = <<[id |-> 1, url |-> \"n1\"], [id |-> 2, url |-> \"n2\"]>>",
+            ) || initBlock.contains(
+                "Peer_cluster = <<[id |-> 1, url |-> \"n1\"], [id |-> 2, url |-> \"n2\"]>>",
+            ),
+            "singleton NodeInfo list init should assign ids 1..n with NodeSet urls;\n$initBlock",
+        )
+        assertTrue(
+            !initBlock.contains("cluster \\in BoundedSeq") &&
+                !initBlock.contains("Peer_cluster \\in BoundedSeq"),
+            "singleton NodeInfo list init should drop BoundedSeq membership;\n$initBlock",
         )
     }
 

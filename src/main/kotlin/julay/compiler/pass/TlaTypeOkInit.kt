@@ -5,6 +5,7 @@ import julay.compiler.decl.TransitUpdate
 import julay.program.type.IntType
 import julay.program.type.ListType
 import julay.program.type.MapType
+import julay.program.type.ObjClassType
 import julay.program.type.SetType
 import julay.program.type.DomainType
 import julay.program.type.Type
@@ -25,6 +26,9 @@ internal data class TypeOkShapePlan(
 
 /**
  * `cluster = <<1, 2, …, n>>` when `init:` pins length and identity `xs[i] = i`.
+ * For `List<{id: Int, url: String}>` with the same id identity and length from a
+ * delayed model (e.g. NodeSet), emits `<<[id |-> 1, url |-> "n1"], …>>` using that
+ * model's elements as urls (declaration order) — same create-index pattern as Raft.
  * Does not pick a canonical `self`.
  */
 internal fun matchSingletonConstGlobalInit(
@@ -37,12 +41,31 @@ internal fun matchSingletonConstGlobalInit(
         lengthEqSize(expr, varName, domains)?.let { expr to it }
     }.singleOrNull() ?: return null
     if (lenHit.second < 0) return null
-    val elems = (1..lenHit.second).joinToString(", ")
+    val n = lenHit.second
+    val elems = (1..n).joinToString(", ")
     return when (type) {
         is ListType -> {
-            if (!tlaElemIsInt(type.elementType)) return null
             val idHit = initExprs.firstOrNull { isIdentityIndexInit(it, varName) } ?: return null
-            SingletonInitHit("<<$elems>>", listOf(lenHit.first, idHit))
+            when {
+                tlaElemIsInt(type.elementType) ->
+                    SingletonInitHit("<<$elems>>", listOf(lenHit.first, idHit))
+                else -> {
+                    val obj = type.elementType as? ObjClassType ?: return null
+                    val fields = TlaFieldProjection.get().fieldsFor(obj)
+                    if (fields.none { it.name == "id" && it.type is IntType }) return null
+                    val urls = lengthDomainCfgElements(lenHit.first, varName, domains) ?: return null
+                    if (urls.size != n) return null
+                    val hasUrl = fields.any { it.name == "url" }
+                    val records = (1..n).joinToString(", ") { i ->
+                        if (hasUrl) {
+                            "[id |-> $i, url |-> ${urls[i - 1]}]"
+                        } else {
+                            "[id |-> $i]"
+                        }
+                    }
+                    SingletonInitHit("<<$records>>", listOf(lenHit.first, idHit))
+                }
+            }
         }
         is SetType -> {
             if (!tlaElemIsInt(type.elementType)) return null
@@ -255,6 +278,24 @@ private fun lengthEqSize(
         return sortCardinality(other, domains)
     }
     return size(l, r) ?: size(r, l)
+}
+
+/** Delayed-model cfg tokens (already TLA-quoted) from the sort on the other side of a length `=`. */
+private fun lengthDomainCfgElements(
+    lenEqExpr: ExprNode,
+    varName: String,
+    domains: Map<String, DomainType>,
+): List<String>? {
+    val e = unwrapInitParen(lenEqExpr) as? BinaryOpExprNode ?: return null
+    if (e.op() != "=") return null
+    val l = unwrapInitParen(e.lhsOperand())
+    val r = unwrapInitParen(e.rhsOperand())
+    fun fromOther(lenExpr: ExprNode, other: ExprNode): List<String>? {
+        if (!isLengthOfName(lenExpr, varName)) return null
+        val name = lengthBaseName(other) ?: return null
+        return domains[name]?.cfgElements
+    }
+    return fromOther(l, r) ?: fromOther(r, l)
 }
 
 private fun sortCardinality(expr: ExprNode, domains: Map<String, DomainType>): Int? {

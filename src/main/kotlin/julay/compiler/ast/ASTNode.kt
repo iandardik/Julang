@@ -389,9 +389,17 @@ class AgSpecExprNode(
     }
 }
 
-/** Create-index `{ global x }` / `{ const global x }` names with source location. */
+/** One create-index `global` / `const global` target: `Leaf.var`. */
+data class GlobalVarRef(
+    val leafName: String,
+    val varName: String,
+) {
+    override fun toString(): String = "$leafName.$varName"
+}
+
+/** Create-index `{ global Leaf.x }` / `{ const global Leaf.x }` refs with source location. */
 data class GlobalDeclNames(
-    val names: List<String>,
+    val refs: List<GlobalVarRef>,
     val isConst: Boolean,
     val loc: ProgramLoc,
 )
@@ -417,9 +425,12 @@ class ParamProcExprNode(
     internal fun paramType(): TypeExpr? = paramType
     internal fun isApplyIndex(): Boolean = paramType == null
     internal fun globalDecls(): List<GlobalDeclNames> = globalDecls
-    internal fun globalVarNames(): List<String> = globalDecls.flatMap { it.names }
+    /** All `Leaf.var` refs on this create-index (const and plain). */
+    internal fun globalVarRefs(): List<GlobalVarRef> = globalDecls.flatMap { it.refs }
+    /** Bare var names (legacy helpers); prefer [globalVarRefs] / per-leaf filtering. */
+    internal fun globalVarNames(): List<String> = globalVarRefs().map { it.varName }
     internal fun globalConstVarNames(): List<String> =
-        globalDecls.filter { it.isConst }.flatMap { it.names }
+        globalDecls.filter { it.isConst }.flatMap { it.refs.map { ref -> ref.varName } }
     internal fun initExprs(): List<ExprNode> = initExprs
     internal fun typeModels(): List<TypeModelNode> = typeModels
     internal fun funModels(): List<FunModelNode> = funModels
@@ -429,7 +440,7 @@ class ParamProcExprNode(
             return index
         }
         val lines = globalDecls.map { decl ->
-            val names = decl.names.joinToString(", ")
+            val names = decl.refs.joinToString(", ")
             val kw = if (decl.isConst) "const global" else "global"
             "  $kw $names"
         } + typeModels.map { it.toString().prependIndent("  ") } +

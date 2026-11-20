@@ -362,24 +362,26 @@ private fun globalDeclErrors(
 ): List<CompileError> {
     val errors = mutableListOf<CompileError>()
     fun walk(n: ASTNode) {
-        if (n is ParamProcExprNode && !n.isApplyIndex() && n.globalVarNames().isNotEmpty()) {
-            val names = n.globalVarNames()
+        if (n is ParamProcExprNode && !n.isApplyIndex() && n.globalVarRefs().isNotEmpty()) {
+            val refs = n.globalVarRefs()
             val seen = mutableSetOf<String>()
-            names.forEach { name ->
-                if (!seen.add(name)) {
+            refs.forEach { ref ->
+                val key = ref.toString()
+                if (!seen.add(key)) {
                     errors += OneLocCompileError(
                         n.programLocation(),
-                        "duplicate global variable \"$name\"",
+                        "duplicate global variable \"$key\"",
                     )
                 }
-                if (name in SYNTHETIC_GLOBAL_NAMES) {
+                if (ref.varName in SYNTHETIC_GLOBAL_NAMES) {
                     errors += OneLocCompileError(
                         n.programLocation(),
-                        "cannot mark synthetic variable \"$name\" as global",
+                        "cannot mark synthetic variable \"${ref.varName}\" as global",
                     )
                 }
             }
-            val unique = names.distinct().filter { it !in SYNTHETIC_GLOBAL_NAMES }
+            val unique = refs.distinctBy { it.toString() }
+                .filter { it.varName !in SYNTHETIC_GLOBAL_NAMES }
             if (unique.isNotEmpty()) {
                 val expanded = expandLeavesToPclasses(
                     flattenSpecLeaves(n),
@@ -388,33 +390,40 @@ private fun globalDeclErrors(
                     specAliases,
                     leafSpecNodes,
                 )
-                val declared = expanded.flatMap { leaf ->
-                    declaredStateNames(leaf.name, pclassNodes, leafSpecNodes)
-                }.toSet()
-                unique.forEach { name ->
-                    if (name !in declared) {
+                val leafNames = expanded.map { it.name }.toSet()
+                unique.forEach { ref ->
+                    if (ref.leafName !in leafNames) {
                         errors += OneLocCompileError(
                             n.programLocation(),
-                            "global \"$name\" is not a state variable of any indexed leaf in this spec",
+                            "global \"${ref}\" names leaf \"${ref.leafName}\" which is not an indexed leaf in this spec",
+                        )
+                        return@forEach
+                    }
+                    val declared = declaredStateNames(ref.leafName, pclassNodes, leafSpecNodes)
+                    if (ref.varName !in declared) {
+                        errors += OneLocCompileError(
+                            n.programLocation(),
+                            "global \"${ref}\" is not a state variable of leaf \"${ref.leafName}\"",
                         )
                     }
                 }
                 n.globalDecls().forEach { decl ->
-                    decl.names.distinct().forEach { name ->
-                        if (name in SYNTHETIC_GLOBAL_NAMES || name !in declared) return@forEach
-                        val vars = expanded.mapNotNull { leaf ->
-                            declaredStateVars(leaf.name, pclassNodes, leafSpecNodes)[name]
-                        }
-                        if (!decl.isConst && vars.any { it.isConst }) {
+                    decl.refs.distinctBy { it.toString() }.forEach { ref ->
+                        if (ref.varName in SYNTHETIC_GLOBAL_NAMES) return@forEach
+                        if (ref.leafName !in leafNames) return@forEach
+                        val vn = declaredStateVars(ref.leafName, pclassNodes, leafSpecNodes)[ref.varName]
+                            ?: return@forEach
+                        val q = ref.toString()
+                        if (!decl.isConst && vn.isConst) {
                             errors += OneLocCompileError(
                                 decl.loc,
-                                "\"$name\" may change without declaring it \"const global $name\", so either make it \"const global $name\" or change the state var to be \"var $name\" instead of \"const $name\"",
+                                "\"$q\" may change without declaring it \"const global $q\", so either make it \"const global $q\" or change the state var to be \"var ${ref.varName}\" instead of \"const ${ref.varName}\"",
                             )
                         }
-                        if (decl.isConst && vars.any { !it.isConst }) {
+                        if (decl.isConst && !vn.isConst) {
                             errors += OneLocCompileError(
                                 decl.loc,
-                                "\"$name\" is a var, so either drop \"const\" (use \"global $name\") or declare \"const $name\" on the proc instead of \"var $name\"",
+                                "\"$q\" is a var, so either drop \"const\" (use \"global $q\") or declare \"const ${ref.varName}\" on the proc instead of \"var ${ref.varName}\"",
                             )
                         }
                     }
