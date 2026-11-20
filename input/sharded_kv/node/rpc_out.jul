@@ -1,10 +1,18 @@
 import julay.funlib.doHttpRequest
 import julay.funlib.parseInt
+import julay.funlib.split
+import node.lib.NodeInfo
 import node.lib.fieldValue
 import specs.net.Key
-import specs.net.Value
 
+/*
+ * Outbound ownership broadcast: POST k|id|url to a peer; reply body is id|url
+ * for the resolved owner (this node or a higher-id winner).
+ */
 export proc RpcOut := SendOwnershipBroadcast
+
+fun ownershipBodyField(body : String, idx : Int) : String =
+    fieldValue(split(body, "|")[idx])
 
 proc SendOwnershipBroadcast {
     const dest : String
@@ -15,7 +23,7 @@ proc SendOwnershipBroadcast {
     constructor broadcastOwnershipToPeer(peer : NodeInfo, key : Key, myInfo : NodeInfo) {
         transit:
             dest := peer.url
-            body := "k=" + key + "|owner=" + myInfo
+            body := "k=" + key + "|id=" + (myInfo.id + "") + "|url=" + myInfo.url
             sent := false
             knownOwner := myInfo
     }
@@ -24,13 +32,20 @@ proc SendOwnershipBroadcast {
         guard:
             ~sent
         transit:
-            let resp := doHttpRequest(HttpClientRequest {
+            let resp : HttpClientResponse := doHttpRequest(HttpClientRequest {
                 url := dest + "/rpc/ownership",
                 method := "POST",
                 body := body
+            })
+            sent := resp.code >= 0
+            knownOwner := if (sent) {
+                NodeInfo {
+                    id := parseInt(ownershipBodyField(resp.body, 1)),
+                    url := ownershipBodyField(resp.body, 2)
+                }
+            } else {
+                knownOwner
             }
-            sent = resp.code >= 0
-            knownOwner := getBody(resp.body,1)
     }
 
     return doneBroadcastOwnershipToPeer(owner : NodeInfo) {
@@ -39,4 +54,3 @@ proc SendOwnershipBroadcast {
             & owner = knownOwner
     }
 }
-

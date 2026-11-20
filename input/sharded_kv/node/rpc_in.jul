@@ -3,8 +3,10 @@ import julay.funlib.portFromUrl
 import julay.funlib.parseInt
 import julay.funlib.split
 import julay.funlib.length
+import julay.funlib.setOf
 import node.lib.fieldValue
 import node.lib.parseCfg
+import node.lib.NodeInfo
 import node.lib.PutResult
 import node.lib.GetResult
 import node.lib.OwnerEntry
@@ -73,9 +75,7 @@ proc HandleRpc {
             & path ~in setOf("kv/put",
                 "kv/get",
                 "kv/owners",
-                "rpc/keyCount",
-                "rpc/claim",
-                "rpc/moveBatch")
+                "rpc/ownership")
         transit:
             step := "done"
             respBody := "NOT_FOUND"
@@ -122,7 +122,8 @@ proc HandleRpc {
             step = "wait"
         transit:
             step := "done"
-            respBody := "OWNER " + owner
+            /* Wire format matches RpcOut ownershipBodyField: id=…|url=… */
+            respBody := "id=" + (owner.id + "") + "|url=" + owner.url
             respCode := 200
     }
 
@@ -154,9 +155,9 @@ static proc ServerStarter {
 fun encodeOwnersBody(entries : List<OwnerEntry>) : String =
     "owners=" + entries.fold("", (acc, e) ->
         if (acc = "") {
-            e.k + "->" + e.owner
+            e.key + "->" + e.owner.url
         } else {
-            acc + "|" + e.k + "->" + e.owner
+            acc + "|" + e.key + "->" + e.owner.url
         })
 
 fun bodyField(body : String, idx : Int) : String =

@@ -1,4 +1,7 @@
+import julay.funlib.length
 import julay.funlib.parseInt
+import node.lib.NodeInfo
+import node.lib.CfgPair
 import node.lib.parseCfg
 
 export static proc ClusterInfo {

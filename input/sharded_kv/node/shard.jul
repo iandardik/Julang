@@ -1,18 +1,19 @@
 import julay.funlib.length
 import julay.funlib.listOf
 import julay.funlib.setOf
+import node.cluster_info.ClusterInfo
+import node.lib.NodeInfo
 import node.lib.emptyNodeInfo
 import node.lib.PutResult
 import node.lib.GetResult
-import node.lib.KvPair
 import node.lib.OwnerEntry
-import node.lib.PeerPick
 import specs.net.Key
 import specs.net.Value
 
 export proc ShardLogic := PathLogic || ClusterInfo
 
-proc PathLogic := (Put || BroadcastOwnership) || Get || Owners
+proc PathLogic := (Put || BroadcastOwnership || RecvBroadcastOwnership)
+    || Get || Owners
 
 
 proc Put {
@@ -24,7 +25,7 @@ proc Put {
 
     constructor put(key : Key, val : Value) {
         transit:
-            putKey := put
+            putKey := key
             putVal := val
             step := "getMyInfo"
             me := emptyNodeInfo()
@@ -124,10 +125,12 @@ proc Get {
             & key = getKey
         transit:
             keyOwner := owner
-            step := when (owner) {
-                emptyNodeInfo() -> "missing"
-                me -> "getvalue"
-                else -> "redirect"
+            step := if (owner = emptyNodeInfo()) {
+                "missing"
+            } else if (owner = me) {
+                "getvalue"
+            } else {
+                "redirect"
             }
     }
 
@@ -135,7 +138,7 @@ proc Get {
     client transition getValue(getKey : Key, getVal : Value) {
         guard:
             & step = "getvalue"
-            & getKey = key
+            & getKey = this.getKey
         transit:
             value := getVal
             step := "ok"
@@ -210,7 +213,7 @@ proc BroadcastOwnership {
             clusterSize := 0
             peerIdx := 1
             peerInfo := emptyNodeInfo()
-            knownOwner := me
+            knownOwner := myInfo
     }
 
     client transition getClusterSize(size : Int) {
@@ -274,6 +277,8 @@ proc BroadcastOwnership {
 }
 
 // TODO implement
+// 1. Add the ownership info to the store
+// 2. Add committed to store for keys and return whether the key exists
 proc RecvBroadcastOwnership {
     constructor recvBroadcastOwnership(key : Key) {
     }

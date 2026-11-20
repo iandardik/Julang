@@ -1,6 +1,7 @@
 import julay.funlib.mapOf
 import node.lib.NodeInfo
 import node.lib.OwnerEntry
+import node.lib.emptyNodeInfo
 import specs.net.Key
 import specs.net.Value
 
@@ -16,8 +17,8 @@ export static proc Store {
 
     service transition ownerOf(key : Key, owner : NodeInfo) {
         guard:
-            owner = if (key in owner) {
-                owner[key]
+            owner = if (key in owners) {
+                owners[key]
             } else {
                 emptyNodeInfo()
             }
@@ -28,25 +29,15 @@ export static proc Store {
             getVal = store[getKey]
     }
 
-    service transition numKeysInShard(count : Int) {
-        guard:
-            count = store.length
-    }
-
     service transition putKV(key : Key, val : Value, owner : NodeInfo) {
         transit:
             store[key] := val
             owners[key] := owner
     }
 
-    service transition setKeyOwner(key : Key, owner : NodeInfo) {
-        transit:
-            owners[key] := owner
-    }
-
-    service transition getAllOwners(entries : List<OwnerEntry>) {
+    service transition getAllOwners(allOwners : List<OwnerEntry>) {
         guard:
-            entries = owners.keys.map(k -> OwnerEntry {
+            allOwners = owners.keys.toList().map(k -> OwnerEntry {
                 key := k,
                 owner := owners[k]
             })
