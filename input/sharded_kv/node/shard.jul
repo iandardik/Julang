@@ -210,7 +210,7 @@ proc BroadcastOwnership {
             bcKey := key
             me := myInfo
             step := "getClusterSize"
-            clusterSize := 0
+            clusterSize := 2
             peerIdx := 1
             peerInfo := emptyNodeInfo()
             knownOwner := myInfo
@@ -280,11 +280,29 @@ proc BroadcastOwnership {
 // 1. Add the ownership info to the store
 // 2. Add committed to store for keys and return whether the key exists
 proc RecvBroadcastOwnership {
-    constructor recvBroadcastOwnership(key : Key) {
+    const bcKey : Key
+    const bcOwner : NodeInfo
+    var state : String
+
+    constructor recvBroadcastOwnership(key : Key, sender : NodeInfo) {
+        transit:
+            bcKey := key
+            bcOwner := sender
+            state := "addOwnedKey"
+    }
+
+    client transition addOwnedKey(key : Key, owner : NodeInfo) {
+        guard:
+            & state = "addOwnedKey"
+            & key = bcKey
+            & owner = bcOwner
+        transit:
+            state := "done"
     }
 
     return doneRecvBroadcastOwnership(owner : NodeInfo) {
         guard:
-            owner = emptyNodeInfo()
+            & state = "done"
+            & owner = bcOwner
     }
 }

@@ -7,13 +7,13 @@ import specs.net.Value
 
 spec ClusterStore := Store[n : NodeSet] {
     NodeSet := { "n1", "n2" }
-    Key := { "k1", "k2", "k3", "k4", "k5" }
+    Key := { "k1", "k2"}
     Value := { "v1", "v2" }
 }
 
 spec Cluster := (Store || ShardLogic)[n : NodeSet] {
     NodeSet := { "n1", "n2" }
-    Key := { "k1", "k2", "k3", "k4", "k5" }
+    Key := { "k1", "k2"}
     Value := { "v1", "v2" }
 }
 

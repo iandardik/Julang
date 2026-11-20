@@ -42,5 +42,10 @@ export static proc Store {
                 owner := owners[k]
             })
     }
+
+    service transition addOwnedKey(key : Key, owner : NodeInfo) {
+        transit:
+            owners[key] := owner
+    }
 }
 

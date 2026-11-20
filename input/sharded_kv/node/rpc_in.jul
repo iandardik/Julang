@@ -60,11 +60,16 @@ proc HandleRpc {
             step := "wait"
     }
 
-    transition recvBroadcastOwnership(key : Key) {
+    /* body: k=<k>|id=<id>|url=<url> — matches RpcOut broadcastOwnershipToPeer */
+    transition recvBroadcastOwnership(key : Key, sender : NodeInfo) {
         guard:
             & step = "route"
-            & path = "kv/ownership"
+            & path = "rpc/ownership"
             & key = bodyField(body, 1)
+            & sender = NodeInfo {
+                id := parseInt(bodyField(body, 2)),
+                url := bodyField(body, 3)
+            }
         transit:
             step := "wait"
     }
