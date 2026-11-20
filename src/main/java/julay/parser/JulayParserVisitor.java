@@ -113,6 +113,18 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitSpec(JulayParser.SpecContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#composition_spec_item}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitComposition_spec_item(JulayParser.Composition_spec_itemContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#unsynced_decl}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitUnsynced_decl(JulayParser.Unsynced_declContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#leaf_spec_item}.
 	 * @param ctx the parse tree
 	 * @return the visitor result

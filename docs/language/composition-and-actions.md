@@ -33,19 +33,31 @@ If `A` and `B` both offer ordinary `y`, that pair becomes composition-private in
 
 Use **`service` / `client`** when a static hub must stay visible so many callers can sync on the same public API (see [inc server](../examples/inc-server.md)).
 
-### Alphabet integrity (native binary only)
+### Alphabet integrity and `unsynced`
 
-**Complete sync** of ordinary / client actions is required only on the **top-level native `compile` target** — not on intermediate apis or procs that a parent will compose later, and not when compiling to TLA+ (`spec` or `--compile-tla`).
+**Complete sync** of ordinary actions is required by default on every top-level `compile` target (JAR and TLA). Intermediate assemblies (analyze / check without a `compile` directive) may still leave ordinary actions unbound.
 
-On that top-level binary target:
+On a top-level **JAR** target:
 
-- Unsynced ordinary actions in the external alphabet → **warn** (compile still succeeds). Tag them `internal` if a solo step is intentional.
+- Unsynced ordinary actions in the external alphabet → **error**. Tag them `internal` if a solo step is intentional (programs cannot declare an open-env allowlist).
 - Dangling `client` with no `service` → **error** (except folded procfun clients waiting for a parent hub).
 - Action-shape and static-occurrence errors are hard failures (see below).
 
-TLA+ compile skips composition-alphabet **integrity errors**, so partial specs are allowed. It still emits **one warning** listing every unbound (still-external) action name after composition (open env alphabet for TLC).
+On a top-level **TLA / composition Spec** target, dangling clients are still allowed, but unbound ordinary actions are an **error** unless listed on the Spec:
 
-`analyze`, IDE alphabet panels, and `check` without a `compile` directive do not require incomplete ordinary wiring to be resolved yet.
+```jul
+spec Sys := Cluster || Env {
+  unsynced goInject, tick
+}
+```
+
+The `unsynced` list is an **exact** allowlist of intentional open-env ordinary action names (unqualified; local to this Spec):
+
+- Unbound ordinary **not** listed → error (forgotten peer).
+- Name listed but **already synced** → error (stale declaration).
+- Name listed but **absent** from the alphabet → error (typo).
+
+Unbound **constructors** (other than `initially`) are included: list them in `unsynced` on a Spec, or sync them with a peer. `analyze`, IDE alphabet panels, and `check` without a `compile` directive do not require incomplete ordinary wiring yet.
 
 ### Procfuns and alphabets
 

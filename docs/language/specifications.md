@@ -65,7 +65,7 @@ Invariant assume/guarantee formulas are type-checked against the AG **system** l
 
 #### AG Obl `.cfg`: safety by default (no `*Terminates`)
 
-An assume–guarantee composition (`<Asm> Sys <G>` / `|=`) is an **obligation** (Obl): TLC proves the guarantee under the assume, typically against an open environment (unbound injectors / stubs). That model is for **safety** (invariants), not worker liveness.
+An assume–guarantee composition (`<Asm> Sys <G>` / `|=`) is an **obligation** (Obl): TLC proves the guarantee under the assume, typically against an open environment (unbound injectors / stubs). Declare those intentional unbound ordinary actions with `unsynced a, b` on the composition Spec (exact allowlist; see [composition-and-actions](composition-and-actions.md)). That model is for **safety** (invariants), not worker liveness.
 
 For every AG Obl, `julayc` therefore emits:
 

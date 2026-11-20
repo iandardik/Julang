@@ -54,17 +54,19 @@ class SoftSyncWarningTest {
             "intermediate analyze must not require ordinary sync; got: $intermediateWarnings",
         )
 
-        val compileWarnings = checked.ast.warningPass(
+        val compileErrors = checked.ast.errorPass(
             components,
             checked.librariesInUse,
             requireCompleteSync = true,
+            program = checked.procDecls.firstOrNull { it.name == "P" },
+            procDecls = checked.procDecls,
         )
         assertTrue(
-            compileWarnings.any {
+            compileErrors.any {
                 it.toString().contains("not synchronized with any peer") ||
                     it.toString().contains("tag it `internal`")
             },
-            "top-level compile must still warn on unilateral ordinary; got: $compileWarnings",
+            "top-level compile must error on unilateral ordinary; got: $compileErrors",
         )
 
         val scope = resolveAnalyzeScope(
@@ -86,7 +88,7 @@ class SoftSyncWarningTest {
     }
 
     @Test
-    fun jarCompileUnilateralOrdinaryWarnsButDoesNotError() {
+    fun jarCompileUnilateralOrdinaryErrors() {
         val dir = Files.createTempDirectory("julay-soft-sync-jar")
         val file = dir.resolve("solo.jul")
         file.toFile().writeText(
@@ -114,21 +116,19 @@ class SoftSyncWarningTest {
             program = program,
             procDecls = checked.procDecls,
         )
-        assertTrue(ok, "unsynced ordinary must not abort JAR compile checks")
+        assertFalse(ok, "unsynced ordinary must abort JAR compile checks")
 
-        val warnings = checked.ast.warningPass(
+        val errors = checked.ast.errorPass(
             components,
             checked.librariesInUse,
             program,
             checked.procDecls,
         )
         assertTrue(
-            warnings.any { it.toString().contains("not synchronized with any peer") },
-            "expected unsynced-ordinary warning; got: $warnings",
+            errors.any { it.toString().contains("not synchronized with any peer") },
+            "expected unsynced-ordinary error; got: $errors",
         )
     }
-
-
 
     @Test
     fun serviceWithNoClientsStillWarnsDeadlock() {
@@ -161,10 +161,45 @@ class SoftSyncWarningTest {
         )
     }
 
+    @Test
+    fun tlaCompileRequiresUnsyncedAllowlistForConstructor() {
+        val dir = Files.createTempDirectory("julay-tla-unsynced-ctor")
+        val file = dir.resolve("ctor.jul")
+        file.toFile().writeText(
+            """
+            proc Box {
+                var n : Int
+                constructor start() { transit: n := 0 }
+                transition tick() { transit: n := n + 1 }
+                return done() { guard: n >= 0 }
+            }
+            spec Allowed := Box {
+                unsynced start, tick, done
+            }
+            spec MissingCtor := Box {
+                unsynced tick, done
+            }
+            compile Allowed, MissingCtor
+            """.trimIndent(),
+        )
+
+        val cwd = java.io.File(".").canonicalFile
+        val allowed = java.io.File(cwd, "Allowed.tla")
+        val missing = java.io.File(cwd, "MissingCtor.tla")
+        listOf(allowed, missing).forEach { it.delete() }
+        try {
+            julay.compiler.compileJulFile(file, keepBuild = false)
+            assertTrue(allowed.exists(), "expected Allowed.tla when start listed in unsynced")
+            assertFalse(missing.exists(), "MissingCtor must fail without unsynced start")
+        } finally {
+            listOf(allowed, missing).forEach { it.delete() }
+            listOf("Allowed.cfg", "MissingCtor.cfg").forEach { java.io.File(cwd, it).delete() }
+        }
+    }
 
     @Test
-    fun tlaCompileAllowsPartialAlphabetsJarStillRejectsUnmatchedClient() {
-        val dir = Files.createTempDirectory("julay-tla-partial-alphabet")
+    fun tlaCompileRequiresUnsyncedAllowlistForOrdinary() {
+        val dir = Files.createTempDirectory("julay-tla-unsynced")
         val file = dir.resolve("partial.jul")
         file.toFile().writeText(
             """
@@ -177,26 +212,30 @@ class SoftSyncWarningTest {
                 transition tick() { transit: }
             }
             spec ClientSpec := ClientOnly
-            spec OrdinarySpec := OrdinarySolo
-            compile ClientSpec, OrdinarySpec
+            spec OrdinarySpec := OrdinarySolo {
+                unsynced tick
+            }
+            spec OrdinaryMissing := OrdinarySolo
+            compile ClientSpec, OrdinarySpec, OrdinaryMissing
             """.trimIndent(),
         )
 
         val cwd = java.io.File(".").canonicalFile
         val clientTla = java.io.File(cwd, "ClientSpec.tla")
-        val clientCfg = java.io.File(cwd, "ClientSpec.cfg")
         val ordinaryTla = java.io.File(cwd, "OrdinarySpec.tla")
-        val ordinaryCfg = java.io.File(cwd, "OrdinarySpec.cfg")
-        listOf(clientTla, clientCfg, ordinaryTla, ordinaryCfg).forEach { it.delete() }
+        val missingTla = java.io.File(cwd, "OrdinaryMissing.tla")
+        listOf(clientTla, ordinaryTla, missingTla).forEach { it.delete() }
 
         try {
             julay.compiler.compileJulFile(file, keepBuild = false)
             assertTrue(clientTla.exists(), "expected ClientSpec.tla for unmatched client")
-            assertTrue(clientCfg.exists(), "expected ClientSpec.cfg")
-            assertTrue(ordinaryTla.exists(), "expected OrdinarySpec.tla for unsynced ordinary")
-            assertTrue(ordinaryCfg.exists(), "expected OrdinarySpec.cfg")
+            assertTrue(ordinaryTla.exists(), "expected OrdinarySpec.tla when listed in unsynced")
+            assertFalse(missingTla.exists(), "OrdinaryMissing must fail without unsynced tick")
         } finally {
-            listOf(clientTla, clientCfg, ordinaryTla, ordinaryCfg).forEach { it.delete() }
+            listOf(clientTla, ordinaryTla, missingTla).forEach { it.delete() }
+            listOf("ClientSpec.cfg", "OrdinarySpec.cfg", "OrdinaryMissing.cfg").forEach {
+                java.io.File(cwd, it).delete()
+            }
         }
 
         // Same unmatched client as a JAR root must still fail alphabet integrity.
@@ -224,6 +263,72 @@ class SoftSyncWarningTest {
             requireCompleteSync = true,
         )
         assertFalse(ok, "JAR compile must still reject unmatched client")
+    }
+
+    @Test
+    fun tlaUnsyncedListedButSyncedIsError() {
+        val dir = Files.createTempDirectory("julay-tla-unsynced-stale")
+        val file = dir.resolve("stale.jul")
+        file.toFile().writeText(
+            """
+            static proc A {
+                constructor initially(args : List<String>) { transit: }
+                transition ping() { transit: }
+            }
+            static proc B {
+                constructor initially(args : List<String>) { transit: }
+                transition ping() { transit: }
+            }
+            spec Synced := A || B {
+                unsynced ping
+            }
+            compile Synced
+            """.trimIndent(),
+        )
+
+        val cwd = java.io.File(".").canonicalFile
+        val tla = java.io.File(cwd, "Synced.tla")
+        val cfg = java.io.File(cwd, "Synced.cfg")
+        tla.delete()
+        cfg.delete()
+        try {
+            julay.compiler.compileJulFile(file, keepBuild = false)
+            assertFalse(tla.exists(), "listed-but-synced unsynced must fail compile")
+        } finally {
+            tla.delete()
+            cfg.delete()
+        }
+    }
+
+    @Test
+    fun tlaUnsyncedUnknownNameIsError() {
+        val dir = Files.createTempDirectory("julay-tla-unsynced-typo")
+        val file = dir.resolve("typo.jul")
+        file.toFile().writeText(
+            """
+            static proc Solo {
+                constructor initially(args : List<String>) { transit: }
+                transition tick() { transit: }
+            }
+            spec S := Solo {
+                unsynced tick, noSuchAct
+            }
+            compile S
+            """.trimIndent(),
+        )
+
+        val cwd = java.io.File(".").canonicalFile
+        val tla = java.io.File(cwd, "S.tla")
+        val cfg = java.io.File(cwd, "S.cfg")
+        tla.delete()
+        cfg.delete()
+        try {
+            julay.compiler.compileJulFile(file, keepBuild = false)
+            assertFalse(tla.exists(), "unknown unsynced name must fail compile")
+        } finally {
+            tla.delete()
+            cfg.delete()
+        }
     }
 
     @Test

@@ -19,6 +19,8 @@ static proc Box {
     }
 }
 
-spec UnusedLets := <true> Box <true>
+spec UnusedLets := <true> Box <true> {
+    unsynced step
+}
 
 compile UnusedLets

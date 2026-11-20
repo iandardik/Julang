@@ -24,6 +24,8 @@ static proc Branchy {
     }
 }
 
-spec NestedBoolLayout := <true> Branchy <true>
+spec NestedBoolLayout := <true> Branchy <true> {
+    unsynced choose
+}
 
 compile NestedBoolLayout

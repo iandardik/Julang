@@ -21,6 +21,8 @@ invariant OneLeaderPerTerm := forall n1, n2 : NodeSet,
 
 spec InvLayout := <true> Node[n : NodeSet] {
     NodeSet := {"a", "b"}
-} <OneLeaderPerTerm>
+} <OneLeaderPerTerm> {
+    unsynced bump
+}
 
 compile InvLayout

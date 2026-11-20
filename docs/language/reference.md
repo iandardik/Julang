@@ -52,6 +52,7 @@ spec Name { ... }                          // dynamic leaf (spawn ctor + return;
 spec Name := <Assume> System <Guarantee>
 spec Name := System |= Guarantee
 spec Name := System
+spec Name := System { unsynced act1, act2 } // exact open-env ordinary allowlist (TLA)
 spec Name := with (v : T) { System }       // shared apply-binder scope
 spec Name := System[v : T] { const global x } // create-index; x unindexed & immutable in TLA+
 spec Name := System[v : T] { const global x; init: expr } // extra Init conjuncts (const-global)

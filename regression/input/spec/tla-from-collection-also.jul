@@ -41,5 +41,7 @@ spec AlsoStructSys := with (n : NodeSet) {
     PeerIndexed[n] || Net[n]
 }
 
-spec AlsoStructChecked := AlsoStructSys |= GotOk
+spec AlsoStructChecked := AlsoStructSys |= GotOk {
+    unsynced ping, recv
+}
 compile AlsoStructChecked

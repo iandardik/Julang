@@ -178,6 +178,26 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitSpec(JulayParser.SpecContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#composition_spec_item}.
+	 * @param ctx the parse tree
+	 */
+	void enterComposition_spec_item(JulayParser.Composition_spec_itemContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#composition_spec_item}.
+	 * @param ctx the parse tree
+	 */
+	void exitComposition_spec_item(JulayParser.Composition_spec_itemContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#unsynced_decl}.
+	 * @param ctx the parse tree
+	 */
+	void enterUnsynced_decl(JulayParser.Unsynced_declContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#unsynced_decl}.
+	 * @param ctx the parse tree
+	 */
+	void exitUnsynced_decl(JulayParser.Unsynced_declContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#leaf_spec_item}.
 	 * @param ctx the parse tree
 	 */

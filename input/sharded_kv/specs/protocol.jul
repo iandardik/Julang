@@ -2,8 +2,8 @@ import node.store.Store
 import node.shard.ShardLogic
 import specs.net.PerfectNet
 import specs.net.NodeSet
-import specs.net.Key
-import specs.net.Value
+import node.lib.Key
+import node.lib.Value
 
 spec ClusterStore := Store[n : NodeSet] {
     NodeSet := { "n1", "n2" }
@@ -34,4 +34,7 @@ invariant ProtocolInvs := KeysUnique
 
 
 export spec StoreSpec := <true> ClusterStore <ProtocolInvs>
-export spec SysSpec := <true> Cluster || PerfectNet <ProtocolInvs>
+
+export spec SysSpec := <true> Cluster || PerfectNet <ProtocolInvs> {
+    unsynced put, putDone, get, getDone, owners, ownersDone
+}

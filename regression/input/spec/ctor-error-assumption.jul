@@ -26,6 +26,8 @@ static proc P {
 
 spec CtorErr := P[n : Idx] {
     Idx := {"a"}
+} {
+    unsynced start
 }
 
 compile CtorErr

@@ -15,6 +15,8 @@ invariant A := Counter.n >= 0
 invariant B := Counter.n <= 10
 invariant C := A & B
 
-spec ConjInv := Counter |= C
+spec ConjInv := Counter |= C {
+    unsynced bump
+}
 
 compile ConjInv

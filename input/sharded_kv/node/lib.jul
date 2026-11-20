@@ -5,8 +5,9 @@ import julay.funlib.parseInt
 import julay.funlib.readFile
 import julay.funlib.listOf
 import julay.funlib.startsWith
-import specs.net.Key
-import specs.net.Value
+
+export type Key := String
+export type Value := String
 
 export type NodeInfo {
     id : Int

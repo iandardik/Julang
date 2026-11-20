@@ -16,6 +16,8 @@ static proc Store {
     }
 }
 
-spec ObjFieldEq := <true> Store <true>
+spec ObjFieldEq := <true> Store <true> {
+    unsynced collide
+}
 
 compile ObjFieldEq

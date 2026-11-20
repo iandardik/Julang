@@ -11,6 +11,8 @@ static spec Env {
     }
 }
 
-spec LeafPlainEnv := Env
+spec LeafPlainEnv := Env {
+    unsynced mark
+}
 
 compile LeafPlainEnv

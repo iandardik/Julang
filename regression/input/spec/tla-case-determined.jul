@@ -12,6 +12,8 @@ static proc Box {
     }
 }
 
-spec CaseDetermined := <true> Box <true>
+spec CaseDetermined := <true> Box <true> {
+    unsynced go
+}
 
 compile CaseDetermined

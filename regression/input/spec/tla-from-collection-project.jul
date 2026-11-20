@@ -22,6 +22,8 @@ static proc Mail {
 
 invariant Saw := Mail.seen >= 0
 
-spec FromCollectionProject := Mail |= Saw
+spec FromCollectionProject := Mail |= Saw {
+    unsynced take
+}
 
 compile FromCollectionProject

@@ -59,7 +59,11 @@ invariant Safe := C2.ok
 invariant I1 := G
 invariant I2 := A & Safe
 
-export spec Obl1 := I1 |= <true, A> C1 <G>
-export spec Obl2 := I2 |= <G> C2 <A, Safe>
+export spec Obl1 := I1 |= <true, A> C1 <G> {
+    unsynced reset, tick
+}
+export spec Obl2 := I2 |= <G> C2 <A, Safe> {
+    unsynced reset, tick
+}
 
 compile Obl1, Obl2

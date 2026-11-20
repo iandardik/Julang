@@ -33,11 +33,10 @@ class CheckJulFileTest {
     }
 
     @Test
-    fun checkJsonReportsSoftSyncAsWarningOnly() {
-        val dir = Files.createTempDirectory("julay-check-warn")
+    fun checkJsonReportsUnsyncedOrdinaryAsError() {
+        val dir = Files.createTempDirectory("julay-check-unsynced")
         val file = dir.resolve("solo.jul")
-        // Soft sync warnings require a named `compile` target; without one,
-        // incomplete ordinary sync is allowed for intermediate assemblies.
+        // Complete ordinary sync is required on a named `compile` JAR target.
         file.toFile().writeText(
             """
             static proc Solo {
@@ -50,17 +49,16 @@ class CheckJulFileTest {
         )
 
         val result = checkJulFile(file)
-        assertFalse(result.hasErrors, result.diagnostics.toString())
+        assertTrue(result.hasErrors, result.diagnostics.toString())
         assertTrue(
             result.diagnostics.any {
-                it.severity == DiagnosticSeverity.Warning &&
+                it.severity == DiagnosticSeverity.Error &&
                     it.message.contains("not synchronized with any peer")
             },
             result.diagnostics.toString(),
         )
         val json = buildDiagnosticsJsonDocument(result.diagnostics)
-        assertTrue(json.contains("\"severity\": \"warning\""), json)
-        assertFalse(json.contains("\"severity\": \"error\""), json)
+        assertTrue(json.contains("\"severity\": \"error\""), json)
     }
 
     @Test

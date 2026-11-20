@@ -21,6 +21,8 @@ static proc Modes {
 
 invariant Keep := Modes.step >= 0 & Modes.payload ~= "" & Modes.role ~= ""
 
-spec LiteralDomains := Modes |= Keep
+spec LiteralDomains := Modes |= Keep {
+    unsynced go
+}
 
 compile LiteralDomains

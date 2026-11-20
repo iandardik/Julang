@@ -24,6 +24,8 @@ static proc WhenCase {
     }
 }
 
-spec WhenCaseLayout := <true> WhenCase <true>
+spec WhenCaseLayout := <true> WhenCase <true> {
+    unsynced step
+}
 
 compile WhenCaseLayout

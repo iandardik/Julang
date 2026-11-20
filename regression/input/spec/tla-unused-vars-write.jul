@@ -16,6 +16,8 @@ static proc Box {
     }
 }
 
-spec UnusedVarsWrite := <true> Box <true>
+spec UnusedVarsWrite := <true> Box <true> {
+    unsynced bump
+}
 
 compile UnusedVarsWrite

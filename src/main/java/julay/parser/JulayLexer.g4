@@ -78,6 +78,7 @@ WITH : 'with' ;
 THIS : 'this' ;
 GLOBAL : 'global' ;
 INIT : 'init' ;
+UNSYNCED : 'unsynced' ;
 
 REAL : [-]?[0-9]+ '.' [0-9]+ ;
 INT : [-]?[0-9]+ ;

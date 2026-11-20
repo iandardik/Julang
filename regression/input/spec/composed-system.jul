@@ -28,6 +28,8 @@ proc System := Counter || Env
 
 invariant Bound := Counter.n >= 0
 
-spec ComposedSystem := <true> System <Bound>
+spec ComposedSystem := <true> System <Bound> {
+    unsynced arm, bump
+}
 
 compile ComposedSystem

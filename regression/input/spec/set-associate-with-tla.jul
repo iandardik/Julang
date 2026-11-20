@@ -23,6 +23,8 @@ spec AssocMap := Box[i : Ids] {
     const global cluster
     init: cluster.length = Ids.length
     init: forall i : Int, (i >= 1 & i <= cluster.length) => i in cluster
+} {
+    unsynced bump, start
 }
 
 compile AssocMap

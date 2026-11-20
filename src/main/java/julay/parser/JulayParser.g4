@@ -89,10 +89,19 @@ compile_decl
 spec
     : STATIC? SPEC ID (LBRACK ID COLON typeExpr RBRACK)? LCURLY leaf_spec_item* RCURLY
     /* LocalInv |= <A> C <G>  (and circular comma forms) */
-    | SPEC ID ASGN_EQ ID MODELS ag_spec
-    | SPEC ID ASGN_EQ ag_spec
-    | SPEC ID ASGN_EQ system_expr MODELS expr
-    | SPEC ID ASGN_EQ system_expr
+    | SPEC ID ASGN_EQ ID MODELS ag_spec (LCURLY composition_spec_item* RCURLY)?
+    | SPEC ID ASGN_EQ ag_spec (LCURLY composition_spec_item* RCURLY)?
+    | SPEC ID ASGN_EQ system_expr MODELS expr (LCURLY composition_spec_item* RCURLY)?
+    | SPEC ID ASGN_EQ system_expr (LCURLY composition_spec_item* RCURLY)?
+    ;
+
+/* Optional block on composition specs: intentional open-env ordinary actions. */
+composition_spec_item
+    : unsynced_decl
+    ;
+
+unsynced_decl
+    : UNSYNCED ID (COMMA ID)*
     ;
 
 /* Leaf-spec body: state/actions plus delayed models (not top-level decls). */

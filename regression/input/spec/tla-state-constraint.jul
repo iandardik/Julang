@@ -11,6 +11,8 @@ static proc Counter {
     }
 }
 
-spec StateConstraintInc := <true> Counter <true>
+spec StateConstraintInc := <true> Counter <true> {
+    unsynced bump
+}
 
 compile StateConstraintInc

@@ -35,5 +35,7 @@ spec AlsoPeerSys := with (n : Node) {
     PeerIndexed[n] || Net[n]
 }
 
-spec AlsoPeerChecked := AlsoPeerSys |= SeenOk
+spec AlsoPeerChecked := AlsoPeerSys |= SeenOk {
+    unsynced observe, ping
+}
 compile AlsoPeerChecked

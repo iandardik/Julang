@@ -23,6 +23,8 @@ static spec Net[n : Node] {
 }
 
 // Peer missing from composition.
-spec BadMissingPeer := Net
+spec BadMissingPeer := Net {
+    unsynced observe
+}
 
 compile BadMissingPeer

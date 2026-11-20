@@ -20,6 +20,8 @@ static proc Box {
     }
 }
 
-spec DeterminedArgsLet := <true> Box <true>
+spec DeterminedArgsLet := <true> Box <true> {
+    unsynced step
+}
 
 compile DeterminedArgsLet

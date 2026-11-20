@@ -167,15 +167,23 @@ class CompileNode(
 class SpecNode(
     private val name : String,
     private val value : ASTNode,
-    private val loc : ProgramLoc
+    private val loc : ProgramLoc,
+    /** Composition-block `unsynced a, b` — exact allowlist of intentional unbound ordinary actions. */
+    private val unsyncedActionNames: List<String> = emptyList(),
 ) : DeclNode(listOf(value)) {
     override fun programLocation() = loc
     override fun name() = name
     internal fun specNodeName() = name
     internal fun specNodeValue() = value
+    internal fun unsyncedActionNames(): List<String> = unsyncedActionNames
     override fun toString(): String {
         val export = if (isExported) "export " else ""
-        return "${export}spec $name := $value"
+        val body = if (unsyncedActionNames.isEmpty()) {
+            ""
+        } else {
+            " {\n  unsynced ${unsyncedActionNames.joinToString(", ")}\n}"
+        }
+        return "${export}spec $name := $value$body"
     }
 }
 

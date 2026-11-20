@@ -19,6 +19,8 @@ spec SingletonSetInit := Box[i : Ids] {
     const global xs
     init: xs.length = Ids.length
     init: forall i : Int, (i >= 1 & i <= xs.length) => i in xs
+} {
+    unsynced bump
 }
 
 compile SingletonSetInit

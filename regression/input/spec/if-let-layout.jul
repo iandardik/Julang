@@ -26,6 +26,8 @@ static proc Nest {
     }
 }
 
-spec IfLetLayout := <true> Nest <true>
+spec IfLetLayout := <true> Nest <true> {
+    unsynced step
+}
 
 compile IfLetLayout

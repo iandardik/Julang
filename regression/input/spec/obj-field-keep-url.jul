@@ -21,6 +21,8 @@ static proc Router {
     }
 }
 
-spec ObjFieldKeepUrl := <true> Router <true>
+spec ObjFieldKeepUrl := <true> Router <true> {
+    unsynced pick
+}
 
 compile ObjFieldKeepUrl

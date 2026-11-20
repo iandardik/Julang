@@ -30,6 +30,8 @@ spec Indexed := Peer[n : Node] {
     Node := {"n1", "n2"}
   const global cluster
   global extra
-} |= All
+} |= All {
+    unsynced start
+}
 
 compile Indexed

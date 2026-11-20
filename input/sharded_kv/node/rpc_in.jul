@@ -10,8 +10,8 @@ import node.lib.NodeInfo
 import node.lib.PutResult
 import node.lib.GetResult
 import node.lib.OwnerEntry
-import specs.net.Key
-import specs.net.Value
+import node.lib.Key
+import node.lib.Value
 
 export proc RpcIn := ServerStarter || HandleRpc
 

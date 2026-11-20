@@ -17,6 +17,8 @@ static proc Counter {
 
 invariant WatchedOk := Counter.watched >= 0
 
-spec UnusedVarsInv := Counter |= WatchedOk
+spec UnusedVarsInv := Counter |= WatchedOk {
+    unsynced bump
+}
 
 compile UnusedVarsInv

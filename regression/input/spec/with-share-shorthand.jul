@@ -14,6 +14,8 @@ static proc Counter {
 
 spec SharedIdx := (Counter || Counter)[i : Node] {
     Node := { "n1", "n2" }
+} {
+    unsynced bump
 }
 
 compile SharedIdx

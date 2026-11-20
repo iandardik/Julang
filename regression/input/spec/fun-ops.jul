@@ -32,6 +32,8 @@ static proc LogNode {
     }
 }
 
-spec FunOps := <true> LogNode <true>
+spec FunOps := <true> LogNode <true> {
+    unsynced advance
+}
 
 compile FunOps

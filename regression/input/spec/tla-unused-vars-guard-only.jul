@@ -19,6 +19,8 @@ static proc Store {
     }
 }
 
-spec UnusedVarsGuardOnly := <true> Store <true>
+spec UnusedVarsGuardOnly := <true> Store <true> {
+    unsynced bump, peek
+}
 
 compile UnusedVarsGuardOnly

@@ -279,8 +279,8 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
 
     override fun visitSpec(ctx: JulayParser.SpecContext?): ASTNode {
         val name = ctx!!.ID(0).text
-        // Leaf form: spec Name [p : T]? { ... }
-        if (ctx.LCURLY() != null) {
+        // Leaf form: spec Name [p : T]? { ... } (no :=)
+        if (ctx.ASGN_EQ() == null) {
             val localDecls = mutableListOf<ProcClassDeclNode>()
             val typeModels = mutableListOf<TypeModelNode>()
             val funModels = mutableListOf<FunModelNode>()
@@ -345,7 +345,11 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             ctx.system_expr() != null -> visit(ctx.system_expr())
             else -> throw RuntimeException("Invalid spec body")
         }
-        return SpecNode(name, value, sourceLocation(ctx))
+        val unsynced = ctx.composition_spec_item().flatMap { item ->
+            val decl = item.unsynced_decl() ?: return@flatMap emptyList()
+            decl.ID().map { it.text }
+        }
+        return SpecNode(name, value, sourceLocation(ctx), unsynced)
     }
 
     override fun visitAg_spec(ctx: JulayParser.Ag_specContext?): ASTNode {

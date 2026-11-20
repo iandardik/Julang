@@ -3,7 +3,7 @@ import julay.funlib.parseInt
 import julay.funlib.split
 import node.lib.NodeInfo
 import node.lib.fieldValue
-import specs.net.Key
+import node.lib.Key
 
 /*
  * Outbound ownership broadcast: POST k|id|url to a peer; reply body is id|url

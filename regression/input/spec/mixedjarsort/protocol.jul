@@ -1,3 +1,5 @@
 import net.Net
 
-export spec Sys := Net
+export spec Sys := Net {
+    unsynced send
+}

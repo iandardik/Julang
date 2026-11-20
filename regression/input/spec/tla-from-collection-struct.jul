@@ -21,6 +21,8 @@ static proc Net {
     }
 }
 
-spec FromCollectionStruct := <true> Net <true>
+spec FromCollectionStruct := <true> Net <true> {
+    unsynced recv
+}
 
 compile FromCollectionStruct

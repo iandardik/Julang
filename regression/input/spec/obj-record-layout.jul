@@ -20,6 +20,8 @@ static proc Painter {
     }
 }
 
-spec ObjRecordLayout := <true> Painter <true>
+spec ObjRecordLayout := <true> Painter <true> {
+    unsynced paint
+}
 
 compile ObjRecordLayout

@@ -23,6 +23,8 @@ static spec Net[n : Node] {
 }
 
 // Peer is not create-indexed — indexed peer read must fail at compile.
-spec BadPeerIdx := Net || Peer
+spec BadPeerIdx := Net || Peer {
+    unsynced observe, ping
+}
 
 compile BadPeerIdx

@@ -20,6 +20,8 @@ static proc TransitLet {
     }
 }
 
-spec TransitLetLayout := <true> TransitLet <true>
+spec TransitLetLayout := <true> TransitLet <true> {
+    unsynced step
+}
 
 compile TransitLetLayout

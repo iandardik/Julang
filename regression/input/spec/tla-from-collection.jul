@@ -26,6 +26,8 @@ static proc Core {
     }
 }
 
-spec FromCollection := <true> Core <true>
+spec FromCollection := <true> Core <true> {
+    unsynced ping
+}
 
 compile FromCollection

@@ -26,7 +26,11 @@ static proc Handler {
 
 invariant Bound := Counter.n >= 0
 
-spec HandlerSpec := Handler[t : Int]
-spec NestedSpec := <true> Counter || HandlerSpec <Bound>
+spec HandlerSpec := Handler[t : Int] {
+    unsynced work
+}
+spec NestedSpec := <true> Counter || HandlerSpec <Bound> {
+    unsynced bump, work
+}
 
 compile HandlerSpec, NestedSpec

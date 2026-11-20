@@ -25,6 +25,8 @@ static proc Box {
     }
 }
 
-spec OptionalSpec := Box
+spec OptionalSpec := Box {
+    unsynced check, put
+}
 
 compile OptionalSpec

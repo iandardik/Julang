@@ -21,6 +21,8 @@ static proc SpliceClash {
     }
 }
 
-spec SpliceClashLayout := <true> SpliceClash <true>
+spec SpliceClashLayout := <true> SpliceClash <true> {
+    unsynced take
+}
 
 compile SpliceClashLayout

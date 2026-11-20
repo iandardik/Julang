@@ -7,8 +7,8 @@ import node.lib.emptyNodeInfo
 import node.lib.PutResult
 import node.lib.GetResult
 import node.lib.OwnerEntry
-import specs.net.Key
-import specs.net.Value
+import node.lib.Key
+import node.lib.Value
 
 export proc ShardLogic := PathLogic || ClusterInfo
 
@@ -277,7 +277,6 @@ proc BroadcastOwnership {
 }
 
 // TODO implement
-// 1. Add the ownership info to the store
 // 2. Add committed to store for keys and return whether the key exists
 proc RecvBroadcastOwnership {
     const bcKey : Key

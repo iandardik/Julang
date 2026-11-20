@@ -28,6 +28,8 @@ static proc Router {
 
 invariant Ok := forall i : Int, Router[i].step ~= ""
 
-spec ObjFieldAccess := <true> Router[i : Int] <Ok>
+spec ObjFieldAccess := <true> Router[i : Int] <Ok> {
+    unsynced pick, usePeer
+}
 
 compile ObjFieldAccess

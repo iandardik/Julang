@@ -16,6 +16,8 @@ static proc StartsWithP {
     }
 }
 
-spec StartsWithLayout := <true> StartsWithP <true>
+spec StartsWithLayout := <true> StartsWithP <true> {
+    unsynced check
+}
 
 compile StartsWithLayout

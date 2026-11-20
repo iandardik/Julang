@@ -20,6 +20,8 @@ static proc Box {
 spec S := Box[i : Idx] {
     Idx := { "a" }
     bigConst := 1
+} {
+    unsynced bump, start
 }
 
 compile S

@@ -62,13 +62,13 @@ class SpecTlaTlcSmokeTest {
 
     @Test
     fun defaultDynProcSlotsAvoidReservedNames() {
-        assertEquals(listOf("dp1", "dp2", "dp3"), defaultDynProcSlotNames(emptySet()))
+        assertEquals(listOf("dp1", "dp2"), defaultDynProcSlotNames(emptySet()))
         assertEquals(
-            listOf("dpp1", "dpp2", "dpp3"),
+            listOf("dpp1", "dpp2"),
             defaultDynProcSlotNames(setOf("dp1", "dp2")),
         )
         assertEquals(
-            listOf("dppp1", "dppp2", "dppp3"),
+            listOf("dppp1", "dppp2"),
             defaultDynProcSlotNames(setOf("dp2", "dpp1")),
         )
     }
@@ -140,7 +140,7 @@ class SpecTlaTlcSmokeTest {
             assertTrue(cfg.exists(), "expected ParamCounters.cfg")
             val tlaText = tla.readText()
             assertTrue(
-                tlaText.contains("CONSTANT String"),
+                Regex("""CONSTANT[\s\n]+String""").containsMatchIn(tlaText),
                 "expected String domain as CONSTANT;\n$tlaText",
             )
             assertTrue(
@@ -211,7 +211,7 @@ class SpecTlaTlcSmokeTest {
             val tlaText = tla.readText()
             val cfgText = cfg.readText()
             assertTrue(
-                tlaText.contains("CONSTANT Node"),
+                Regex("""CONSTANT[\s\n]+Node""").containsMatchIn(tlaText),
                 "expected Node domain as CONSTANT;\n$tlaText",
             )
             assertTrue(
@@ -2236,7 +2236,7 @@ class SpecTlaTlcSmokeTest {
             assertTrue(cfg.exists(), "expected LeafParamNet.cfg")
             val tlaText = tla.readText()
             assertTrue(
-                tlaText.contains("CONSTANT Node") || tlaText.contains("CONSTANT Node,"),
+                Regex("""CONSTANT[\s\n,]+Node""").containsMatchIn(tlaText),
                 "expected Node sort as CONSTANT;\n$tlaText",
             )
             assertTrue(

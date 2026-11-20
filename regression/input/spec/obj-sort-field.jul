@@ -6,7 +6,7 @@ type VoteRequestMsg {
     msg : String
 }
 
-static spec Env {
+static spec EnvLeaf {
     NodeSet := { "n1", "n2" }
     var dest : NodeSet := "n1"
     var msgs : Set<VoteRequestMsg> := setOf()
@@ -18,6 +18,10 @@ static spec Env {
         guard: dest = "n1"
         transit: msgs := msgs + setOf(VoteRequestMsg { dest := dest, msg := "hi" })
     }
+}
+
+spec Env := EnvLeaf {
+    unsynced send
 }
 
 compile Env

@@ -17,6 +17,8 @@ static proc Box {
     }
 }
 
-spec BoolIte := <true> Box <true>
+spec BoolIte := <true> Box <true> {
+    unsynced go
+}
 
 compile BoolIte

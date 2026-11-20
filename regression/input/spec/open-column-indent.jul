@@ -35,6 +35,8 @@ static proc Mail {
     }
 }
 
-spec OpenColumnIndent := <true> Mail <true>
+spec OpenColumnIndent := <true> Mail <true> {
+    unsynced send
+}
 
 compile OpenColumnIndent

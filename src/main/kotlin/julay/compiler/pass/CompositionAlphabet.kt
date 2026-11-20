@@ -1,9 +1,7 @@
 package julay.compiler.pass
 
 import julay.compiler.CompileError
-import julay.compiler.CompileWarning
 import julay.compiler.OneLocCompileError
-import julay.compiler.OneLocCompileWarning
 import julay.compiler.ProgramLoc
 import julay.compiler.TwoLocsCompileError
 import julay.compiler.ast.ASTNode
@@ -682,53 +680,77 @@ fun RootNode.handlerRefs(): List<HandlerRefExprNode> {
 fun RootNode.handlerRuntimeActions(): Set<Pair<String, String>> =
     handlerRefs().flatMap { listOf(it.handlerClass() to it.handlerCtor(), it.handlerClass() to it.handlerAction()) }.toSet()
 
-/** JAR-target warning: leftover ordinary actions in the external alphabet are unsynced. */
-fun unsyncedOrdinaryWarnings(
+/**
+ * Ordinary offers still external after composition (candidates for sync / `unsynced`).
+ * Includes unbound constructors other than `initially` (lifecycle / folded Init).
+ */
+fun unboundOrdinaryOffers(
     external: List<AlphabetOffer>,
     runtimeSynced: Set<Pair<String, String>> = emptySet(),
-): List<CompileWarning> =
+): List<AlphabetOffer> =
     external
         .filter { offer ->
             (offer.pclassKey to offer.name) !in runtimeSynced &&
-            offer.name != "initially" &&
+                offer.name != "initially" &&
                 !offer.isService &&
                 !offer.isClient &&
                 !offer.isLocal
         }
         .distinctBy { it.channelKey }
-        .map { o ->
-            OneLocCompileWarning(
-                o.loc,
-                "Action \"${o.name}\" is not synchronized with any peer; " +
-                    "tag it `internal` if a solo step is intentional",
-            )
-        }
 
 /**
- * TLA-target warning: one message listing every unbound (still-external) action name
- * after composition. Not an error — open env alphabet is expected for TLC.
+ * Bidirectional ordinary-sync check (transitions and non-`initially` constructors):
+ * - unbound ordinary not listed in [unsyncedAllowed] → error
+ * - name in [unsyncedAllowed] but already synced or absent from the alphabet → error
  */
-fun unboundExternalActionsWarning(
+fun unboundOrdinaryActionErrors(
     alphabet: CompositionAlphabetResult,
+    unsyncedAllowed: Collection<String> = emptyList(),
     runtimeSynced: Set<Pair<String, String>> = emptySet(),
-): CompileWarning? {
-    val names = alphabet.external
-        .filter { offer ->
-            (offer.pclassKey to offer.name) !in runtimeSynced &&
-            !offer.isConstructor &&
-                !offer.isService &&
-                offer.name != "initially" &&
-                !offer.isLocal
+    allowlistLoc: ProgramLoc? = null,
+): List<CompileError> {
+    val unbound = unboundOrdinaryOffers(alphabet.external, runtimeSynced)
+    val unboundNames = unbound.map { it.name }.toSet()
+    val allowed = unsyncedAllowed.toSet()
+    val alphabetNames = alphabet.allOffers.map { it.name }.toSet()
+    val errors = mutableListOf<CompileError>()
+
+    for (offer in unbound.distinctBy { it.pclassKey to it.name }) {
+        if (offer.name !in allowed) {
+            errors += OneLocCompileError(
+                offer.loc,
+                "Action \"${offer.name}\" of \"${offer.pclassKey}\" is not synchronized with any peer; " +
+                    "tag it `internal` if a solo step is intentional, or list it in " +
+                    "`unsynced` on the composition spec",
+            )
         }
-        .map { it.name }
-        .distinct()
-        .sorted()
-    if (names.isEmpty()) return null
-    val loc = alphabet.external.firstOrNull()?.loc ?: return null
-    return OneLocCompileWarning(
-        loc,
-        "unbound actions in TLA composition: ${names.joinToString(", ")}",
-    )
+    }
+
+    val loc = allowlistLoc
+        ?: alphabet.external.firstOrNull()?.loc
+        ?: alphabet.allOffers.firstOrNull()?.loc
+    for (name in allowed.sorted()) {
+        when {
+            name in unboundNames -> Unit
+            name !in alphabetNames -> {
+                if (loc != null) {
+                    errors += OneLocCompileError(
+                        loc,
+                        "Action \"$name\" is listed in `unsynced` but is not in the composition alphabet",
+                    )
+                }
+            }
+            else -> {
+                if (loc != null) {
+                    errors += OneLocCompileError(
+                        loc,
+                        "Action \"$name\" is listed in `unsynced` but is synchronized with a peer",
+                    )
+                }
+            }
+        }
+    }
+    return errors
 }
 
 /**
@@ -834,10 +856,10 @@ fun actionShapeErrors(allOffers: List<AlphabetOffer>): List<CompileError> {
  * - when [requireCompleteSync] is true (top-level JAR `compile` target only):
  *   every external client must have a service of the same name.
  *
- * Incomplete sync of `client` and ordinary (default) actions is allowed on
- * intermediate assemblies and on all TLA+ targets; only the compiled top-level JAR
- * process must be fully synced (dangling clients → error; leftover ordinary →
- * warning via [unsyncedOrdinaryWarnings]).
+ * Incomplete sync of `client` actions is allowed on intermediate assemblies and
+ * TLA+ targets; only the compiled top-level JAR process must fully wire clients.
+ * Unbound ordinary actions are checked separately via [unboundOrdinaryActionErrors]
+ * (JAR always; TLA with optional `unsynced` allowlist on the composition Spec).
  *
  * Same-class ordinary duplicates are reported eagerly in [composeAlphabets] (JAR path).
  */

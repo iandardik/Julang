@@ -253,7 +253,20 @@ private fun RootNode.actionConsistencyErrors(
 
     val spawnErrors = spawningStaticErrors(procs)
 
-    return alphabetResult.errors + localMixErrors + consistencyErrors + integrity + childErrors + spawnErrors
+    // Unbound ordinary: hard error on JAR complete-sync targets (empty allowlist).
+    // Spec/TLA allowlists are checked in runTlaStructuralPass.
+    val unboundOrdinary = if (requireCompleteSync && program != null) {
+        unboundOrdinaryActionErrors(
+            alphabetResult,
+            unsyncedAllowed = emptyList(),
+            runtimeSynced = handlerRuntimeActions(),
+        )
+    } else {
+        emptyList()
+    }
+
+    return alphabetResult.errors + localMixErrors + consistencyErrors + integrity +
+        childErrors + spawnErrors + unboundOrdinary
 }
 
 /**
@@ -344,30 +357,7 @@ private fun RootNode.actionConsistencyWarnings(
         emptyList()
     }
 
-    val syncWarnings = if (alphabetResult != null) {
-        unsyncedOrdinaryWarnings(alphabetResult.external, handlerRuntimeActions())
-    } else {
-        unsyncedOrdinaryWarnings(
-            collectActionOffers(procs, librariesInUse).map { offer ->
-                AlphabetOffer(
-                    pclassKey = offer.pclassKey,
-                    occurrenceId = "",
-                    introducingAssembly = offer.pclassKey,
-                    name = offer.decl.action.name,
-                    args = offer.decl.action.args,
-                    modifier = offer.decl.modifier,
-                    isTimer = offer.decl.isTimer,
-                    isConstructor = offer.isConstructor,
-                    loc = offer.decl.loc,
-                    channelKey = offer.channelKey,
-                    compositionHidden = offer.compositionHidden,
-                    sourceInternal = offer.sourceInternal,
-                )
-            },
-        )
-    }
-
-    return serviceDeadlock + syncWarnings
+    return serviceDeadlock
 }
 
 private fun RootNode.overlappingDeclNamesErrors(): List<CompileError> {

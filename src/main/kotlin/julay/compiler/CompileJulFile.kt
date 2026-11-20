@@ -21,7 +21,7 @@ import julay.compiler.pass.expandLeavesToPclasses
 import julay.compiler.pass.leafActionMap
 import julay.compiler.pass.peerCompositionErrors
 import julay.compiler.pass.procPass
-import julay.compiler.pass.unboundExternalActionsWarning
+import julay.compiler.pass.unboundOrdinaryActionErrors
 import java.nio.file.Path
 
 fun compileJulFile(
@@ -99,9 +99,13 @@ fun compileJulFile(
             println("Internal error: missing SpecNode for \"${specDecl.name}\"")
             return
         }
-        // TLA+ allows incomplete alphabets (unmatched clients, unilateral ordinary/session,
-        // dual providers, etc.). SyncChannel completeness is JAR-only.
-        if (!runTlaStructuralPass(ast, specDecl, procDecls, librariesInUse)) {
+        // Unmatched clients still allowed for TLA; unbound ordinary needs `unsynced` allowlist.
+        if (!runTlaStructuralPass(
+                ast, specDecl, procDecls, librariesInUse,
+                unsyncedAllowed = specNode.unsyncedActionNames(),
+                allowlistLoc = specNode.programLocation(),
+            )
+        ) {
             return
         }
         val invariantNames = unit.modules
@@ -144,7 +148,12 @@ fun compileJulFile(
         }
         val sideSpec = SpecNode(sideName, productSys, loc)
         val sideProgram = sideSpec.procPass().first()
-        if (!runTlaStructuralPass(ast, sideProgram, procDecls, librariesInUse)) {
+        if (!runTlaStructuralPass(
+                ast, sideProgram, procDecls, librariesInUse,
+                unsyncedAllowed = sideSpec.unsyncedActionNames(),
+                allowlistLoc = sideSpec.programLocation(),
+            )
+        ) {
             return
         }
         val invariantNames = unit.modules
@@ -180,15 +189,17 @@ fun compileJulFile(
 }
 
 /**
- * Preflight for TLA+ targets: parent/child rules are enforced, and one
- * unbound-external-actions warning lists leftover env alphabet names. Other composition
- * alphabet integrity (hard errors) is skipped — partial specs are allowed for TLA+.
+ * Preflight for TLA+ targets: parent/child rules plus bidirectional unbound-ordinary
+ * check ([unsyncedAllowed] from the composition Spec's `unsynced` list). Other
+ * alphabet integrity (e.g. dangling clients) remains JAR-only.
  */
 private fun runTlaStructuralPass(
     ast: julay.compiler.ast.RootNode,
     program: julay.compiler.decl.ProcDecl,
     procDecls: List<julay.compiler.decl.ProcDecl>,
     librariesInUse: Set<String> = emptySet(),
+    unsyncedAllowed: List<String> = emptyList(),
+    allowlistLoc: ProgramLoc? = null,
 ): Boolean {
     val leafMap = leafActionMap(ast, program.allProcNames(procDecls).toSet(), librariesInUse)
     val alphabet = computeCompositionAlphabet(program, procDecls, leafMap)
@@ -196,13 +207,19 @@ private fun runTlaStructuralPass(
     val lifecycle = ast.declNodes().filterIsInstance<julay.compiler.ast.ProcClassNode>()
         .filter { it.name() in components }
         .flatMap { it.lifecycleErrors() }
-    val childErrors = lifecycle + childSyncErrors(alphabet) + childParentPresenceErrors(alphabet, program.name)
+    val unbound = unboundOrdinaryActionErrors(
+        alphabet,
+        unsyncedAllowed = unsyncedAllowed,
+        runtimeSynced = ast.handlerRuntimeActions(),
+        allowlistLoc = allowlistLoc,
+    )
+    val childErrors = lifecycle + childSyncErrors(alphabet) +
+        childParentPresenceErrors(alphabet, program.name) + unbound
     if (childErrors.isNotEmpty()) {
         childErrors.forEach { System.err.println(it) }
         System.err.println("Found errors while compiling \"${program.name}\"; exiting.")
         return false
     }
-    unboundExternalActionsWarning(alphabet, ast.handlerRuntimeActions())?.let { System.err.println(it) }
     return true
 }
 

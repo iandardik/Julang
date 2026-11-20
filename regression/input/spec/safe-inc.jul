@@ -31,6 +31,8 @@ static proc Counter {
 
 invariant Bound := forall k : Int, Counter.n <= 3
 
-spec SafeInc := <Env> Counter <Bound>
+spec SafeInc := <Env> Counter <Bound> {
+    unsynced arm
+}
 
 compile SafeInc

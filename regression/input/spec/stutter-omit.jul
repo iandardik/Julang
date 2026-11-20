@@ -20,6 +20,8 @@ static proc Counter {
 
 invariant Bound := Counter.n >= 0
 
-spec StutterOmit := Counter |= Bound
+spec StutterOmit := Counter |= Bound {
+    unsynced noop, step
+}
 
 compile StutterOmit
