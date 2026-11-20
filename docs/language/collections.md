@@ -176,6 +176,12 @@ Put in `transit` (insert or overwrite):
 mp["c"] := 3
 ```
 
+Remove a key (returns a new map; missing key is a no-op):
+
+```jul
+mp := mp.remove("a")
+```
+
 - Multiple puts to the same map in one action compose in order.
 - You cannot mix whole-map `mp := …` and `mp[k] := …` in the same action.
 
@@ -293,6 +299,7 @@ Lambdas may close over outer variables (state, locals, action args in transit). 
 | `.fold(init, f)` | `List` / `Set` | init + `(Acc, Elem) -> Acc` | type of `init` |
 | `.toSet()` | `List` | none | `Set<T>` (duplicates dropped) |
 | `.toList()` | `Set` | none | `List<T>` (order unspecified) |
+| `.remove(k)` | `Map` | key of type `K` | same `Map<K,V>` (key absent → unchanged) |
 
 ```jul
 ys := xs.filter(i -> i >= 3)
@@ -302,6 +309,7 @@ n := xs.fold(0, (acc, x) -> acc + x)
 agree := mp.keys.filter(k -> mp[k] >= commitIndex)
 uniq := xs.toSet()
 ordered := s.toList()
+mp2 := mp.remove("a")
 ```
 
 The function argument may also be a **named** unary `fun`:
@@ -317,7 +325,7 @@ Freestanding `map(xs, f)` from `julay.funlib.map` accepts a named fun or a lambd
 
 Higher-order calls that only depend on concrete process state are encoded by evaluating the Kotlin form and embedding the result in Z3 (so patterns like `mp.keys.filter(...).length` work in guards). Calls that depend on **symbolic action arguments** are rejected in guards. Set `.associateWith` uses that same embed-or-reject policy; there is no symbolic SMT array comprehension.
 
-For **TLA+ / TLC**, list and set `.map` / `.filter` / `.length` / `.toSet` / `.toList` and set `.associateWith` are emitted (Julay list indexes already match TLA `Sequences`); `.fold` and map HOFs are not — see [Specifications — TLA+ translation limits](specifications.md#tla-translation-limits). `.toList` order is unspecified in TLC (`SetToSeq` via `CHOOSE`). `allDistinct(xs)` emits `Len(xs) = Cardinality(Range(xs))`. Set `.associateWith(n -> e)` emits `[__k \in S |-> e]`.
+For **TLA+ / TLC**, list and set `.map` / `.filter` / `.length` / `.toSet` / `.toList`, set `.associateWith`, and map `.remove` are emitted (Julay list indexes already match TLA `Sequences`); `.fold` and map HOFs are not — see [Specifications — TLA+ translation limits](specifications.md#tla-translation-limits). `.toList` order is unspecified in TLC (`SetToSeq` via `CHOOSE`). `allDistinct(xs)` emits `Len(xs) = Cardinality(Range(xs))`. Set `.associateWith(n -> e)` emits `[__k \in S |-> e]`. Map `.remove(k)` emits `[__k \in DOMAIN mp \ {k} |-> mp[__k]]`.
 
 Runtime list/map indexing throws on out-of-bounds or missing keys. Symbolic map reads in guards may soft-default missing keys — do not rely on that for executable behavior; check `k in mp` first.
 

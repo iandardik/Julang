@@ -193,11 +193,19 @@ private data class GoLinkage(
  * Composition channel keys where a `B<A>` child meets its parent `A`, mapped to one canonical
  * key per (child, action) so `B<A> || B<C>` share one child field and Go message type; each
  * child instance has exactly one parent, which hands over its own channel at spawn.
+ *
+ * Service/client hubs keep the public action name as [AlphabetOffer.channelKey] even when
+ * clients are composition-hidden. Those must stay global Go channels — otherwise a parent and
+ * child that both call the same service (e.g. `ownerOf`) are misclassified as a parent↔child
+ * sync and every peer is rewritten onto `p.ch_pc_…`.
  */
 private fun parentChildChannelKeys(alphabet: CompositionAlphabetResult): Map<String, ParentChildChannel> {
     val out = linkedMapOf<String, ParentChildChannel>()
     alphabet.allOffers.filter { it.compositionHidden && !it.isLocal }.groupBy { it.channelKey }
         .forEach { (key, offers) ->
+            // Parent↔child ordinary syncs use scoped keys (`scope#name#Child<Parent>`);
+            // public service hubs keep the bare action name.
+            if (!key.contains('#')) return@forEach
             val child = offers.firstOrNull { o ->
                 o.parentClass != null && offers.any { it.pclassKey == o.parentClass && it.pclassKey != o.pclassKey }
             } ?: return@forEach
@@ -536,9 +544,10 @@ private fun emitRunLoop(
                             } catch (_: RuntimeException) {
                                 "any"
                             }
+                            val setGo = setExpr.toGoString(recvCtx)
                             sb.appendLine(
                                 "\t\t\t$local, _ := julay.ChooseUniformFiltered(" +
-                                    "(${setExpr.toGoString(recvCtx)}).Elements(), " +
+                                    "${collectionElementsGo(setExpr, setGo)}, " +
                                     "func(__cand $elemTy) bool { return true })",
                             )
                             argBindings[arg] = local
@@ -625,7 +634,10 @@ private fun emitEnablementLocals(
         val elemTy = elementTypeOfCollection(setExpr)?.toGoTypeString() ?: "any"
         val predCtx = bindCtx.withArgBindings(mapOf(arg to "__cand"))
         val predGuard = residualGuardGo(decl, bound, predCtx, skipMembershipOf = setOf(arg))
-        sb.appendLine("\t\t$local, ok_$safe := julay.ChooseUniformFiltered(($setGo).Elements(), func(__cand $elemTy) bool {")
+        sb.appendLine(
+            "\t\t$local, ok_$safe := julay.ChooseUniformFiltered(" +
+                "${collectionElementsGo(setExpr, setGo)}, func(__cand $elemTy) bool {",
+        )
         sb.appendLine("\t\t\treturn ($predGuard)")
         sb.appendLine("\t\t})")
         sb.appendLine("\t\tif ok_$safe {")
@@ -730,7 +742,10 @@ private fun emitSenderEnablement(
                 val elemTy = elementTypeOfCollection(setExpr)?.toGoTypeString() ?: "any"
                 val predCtx = bindCtx.withArgBindings(mapOf(arg to "__cand"))
                 val pred = residualGuardGo(decl, bound, predCtx, skipMembershipOf = setOf(arg))
-                sb.appendLine("\t\t$local, ok_${safe}_$arg := julay.ChooseUniformFiltered(($setGo).Elements(), func(__cand $elemTy) bool {")
+                sb.appendLine(
+                    "\t\t$local, ok_${safe}_$arg := julay.ChooseUniformFiltered(" +
+                        "${collectionElementsGo(setExpr, setGo)}, func(__cand $elemTy) bool {",
+                )
                 sb.appendLine("\t\t\treturn ($pred)")
                 sb.appendLine("\t\t})")
                 sb.appendLine("\t\t_ = ok_${safe}_$arg")
@@ -1077,4 +1092,14 @@ private fun elementTypeOfCollection(expr: ExprNode): Type? = try {
     }
 } catch (_: RuntimeException) {
     null
+}
+
+/** Go expression yielding a `[]T` of candidates for membership choice (`set`/`list`/`map` keys). */
+private fun collectionElementsGo(setExpr: ExprNode, setGo: String): String = try {
+    when (setExpr.getType()) {
+        is MapType -> "($setGo).Keys().Elements()"
+        else -> "($setGo).Elements()"
+    }
+} catch (_: RuntimeException) {
+    "($setGo).Elements()"
 }

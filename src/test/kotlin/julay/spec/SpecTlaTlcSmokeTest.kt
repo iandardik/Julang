@@ -894,6 +894,19 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun mapRemoveEmitsDomainMinusKey() {
+        val source = File("regression/input/spec/map-remove-tla.jul")
+        val (tlaText, _) = compileSpecTla(source, "MapRemove")
+        assertTrue(
+            tlaText.contains("[__k \\in DOMAIN table[i] \\ {\"a\"} |-> table[i][__k]]") ||
+                Regex(
+                    """\[__k \\in DOMAIN table\[[^\]]+\] \\ \{"a"\} \|-> table\[[^\]]+\]\[__k\]]""",
+                ).containsMatchIn(tlaText),
+            "map.remove should emit DOMAIN mp \\ {k};\n$tlaText",
+        )
+    }
+
+    @Test
     fun associateWithEmitsFunctionComprehension() {
         val source = File("regression/input/spec/set-associate-with-tla.jul")
         val (tlaText, _) = compileSpecTla(source, "AssocMap")

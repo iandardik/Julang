@@ -496,6 +496,40 @@ class SpecIndexingTest {
         )
     }
 
+    @Test
+    fun sharedGuaranteeInvariantTypeErrorReportedOnce() {
+        // Two specs share one guarantee; the invariant body must not be reported twice.
+        val result = typeCheck(
+            """
+            type Node {
+                id : Int
+            }
+            type N
+            static proc Box {
+                var owner : Node
+                constructor initially(args : List<String>) {
+                    transit: owner := Node { id := 0 }
+                }
+            }
+            invariant BadEq := forall n : N, Box[n].owner = n
+            invariant G := BadEq
+            spec SysA := Box[i : N] {
+                N := {"a", "b"}
+            }
+            spec SysB := Box[i : N] {
+                N := {"a", "b"}
+            }
+            spec A := <true> SysA <G>
+            spec B := <true> SysB <G>
+            """.trimIndent(),
+        )
+        val eqErrors = result.errors.filter {
+            it.toString().contains("same obj type")
+        }
+        assertTrue(eqErrors.isNotEmpty(), result.toString())
+        assertEquals(1, eqErrors.size, "duplicate invariant diagnostics:\n$result")
+    }
+
     private fun typeCheck(source: String, allowUnindexedSpec: Boolean = false): TypePassResult {
         val dir = Files.createTempDirectory("julay-spec-indexing")
         val file = dir.resolve("main.jul")

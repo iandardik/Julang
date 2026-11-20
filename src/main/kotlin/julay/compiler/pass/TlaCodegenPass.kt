@@ -2501,6 +2501,9 @@ private fun emitConjoined(
     val indexBinderNames = indexParams.map { it.first }.toSet()
 
     val letBindings = mutableListOf<Pair<String, String>>()
+    // Map-index determined RHSs must sit in a nested LET *after* domain guards so TLC
+    // short-circuits `/\` and does not apply `store[k]` when `k \notin DOMAIN store`.
+    val mapIndexLets = mutableListOf<Pair<String, String>>()
     bindPlan.listBinds.forEach { b ->
         letBindings += argTla(b.arg) to "${emitBound(b.list)}[${argTla(b.index)}]"
     }
@@ -2526,11 +2529,48 @@ private fun emitConjoined(
         val tlaArg = argTla(arg)
         if (tlaArg in indexBinderNames) {
             parts += "/\\ $tlaArg = ${emitBound(expr)}"
+        } else if (collectMapIndexesInValue(expr).isNotEmpty()) {
+            // Inject DOMAIN guards so TLC short-circuits before `store[k]` when the client
+            // binds `k` by equality and the hub only determines `v = store[k]` (no Julay-level
+            // `k in store`, which would break Go channel direction for the same action).
+            // Only indexes whose key is an outer action/plan binder — skip HOF/lambda
+            // binders like `owners.keys.map(k -> owners[k])` (emitting free `k` breaks TLC).
+            val outerIndexKeys = buildSet {
+                offers.forEach { o -> o.decl.action.args.forEach { add(it.name) } }
+                addAll(indexBinderNames)
+                addAll(bindNames)
+            }
+            for (idx in collectMapIndexesInValue(expr).distinctBy { it.toString() }) {
+                var indexExpr = idx.index
+                while (indexExpr is ParenExprNode) indexExpr = indexExpr.innerExpr()
+                val idxSym = (indexExpr as? SymbolValueExprNode)?.symbol ?: continue
+                if (idxSym !in outerIndexKeys) continue
+                val guard = "/\\ ${emitBound(idx.index)} \\in DOMAIN ${emitBound(idx.base)}"
+                if (guard !in parts) parts += guard
+            }
+            mapIndexLets += tlaArg to emitBound(expr, "      $tlaArg == ")
         } else {
             letBindings += tlaArg to emitBound(expr, "      $tlaArg == ")
         }
     }
-    val body = wrapTlaLet(letBindings, parts.joinToString("\n  "))
+    val mapLetNames = mapIndexLets.map { it.first }.toSet()
+    fun usesMapLet(part: String): Boolean =
+        mapLetNames.any { name ->
+            Regex("(?<![A-Za-z0-9_])${Regex.escape(name)}(?![A-Za-z0-9_])").containsMatchIn(part)
+        }
+    val beforeMapLets = parts.filterNot { usesMapLet(it) }
+    val afterMapLets = parts.filter { usesMapLet(it) }
+    val afterDomainBody = if (mapIndexLets.isEmpty()) {
+        parts.joinToString("\n  ")
+    } else {
+        val nested = wrapTlaLet(
+            mapIndexLets,
+            afterMapLets.joinToString("\n  ").ifEmpty { "TRUE" },
+        )
+        val prefix = beforeMapLets.joinToString("\n  ")
+        if (prefix.isEmpty()) nested else "$prefix\n  /\\ $nested"
+    }
+    val body = wrapTlaLet(letBindings, afterDomainBody)
     // Aux params that are already index binders (same name) are dropped by distinctBy.
     // Determined / struct-bound also-args are omitted from type-domain `\E`, but index
     // binders must stay: set domains like `msgs[n]` still need `\E n \in NodeSet` in Next.
@@ -5761,6 +5801,16 @@ internal fun exprToTla(
                 }
                 "toSet" -> "Range(${rec(expr.baseExpr)})"
                 "toList" -> "SetToSeq(${rec(expr.baseExpr)})"
+                "remove" -> {
+                    val keyArg = expr.args.singleOrNull()
+                    if (keyArg == null) {
+                        unresolvedTlaCall("method", "remove")
+                    } else {
+                        val mp = rec(expr.baseExpr)
+                        val key = rec(keyArg)
+                        "[__k \\in DOMAIN $mp \\ {$key} |-> $mp[__k]]"
+                    }
+                }
                 "associateWith" -> {
                     val hofBody = expr.hofBodyOrNull()
                     val hofParams = expr.hofParamNamesOrNull()

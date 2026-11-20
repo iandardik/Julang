@@ -1608,6 +1608,7 @@ private fun MethodCallExprNode.typePassMethodCall(
         CollectionMethodKind.Fold -> typePassFold(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, collType)
         CollectionMethodKind.ToSet -> typePassToSet(collType)
         CollectionMethodKind.ToList -> typePassToList(collType)
+        CollectionMethodKind.Remove -> typePassRemove(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, collType)
     }
 }
 
@@ -1648,6 +1649,50 @@ private fun MethodCallExprNode.typePassToList(collType: Type): List<CompileError
         )
     }
     setInferredType(TypePassType.Inferred(listType(setTy.elementType)))
+    return emptyList()
+}
+
+private fun MethodCallExprNode.typePassRemove(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+    collType: Type,
+): List<CompileError> {
+    val mapTy = collType as? MapType
+        ?: return listOf(
+            OneLocCompileError(
+                programLocation(),
+                "Expected receiver of \"remove\" to have a Map type but got $collType",
+            ),
+        )
+    if (args.size != 1) {
+        return listOf(
+            OneLocCompileError(
+                programLocation(),
+                "Expected method \"remove\" to take 1 argument(s) but got ${args.size}",
+            ),
+        )
+    }
+    val keyErrors = args[0].typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    if (keyErrors.isNotEmpty()) {
+        return keyErrors
+    }
+    val keyType = try {
+        args[0].getType()
+    } catch (_: RuntimeException) {
+        return listOf(OneLocCompileError(args[0].programLocation(), "Cannot resolve type of remove key"))
+    }
+    if (keyType != mapTy.keyType) {
+        return listOf(
+            OneLocCompileError(
+                args[0].programLocation(),
+                "Expected remove key of type ${mapTy.keyType} but got $keyType",
+            ),
+        )
+    }
+    setInferredType(TypePassType.Inferred(mapTy))
     return emptyList()
 }
 

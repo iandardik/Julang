@@ -104,7 +104,13 @@ fun RootNode.specTypePass(
             warnings += result.warnings
         }
     }
-    return SpecTypePassResult(errors, warnings)
+    // Specs that share a guarantee (e.g. StoreSpec and SysSpec both use ProtocolInvs)
+    // re-type the same invariant bodies under each system. Keep one report per
+    // identical diagnostic so users do not see the same line repeated.
+    return SpecTypePassResult(
+        errors.distinctBy { it.toString() },
+        warnings.distinctBy { it.toString() },
+    )
 }
 
 /** Carrier view for fluent param typing (same as valueView). */

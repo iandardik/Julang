@@ -460,6 +460,10 @@ private fun MethodCallExprNode.methodCallToGo(ctx: GoEmitCtx): String {
     when (methodName) {
         "toSet" -> return "($base).ToSet()"
         "toList" -> return "($base).ToList()"
+        "remove" -> {
+            val key = args.single().toGoString(ctx)
+            return "($base).Remove($key)"
+        }
     }
     val body = hofBodyOrNull()
         ?: throw RuntimeException("HOF body not resolved for \"$methodName\" at ${programLocation()}")

@@ -1,0 +1,29 @@
+import julay.funlib.mapOf
+
+type Ids
+
+static proc Box {
+    var table : Map<String, Int>
+    var n : Int
+
+    constructor start() {
+        transit:
+            table := mapOf("a" to 1, "b" to 2)
+            n := 0
+    }
+
+    transition dropA() {
+        guard: "b" in table & table["b"] = 2
+        transit:
+            table := table.remove("a")
+            n := n + 1
+    }
+}
+
+spec MapRemove := Box[i : Ids] {
+    Ids := { "x" }
+} {
+    unsynced dropA, start
+}
+
+compile MapRemove

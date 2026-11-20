@@ -419,6 +419,7 @@ When `init:` uniquely determines a const-global list (length plus identity `xs[i
 | `length` / `.length` on sets | `Cardinality(…)` |
 | list/set `.map` (lambda) | function/set comprehension |
 | set `.associateWith` (lambda) | `[__k \in S \|-> e]` |
+| map `.remove(k)` | `[__k \in DOMAIN mp \\ {k} \|-> mp[__k]]` |
 | list `.filter` | `SelectSeq` |
 | set `.filter` | set comprehension |
 | `xs.toSet()` | `Range(xs)` |

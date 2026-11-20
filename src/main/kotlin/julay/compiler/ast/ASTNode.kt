@@ -2421,6 +2421,10 @@ class MethodCallExprNode(
         when (methodName) {
             "toSet" -> return "$base.toSet()"
             "toList" -> return "$base.toList()"
+            "remove" -> {
+                val key = args.single().toTransitString(symbolTypes, argSymbols)
+                return "($base - $key)"
+            }
         }
         val body = hofBody ?: throw RuntimeException("HOF body not resolved for \"$methodName\" at $loc")
         val paramNames = hofParamNames ?: throw RuntimeException("HOF params not resolved for \"$methodName\" at $loc")

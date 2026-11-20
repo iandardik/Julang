@@ -66,6 +66,7 @@ sealed interface CollectionMethodKind {
     data object Fold : CollectionMethodKind
     data object ToSet : CollectionMethodKind
     data object ToList : CollectionMethodKind
+    data object Remove : CollectionMethodKind
 }
 
 fun collectionMethodKind(name: String): CollectionMethodKind? = when (name) {
@@ -75,6 +76,7 @@ fun collectionMethodKind(name: String): CollectionMethodKind? = when (name) {
     "fold" -> CollectionMethodKind.Fold
     "toSet" -> CollectionMethodKind.ToSet
     "toList" -> CollectionMethodKind.ToList
+    "remove" -> CollectionMethodKind.Remove
     else -> null
 }
 

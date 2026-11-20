@@ -137,7 +137,7 @@ private fun conjoinMapDomainGuards(comparison: ExprNode, indexes: List<IndexExpr
  * Map indexes that appear in a *value* position (not under boolean connectives —
  * those are handled when their enclosing comparison is rewritten).
  */
-private fun collectMapIndexesInValue(expr: ExprNode): List<IndexExprNode> = when (expr) {
+internal fun collectMapIndexesInValue(expr: ExprNode): List<IndexExprNode> = when (expr) {
     is IndexExprNode -> {
         val nested = collectMapIndexesInValue(expr.base) + collectMapIndexesInValue(expr.index)
         val self = try {
