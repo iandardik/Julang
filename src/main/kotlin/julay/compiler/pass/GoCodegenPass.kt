@@ -103,7 +103,7 @@ fun goCodegenPass(
     for (obj in objClassDecls) {
         bodySb.appendLine("type ${obj.name} struct {")
         for (f in obj.fields) {
-            bodySb.appendLine("\t${f.name.toGoExportedIdent()} ${f.type.toGoTypeString()}")
+            bodySb.appendLine("\t${f.name.toGoObjFieldIdent()} ${f.type.toGoTypeString()}")
         }
         bodySb.appendLine("}")
         bodySb.appendLine()
@@ -113,7 +113,7 @@ fun goCodegenPass(
         bodySb.appendLine()
         bodySb.appendLine("func (v ${obj.name}) Key() string {")
         val keyParts = obj.fields.joinToString(" + \"|\" + ") { f ->
-            "julay.KeyOf(v.${f.name.toGoExportedIdent()})"
+            "julay.KeyOf(v.${f.name.toGoObjFieldIdent()})"
         }.ifEmpty { "\"\"" }
         bodySb.appendLine("\treturn \"${obj.name}|\" + $keyParts")
         bodySb.appendLine("}")
@@ -451,27 +451,45 @@ private fun emitRunLoop(
         when (c.role) {
             CaseRole.Local -> {
                 sb.appendLine("\t\tcase <-case_$safe:")
-                sb.append(emitLocalArgRebind(decl, safe, stateVars))
-                sb.append(emitFireBody(pc, decl, c.dir, CaseRole.Local, stateVars, dynamicCtorNames, procClassByName, linkage))
+                val argBindings = localCaseArgBindings(decl, safe, stateVars, sb)
+                sb.append(
+                    emitFireBody(
+                        pc, decl, c.dir, CaseRole.Local, stateVars, argBindings,
+                        dynamicCtorNames, procClassByName, linkage,
+                    ),
+                )
             }
             CaseRole.Timer -> {
                 sb.appendLine("\t\tcase <-case_$safe:")
                 sb.appendLine("\t\t\tp.timers.ClearFired(\"${c.name.escapeGoStringLiteral()}\")")
-                sb.append(emitLocalArgRebind(decl, safe, stateVars))
-                sb.append(emitFireBody(pc, decl, c.dir, CaseRole.Timer, stateVars, dynamicCtorNames, procClassByName, linkage))
+                val argBindings = localCaseArgBindings(decl, safe, stateVars, sb)
+                sb.append(
+                    emitFireBody(
+                        pc, decl, c.dir, CaseRole.Timer, stateVars, argBindings,
+                        dynamicCtorNames, procClassByName, linkage,
+                    ),
+                )
             }
             CaseRole.Sender -> {
                 val dir = c.dir!!
                 val chanId = dir.channelKey.toGoSafeIdent()
                 // payload_* avoids shadowing the msg_* type name in Go.
                 sb.appendLine("\t\tcase ch_send_$safe <- payload_$safe:")
+                val argBindings = LinkedHashMap(senderScopedArgBindings(decl, dir, safe))
                 if (dir.replyArgs.isNotEmpty()) {
                     sb.appendLine("\t\t\treplyMsg_$safe := <-p.reply_$chanId")
                     for (arg in dir.replyArgs) {
-                        sb.appendLine("\t\t\t${arg.toGoSafeIdent()} := replyMsg_$safe.${arg.toGoExportedIdent()}")
+                        val local = actionScopedGoIdent(arg, safe)
+                        sb.appendLine("\t\t\t$local := replyMsg_$safe.${arg.toGoExportedIdent()}")
+                        argBindings[arg] = local
                     }
                 }
-                sb.append(emitFireBody(pc, decl, dir, CaseRole.Sender, stateVars, dynamicCtorNames, procClassByName, linkage))
+                sb.append(
+                    emitFireBody(
+                        pc, decl, dir, CaseRole.Sender, stateVars, argBindings,
+                        dynamicCtorNames, procClassByName, linkage,
+                    ),
+                )
             }
             CaseRole.Receiver -> {
                 val dir = c.dir!!
@@ -481,23 +499,28 @@ private fun emitRunLoop(
                 } else {
                     sb.appendLine("\t\tcase payload_$safe := <-case_$safe:")
                 }
+                val argBindings = LinkedHashMap<String, String>()
                 for (arg in dir.senderBoundArgs) {
-                    sb.appendLine("\t\t\t${arg.toGoSafeIdent()} := payload_$safe.${arg.toGoExportedIdent()}")
-                    sb.appendLine("\t\t\t_ = ${arg.toGoSafeIdent()}")
+                    val local = actionScopedGoIdent(arg, safe)
+                    sb.appendLine("\t\t\t$local := payload_$safe.${arg.toGoExportedIdent()}")
+                    sb.appendLine("\t\t\t_ = $local")
+                    argBindings[arg] = local
                 }
                 // Materialize receiver-bound args (including reply args) for body + reply channel.
                 val bound = computeBoundArgs(decl, availableFromOther = dir.senderBoundArgs.toSet())
                 val recvCtx = GoEmitCtx(
                     stateVars = stateVars,
-                    argBindings = (dir.senderBoundArgs + bound.boundArgs).associateWith { it.toGoSafeIdent() },
+                    argBindings = argBindings.toMap(),
                 )
                 val receiverOwned = (bound.boundArgs - dir.senderBoundArgs.toSet()).toList()
                 for (arg in receiverOwned) {
+                    val local = actionScopedGoIdent(arg, safe)
                     when {
                         arg in bound.equalityBound -> {
                             val rhs = findEqualityRhs(decl, arg) ?: continue
-                            sb.appendLine("\t\t\t${arg.toGoSafeIdent()} := ${rhs.toGoString(recvCtx)}")
-                            sb.appendLine("\t\t\t_ = ${arg.toGoSafeIdent()}")
+                            sb.appendLine("\t\t\t$local := ${rhs.toGoString(recvCtx)}")
+                            sb.appendLine("\t\t\t_ = $local")
+                            argBindings[arg] = local
                         }
                         arg in bound.membershipBound -> {
                             val setExpr = findMembershipSet(decl, arg) ?: continue
@@ -514,20 +537,26 @@ private fun emitRunLoop(
                                 "any"
                             }
                             sb.appendLine(
-                                "\t\t\t${arg.toGoSafeIdent()}, _ := julay.ChooseUniformFiltered(" +
+                                "\t\t\t$local, _ := julay.ChooseUniformFiltered(" +
                                     "(${setExpr.toGoString(recvCtx)}).Elements(), " +
                                     "func(__cand $elemTy) bool { return true })",
                             )
+                            argBindings[arg] = local
                         }
                     }
                 }
                 if (dir.replyArgs.isNotEmpty()) {
                     val fields = dir.replyArgs.joinToString(", ") { arg ->
-                        "${arg.toGoExportedIdent()}: ${arg.toGoSafeIdent()}"
+                        "${arg.toGoExportedIdent()}: ${argBindings.getValue(arg)}"
                     }
                     sb.appendLine("\t\t\tpayload_$safe.Reply <- reply_$chanId{$fields}")
                 }
-                sb.append(emitFireBody(pc, decl, dir, CaseRole.Receiver, stateVars, dynamicCtorNames, procClassByName, linkage))
+                sb.append(
+                    emitFireBody(
+                        pc, decl, dir, CaseRole.Receiver, stateVars, argBindings,
+                        dynamicCtorNames, procClassByName, linkage,
+                    ),
+                )
             }
         }
     }
@@ -590,18 +619,19 @@ private fun emitEnablementLocals(
     // Membership: nested ChooseUniformFiltered (single arg first; multi-arg cartesian later)
     if (memArgs.size == 1) {
         val arg = memArgs.single()
+        val local = actionScopedGoIdent(arg, safe)
         val setExpr = findMembershipSet(decl, arg)!!
         val setGo = setExpr.toGoString(bindCtx)
         val elemTy = elementTypeOfCollection(setExpr)?.toGoTypeString() ?: "any"
         val predCtx = bindCtx.withArgBindings(mapOf(arg to "__cand"))
         val predGuard = residualGuardGo(decl, bound, predCtx, skipMembershipOf = setOf(arg))
-        sb.appendLine("\t\t${arg.toGoSafeIdent()}, ok_$safe := julay.ChooseUniformFiltered(($setGo).Elements(), func(__cand $elemTy) bool {")
+        sb.appendLine("\t\t$local, ok_$safe := julay.ChooseUniformFiltered(($setGo).Elements(), func(__cand $elemTy) bool {")
         sb.appendLine("\t\t\treturn ($predGuard)")
         sb.appendLine("\t\t})")
         sb.appendLine("\t\tif ok_$safe {")
         val extraGuard = residualGuardGo(
             decl, bound,
-            bindCtx.withArgBindings(mapOf(arg to arg.toGoSafeIdent())),
+            bindCtx.withArgBindings(mapOf(arg to local)),
             skipMembershipOf = setOf(arg),
         )
         // pred already checked residual that mentions arg; still need residual without mem
@@ -660,6 +690,18 @@ private fun residualMentionsArg(
     return false
 }
 
+/** Enablement-time locals for sender-bound / local-eq args (unique per action in `run()`). */
+private fun senderScopedArgBindings(
+    decl: ActionDecl,
+    dir: ActionChannelDirection,
+    safe: String,
+): Map<String, String> {
+    val bound = computeBoundArgs(decl)
+    val localEq = decl.action.args.map { it.name }
+        .filter { it !in dir.senderBoundArgs && it !in dir.replyArgs && it in bound.equalityBound }
+    return (dir.senderBoundArgs + localEq).associateWith { actionScopedGoIdent(it, safe) }
+}
+
 private fun emitSenderEnablement(
     safe: String,
     decl: ActionDecl,
@@ -673,12 +715,14 @@ private fun emitSenderEnablement(
     sb.appendLine("\t\tvar ch_send_$safe chan msg_$chanId = nil")
     sb.appendLine("\t\tvar payload_$safe msg_$chanId")
     var bindCtx = ctx
+    val scoped = senderScopedArgBindings(decl, dir, safe)
     for (arg in dir.senderBoundArgs) {
+        val local = scoped.getValue(arg)
         when {
             arg in bound.equalityBound -> {
                 val rhs = findEqualityRhs(decl, arg)!!
-                sb.appendLine("\t\t${arg.toGoSafeIdent()} := ${rhs.toGoString(bindCtx)}")
-                bindCtx = bindCtx.withArgBindings(mapOf(arg to arg.toGoSafeIdent()))
+                sb.appendLine("\t\t$local := ${rhs.toGoString(bindCtx)}")
+                bindCtx = bindCtx.withArgBindings(mapOf(arg to local))
             }
             arg in bound.membershipBound -> {
                 val setExpr = findMembershipSet(decl, arg)!!
@@ -686,11 +730,11 @@ private fun emitSenderEnablement(
                 val elemTy = elementTypeOfCollection(setExpr)?.toGoTypeString() ?: "any"
                 val predCtx = bindCtx.withArgBindings(mapOf(arg to "__cand"))
                 val pred = residualGuardGo(decl, bound, predCtx, skipMembershipOf = setOf(arg))
-                sb.appendLine("\t\t${arg.toGoSafeIdent()}, ok_${safe}_$arg := julay.ChooseUniformFiltered(($setGo).Elements(), func(__cand $elemTy) bool {")
+                sb.appendLine("\t\t$local, ok_${safe}_$arg := julay.ChooseUniformFiltered(($setGo).Elements(), func(__cand $elemTy) bool {")
                 sb.appendLine("\t\t\treturn ($pred)")
                 sb.appendLine("\t\t})")
                 sb.appendLine("\t\t_ = ok_${safe}_$arg")
-                bindCtx = bindCtx.withArgBindings(mapOf(arg to arg.toGoSafeIdent()))
+                bindCtx = bindCtx.withArgBindings(mapOf(arg to local))
             }
         }
     }
@@ -698,10 +742,11 @@ private fun emitSenderEnablement(
     val localEq = decl.action.args.map { it.name }
         .filter { it !in dir.senderBoundArgs && it !in dir.replyArgs && it in bound.equalityBound }
     for (arg in localEq) {
+        val local = scoped.getValue(arg)
         val rhs = findEqualityRhs(decl, arg) ?: continue
-        sb.appendLine("\t\t${arg.toGoSafeIdent()} := ${rhs.toGoString(bindCtx)}")
-        sb.appendLine("\t\t_ = ${arg.toGoSafeIdent()}")
-        bindCtx = bindCtx.withArgBindings(mapOf(arg to arg.toGoSafeIdent()))
+        sb.appendLine("\t\t$local := ${rhs.toGoString(bindCtx)}")
+        sb.appendLine("\t\t_ = $local")
+        bindCtx = bindCtx.withArgBindings(mapOf(arg to local))
     }
     val guard = residualGuardGo(decl, bound, bindCtx)
     val memOk = dir.senderBoundArgs.filter { it in bound.membershipBound }
@@ -711,7 +756,7 @@ private fun emitSenderEnablement(
     sb.appendLine("\t\t\tenabledAny = true")
     val fields = buildString {
         for (arg in dir.senderBoundArgs) {
-            append("${arg.toGoExportedIdent()}: ${arg.toGoSafeIdent()}, ")
+            append("${arg.toGoExportedIdent()}: ${scoped.getValue(arg)}, ")
         }
         if (dir.replyArgs.isNotEmpty()) {
             append("Reply: p.reply_$chanId, ")
@@ -743,19 +788,32 @@ private fun emitReceiverEnablement(
     return sb.toString()
 }
 
-/** Re-materialize equality-bound args inside a local/timer select case body. */
-private fun emitLocalArgRebind(decl: ActionDecl, @Suppress("UNUSED_PARAMETER") safe: String, stateVars: Set<String>): String {
+/**
+ * Equality args are rebound in the select case; membership args keep the
+ * enablement-time locals (`arg_action`). Both use [actionScopedGoIdent].
+ */
+private fun localCaseArgBindings(
+    decl: ActionDecl,
+    safe: String,
+    stateVars: Set<String>,
+    sb: StringBuilder,
+): Map<String, String> {
     val bound = computeBoundArgs(decl)
-    if (bound.equalityBound.isEmpty()) return ""
-    val sb = StringBuilder()
+    val bindings = LinkedHashMap<String, String>()
     var ctx = GoEmitCtx(stateVars = stateVars)
     for (arg in decl.action.args.map { it.name }) {
-        if (arg !in bound.equalityBound) continue
-        val rhs = findEqualityRhs(decl, arg) ?: continue
-        sb.appendLine("\t\t\t${arg.toGoSafeIdent()} := ${rhs.toGoString(ctx)}")
-        ctx = ctx.withArgBindings(mapOf(arg to arg.toGoSafeIdent()))
+        if (arg in bound.equalityBound) {
+            val rhs = findEqualityRhs(decl, arg) ?: continue
+            val local = actionScopedGoIdent(arg, safe)
+            sb.appendLine("\t\t\t$local := ${rhs.toGoString(ctx)}")
+            sb.appendLine("\t\t\t_ = $local")
+            bindings[arg] = local
+            ctx = ctx.withArgBindings(mapOf(arg to local))
+        } else if (arg in bound.membershipBound) {
+            bindings[arg] = actionScopedGoIdent(arg, safe)
+        }
     }
-    return sb.toString()
+    return bindings
 }
 
 private fun emitFireBody(
@@ -764,15 +822,12 @@ private fun emitFireBody(
     dir: ActionChannelDirection?,
     @Suppress("UNUSED_PARAMETER") role: CaseRole,
     stateVars: Set<String>,
+    argBindings: Map<String, String>,
     dynamicCtorNames: Map<String, List<String>>,
     procClassByName: Map<String, ProcClassDecl>,
     linkage: GoLinkage,
 ): String {
-    val argNames = decl.action.args.map { it.name }
-    val argBindings = argNames.associateWith { it.toGoSafeIdent() }
-    // Also include reply args for sender after reply received
-    val replyBindings = dir?.replyArgs?.associateWith { it.toGoSafeIdent() }.orEmpty()
-    val ctx = GoEmitCtx(stateVars = stateVars, argBindings = argBindings + replyBindings)
+    val ctx = GoEmitCtx(stateVars = stateVars, argBindings = argBindings)
 
     val sb = StringBuilder()
     // errors
@@ -807,7 +862,9 @@ private fun emitFireBody(
     for (childClass in spawnTargets) {
         val child = procClassByName[childClass] ?: continue
         val ctor = child.constructors.firstOrNull { it.action.name == decl.action.name } ?: continue
-        val args = ctor.action.args.joinToString(", ") { it.name.toGoSafeIdent() }
+        val args = ctor.action.args.joinToString(", ") { arg ->
+            argBindings[arg.name] ?: arg.name.toGoSafeIdent()
+        }
         val shared = linkage.ownedBy(pc.name).filter { it.childClass == childClass }.map { it.key }.distinct()
         sb.appendLine("\t\t\tjulay.AddProc()")
         if (shared.isEmpty()) {
@@ -823,7 +880,8 @@ private fun emitFireBody(
         }
     }
     if (decl.action.name in linkage.handlerReplies[pc.name].orEmpty()) {
-        val resp = decl.action.args.firstOrNull()?.name?.toGoSafeIdent()
+        val respArg = decl.action.args.firstOrNull()?.name
+        val resp = respArg?.let { argBindings[it] ?: it.toGoSafeIdent() }
         if (resp != null) sb.appendLine("\t\t\tp.${goHttpReplyField(decl.action.name)} <- $resp")
     }
     if (decl.isReturn) {
@@ -932,7 +990,7 @@ private fun assignTarget(key: String, ctx: GoEmitCtx): String {
     if (parts.size == 1) return rootGo
     // Nested field update: for simplicity assign whole root with copy — field path
     // Go structs are values; nested updates need rebuild. Simple path: p.obj.Field = ...
-    return parts.drop(1).fold(rootGo) { acc, seg -> "$acc.${seg.toGoExportedIdent()}" }
+    return parts.drop(1).fold(rootGo) { acc, seg -> "$acc.${seg.toGoObjFieldIdent()}" }
 }
 
 private fun stateOrLocal(name: String, ctx: GoEmitCtx): String = when {

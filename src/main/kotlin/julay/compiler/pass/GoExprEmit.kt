@@ -60,6 +60,21 @@ fun String.toGoExportedIdent(): String =
     if (isEmpty()) this
     else replaceFirstChar { if (it.isLowerCase()) it.titlecaseChar() else it }
 
+/**
+ * Obj struct field name in Go. Mangling avoids clashing with generated methods
+ * (`Key`, `ToString`, `String`) that every Julay obj type implements.
+ */
+fun String.toGoObjFieldIdent(): String {
+    val exported = toGoExportedIdent()
+    return if (exported in GO_OBJ_RESERVED_METHOD_NAMES) "${exported}_" else exported
+}
+
+/** Go local for an action arg, unique per action within one `run()` (shared switch scope). */
+fun actionScopedGoIdent(arg: String, actionSafe: String): String =
+    "${arg.toGoSafeIdent()}_$actionSafe"
+
+private val GO_OBJ_RESERVED_METHOD_NAMES = setOf("Key", "ToString", "String")
+
 fun String.toGoSafeIdent(): String {
     val sanitized = replace(Regex("[^A-Za-z0-9_]"), "_")
     return if (sanitized.isEmpty() || sanitized[0].isDigit()) "_$sanitized" else sanitized
@@ -323,7 +338,7 @@ private fun whenLiteralToGo(lit: WhenLiteral): String = when (lit) {
 private fun ObjClassLiteralExprNode.objLiteralToGo(ctx: GoEmitCtx): String {
     val fields = structType.fields.joinToString(", ") { field ->
         val expr = fieldAssignments.getValue(field.name).toGoString(ctx)
-        "${field.name.toGoExportedIdent()}: $expr"
+        "${field.name.toGoObjFieldIdent()}: $expr"
     }
     val typeName = when (structType.name) {
         "HttpServerRequest" -> "julay.HttpServerRequest"
@@ -383,7 +398,7 @@ private fun ThisAccessExprNode.thisAccessToGo(ctx: GoEmitCtx): String {
     val root = "${ctx.procRecv}.${stateVarName()}"
     val rest = nestedFieldPath()
     if (rest.isEmpty()) return root
-    return rest.fold(root) { acc, seg -> "($acc).${seg.toGoExportedIdent()}" }
+    return rest.fold(root) { acc, seg -> "($acc).${seg.toGoObjFieldIdent()}" }
 }
 
 private fun FieldAccessExprNode.fieldAccessToGo(ctx: GoEmitCtx): String {
@@ -400,7 +415,7 @@ private fun FieldAccessExprNode.fieldAccessToGo(ctx: GoEmitCtx): String {
             else -> error("unreachable")
         }
     }
-    return fieldPath.fold(base) { acc, seg -> "($acc).${seg.toGoExportedIdent()}" }
+    return fieldPath.fold(base) { acc, seg -> "($acc).${seg.toGoObjFieldIdent()}" }
 }
 
 private fun MemberAccessExprNode.memberAccessToGo(ctx: GoEmitCtx): String {
@@ -408,7 +423,7 @@ private fun MemberAccessExprNode.memberAccessToGo(ctx: GoEmitCtx): String {
     return when (fieldName) {
         "length" -> "($base).Len()"
         "keys" -> "($base).Keys()"
-        else -> "($base).${fieldName.toGoExportedIdent()}"
+        else -> "($base).${fieldName.toGoObjFieldIdent()}"
     }
 }
 
@@ -418,7 +433,7 @@ private fun FieldAccessOnExprNode.fieldAccessOnExprToGo(ctx: GoEmitCtx): String 
         when (seg) {
             "length" -> "($acc).Len()"
             "keys" -> "($acc).Keys()"
-            else -> "($acc).${seg.toGoExportedIdent()}"
+            else -> "($acc).${seg.toGoObjFieldIdent()}"
         }
     }
 }
