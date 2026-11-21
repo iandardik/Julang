@@ -176,6 +176,14 @@ private fun collectStateReads(
             is MemberAccessExprNode -> {
                 val base = e.baseExpr
                 when {
+                    base is IndexExprNode && base.base is IndexExprNode &&
+                        (base.base as IndexExprNode).base is SymbolValueExprNode -> {
+                        val outer = base.base as IndexExprNode
+                        val peer = (outer.base as SymbolValueExprNode).symbol
+                        if (peer in leaves) mark(peer, e.fieldName)
+                        walk(outer.index, boundNow)
+                        walk(base.index, boundNow)
+                    }
                     base is IndexExprNode && base.base is SymbolValueExprNode -> {
                         val peer = (base.base as SymbolValueExprNode).symbol
                         if (peer in leaves) mark(peer, e.fieldName)

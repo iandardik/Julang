@@ -3314,14 +3314,78 @@ internal fun defaultTlaValue(
     }
 }
 
-/** Julay leaf class names used as `Leaf.var` in an invariant formula. */
+/**
+ * Dynamic leaf field reads in comparisons imply the instance is live:
+ * `Put[n][d].step = "done"` → `Put_constructed[n][d] /\ step_Put[n][d] = "done"`.
+ */
+private fun collectDynConstructedGuards(
+    expr: ExprNode,
+    leafCtx: Map<String, SpecLeaf>,
+    stateVarNames: Map<Pair<String, String>, String>,
+    renderIdx: (ExprNode) -> String,
+): List<String> {
+    val out = linkedSetOf<String>()
+    fun walk(e: ExprNode) {
+        when (e) {
+            is MemberAccessExprNode -> {
+                val base = e.baseExpr
+                when {
+                    base is IndexExprNode && base.base is IndexExprNode &&
+                        (base.base as IndexExprNode).base is SymbolValueExprNode -> {
+                        val outer = base.base as IndexExprNode
+                        val leafName = (outer.base as SymbolValueExprNode).symbol
+                        val peer = leafCtx[leafName] ?: return
+                        if (!peer.isDynamic) return
+                        val c = stateVarNames[leafName to "constructed"]
+                            ?: stateVarNames[peer.tlaName to "constructed"]
+                            ?: return
+                        out += "$c[${renderIdx(outer.index)}][${renderIdx(base.index)}]"
+                    }
+                    base is IndexExprNode && base.base is SymbolValueExprNode -> {
+                        val leafName = (base.base as SymbolValueExprNode).symbol
+                        val peer = leafCtx[leafName] ?: return
+                        if (!peer.isDynamic) return
+                        val c = stateVarNames[leafName to "constructed"]
+                            ?: stateVarNames[peer.tlaName to "constructed"]
+                            ?: return
+                        out += "$c[${renderIdx(base.index)}]"
+                    }
+                    else -> e.children.filterIsInstance<ExprNode>().forEach { walk(it) }
+                }
+            }
+            else -> e.children.filterIsInstance<ExprNode>().forEach { walk(it) }
+        }
+    }
+    walk(expr)
+    return out.toList()
+}
+
+private fun wrapWithDynConstructedGuards(
+    core: String,
+    guards: List<String>,
+    parentPrec: Int,
+): String {
+    if (guards.isEmpty()) return core
+    val conj = (guards + listOf(core)).joinToString(" /\\ ")
+    return if (PREC_AND < parentPrec) "($conj)" else conj
+}
+
+/** Julay leaf class names used as `Leaf.var` / `Leaf[i].var` / `Leaf[n][i].var` in an invariant. */
 internal fun collectInvariantLeafBases(expr: ExprNode): Set<String> {
     val out = linkedSetOf<String>()
+    fun peerSymbol(e: ExprNode): String? = when (e) {
+        is SymbolValueExprNode -> e.symbol
+        is IndexExprNode -> peerSymbol(e.base)
+        else -> null
+    }
     fun walk(e: ExprNode) {
         when (e) {
             is FieldAccessExprNode -> {
                 // Leaf.var (single field) — not object field chains on args.
                 if (e.fieldPath.size == 1) out += e.baseSymbol
+            }
+            is MemberAccessExprNode -> {
+                peerSymbol(e.baseExpr)?.let { out += it }
             }
             else -> Unit
         }
@@ -3346,12 +3410,17 @@ private fun emitInvariantDefs(
     val bases = collectInvariantLeafBases(node.invariantFormula())
     val byClass = leaves.groupBy { it.name }
     val multiClasses = bases.filter { (byClass[it]?.size ?: 0) > 1 }
+    val fullCtx = linkedMapOf<String, SpecLeaf>()
+    leaves.forEach { leaf ->
+        fullCtx[leaf.name] = leaf
+        fullCtx[leaf.tlaName] = leaf
+    }
     fun formatInv(name: String, remapped: Map<Pair<String, String>, String>): String {
         // `mp[k] = v` → `k in mp & mp[k] = v` so TLA application is domain-guarded.
         val formula = withMapIndexDomainGuards(node.invariantFormula())
         val body = exprToTla(
             formula,
-            leafCtx = emptyMap(),
+            leafCtx = fullCtx,
             argNames = emptySet(),
             self = null,
             bareStateVars = emptySet(),
@@ -5868,6 +5937,33 @@ internal fun exprToTla(
                         TlaSymbolTypes.get()[base.symbol],
                         listOf(expr.fieldName),
                     )
+                // Dual-index: Peer[n][d].field → var[n][d] (and constructed for dynamic leaves)
+                base is IndexExprNode && base.base is IndexExprNode &&
+                    (base.base as IndexExprNode).base is SymbolValueExprNode -> {
+                    val outer = base.base as IndexExprNode
+                    val leafName = (outer.base as SymbolValueExprNode).symbol
+                    val peer = leafCtx[leafName]
+                    val mapped = stateVarNames[leafName to expr.fieldName]
+                        ?: peer?.let { stateVarNames[it.tlaName to expr.fieldName] }
+                    if (mapped != null && leafName !in argNames && leafName !in bareStateVars) {
+                        val globals = globalByLeaf[leafName].orEmpty() +
+                            (peer?.let { globalByLeaf[it.tlaName].orEmpty() } ?: emptySet())
+                        if (expr.fieldName in globals) {
+                            mapped
+                        } else {
+                            "$mapped[${rec(outer.index)}][${rec(base.index)}]"
+                        }
+                    } else {
+                        val stateLeaf = leafCtx.values.singleOrNull()
+                        emitUnwrappedFieldPath(
+                            rec(base),
+                            typeOfBaseExpr(base),
+                            listOf(expr.fieldName),
+                            leafClass = stateLeaf?.name,
+                            stateVarName = leafName,
+                        )
+                    }
+                }
                 base is IndexExprNode && base.base is SymbolValueExprNode -> {
                     val leafName = (base.base as SymbolValueExprNode).symbol
                     val peer = leafCtx[leafName]
@@ -5876,7 +5972,11 @@ internal fun exprToTla(
                     if (mapped != null && leafName !in argNames && leafName !in bareStateVars) {
                         val globals = globalByLeaf[leafName].orEmpty() +
                             (peer?.let { globalByLeaf[it.tlaName].orEmpty() } ?: emptySet())
-                        if (expr.fieldName in globals) mapped else "$mapped[${rec(base.index)}]"
+                        if (expr.fieldName in globals) {
+                            mapped
+                        } else {
+                            "$mapped[${rec(base.index)}]"
+                        }
                     } else {
                         val stateLeaf = leafCtx.values.singleOrNull()
                         val idxBase = (base.base as SymbolValueExprNode).symbol
@@ -6128,6 +6228,16 @@ internal fun exprToTla(
                 val r = rec(expr.rhsOperand(), linePrefix + open + l + mid, rightPrec)
                 return "$open$l$mid$r$close"
             }
+            fun binWithDynConstructed(mid: String, prec: Int, rightPrec: Int = prec): String {
+                val core = bin(mid, prec, rightPrec)
+                val guards = collectDynConstructedGuards(
+                    expr.lhsOperand(), leafCtx, stateVarNames,
+                ) { idx -> rec(idx, linePrefix, PREC_BOTTOM) } +
+                    collectDynConstructedGuards(
+                        expr.rhsOperand(), leafCtx, stateVarNames,
+                    ) { idx -> rec(idx, linePrefix, PREC_BOTTOM) }
+                return wrapWithDynConstructedGuards(core, guards, parentPrec)
+            }
             when (expr.op()) {
                 "&" -> {
                     val all = flattenTopLevelAnd(expr)
@@ -6163,14 +6273,32 @@ internal fun exprToTla(
                     }
                 }
                 "=>" -> bin(" => ", PREC_IMPLIES, rightPrec = PREC_IMPLIES)
-                "=" -> bin(" = ", PREC_REL)
-                "~=" -> bin(" # ", PREC_REL)
-                "<" -> bin(" < ", PREC_REL)
-                "<=" -> bin(" <= ", PREC_REL)
-                ">" -> bin(" > ", PREC_REL)
-                ">=" -> bin(" >= ", PREC_REL)
-                "in" -> emitInToTla(expr, negated = false, linePrefix, parentPrec, ::rec)
-                "~in" -> emitInToTla(expr, negated = true, linePrefix, parentPrec, ::rec)
+                "=" -> binWithDynConstructed(" = ", PREC_REL)
+                "~=" -> binWithDynConstructed(" # ", PREC_REL)
+                "<" -> binWithDynConstructed(" < ", PREC_REL)
+                "<=" -> binWithDynConstructed(" <= ", PREC_REL)
+                ">" -> binWithDynConstructed(" > ", PREC_REL)
+                ">=" -> binWithDynConstructed(" >= ", PREC_REL)
+                "in" -> {
+                    val core = emitInToTla(expr, negated = false, linePrefix, parentPrec, ::rec)
+                    val guards = collectDynConstructedGuards(
+                        expr.lhsOperand(), leafCtx, stateVarNames,
+                    ) { idx -> rec(idx, linePrefix, PREC_BOTTOM) } +
+                        collectDynConstructedGuards(
+                            expr.rhsOperand(), leafCtx, stateVarNames,
+                        ) { idx -> rec(idx, linePrefix, PREC_BOTTOM) }
+                    wrapWithDynConstructedGuards(core, guards, parentPrec)
+                }
+                "~in" -> {
+                    val core = emitInToTla(expr, negated = true, linePrefix, parentPrec, ::rec)
+                    val guards = collectDynConstructedGuards(
+                        expr.lhsOperand(), leafCtx, stateVarNames,
+                    ) { idx -> rec(idx, linePrefix, PREC_BOTTOM) } +
+                        collectDynConstructedGuards(
+                            expr.rhsOperand(), leafCtx, stateVarNames,
+                        ) { idx -> rec(idx, linePrefix, PREC_BOTTOM) }
+                    wrapWithDynConstructedGuards(core, guards, parentPrec)
+                }
                 "+" -> {
                     when {
                         exprIsSetTyped(expr) || exprIsSetTyped(expr.lhsOperand()) || exprIsSetTyped(expr.rhsOperand()) ->

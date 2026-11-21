@@ -10,7 +10,7 @@ invariant AllInvs := NonNegative & CorrectCounter
 invariant Bound := forall k : Int, Counter.n <= 3
 ```
 
-Invariants are Boolean expressions over proc state and/or **fluents**. Quantifiers (`forall`, `exists`) are common; multiple binders may share a type (`forall n1, n2 : NodeSet, …` ≡ nested `forall n1 : NodeSet, forall n2 : NodeSet, …`). Indexed state uses `Leaf[i].var`; collection properties and nested record fields are allowed (`Leaf[i].log.length`, `Leaf[i].log[j]`).
+Invariants are Boolean expressions over proc state and/or **fluents**. Quantifiers (`forall`, `exists`) are common; multiple binders may share a type (`forall n1, n2 : NodeSet, …` ≡ nested `forall n1 : NodeSet, forall n2 : NodeSet, …`). Indexed state uses `Leaf[i].var`; under create-index plus dynamic children, dual-index `Leaf[n][i].var` is allowed (quantify `i` with `forall i : DynProc` when `type DynProc` is declared and the create-index supplies `DynProc := {…}`). Dynamic leaf field reads in comparisons desugar to require the instance is live (`Leaf_constructed[n][i] /\ …`). Collection properties and nested record fields are allowed (`Leaf[i].log.length`, `Leaf[i].log[j]`).
 
 ## Fluents
 

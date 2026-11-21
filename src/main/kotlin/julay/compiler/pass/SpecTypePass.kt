@@ -523,16 +523,17 @@ private fun typePassInvariantFormula(
         )
         env[name] = boolType
     }
-    val (unindexed, indexed, paramTypes) = specPeerMaps(systemLeaves, pclasses, registry)
+    val peers = specPeerMaps(systemLeaves, pclasses, registry)
     errors += typePassSpecFormula(
         formula,
         env,
         registry,
         funEnv,
         funBuiltinEnv,
-        unindexed,
-        indexed,
-        paramTypes,
+        peers.unindexed,
+        peers.indexed,
+        peers.paramTypes,
+        peers.instParamTypes,
         fluentArities = fluentArities,
     )
     if (errors.isEmpty()) {
@@ -549,14 +550,22 @@ private fun typePassInvariantFormula(
     return errors
 }
 
+private data class SpecPeerMaps(
+    val unindexed: Map<String, ProcClassNode>,
+    val indexed: Map<String, ProcClassNode>,
+    val paramTypes: Map<String, Type>,
+    val instParamTypes: Map<String, Type>,
+)
+
 private fun specPeerMaps(
     systemLeaves: List<SpecLeaf>,
     pclasses: Map<String, ProcClassNode>,
     registry: ObjClassRegistry,
-): Triple<Map<String, ProcClassNode>, Map<String, ProcClassNode>, Map<String, Type>> {
+): SpecPeerMaps {
     val unindexed = linkedMapOf<String, ProcClassNode>()
     val indexed = linkedMapOf<String, ProcClassNode>()
     val paramTypes = linkedMapOf<String, Type>()
+    val instParamTypes = linkedMapOf<String, Type>()
     systemLeaves.forEach { leaf ->
         val pc = pclasses[leaf.name] ?: return@forEach
         if (leaf.isParameterized) {
@@ -567,11 +576,19 @@ private fun specPeerMaps(
                     is TypeResolveResult.Error -> {}
                 }
             }
+            if (leaf.isDualIndexed) {
+                leaf.instParamType?.let { pt ->
+                    when (val r = registry.resolveTypeExpr(pt)) {
+                        is TypeResolveResult.Found -> instParamTypes[leaf.name] = r.type
+                        is TypeResolveResult.Error -> {}
+                    }
+                }
+            }
         } else {
             unindexed[leaf.name] = pc
         }
     }
-    return Triple(unindexed, indexed, paramTypes)
+    return SpecPeerMaps(unindexed, indexed, paramTypes, instParamTypes)
 }
 
 internal fun collectInvariantRefs(
@@ -639,6 +656,7 @@ private fun initClauseErrors(
         }.toMap()
         val indexed = linkedMapOf<String, ProcClassNode>()
         val paramTypes = linkedMapOf<String, Type>()
+        val instParamTypes = linkedMapOf<String, Type>()
         expanded.forEach { leaf ->
             if (!leaf.isParameterized) return@forEach
             val pc = pclassNodes[leaf.name] ?: leafSpecNodes[leaf.name]?.asProcClass() ?: return@forEach
@@ -647,6 +665,14 @@ private fun initClauseErrors(
                 when (val r = registry.resolveTypeExpr(pt)) {
                     is TypeResolveResult.Found -> paramTypes[leaf.name] = r.type
                     is TypeResolveResult.Error -> {}
+                }
+            }
+            if (leaf.isDualIndexed) {
+                leaf.instParamType?.let { pt ->
+                    when (val r = registry.resolveTypeExpr(pt)) {
+                        is TypeResolveResult.Found -> instParamTypes[leaf.name] = r.type
+                        is TypeResolveResult.Error -> {}
+                    }
                 }
             }
         }
@@ -675,6 +701,7 @@ private fun initClauseErrors(
                 unindexed,
                 indexedPeers = indexed,
                 indexedParamTypes = paramTypes,
+                indexedInstParamTypes = instParamTypes,
                 initConstGlobals = leafConst,
             )
             errors += initErrs

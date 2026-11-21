@@ -2665,6 +2665,44 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun dynProcInvDualIndexEmitsConstructedGuards() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-dynproc-inv-dual").toFile()
+        try {
+            val source = File("regression/input/spec/dynproc-inv-dual-index.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            val emit = compileSpecEmit(source, "DualInvSpec")
+            val tlaText = emit.tlaText
+            val inv = tlaText.substringAfter("NoStaleKeys ==").substringBefore("\n\n")
+            assertTrue(
+                Regex("""\\A d \\in DynProc""").containsMatchIn(inv) ||
+                    Regex("""\\A [^\n]*d \\in DynProc""").containsMatchIn(inv),
+                "expected forall d : DynProc in NoStaleKeys;\n$inv",
+            )
+            assertTrue(
+                inv.contains("Put_constructed[n][d]") ||
+                    Regex("""Put_constructed\[[^\]]+\]\[[^\]]+\]""").containsMatchIn(inv),
+                "dynamic dual-index field reads must conjoin constructed;\n$inv",
+            )
+            assertTrue(
+                Regex("""step_Put\[[^\]]+\]\[[^\]]+\]""").containsMatchIn(inv) ||
+                    Regex("""step\[[^\]]+\]\[[^\]]+\]""").containsMatchIn(inv),
+                "dual-index field reads must use [n][d], not a single index;\n$inv",
+            )
+            assertFalse(
+                Regex("""step_Put\[[^\]]+\] =""").containsMatchIn(inv) &&
+                    !Regex("""step_Put\[[^\]]+\]\[[^\]]+\]""").containsMatchIn(inv),
+                "must not emit single-index step_Put[d] for dual leaf;\n$inv",
+            )
+            File(work, "DualInvSpec.tla").writeText(tlaText)
+            File(work, "DualInvSpec.cfg").writeText(emit.cfgText)
+            assertTlcHealthyStart(work, "DualInvSpec")
+        } finally {
+            work.deleteRecursively()
+        }
+    }
+
+    @Test
     fun compositionBlockInitConjoinsOnUnindexedConst() {
         assumeTlcPresent()
         val work = Files.createTempDirectory("julay-spec-composition-block-init").toFile()

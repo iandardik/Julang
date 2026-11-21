@@ -286,7 +286,22 @@ private fun collectObjFieldReads(
                     }
                     is IndexExprNode -> {
                         val idxBase = base.base
-                        if (idxBase is SymbolValueExprNode) {
+                        if (idxBase is IndexExprNode && idxBase.base is SymbolValueExprNode) {
+                            val s = (idxBase.base as SymbolValueExprNode).symbol
+                            when {
+                                s in leaves -> {
+                                    markWhole(s, e.fieldName)
+                                    walk(idxBase.index, boundNow)
+                                    walk(base.index, boundNow)
+                                }
+                                currentLeaf != null && s !in boundNow -> {
+                                    markField(currentLeaf, s, e.fieldName)
+                                    walk(idxBase.index, boundNow)
+                                    walk(base.index, boundNow)
+                                }
+                                else -> walk(base, boundNow)
+                            }
+                        } else if (idxBase is SymbolValueExprNode) {
                             val s = idxBase.symbol
                             when {
                                 s in leaves -> {

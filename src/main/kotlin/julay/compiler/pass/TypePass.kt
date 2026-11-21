@@ -83,8 +83,13 @@ private var typePassUnindexedPeerClasses: Map<String, ProcClassNode> = emptyMap(
  * Empty outside [typePassSpecFormula].
  */
 private var typePassIndexedPeerClasses: Map<String, ProcClassNode> = emptyMap()
-/** Expected index types for [typePassIndexedPeerClasses], when known. */
+/** Expected create-index types for [typePassIndexedPeerClasses], when known. */
 private var typePassIndexedPeerParamTypes: Map<String, Type> = emptyMap()
+/**
+ * Expected DynProc slot types for dual-indexed peers (`Leaf[n][i].var`).
+ * Empty when the peer is single-indexed.
+ */
+private var typePassIndexedPeerInstParamTypes: Map<String, Type> = emptyMap()
 /**
  * Non-null while typing `init:`: leaf name → frozen global var names (listed
  * `global` + proc `const`). Indexed `Leaf[i].var` is rejected for those names
@@ -149,6 +154,7 @@ internal fun typePassSpecFormula(
     unindexedPeers: Map<String, ProcClassNode>,
     indexedPeers: Map<String, ProcClassNode>,
     indexedParamTypes: Map<String, Type> = emptyMap(),
+    indexedInstParamTypes: Map<String, Type> = emptyMap(),
     initConstGlobals: Map<String, Set<String>>? = null,
     fluentArities: Map<String, Int> = emptyMap(),
 ): List<CompileError> {
@@ -157,6 +163,7 @@ internal fun typePassSpecFormula(
     val prevUnindexed = typePassUnindexedPeerClasses
     val prevIndexed = typePassIndexedPeerClasses
     val prevParamTypes = typePassIndexedPeerParamTypes
+    val prevInstParamTypes = typePassIndexedPeerInstParamTypes
     val prevInit = typePassInitConstGlobals
     val prevSpec = typePassSpecFormula
     val prevForbid = typePassForbidEffects
@@ -168,6 +175,7 @@ internal fun typePassSpecFormula(
     typePassUnindexedPeerClasses = unindexedPeers
     typePassIndexedPeerClasses = indexedPeers
     typePassIndexedPeerParamTypes = indexedParamTypes
+    typePassIndexedPeerInstParamTypes = indexedInstParamTypes
     typePassInitConstGlobals = initConstGlobals
     typePassPeerClasses = unindexedPeers + indexedPeers
     typePassStateEnv = null
@@ -182,6 +190,7 @@ internal fun typePassSpecFormula(
         typePassUnindexedPeerClasses = prevUnindexed
         typePassIndexedPeerClasses = prevIndexed
         typePassIndexedPeerParamTypes = prevParamTypes
+        typePassIndexedPeerInstParamTypes = prevInstParamTypes
         typePassInitConstGlobals = prevInit
         typePassSpecFormula = prevSpec
         typePassForbidEffects = prevForbid
@@ -1466,7 +1475,13 @@ private fun peerStateRefType(
 ): PeerRefTypeResult? {
     when (baseExpr) {
         is IndexExprNode -> {
-            val peerSym = (baseExpr.base as? SymbolValueExprNode)?.symbol ?: return null
+            // Dual-index: Peer[n][d].field  (create-index + DynProc)
+            val innerIndex = baseExpr.base as? IndexExprNode
+            val peerSym = if (innerIndex != null) {
+                (innerIndex.base as? SymbolValueExprNode)?.symbol
+            } else {
+                (baseExpr.base as? SymbolValueExprNode)?.symbol
+            } ?: return null
             if (peerSym in symbolEnv) return null
             val pc = indexedPeerClass(peerSym)
             if (pc == null) {
@@ -1486,7 +1501,36 @@ private fun peerStateRefType(
                 }
                 return PeerRefTypeResult(null, listOf(fieldErr))
             }
-            val idxErrors = baseExpr.index.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+            val expectedInst = typePassIndexedPeerInstParamTypes[peerSym]
+            val dual = innerIndex != null
+            if (dual && expectedInst == null) {
+                return PeerRefTypeResult(
+                    null,
+                    listOf(
+                        OneLocCompileError(
+                            baseExpr.programLocation(),
+                            "component \"$peerSym\" is not dual-indexed; use \"$peerSym[i].$fieldName\"",
+                        ),
+                    ),
+                )
+            }
+            if (!dual && expectedInst != null) {
+                return PeerRefTypeResult(
+                    null,
+                    listOf(
+                        OneLocCompileError(
+                            baseExpr.programLocation(),
+                            "dual-indexed component \"$peerSym\" requires \"$peerSym[n][i].$fieldName\"",
+                        ),
+                    ),
+                )
+            }
+            val idxErrors = if (dual) {
+                innerIndex!!.index.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) +
+                    baseExpr.index.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+            } else {
+                baseExpr.index.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+            }
             val vn = pc.localDecls().filterIsInstance<VarNode>().firstOrNull { it.name == fieldName }
                 ?: return PeerRefTypeResult(
                     null,
@@ -1529,16 +1573,43 @@ private fun peerStateRefType(
             }
             val expected = typePassIndexedPeerParamTypes[peerSym]
             val typeErrs = mutableListOf<CompileError>()
-            if (expected != null && idxErrors.isEmpty()) {
-                try {
-                    val actualIdx = baseExpr.index.getType()
-                    if (typingView(actualIdx) != typingView(expected)) {
-                        typeErrs += OneLocCompileError(
-                            baseExpr.programLocation(),
-                            "index type $actualIdx does not match parameter type $expected",
-                        )
+            if (idxErrors.isEmpty()) {
+                if (dual) {
+                    if (expected != null) {
+                        try {
+                            val actualOuter = innerIndex!!.index.getType()
+                            if (typingView(actualOuter) != typingView(expected)) {
+                                typeErrs += OneLocCompileError(
+                                    baseExpr.programLocation(),
+                                    "index type $actualOuter does not match parameter type $expected",
+                                )
+                            }
+                        } catch (_: RuntimeException) {
+                        }
                     }
-                } catch (_: RuntimeException) {
+                    if (expectedInst != null) {
+                        try {
+                            val actualInst = baseExpr.index.getType()
+                            if (typingView(actualInst) != typingView(expectedInst)) {
+                                typeErrs += OneLocCompileError(
+                                    baseExpr.programLocation(),
+                                    "index type $actualInst does not match slot type $expectedInst",
+                                )
+                            }
+                        } catch (_: RuntimeException) {
+                        }
+                    }
+                } else if (expected != null) {
+                    try {
+                        val actualIdx = baseExpr.index.getType()
+                        if (typingView(actualIdx) != typingView(expected)) {
+                            typeErrs += OneLocCompileError(
+                                baseExpr.programLocation(),
+                                "index type $actualIdx does not match parameter type $expected",
+                            )
+                        }
+                    } catch (_: RuntimeException) {
+                    }
                 }
             }
             return PeerRefTypeResult(t, idxErrors + typeErrs)

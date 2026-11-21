@@ -37,13 +37,14 @@ invariant KeyUniquelyOwned := forall n1,n2,owner1,owner2 : Node, forall k : Key,
 invariant OwnerHasValue := forall n : Node, forall k : Key,
     (k in Store[n].committed) => (Store[n].owners[k] = n <=> k in Store[n].store)
 
-//invariant NoStaleKeys := forall n1,n2 : Node, forall k : Key,
-//    (k in Store[n1].store & Store[n2].owners[k] = n2 & k in Store[n2].committed) => n1 = n2
+invariant NoStaleKeys := forall n : Node, forall k : Key, forall d : DynProc,
+    (Put[n][d].step = "done" & Put[n][d].putKey = k & Store[n].owners[k] = n) => (k in Store[n].committed)
 
 invariant ProtocolInvs := KeysUnique
     & CommittedImpliesOwn
     & KeyUniquelyOwned
     & OwnerHasValue
+    & NoStaleKeys
 
 
 export spec SysSpec := <true> Cluster || PerfectNet <ProtocolInvs> {

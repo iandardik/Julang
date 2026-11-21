@@ -1,0 +1,58 @@
+import julay.funlib.setOf
+import julay.funlib.mapOf
+
+type Node {
+    url : String
+    id : Int
+}
+
+type Key := String
+
+type DynProc
+
+fun emptyNode() : Node =
+    Node {
+        id := -1,
+        url := ""
+    }
+
+static proc Store {
+    var committed : Set<Key>
+    var owners : Map<Key, Node>
+
+    constructor start(self : Node) {
+        transit:
+            committed := setOf()
+            owners := mapOf()
+    }
+}
+
+proc Put {
+    const putKey : Key
+    var step : String
+
+    constructor put(key : Key) {
+        transit:
+            putKey := key
+            step := "done"
+    }
+
+    return putDone() {
+        guard: step = "done"
+    }
+}
+
+invariant NoStaleKeys := forall n : Node, forall k : Key, forall d : DynProc,
+    (Put[n][d].step = "done" & Put[n][d].putKey = k & Store[n].owners[k] = n) =>
+        (k in Store[n].committed)
+
+spec DualInvSpec := (Store || Put)[n : Node] {
+    Node := { "n1", "n2" }
+    Key := { "k1" }
+    DynProc := { "dp1" }
+    init: forall n : Node, n.url = n
+} |= NoStaleKeys {
+    unsynced start, put, putDone
+}
+
+compile DualInvSpec
