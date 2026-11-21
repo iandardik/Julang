@@ -1,0 +1,59 @@
+import julay.funlib.listOf
+import julay.funlib.setOf
+import julay.funlib.length
+
+type Node {
+    url : String
+    id : Int
+}
+
+type Msg {
+    src : Node
+    dest : Node
+}
+
+fun emptyNode() : Node =
+    Node {
+        id := -1,
+        url := ""
+    }
+
+static spec Hub {
+    var owner : Node
+    var peers : List<Node>
+    var bag : Set<Msg>
+
+    constructor start(self : Node) {
+        transit:
+            owner := emptyNode()
+            peers := listOf()
+            bag := setOf()
+    }
+
+    /* Free also binder: typeToTlaDomain must be live Node (not Node ∪ {sent}). */
+    transition inject(m : Msg) also (dest : Node) {
+        guard: m = Msg { src := owner, dest := dest }
+        transit:
+            bag := bag + setOf(m)
+    }
+
+    internal transition clear() {
+        transit:
+            owner := emptyNode()
+    }
+}
+
+/* Reference peers/bag so unused-vars keeps them for TypeOK nesting checks. */
+invariant Ok := forall n : Node,
+    (Hub[n].owner = emptyNode() | Hub[n].owner = n) &
+    length(Hub[n].peers) >= 0 &
+    Hub[n].bag = Hub[n].bag
+
+spec OpaqueDomains := Hub[n : Node] {
+    Node := { "n1", "n2" }
+    init: forall n : Node, n.url = n
+} |= Ok {
+    unsynced start, inject
+}
+
+compile OpaqueDomains

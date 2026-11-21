@@ -17,6 +17,8 @@ fun ownershipBodyField(body : String, idx : Int) : String =
 proc SendOwnershipBroadcast {
     const dest : String
     const body : String
+    const peerNode : Node
+    const bcKey : Key
     var sent : Boolean
     var knownOwner : Node
 
@@ -24,6 +26,8 @@ proc SendOwnershipBroadcast {
         transit:
             dest := peer.url
             body := "k=" + key + "|id=" + (myInfo.id + "") + "|url=" + myInfo.url
+            peerNode := peer
+            bcKey := key
             sent := false
             knownOwner := myInfo
     }
@@ -48,9 +52,11 @@ proc SendOwnershipBroadcast {
             }
     }
 
-    return doneBroadcastOwnershipToPeer(owner : Node) {
+    return doneBroadcastOwnershipToPeer(owner : Node, src : Node, k : Key) {
         guard:
             & sent
             & owner = knownOwner
+            & src = peerNode
+            & k = bcKey
     }
 }

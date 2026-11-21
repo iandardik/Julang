@@ -594,9 +594,6 @@ internal fun collectInvariantRefs(
 }
 
 
-/** Default TLC MaxListLen; `init:` length constraints larger than this make Init empty. */
-private const val INIT_MAX_LIST_LEN = 3
-
 private fun initClauseErrors(
     node: ASTNode,
     pclassNodes: Map<String, ProcClassNode>,
@@ -733,11 +730,11 @@ private fun sortLengthMaxListLenErrors(
     fun checkSort(name: String, loc: julay.compiler.ProgramLoc) {
         val domain = domains[name] ?: return
         val size = domain.cfgElements?.size ?: return
-        if (size > INIT_MAX_LIST_LEN) {
+        if (size > DEFAULT_MAX_LIST_LEN) {
             errors += OneLocCompileError(
                 loc,
                 "\"init:\" constraint uses type \"$name\" of size $size, " +
-                    "which exceeds MaxListLen ($INIT_MAX_LIST_LEN)",
+                    "which exceeds MaxListLen ($DEFAULT_MAX_LIST_LEN)",
             )
         }
     }

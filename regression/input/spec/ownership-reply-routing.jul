@@ -1,0 +1,103 @@
+import julay.funlib.setOf
+
+type Node {
+    url : String
+    id : Int
+}
+
+type Key := String
+
+type OwnershipReply {
+    src : Node
+    dest : Node
+    owner : Node
+    k : Key
+}
+
+type DynProc
+
+fun emptyNode() : Node =
+    Node { id := -1, url := "" }
+
+static spec OwnershipReplies {
+    var ownershipReplies : Set<OwnershipReply> := setOf()
+    constructor initially(args : List<String>) {}
+    transition doneRecvBroadcastOwnership(owner : Node, dest : Node, k : Key) also (n : Node) {
+        transit:
+            ownershipReplies := ownershipReplies + setOf(OwnershipReply {
+                src := n, dest := dest, owner := owner, k := k
+            })
+    }
+    transition doneBroadcastOwnershipToPeer(owner : Node, src : Node, k : Key) also (n : Node) {
+        guard:
+            OwnershipReply { src := src, dest := n, owner := owner, k := k } in ownershipReplies
+        transit:
+            ownershipReplies := ownershipReplies - setOf(OwnershipReply {
+                src := src, dest := n, owner := owner, k := k
+            })
+    }
+}
+
+proc Recv {
+    const bcKey : Key
+    const bcOwner : Node
+    var state : String
+    var replyOwner : Node
+
+    constructor recvBroadcastOwnership(key : Key, sender : Node) {
+        transit:
+            bcKey := key
+            bcOwner := sender
+            replyOwner := sender
+            state := "done"
+    }
+
+    return doneRecvBroadcastOwnership(owner : Node, dest : Node, k : Key) {
+        guard:
+            & state = "done"
+            & owner = replyOwner
+            & dest = bcOwner
+            & k = bcKey
+    }
+}
+
+proc Broadcast {
+    const bcKey : Key
+    var step : String
+    var peerInfo : Node
+    var knownOwner : Node
+
+    constructor broadcastOwnership(key : Key, peer : Node) {
+        transit:
+            bcKey := key
+            peerInfo := peer
+            knownOwner := emptyNode()
+            step := "midBroadcast"
+    }
+
+    transition doneBroadcastOwnershipToPeer(owner : Node, src : Node, k : Key) {
+        guard:
+            & step = "midBroadcast"
+            & src = peerInfo
+            & k = bcKey
+        transit:
+            knownOwner := owner
+            step := "done"
+    }
+
+    return broadcastDone(resolvedOwner : Node) {
+        guard:
+            & step = "done"
+            & resolvedOwner = knownOwner
+    }
+}
+
+spec ReplyRouting := (Broadcast || Recv)[n : Node] || OwnershipReplies {
+    Node := { "n1", "n2" }
+    Key := { "k1" }
+    DynProc := { "dp1" }
+    init: forall n : Node, n.url = n
+    unsynced broadcastOwnership, recvBroadcastOwnership, broadcastDone
+}
+
+compile ReplyRouting

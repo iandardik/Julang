@@ -14,6 +14,7 @@ type OwnershipReply {
     src : Node
     dest : Node
     owner : Node
+    k : Key
 }
 
 // assume a perfect network for intra-cluster messages
@@ -58,27 +59,30 @@ static spec OwnershipReplies {
 
     constructor initially(args : List<String>) {}
 
-    transition doneRecvBroadcastOwnership(owner : Node) also (n : Node, dest : Node) {
+    transition doneRecvBroadcastOwnership(owner : Node, dest : Node, k : Key) also (n : Node) {
         transit:
             ownershipReplies := ownershipReplies + setOf(OwnershipReply {
                 src := n,
                 dest := dest,
-                owner := owner
+                owner := owner,
+                k := k
             })
     }
 
-    transition doneBroadcastOwnershipToPeer(owner : Node) also (n : Node, src : Node) {
+    transition doneBroadcastOwnershipToPeer(owner : Node, src : Node, k : Key) also (n : Node) {
         guard:
             OwnershipReply {
                 src := src,
                 dest := n,
-                owner := owner
+                owner := owner,
+                k := k
             } in ownershipReplies
         transit:
             ownershipReplies := ownershipReplies - setOf(OwnershipReply {
                 src := src,
                 dest := n,
-                owner := owner
+                owner := owner,
+                k := k
             })
     }
 }

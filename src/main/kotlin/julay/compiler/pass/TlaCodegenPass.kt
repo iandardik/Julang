@@ -1518,7 +1518,7 @@ private fun leafInstDomain(leaf: SpecLeaf): String? =
     }
 
 /** Upper bound for list models / `SetToSeq` CASE arms (must cover largest `.toList()`). */
-internal const val DEFAULT_MAX_LIST_LEN = 5
+internal const val DEFAULT_MAX_LIST_LEN = 3
 
 /** Contiguous extras: lowest negative literal .. max(highest literal, MaxListLen+1). */
 internal fun typeOkIntExtras(intLiterals: Set<Int>, maxListLen: Int = DEFAULT_MAX_LIST_LEN): List<Int> {
@@ -1542,6 +1542,7 @@ private fun typeOkVarRange(
     varName: String? = null,
     mapKeyUniverse: String? = null,
     setUniverse: String? = null,
+    allowOpaqueSentinel: Boolean = true,
 ): String {
     closedLiteralDomain(type, leafClass, varName, fieldOfObj, fieldName)?.let { return it }
     return when (type) {
@@ -1550,30 +1551,41 @@ private fun typeOkVarRange(
         is StringType -> "String"
         is DomainType -> type.name
         // Apalache rejects unbounded Seq(_) in TypeOK; BoundedSeq matches TLC models.
-        is ListType -> "BoundedSeq(${typeOkVarRange(type.elementType, intRange)}, MaxListLen)"
+        is ListType -> "BoundedSeq(${typeOkVarRange(type.elementType, intRange, allowOpaqueSentinel = false)}, MaxListLen)"
         is SetType -> {
-            val univ = setUniverse ?: typeOkEnumerableUniverse(type.elementType, intRange)
+            val univ = setUniverse
+                ?: typeOkEnumerableUniverse(type.elementType, intRange)
             "SUBSET $univ"
         }
         is MapType -> {
             val key = mapKeyUniverse ?: typeOkEnumerableUniverse(type.keyType, intRange)
-            "[$key -> ${typeOkVarRange(type.valueType, intRange)}]"
+            "[$key -> ${typeOkVarRange(type.valueType, intRange, allowOpaqueSentinel = false)}]"
         }
         is ObjClassType -> {
             if (TlaOpaqueIndexSort.isOpaque(type)) {
-                // Locals may hold the empty sentinel; create-index stays on bare CONSTANT.
-                TlaOpaqueIndexSort.valueDomain(type.name)
+                // Top-level Node state may hold empty; nested/cluster/message fields are live-only.
+                if (allowOpaqueSentinel) {
+                    TlaOpaqueIndexSort.valueDomain(type.name)
+                } else {
+                    type.name
+                }
             } else {
                 val single = TlaFieldProjection.get().singletonField(type)
                 if (single != null) {
-                    typeOkVarRange(single.type, intRange, type.name, single.name)
+                    typeOkVarRange(
+                        single.type, intRange, type.name, single.name,
+                        allowOpaqueSentinel = false,
+                    )
                 } else {
                     val fields = TlaFieldProjection.get().fieldsFor(type)
                     if (fields.isEmpty()) {
                         "[dummy: {0}]"
                     } else {
                         val rendered = fields.joinToString(", ") { f ->
-                            "${f.name}: ${typeOkVarRange(f.type, intRange, type.name, f.name)}"
+                            "${f.name}: ${typeOkVarRange(
+                                f.type, intRange, type.name, f.name,
+                                allowOpaqueSentinel = false,
+                            )}"
                         }
                         "[$rendered]"
                     }
@@ -1590,7 +1602,7 @@ private fun typeOkVarRange(
  * ([mapKeyUniverse] / [setUniverse]) when TypeOK shapes provide one.
  */
 private fun typeOkEnumerableUniverse(type: Type, intRange: String): String =
-    if (tlaElemIsInt(type)) "Int" else typeOkVarRange(type, intRange)
+    if (tlaElemIsInt(type)) "Int" else typeOkVarRange(type, intRange, allowOpaqueSentinel = false)
 
 private fun typeOkRangeForVar(
     leaf: SpecLeaf,
@@ -1668,6 +1680,7 @@ private fun typeOkMapConjunct(
     val keyUniv = mapKeyUniverse ?: typeOkEnumerableUniverse(mapType.keyType, intRange)
     val valueRange = typeOkVarRange(
         mapType.valueType, intRange, leafClass = leafClass, varName = varName,
+        allowOpaqueSentinel = false,
     )
     if (mapKeyUniverse != null) {
         return typeOkConjunct(name, "[$keyUniv -> $valueRange]", paramDomain, instDomain)
@@ -1705,6 +1718,7 @@ private fun typeOkListConjunct(
 ): String {
     val elemRange = typeOkVarRange(
         listType.elementType, intRange, leafClass = leafClass, varName = varName,
+        allowOpaqueSentinel = false,
     )
     return when {
         paramDomain != null && instDomain != null ->
@@ -3770,8 +3784,9 @@ internal fun typeToTlaDomain(
         is MapType -> "[${typeToTlaDomain(type.keyType)} -> ${typeToTlaDomain(type.valueType)}]"
     is ObjClassType -> {
         if (TlaOpaqueIndexSort.isOpaque(type)) {
-            // Locals / map values / `\E` may hold the empty sentinel; create-index uses bare CONSTANT.
-            TlaOpaqueIndexSort.valueDomain(type.name)
+            // Action `\E` / structural domains: live CONSTANT only (no sentinel).
+            // TypeOK scalars still use valueDomain via typeOkVarRange.
+            type.name
         } else {
             val single = TlaFieldProjection.get().singletonField(type)
             if (single != null) {

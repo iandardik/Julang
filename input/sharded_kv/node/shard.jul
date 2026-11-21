@@ -282,9 +282,11 @@ proc BroadcastOwnership {
             step := "midBroadcast"
     }
 
-    transition doneBroadcastOwnershipToPeer(owner : Node) {
+    transition doneBroadcastOwnershipToPeer(owner : Node, src : Node, k : Key) {
         guard:
             & step = "midBroadcast"
+            & src = peerInfo
+            & k = bcKey
         transit:
             knownOwner := owner
             step := "nextPeer"
@@ -395,9 +397,11 @@ proc RecvBroadcastOwnership {
             state := "done"
     }
 
-    return doneRecvBroadcastOwnership(owner : Node) {
+    return doneRecvBroadcastOwnership(owner : Node, dest : Node, k : Key) {
         guard:
             & state = "done"
             & owner = replyOwner
+            & dest = bcOwner
+            & k = bcKey
     }
 }

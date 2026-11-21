@@ -52,7 +52,7 @@ move_tla() {
 
 # CircSide only for ShardEnvObl × StoreObl (circular AG). Put/Inbound are ordinary RG Obls.
 # julayc emits MODULE CircSide (not ShardEnvObl_StoreObl_CircSide).
-for name in System PutEnvObl InboundEnvObl StoreObl ShardEnvObl CircSide; do
+for name in System SysSpec PutEnvObl InboundEnvObl StoreObl ShardEnvObl CircSide; do
   move_tla "$name"
 done
 
@@ -80,7 +80,7 @@ chmod +x "$SKV_DIR/ShardNode" "$SKV_DIR/ShardClient"
 echo "Wrote:"
 echo "  $SKV_DIR/ShardNode"
 echo "  $SKV_DIR/ShardClient"
-for name in System PutEnvObl InboundEnvObl StoreObl ShardEnvObl CircSide; do
+for name in System SysSpec PutEnvObl InboundEnvObl StoreObl ShardEnvObl CircSide; do
   if [[ -f "$SKV_DIR/${name}.tla" ]]; then
     echo "  $SKV_DIR/${name}.tla"
   fi

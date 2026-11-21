@@ -16,8 +16,8 @@ import julay.program.type.Type
  *
  * Empty / sentinel literals (e.g. `emptyNode()` with `url := ""`) emit a distinguished
  * atom that is **not** in the create-index CONSTANT [sort], so `peer = emptyNode` never
- * skips a live replica. Node-typed state uses [valueDomain]; projections are defined on
- * live atoms plus the sentinel.
+ * skips a live replica. Top-level Node-typed state uses [valueDomain]; nested / `\E`
+ * domains stay on the live CONSTANT. Projections are defined on live atoms plus the sentinel.
  */
 internal object TlaOpaqueIndexSort {
     private var byName: Map<String, ObjClassType> = emptyMap()
@@ -74,8 +74,8 @@ internal object TlaOpaqueIndexSort {
     }
 
     /**
-     * Domain for Node-typed *values* that may be empty (locals, map values, `\E` havoc).
-     * Create-index binders keep the bare CONSTANT [sort] (live atoms only).
+     * Domain for top-level Node-typed *values* that may be empty (scalars in TypeOK).
+     * Nested fields / list-map elements / action `\E` use the bare CONSTANT [sort].
      */
     fun valueDomain(sort: String): String {
         if (sort !in byName) return sort

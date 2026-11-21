@@ -257,7 +257,7 @@ spec Cluster := (Store || ShardLogic)[n : Node] || ClusterInfo {
 }
 ```
 
-Several `init:` lines, or `init: A & B`, all become Init `/\`. On a **composition** trailing block, unindexed proc `const`s must be written `Leaf.var` (`ClusterInfo.cluster`, `ClusterInfo.me`). Bare names are only for explicitly listed create-index `global Leaf.x` bindings (then `cluster` means that frozen global). An uninterpreted type identifier is a value of that type (TLA `CONSTANT`). Indexed `RaftProtocol[n].cluster` is an error (frozen globals are scalars). Indexed **`const`** state that is not a listed global is allowed (`RaftProtocol[n1].self`), so Init can constrain per-index constants. Mutable `var`s are not. Uninterpreted `.length` / `length(NodeSet)` is spec/TLA-only (`Cardinality` in TLA+). If `|NodeSet| > MaxListLen` (default 5), compile errors — Init would be empty.
+Several `init:` lines, or `init: A & B`, all become Init `/\`. On a **composition** trailing block, unindexed proc `const`s must be written `Leaf.var` (`ClusterInfo.cluster`, `ClusterInfo.me`). Bare names are only for explicitly listed create-index `global Leaf.x` bindings (then `cluster` means that frozen global). An uninterpreted type identifier is a value of that type (TLA `CONSTANT`). Indexed `RaftProtocol[n].cluster` is an error (frozen globals are scalars). Indexed **`const`** state that is not a listed global is allowed (`RaftProtocol[n1].self`), so Init can constrain per-index constants. Mutable `var`s are not. Uninterpreted `.length` / `length(NodeSet)` is spec/TLA-only (`Cardinality` in TLA+). If `|NodeSet| > MaxListLen` (default 3), compile errors — Init would be empty.
 
 For **opaque record index sorts**, projection VARIABLES default to membership in Init (`Node_url \in [Node -> String]`, `Node_id \in [Node -> Int]`). Pin them with `init:` when you want a singleton: `forall n : Node, n.url = n` emits `Node_url = [n ∈ Node |-> n]`; length plus `ClusterInfo.cluster[i].id = i` emits a concrete `cluster` sequence and pins `Node_id`.
 
@@ -273,7 +273,7 @@ Delayed models assign finite literal sets to **uninterpreted** and **typedef** n
 | Typedef | **Optional** | `CONSTANT Name = Carrier` (alias to erasure) | `CONSTANT Name = {…}` (must match carrier) |
 | Record | **Allowed when used as a create-index sort** (opaque atoms + field projections) | — (error if used as index without model) | `CONSTANT Name = {…}` |
 
-Record index sorts keep full structs in JAR; TLA+ encodes values as CONSTANT atoms with projection VARIABLES (`Node_url`, `Node_id`). Empty / sentinel literals (e.g. `emptyNode()` with `url := ""`) emit a distinguished atom **outside** the create-index CONSTANT (prefer `""`, else `#` / `__none` / … if that atom is already in the live model). Node-typed locals use `(Node \cup {sent})`; projections pin `Node_url[sent] = sent` and `Node_id[sent] = -1`. Create-index and `\A n \in Node` stay on live atoms only so `peer = emptyNode` never skips a real replica.
+Record index sorts keep full structs in JAR; TLA+ encodes values as CONSTANT atoms with projection VARIABLES (`Node_url`, `Node_id`). Empty / sentinel literals (e.g. `emptyNode()` with `url := ""`) emit a distinguished atom **outside** the create-index CONSTANT (prefer `""`, else `#` / `__none` / … if that atom is already in the live model). Top-level Node-typed state uses `(Node \cup {sent})` in TypeOK; nested fields, list/map elements, and action `\E` binders stay on live `Node`. Projections pin `Node_url[sent] = sent` and `Node_id[sent] = -1`. Create-index and `\A n \in Node` stay on live atoms only so `peer = emptyNode` never skips a real replica. Unused-fields stripping/warnings do not apply to opaque index sorts.
 
 
 **Uninterpreted on create-index** (required when the indexed type is used):
@@ -396,7 +396,7 @@ TLA+ emit may rewrite the composed spec (JAR codegen is unchanged). Named ids, a
 
 Disable with `--disable-tla-opt` / `--disable-tla-opt=ID,...`.
 
-Open `Int` / `String` sites that still need a TLC universe (leaf index, remaining `\E`, havoc) get a `.cfg` assignment from literals in the emitted spec — not a fixed `{0..5}` or a 9-string set. Cfg `Int` is the contiguous range `{0, …, max(highest non-negative literal, MaxListLen)}` (default `MaxListLen` is `5`). If nothing enumerates `Int`/`String`, that CONSTANT is omitted. Always-on; not a named opt.
+Open `Int` / `String` sites that still need a TLC universe (leaf index, remaining `\E`, havoc) get a `.cfg` assignment from literals in the emitted spec — not a fixed `{0..3}` or a 9-string set. Cfg `Int` is the contiguous range `{0, …, max(highest non-negative literal, MaxListLen)}` (default `MaxListLen` is `3`). If nothing enumerates `Int`/`String`, that CONSTANT is omitted. Always-on; not a named opt.
 
 TLC also infers `CONSTRAINT StateConstraint` (not `INVARIANT`): each `Int` state variable inhabits cfg `Int` (union negative literals already in the model, so `votedFor = -1` stays allowed), and each list state variable has `Cardinality(DOMAIN x) <= MaxListLen`. Parameterized leaves quantify `\A n \in NodeSet : currentTerm[n] \in Int`. Successors outside those bounds are discarded. That keeps `commitIndex` inside cfg `Int`, so `\A i \in Int` is complete for `StateMachineSafety` in this model. Always-on; not a `--disable-tla-opt` id.
 
@@ -405,7 +405,7 @@ When `init:` uniquely determines a const-global list (length plus identity `xs[i
 ### Lists and sequences
 
 - Julay lists are **1-based**, matching TLA `Sequences`. Reads and `EXCEPT` updates on list-typed state use the Julay index as-is.
-- List **action-argument / havoc domains** use a finite `BoundedSeq(S, MaxListLen)` (not bare `Seq(S)`, which TLC cannot enumerate). `MaxListLen` is a module `CONSTANT` (default `5` in the `.cfg`); raise it for longer lists. Lists are modeled as `Int ->` functions (Apalache-friendly) rather than `Seq`.
+- List **action-argument / havoc domains** use a finite `BoundedSeq(S, MaxListLen)` (not bare `Seq(S)`, which TLC cannot enumerate). `MaxListLen` is a module `CONSTANT` (default `3` in the `.cfg`); raise it for longer lists. Lists are modeled as `Int ->` functions (Apalache-friendly) rather than `Seq`.
 - Emitted helpers sit under `\* TLA+ helpers`: `BoundedSeq(S, N) == UNION { [1..k -> S] : k \in 0..N }` when list domains appear, `Range(f) == { f[__i] : __i \in DOMAIN f }` when list `in` / `~in`, `.toSet()`, or `allDistinct` is used, and `SetToSeq` when `.toList()` is used.
 
 ### Collections emitted today

@@ -2542,12 +2542,10 @@ class SpecTlaTlcSmokeTest {
         try {
             val source = File("regression/input/spec/opaque-empty-node.jul")
             assertTrue(source.exists(), "missing ${source.path}")
-            compileJulFile(source.toPath(), keepBuild = false)
-            val tla = File("EmptyNodeSpec.tla")
-            val cfg = File("EmptyNodeSpec.cfg")
-            assertTrue(tla.exists(), "expected EmptyNodeSpec.tla")
-            val tlaText = tla.readText()
-            val cfgText = cfg.readText()
+            val emit = compileSpecEmit(source, "EmptyNodeSpec")
+            val tlaText = emit.tlaText
+            val cfgText = emit.cfgText
+            val warnings = emit.warnings
             assertTrue(
                 tlaText.contains("emptyNode ==") &&
                     !tlaText.contains("CHOOSE __n \\in Node"),
@@ -2569,15 +2567,100 @@ class SpecTlaTlcSmokeTest {
                 "(Node \\cup {\"\"})" in tlaText,
                 "Node-typed values should allow the sentinel;\n$tlaText",
             )
-            tla.copyTo(File(work, "EmptyNodeSpec.tla"), overwrite = true)
-            cfg.copyTo(File(work, "EmptyNodeSpec.cfg"), overwrite = true)
-            tla.delete()
-            cfg.delete()
+            assertTrue(
+                warnings.none { it.contains("unused-fields") },
+                "opaque index sorts must not warn unused-fields;\n$warnings",
+            )
+            File(work, "EmptyNodeSpec.tla").writeText(tlaText)
+            File(work, "EmptyNodeSpec.cfg").writeText(cfgText)
             assertTlcHealthyStart(work, "EmptyNodeSpec")
         } finally {
             work.deleteRecursively()
-            File("EmptyNodeSpec.tla").delete()
-            File("EmptyNodeSpec.cfg").delete()
+        }
+    }
+
+    @Test
+    fun opaqueSentinelDomainsLiveExistsNestedTypeOk() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-opaque-sentinel-domains").toFile()
+        try {
+            val source = File("regression/input/spec/opaque-sentinel-domains.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            val emit = compileSpecEmit(source, "OpaqueDomains")
+            val tlaText = emit.tlaText
+            val next = tlaAfterNext(tlaText)
+            assertTrue(
+                Regex("""\\E [^\n]*dest \\in Node\b""").containsMatchIn(next) ||
+                    Regex("""\\E n, dest \\in Node\b""").containsMatchIn(next),
+                "free also dest must quantify over live Node;\n$next",
+            )
+            assertFalse(
+                next.contains("Node \\cup") &&
+                    Regex("""\\E [^\n]*dest \\in \(Node \\cup""").containsMatchIn(next),
+                "action \\E must not include the opaque sentinel;\n$next",
+            )
+            assertTrue(
+                Regex("""owner \\in \[Node -> \(Node \\cup \{\"\"\}\)\]""").containsMatchIn(tlaText),
+                "scalar owner TypeOK should allow sentinel;\n$tlaText",
+            )
+            assertTrue(
+                Regex("""peers\[n__tok\]\[j__tok\] \\in Node\b""").containsMatchIn(tlaText),
+                "list elements of opaque Node must be live-only in TypeOK;\n$tlaText",
+            )
+            assertTrue(
+                Regex("""bag \\in \[Node -> SUBSET \[src: Node, dest: Node\]\]""").containsMatchIn(tlaText),
+                "message fields must be live Node (no sentinel cup);\n$tlaText",
+            )
+            assertTrue(
+                emit.warnings.none { it.contains("unused-fields") },
+                "opaque Node must not unused-fields warn;\n${emit.warnings}",
+            )
+            File(work, "OpaqueDomains.tla").writeText(tlaText)
+            File(work, "OpaqueDomains.cfg").writeText(emit.cfgText)
+            assertTlcHealthyStart(work, "OpaqueDomains")
+        } finally {
+            work.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun ownershipReplyRoutingDeterminesDestAndSrc() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-ownership-reply-routing").toFile()
+        try {
+            val source = File("regression/input/spec/ownership-reply-routing.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            val emit = compileSpecEmit(source, "ReplyRouting")
+            val tlaText = emit.tlaText
+            val recvDef = tlaText.substringAfter("doneRecvBroadcastOwnership(").substringBefore("\n\n")
+            assertTrue(
+                recvDef.contains("dest ==") && recvDef.contains("bcOwner"),
+                "doneRecv must LET-bind dest to bcOwner;\n$recvDef",
+            )
+            assertFalse(
+                Regex("""\\E dest \\in""").containsMatchIn(tlaAfterNext(tlaText)),
+                "doneRecv must not freely quantify dest;\n${tlaAfterNext(tlaText)}",
+            )
+            val consumeDef = tlaText.substringAfter("doneBroadcastOwnershipToPeer(").substringBefore("\n\n")
+            assertTrue(
+                consumeDef.contains("src ==") && consumeDef.contains("peerInfo"),
+                "consume must bind src to peerInfo;\n$consumeDef",
+            )
+            assertTrue(
+                consumeDef.contains("k ==") &&
+                    (consumeDef.contains("bcKey") || consumeDef.contains("k |->")),
+                "reply consume must carry/constrain k;\n$consumeDef",
+            )
+            assertTrue(
+                Regex("""ownershipReplies \\in SUBSET \[src: Node, dest: Node, owner: Node, k: Key\]""")
+                    .containsMatchIn(tlaText),
+                "OwnershipReply TypeOK must include k with live Node fields;\n$tlaText",
+            )
+            File(work, "ReplyRouting.tla").writeText(tlaText)
+            File(work, "ReplyRouting.cfg").writeText(emit.cfgText)
+            assertTlcHealthyStart(work, "ReplyRouting")
+        } finally {
+            work.deleteRecursively()
         }
     }
 

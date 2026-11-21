@@ -25,6 +25,8 @@ class TlaRelevantFields internal constructor(
 ) {
     fun fieldsFor(type: ObjClassType): List<Variable> {
         if (!projecting) return type.fields
+        // Opaque index sorts are CONSTANT atoms + projections; do not strip fields.
+        if (TlaOpaqueIndexSort.isOpaque(type.name)) return type.fields
         val keep = relevantByObj[type.name] ?: return type.fields
         return type.fields.filter { it.name in keep }
     }
@@ -49,6 +51,7 @@ class TlaRelevantFields internal constructor(
         entries: List<Pair<String, ExprNode>>,
     ): List<Pair<String, ExprNode>> {
         if (!projecting) return entries
+        if (TlaOpaqueIndexSort.isOpaque(objName)) return entries
         val keep = relevantByObj[objName] ?: return entries
         return entries.filter { it.first in keep }
     }
@@ -57,6 +60,7 @@ class TlaRelevantFields internal constructor(
         if (!projecting) return emptyList()
         val out = mutableListOf<OneLocCompileWarning>()
         for ((objName, declared) in declaredFieldsByObj) {
+            if (TlaOpaqueIndexSort.isOpaque(objName)) continue
             val loc = comparisonLocByObj[objName] ?: continue
             val keep = relevantByObj[objName] ?: emptySet()
             for (field in declared) {
