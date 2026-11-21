@@ -25,7 +25,7 @@ static proc Peer {
 
 spec SingletonNodeInfoList := Peer[i : NodeSet] {
     NodeSet := { "n1", "n2" }
-    const global Peer.cluster
+    global Peer.cluster
     init: cluster.length = NodeSet.length
     init: forall i : Int, (i >= 1 & i <= cluster.length) => cluster[i].id = i
 } {

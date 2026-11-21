@@ -1,0 +1,34 @@
+type Node {
+    url : String
+    id : Int
+}
+
+static proc Topology {
+    const cluster : List<Node>
+
+    constructor initially(cluster : List<Node>) {
+        transit: cluster := cluster
+    }
+}
+
+static proc Worker {
+    var flag : Boolean := false
+
+    constructor initially() {
+        transit: flag := false
+    }
+
+    transition tick() {
+        transit: flag := true
+    }
+}
+
+spec Sys := Worker[n : Node] || Topology {
+    Node := { "n1", "n2" }
+    init: Topology.cluster.length = Node.length
+    init: forall i : Int, (i >= 1 & i <= Topology.cluster.length) => Topology.cluster[i].id = i
+    init: forall n : Node, n.url = n
+    unsynced tick
+}
+
+compile Sys

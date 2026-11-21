@@ -95,9 +95,11 @@ spec
     | SPEC ID ASGN_EQ system_expr (LCURLY composition_spec_item* RCURLY)?
     ;
 
-/* Optional block on composition specs: intentional open-env ordinary actions. */
+/* Optional block on composition specs (`spec A := B || C { … }`):
+ * delayed models / init / global (same items as create-index) plus unsynced. */
 composition_spec_item
     : unsynced_decl
+    | create_index_item
     ;
 
 unsynced_decl
@@ -159,9 +161,10 @@ create_index_item
     | fun_model
     ;
 
-// Create-index: `global Leaf.var` or `const global Leaf.var` (proc-qualified; required).
+// Create-index: `global Leaf.var` (proc-qualified; required). Shared immutable
+// topology uses unindexed leaf composition, not a separate const-global keyword.
 global_decl
-    : CONST? GLOBAL global_var_ref (COMMA global_var_ref)*
+    : GLOBAL global_var_ref (COMMA global_var_ref)*
     ;
 
 global_var_ref

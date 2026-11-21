@@ -42,19 +42,24 @@ internal fun julayTypeToApalache(type: Type): String = when (type) {
         "$k -> $v"
     }
     is ObjClassType -> {
-        val proj = TlaFieldProjection.get()
-        val single = proj.singletonField(type)
-        if (single != null) {
-            julayTypeToApalache(single.type)
+        if (TlaOpaqueIndexSort.isOpaque(type)) {
+            // Opaque index-sort atoms are string (or int) CONSTANT elements.
+            "Str"
         } else {
-            val fields = proj.fieldsFor(type)
-            if (fields.isEmpty()) {
-                "{dummy: Int}"
+            val proj = TlaFieldProjection.get()
+            val single = proj.singletonField(type)
+            if (single != null) {
+                julayTypeToApalache(single.type)
             } else {
-                val rendered = fields.joinToString(", ") { f ->
-                    "${f.name}: ${julayTypeToApalache(f.type)}"
+                val fields = proj.fieldsFor(type)
+                if (fields.isEmpty()) {
+                    "{dummy: Int}"
+                } else {
+                    val rendered = fields.joinToString(", ") { f ->
+                        "${f.name}: ${julayTypeToApalache(f.type)}"
+                    }
+                    "{$rendered}"
                 }
-                "{$rendered}"
             }
         }
     }

@@ -1,0 +1,37 @@
+import julay.funlib.setOf
+
+type Node
+
+type Msg {
+    src : Node
+    dest : Node
+    from : Node
+}
+
+static spec Net[n : Node] {
+    Node := { "n1", "n2" }
+    var msgs : Set<Msg> := setOf()
+
+    constructor initially(args : List<String>) {}
+
+    transition recv(sender : Node) {
+        guard:
+            Msg {
+                src := sender,
+                dest := n,
+                from := sender
+            } in msgs
+        transit:
+            msgs := msgs - setOf(Msg {
+                src := sender,
+                dest := n,
+                from := sender
+            })
+    }
+}
+
+spec DupField := Net {
+    unsynced recv
+}
+
+compile DupField

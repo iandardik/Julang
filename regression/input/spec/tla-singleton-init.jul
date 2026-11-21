@@ -16,7 +16,7 @@ static proc Box {
 
 spec SingletonInit := Box[i : Ids] {
     Ids := { "a", "b" }
-    const global Box.xs
+    global Box.xs
     init: xs.length = Ids.length
     init: forall i : Int, (i >= 1 & i <= xs.length) => xs[i] = i
 } {

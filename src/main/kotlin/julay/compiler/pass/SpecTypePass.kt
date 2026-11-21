@@ -367,74 +367,73 @@ private fun globalDeclErrors(
     specAliases: Map<String, SpecNode>,
 ): List<CompileError> {
     val errors = mutableListOf<CompileError>()
-    fun walk(n: ASTNode) {
-        if (n is ParamProcExprNode && !n.isApplyIndex() && n.globalVarRefs().isNotEmpty()) {
-            val refs = n.globalVarRefs()
-            val seen = mutableSetOf<String>()
-            refs.forEach { ref ->
-                val key = ref.toString()
-                if (!seen.add(key)) {
-                    errors += OneLocCompileError(
-                        n.programLocation(),
-                        "duplicate global variable \"$key\"",
-                    )
-                }
-                if (ref.varName in SYNTHETIC_GLOBAL_NAMES) {
-                    errors += OneLocCompileError(
-                        n.programLocation(),
-                        "cannot mark synthetic variable \"${ref.varName}\" as global",
-                    )
-                }
+    fun checkGlobalRefs(
+        refs: List<GlobalVarRef>,
+        loc: julay.compiler.ProgramLoc,
+        system: ASTNode,
+        requireIndexed: Boolean,
+    ) {
+        if (refs.isEmpty()) return
+        val seen = mutableSetOf<String>()
+        refs.forEach { ref ->
+            val key = ref.toString()
+            if (!seen.add(key)) {
+                errors += OneLocCompileError(loc, "duplicate global variable \"$key\"")
             }
-            val unique = refs.distinctBy { it.toString() }
-                .filter { it.varName !in SYNTHETIC_GLOBAL_NAMES }
-            if (unique.isNotEmpty()) {
-                val expanded = expandLeavesToPclasses(
-                    flattenSpecLeaves(n),
-                    pclassNodes,
-                    procAliases,
-                    specAliases,
-                    leafSpecNodes,
+            if (ref.varName in SYNTHETIC_GLOBAL_NAMES) {
+                errors += OneLocCompileError(
+                    loc,
+                    "cannot mark synthetic variable \"${ref.varName}\" as global",
                 )
-                val leafNames = expanded.map { it.name }.toSet()
-                unique.forEach { ref ->
-                    if (ref.leafName !in leafNames) {
-                        errors += OneLocCompileError(
-                            n.programLocation(),
-                            "global \"${ref}\" names leaf \"${ref.leafName}\" which is not an indexed leaf in this spec",
-                        )
-                        return@forEach
-                    }
-                    val declared = declaredStateNames(ref.leafName, pclassNodes, leafSpecNodes)
-                    if (ref.varName !in declared) {
-                        errors += OneLocCompileError(
-                            n.programLocation(),
-                            "global \"${ref}\" is not a state variable of leaf \"${ref.leafName}\"",
-                        )
-                    }
-                }
-                n.globalDecls().forEach { decl ->
-                    decl.refs.distinctBy { it.toString() }.forEach { ref ->
-                        if (ref.varName in SYNTHETIC_GLOBAL_NAMES) return@forEach
-                        if (ref.leafName !in leafNames) return@forEach
-                        val vn = declaredStateVars(ref.leafName, pclassNodes, leafSpecNodes)[ref.varName]
-                            ?: return@forEach
-                        val q = ref.toString()
-                        if (!decl.isConst && vn.isConst) {
-                            errors += OneLocCompileError(
-                                decl.loc,
-                                "\"$q\" may change without declaring it \"const global $q\", so either make it \"const global $q\" or change the state var to be \"var ${ref.varName}\" instead of \"const ${ref.varName}\"",
-                            )
-                        }
-                        if (decl.isConst && !vn.isConst) {
-                            errors += OneLocCompileError(
-                                decl.loc,
-                                "\"$q\" is a var, so either drop \"const\" (use \"global $q\") or declare \"const ${ref.varName}\" on the proc instead of \"var ${ref.varName}\"",
-                            )
-                        }
-                    }
-                }
             }
+        }
+        val unique = refs.distinctBy { it.toString() }
+            .filter { it.varName !in SYNTHETIC_GLOBAL_NAMES }
+        if (unique.isEmpty()) return
+        val expanded = expandLeavesToPclasses(
+            flattenSpecLeaves(system),
+            pclassNodes,
+            procAliases,
+            specAliases,
+            leafSpecNodes,
+        )
+        val byName = expanded.associateBy { it.name }
+        unique.forEach { ref ->
+            val leaf = byName[ref.leafName]
+            if (leaf == null) {
+                errors += OneLocCompileError(
+                    loc,
+                    "global \"${ref}\" names leaf \"${ref.leafName}\" which is not a leaf in this spec",
+                )
+                return@forEach
+            }
+            if (requireIndexed && !leaf.isParameterized) {
+                errors += OneLocCompileError(
+                    loc,
+                    "global \"${ref}\" names leaf \"${ref.leafName}\" which is not an indexed leaf in this spec",
+                )
+                return@forEach
+            }
+            val declared = declaredStateNames(ref.leafName, pclassNodes, leafSpecNodes)
+            if (ref.varName !in declared) {
+                errors += OneLocCompileError(
+                    loc,
+                    "global \"${ref}\" is not a state variable of leaf \"${ref.leafName}\"",
+                )
+            }
+        }
+    }
+    fun walk(n: ASTNode) {
+        when {
+            n is ParamProcExprNode && !n.isApplyIndex() && n.globalVarRefs().isNotEmpty() ->
+                checkGlobalRefs(n.globalVarRefs(), n.programLocation(), n, requireIndexed = true)
+            n is SpecCompositionBlockNode && n.globalVarRefs().isNotEmpty() ->
+                checkGlobalRefs(
+                    n.globalVarRefs(),
+                    n.programLocation(),
+                    n.systemBody(),
+                    requireIndexed = true,
+                )
         }
         n.children.forEach { walk(it) }
     }
@@ -609,75 +608,115 @@ private fun initClauseErrors(
     funBuiltinEnv: Map<String, FunBuiltin>,
 ): List<CompileError> {
     val errors = mutableListOf<CompileError>()
-    fun walk(n: ASTNode) {
-        if (n is ParamProcExprNode && !n.isApplyIndex() && n.initExprs().isNotEmpty()) {
-            val expanded = expandLeavesToPclasses(
-                flattenSpecLeaves(n),
-                pclassNodes,
-                procAliases,
-                specAliases,
-                leafSpecNodes,
-            )
-            val constNames = n.globalConstVarNames().toSet()
-            val constTypes = linkedMapOf<String, Type>()
-            constNames.forEach { name ->
+
+    fun resolveConstType(vn: VarNode): Type? = try {
+        vn.type
+    } catch (_: RuntimeException) {
+        resolveType(registry, vn.typeExpr)
+    }
+
+    fun typeInitExprs(
+        initExprs: List<ExprNode>,
+        globalRefs: List<GlobalVarRef>,
+        expanded: List<SpecLeaf>,
+        createIndexType: TypeExpr?,
+    ) {
+        if (initExprs.isEmpty()) return
+        // Bare names only for explicitly listed `global Leaf.var` bindings. Composition-block
+        // / sibling unindexed consts must be written `Leaf.var` (e.g. ClusterInfo.cluster).
+        val constTypes = linkedMapOf<String, Type>()
+        globalRefs.forEach { ref ->
+            val vn = declaredStateVars(ref.leafName, pclassNodes, leafSpecNodes)[ref.varName]
+                ?: return@forEach
+            if (!vn.isConst) return@forEach
+            resolveConstType(vn)?.let { constTypes.putIfAbsent(ref.varName, it) }
+        }
+        val leafConst = expanded.associate { leaf ->
+            leaf.name to leaf.globalConstVars
+        }
+        // All leaves stay in unindexed so `Leaf.frozen` works for listed globals;
+        // parameterized leaves also go in indexed for `Leaf[i].const`.
+        val unindexed = expanded.mapNotNull { leaf ->
+            val pc = pclassNodes[leaf.name] ?: leafSpecNodes[leaf.name]?.asProcClass()
+            pc?.let { leaf.name to it }
+        }.toMap()
+        val indexed = linkedMapOf<String, ProcClassNode>()
+        val paramTypes = linkedMapOf<String, Type>()
+        expanded.forEach { leaf ->
+            if (!leaf.isParameterized) return@forEach
+            val pc = pclassNodes[leaf.name] ?: leafSpecNodes[leaf.name]?.asProcClass() ?: return@forEach
+            indexed[leaf.name] = pc
+            leaf.paramType?.let { pt ->
+                when (val r = registry.resolveTypeExpr(pt)) {
+                    is TypeResolveResult.Found -> paramTypes[leaf.name] = r.type
+                    is TypeResolveResult.Error -> {}
+                }
+            }
+        }
+        // Create-index: all expanded children share the create-index sort.
+        createIndexType?.let { pt ->
+            val indexType = when (val r = registry.resolveTypeExpr(pt)) {
+                is TypeResolveResult.Found -> r.type
+                is TypeResolveResult.Error -> null
+            }
+            if (indexType != null) {
                 expanded.forEach { leaf ->
-                    val vn = declaredStateVars(leaf.name, pclassNodes, leafSpecNodes)[name] ?: return@forEach
-                    val t = try {
-                        vn.type
-                    } catch (_: RuntimeException) {
-                        resolveType(registry, vn.typeExpr)
-                    } ?: return@forEach
-                    constTypes.putIfAbsent(name, t)
+                    val pc = pclassNodes[leaf.name] ?: leafSpecNodes[leaf.name]?.asProcClass()
+                        ?: return@forEach
+                    indexed[leaf.name] = pc
+                    paramTypes[leaf.name] = indexType
                 }
             }
-            val leafConst = expanded.associate { leaf ->
-                leaf.name to leaf.globalConstVars
-            }
-            val unindexed = expanded.mapNotNull { leaf ->
-                val pc = pclassNodes[leaf.name] ?: leafSpecNodes[leaf.name]?.asProcClass()
-                pc?.let { leaf.name to it }
-            }.toMap()
-            val indexed = linkedMapOf<String, ProcClassNode>()
-            val paramTypes = linkedMapOf<String, Type>()
-            n.paramType()?.let { pt ->
-                val indexType = when (val r = registry.resolveTypeExpr(pt)) {
-                    is TypeResolveResult.Found -> r.type
-                    is TypeResolveResult.Error -> null
-                }
-                if (indexType != null) {
-                    expanded.forEach { leaf ->
-                        val pc = pclassNodes[leaf.name] ?: leafSpecNodes[leaf.name]?.asProcClass() ?: return@forEach
-                        indexed[leaf.name] = pc
-                        paramTypes[leaf.name] = indexType
+        }
+        initExprs.forEach { expr ->
+            val initErrs = typePassSpecFormula(
+                expr,
+                constTypes,
+                registry,
+                funEnv,
+                funBuiltinEnv,
+                unindexed,
+                indexedPeers = indexed,
+                indexedParamTypes = paramTypes,
+                initConstGlobals = leafConst,
+            )
+            errors += initErrs
+            if (initErrs.isEmpty()) {
+                try {
+                    if (expr.getType() !is BoolType) {
+                        errors += OneLocCompileError(
+                            expr.programLocation(),
+                            "\"init:\" constraint must be Boolean but got ${expr.getType()}",
+                        )
                     }
+                } catch (_: RuntimeException) {
                 }
+                errors += sortLengthMaxListLenErrors(expr, registry.domains)
             }
-            n.initExprs().forEach { expr ->
-                val initErrs = typePassSpecFormula(
-                    expr,
-                    constTypes,
-                    registry,
-                    funEnv,
-                    funBuiltinEnv,
-                    unindexed,
-                    indexedPeers = indexed,
-                    indexedParamTypes = paramTypes,
-                    initConstGlobals = leafConst,
+        }
+    }
+
+    fun walk(n: ASTNode) {
+        when {
+            n is ParamProcExprNode && !n.isApplyIndex() && n.initExprs().isNotEmpty() -> {
+                val expanded = expandLeavesToPclasses(
+                    flattenSpecLeaves(n),
+                    pclassNodes,
+                    procAliases,
+                    specAliases,
+                    leafSpecNodes,
                 )
-                errors += initErrs
-                if (initErrs.isEmpty()) {
-                    try {
-                        if (expr.getType() !is BoolType) {
-                            errors += OneLocCompileError(
-                                expr.programLocation(),
-                                "\"init:\" constraint must be Boolean but got ${expr.getType()}",
-                            )
-                        }
-                    } catch (_: RuntimeException) {
-                    }
-                    errors += sortLengthMaxListLenErrors(expr, registry.domains)
-                }
+                typeInitExprs(n.initExprs(), n.globalVarRefs(), expanded, n.paramType())
+            }
+            n is SpecCompositionBlockNode && n.initExprs().isNotEmpty() -> {
+                val expanded = expandLeavesToPclasses(
+                    flattenSpecLeaves(n),
+                    pclassNodes,
+                    procAliases,
+                    specAliases,
+                    leafSpecNodes,
+                )
+                typeInitExprs(n.initExprs(), n.globalVarRefs(), expanded, createIndexType = null)
             }
         }
         n.children.forEach { walk(it) }

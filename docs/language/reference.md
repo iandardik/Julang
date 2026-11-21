@@ -54,18 +54,17 @@ spec Name := System |= Guarantee
 spec Name := System
 spec Name := System { unsynced act1, act2 } // exact open-env ordinary allowlist (TLA)
 spec Name := with (v : T) { System }       // shared apply-binder scope
-spec Name := System[v : T] { const global Leaf.x } // create-index; x unindexed & immutable in TLA+
-spec Name := System[v : T] { const global Leaf.x; init: expr } // extra Init conjuncts (const-global)
-spec Name := System[v : T] { global Leaf.y }       // create-index; y unindexed (mutable) in TLA+
+spec Name := System[v : T] { global Leaf.x } // create-index; x unindexed in TLA+ (frozen if proc const)
+spec Name := System[v : T] { global Leaf.x; init: expr } // extra Init conjuncts (frozen globals)
 spec Name := System[v : T] { DynProc := { … } } // optional; default {"dp1","dp2"}
 compile Name1, Name2, ...
 ```
 
-System atoms: `Name[v : T]` **creates** an index (lifts state); `{ const global Leaf.x }` / `{ global Leaf.y }` on create-index leave those vars scalar in TLA+ (`const global` also freezes them; does not affect the native binary). Names must be proc-qualified. Inside `with`, only `Name[v]` **applies** a shared binder. Shorthand `(A || B)[n : T]` desugars to create-temps + `with` + applies — see [Specifications](specifications.md#indexes-create-with-and-apply). Parent/child edges are inferred from nested `||` — see [Parent/child inference](children.md).
+System atoms: `Name[v : T]` **creates** an index (lifts state); `{ global Leaf.x }` on create-index leaves that var scalar in TLA+ (and freezes it when the proc declares `const x`; does not affect the native binary). Names must be proc-qualified. Shared immutable topology can also sit outside the create-index via composition. Inside `with`, only `Name[v]` **applies** a shared binder. Shorthand `(A || B)[n : T]` desugars to create-temps + `with` + applies — see [Specifications](specifications.md#indexes-create-with-and-apply). Parent/child edges are inferred from nested `||` — see [Parent/child inference](children.md).
 
 Leaf-spec actions: `transition name(args) also (aux : T) { … }` (leaf specs only). Bodies may read peer state `P.var` / `P[idx].var` (compile checks composition + indexing).
 
-**Types:** record `type Name { fields }`; typedef `type Name := Carrier`; uninterpreted `type Name`. Delayed models `Name := { lits }` appear only in create-index or leaf-spec bodies — required for uninterpreted when used, optional for typedef (cfg aliases carrier if absent), forbidden for records. Nullary fun overrides `name := expr` in those same places rewrite the TLA operator only (binary unchanged). Uninterpreted types are spec-only; proc `compile` errors if a proc reaches one. Typedefs erase to the carrier in procs. Details: [Types and expressions](types-and-expressions.md#delayed-models), [Specifications — Fun overrides](specifications.md#fun-overrides).
+**Types:** record `type Name { fields }`; typedef `type Name := Carrier`; uninterpreted `type Name`. Delayed models `Name := { lits }` appear only in create-index or leaf-spec bodies — required for uninterpreted when used, optional for typedef (cfg aliases carrier if absent), forbidden for records (except record types used as create-index sorts; see [Specifications](specifications.md)). Nullary fun overrides `name := expr` in those same places rewrite the TLA operator only (binary unchanged). Uninterpreted types are spec-only; proc `compile` errors if a proc reaches one. Typedefs erase to the carrier in procs. Details: [Types and expressions](types-and-expressions.md#delayed-models), [Specifications — Fun overrides](specifications.md#fun-overrides).
 
 `Guarantee` may be a named invariant, an inline Boolean formula (`true` / `false` included), or `true` meaning no guarantee. Plain `spec := System` equals `<true> System <true>` / `--compile-tla`.
 

@@ -188,9 +188,8 @@ Three roles:
 | Role | Syntax | Meaning |
 |------|--------|---------|
 | **Create index** | `Name[v : Type]` | Lift `Name`’s state to functions of a new index |
-| **Global vars** | `Name[v : T] { global Leaf.x, Leaf.y }` | Leave listed **var**s unindexed (one mutable TLA VARIABLE for all `v`) |
-| **Const-global vars** | `Name[v : T] { const global Leaf.x }` | Leave listed **const**s unindexed and immutable in TLA+ |
-| **Init constraints** | `Name[v : T] { const global Leaf.x; init: expr }` | Extra Init conjuncts over const-globals / uninterpreted `.length` |
+| **Global vars** | `Name[v : T] { global Leaf.x, Leaf.y }` | Leave listed vars unindexed (one TLA VARIABLE for all `v`) |
+| **Init constraints** | `Name[v : T] { global Leaf.x; init: expr }` | Extra Init conjuncts over frozen globals / uninterpreted `.length` |
 | **Delayed model** | `Name[v : T] { NodeSet := { … } }` | Finite set for an uninterpreted or typedef name (see below) |
 | **Shared binder** | `with (v : Type) { system }` | Scope where `v` may be applied; one `\E v` for the group |
 | **Apply index** | `Name[v]` | Use binder `v` from an enclosing `with` (no type). Does not create an index |
@@ -201,7 +200,7 @@ Hard rule: inside `with`, **create-index `Name[n : T]` is illegal** — create o
 spec PeerIndexed := Peer[n : NodeSet]          // create (lift state)
 
 spec ClusterSpec := RaftProtocol[n : NodeSet] {
-  const global RaftProtocol.cluster
+  global RaftProtocol.cluster
   NodeSet := { "n1", "n2", "n3" }
   init: cluster.length = NodeSet.length
   init: forall i : Int, (i >= 1 & i <= cluster.length) =>
@@ -215,27 +214,15 @@ spec Sys := with (n : NodeSet) {
 }
 ```
 
-**`global` / `const global` are model state only.** TLA+ emits listed variables as scalars (not functions of the index): TypeOK / reads omit `[n]`, and `Peer[i].cluster` in an invariant becomes the unindexed `cluster` when that name is unique across leaves (a true two-leaf clash is `{var}_{leaf}`, e.g. `cluster_RaftProtocol`). JAR codegen is unchanged — each runtime instance still has its own copy; this is not shared memory.
+**`global` is model state only.** TLA+ emits listed variables as scalars (not functions of the index): TypeOK / reads omit `[n]`, and `Peer[i].cluster` in an invariant becomes the unindexed `cluster` when that name is unique across leaves (a true two-leaf clash is `{var}_{leaf}`, e.g. `cluster_RaftProtocol`). JAR codegen is unchanged — each runtime instance still has its own copy; this is not shared memory.
 
-Names must be **proc-qualified** (`Leaf.var`): bare `cluster` is a parse error. The leaf must be an indexed leaf of that create-index; only that leaf’s copy is marked global. Do **not** infer immutability from a proc `const` plus `{ global Leaf.x }`. The create-index block must say `const global Leaf.x` explicitly. Mixed decls are allowed:
+Names must be **proc-qualified** (`Leaf.var`): bare `cluster` is a parse error. The leaf must be an indexed leaf of that create-index; only that leaf’s copy is marked global.
 
-```jul
-Peer[n : Node] {
-    const global Peer.cluster
-    global Peer.extra
-}
-```
+When a listed `global` name is a proc **`const`**, TLA also **freezes** it (Init `\in` domain / singleton, no prime, UNCHANGED). When it is a **`var`**, it stays a mutable scalar. Prefer putting truly shared immutable topology **outside** the create-index with composition (`(Store || ShardLogic)[n] || ClusterInfo`) so the leaf is never lifted.
 
-`const global Peer.a, Peer.b` marks every name on that line const-global. Only `const` before `global` is legal (`global const …` is not).
+Unknown leaves/vars, duplicates, and synthetic bookkeeping vars (`constructed` / `killed` / `terminated`) are compile errors. On shorthand `(Store || ShardLogic)[n : T] { global ClusterInfo.cluster }`, only the `ClusterInfo` leaf is marked (not every child that happens to declare `cluster`).
 
-**Mismatch is a compile error** (reported at the `global` / `const global` line):
-
-- `{ global Peer.cluster }` when the proc has `const cluster`: `"Peer.cluster" may change without declaring it "const global Peer.cluster", …`
-- `{ const global Peer.cluster }` when the proc has `var cluster`: it is a `var`, so drop `const` or declare `const cluster` on the proc.
-
-Unknown leaves/vars, duplicates, and synthetic bookkeeping vars (`constructed` / `killed` / `terminated`) are also compile errors. On shorthand `(Store || ShardLogic)[n : T] { const global ClusterInfo.cluster }`, only the `ClusterInfo` leaf is marked (not every child that happens to declare `cluster`).
-
-**TLA+ for `const global` (not plain `global`):**
+**TLA+ for frozen globals (`global` + proc `const`):**
 
 - **Init** uses `/\ cluster \in <enumerable TLC domain>` (e.g. `BoundedSeq(Int, MaxListLen)` for `List<Node>`) instead of `= default`. TypeOK still uses `Seq(...)` so membership stays pointwise.
 - Constructors never prime the variable (`UNCHANGED` includes it).
@@ -244,11 +231,11 @@ Unknown leaves/vars, duplicates, and synthetic bookkeeping vars (`constructed` /
 
 Plain `global extra` (a `var`) is unchanged: Init default, primed writes, scalar (unindexed).
 
-**`init:` on create-index** (same `{ }` block) adds extra Init conjuncts. Use this for facts about `const global` state that never change, so Init is enough (not a checked invariant):
+**`init:` on create-index** (same `{ }` block) adds extra Init conjuncts. Use this for facts about frozen global state that never change, so Init is enough (not a checked invariant):
 
 ```jul
 spec ClusterSpec := RaftProtocol[n : NodeSet] {
-    const global RaftProtocol.cluster
+    global RaftProtocol.cluster
     init: cluster.length = NodeSet.length
     init: forall i : Int, (i >= 1 & i <= cluster.length) =>
         (exists node : Node, node in cluster & node.id = i)
@@ -257,11 +244,26 @@ spec ClusterSpec := RaftProtocol[n : NodeSet] {
 }
 ```
 
-Several `init:` lines, or `init: A & B`, all become Init `/\`. Bare names are the listed const-globals (`cluster`); `RaftProtocol.cluster` also works. An uninterpreted type identifier is a value of that type (TLA `CONSTANT`). Indexed `RaftProtocol[n].cluster` is an error (const-globals are scalars). Indexed **`const`** state that is not const-global is allowed (`RaftProtocol[n1].self`), so Init can constrain per-index constants. Mutable `var`s are not. Uninterpreted `.length` / `length(NodeSet)` is spec/TLA-only (`Cardinality` in TLA+). If `|NodeSet| > MaxListLen` (default 5), compile errors — Init would be empty.
+The same `{ models; init: …; global … }` items may trail **any** composition (`spec A := B { … }`, `spec A := B || C { … }`), not only create-index. Prefer shared immutable topology as an **unindexed** sibling leaf:
+
+```jul
+spec Cluster := (Store || ShardLogic)[n : Node] || ClusterInfo {
+    Node := { "n1", "n2" }
+    init: ClusterInfo.cluster.length = Node.length
+    init: forall i : Int, (i >= 1 & i <= ClusterInfo.cluster.length) =>
+        ClusterInfo.cluster[i].id = i
+    init: forall n : Node, n.url = n
+    init: ClusterInfo.me = ClusterInfo.cluster[1]
+}
+```
+
+Several `init:` lines, or `init: A & B`, all become Init `/\`. On a **composition** trailing block, unindexed proc `const`s must be written `Leaf.var` (`ClusterInfo.cluster`, `ClusterInfo.me`). Bare names are only for explicitly listed create-index `global Leaf.x` bindings (then `cluster` means that frozen global). An uninterpreted type identifier is a value of that type (TLA `CONSTANT`). Indexed `RaftProtocol[n].cluster` is an error (frozen globals are scalars). Indexed **`const`** state that is not a listed global is allowed (`RaftProtocol[n1].self`), so Init can constrain per-index constants. Mutable `var`s are not. Uninterpreted `.length` / `length(NodeSet)` is spec/TLA-only (`Cardinality` in TLA+). If `|NodeSet| > MaxListLen` (default 5), compile errors — Init would be empty.
+
+For **opaque record index sorts**, projection VARIABLES default to membership in Init (`Node_url \in [Node -> String]`, `Node_id \in [Node -> Int]`). Pin them with `init:` when you want a singleton: `forall n : Node, n.url = n` emits `Node_url = [n ∈ Node |-> n]`; length plus `ClusterInfo.cluster[i].id = i` emits a concrete `cluster` sequence and pins `Node_id`.
 
 ### Delayed models
 
-Delayed models assign finite literal sets to **uninterpreted** and **typedef** names for TLC. They are written `Name := { lit, … }` and may appear **only** in a create-index block (alongside `const global` / `init:`) or in a **leaf-spec body** — not as top-level decls.
+Delayed models assign finite literal sets to **uninterpreted** and **typedef** names for TLC. They are written `Name := { lit, … }` and may appear in a create-index block (alongside `global` / `init:`), a **composition trailing block** (`spec A := B || C { … }`, same items), or a **leaf-spec body** — not as top-level decls.
 
 **Compile-time rules** (see [Types and expressions — delayed models](types-and-expressions.md#delayed-models) for full examples):
 
@@ -269,7 +271,10 @@ Delayed models assign finite literal sets to **uninterpreted** and **typedef** n
 |-----------|---------------|--------------------|---------------------|
 | Uninterpreted | **Required** if used by the compile target | — (error) | `CONSTANT Name = {…}` |
 | Typedef | **Optional** | `CONSTANT Name = Carrier` (alias to erasure) | `CONSTANT Name = {…}` (must match carrier) |
-| Record | **Forbidden** | — | — (error) |
+| Record | **Allowed when used as a create-index sort** (opaque atoms + field projections) | — (error if used as index without model) | `CONSTANT Name = {…}` |
+
+Record index sorts keep full structs in JAR; TLA+ encodes values as CONSTANT atoms with projection VARIABLES (`Node_url`, `Node_id`). Empty / sentinel literals (e.g. `emptyNode()` with `url := ""`) emit a distinguished atom **outside** the create-index CONSTANT (prefer `""`, else `#` / `__none` / … if that atom is already in the live model). Node-typed locals use `(Node \cup {sent})`; projections pin `Node_url[sent] = sent` and `Node_id[sent] = -1`. Create-index and `\A n \in Node` stay on live atoms only so `peer = emptyNode` never skips a real replica.
+
 
 **Uninterpreted on create-index** (required when the indexed type is used):
 
@@ -317,7 +322,7 @@ Models are merged from the compile target’s system AST (create-index items and
 
 ### Fun overrides
 
-Spec-only overrides rewrite a **nullary** user `fun`’s TLA operator body (and cfg literal collection). JAR codegen keeps the original definition. Syntax is bare `name := expr` in a create-index block or leaf-spec body (same places as delayed models).
+Spec-only overrides rewrite a **nullary** user `fun`’s TLA operator body (and cfg literal collection). JAR codegen keeps the original definition. Syntax is bare `name := expr` in a create-index block, composition trailing block, or leaf-spec body (same places as delayed models).
 
 ```jul
 export fun maxBatchEntries() : Int = 32   // runtime / JAR
@@ -395,7 +400,7 @@ Open `Int` / `String` sites that still need a TLC universe (leaf index, remainin
 
 TLC also infers `CONSTRAINT StateConstraint` (not `INVARIANT`): each `Int` state variable inhabits cfg `Int` (union negative literals already in the model, so `votedFor = -1` stays allowed), and each list state variable has `Cardinality(DOMAIN x) <= MaxListLen`. Parameterized leaves quantify `\A n \in NodeSet : currentTerm[n] \in Int`. Successors outside those bounds are discarded. That keeps `commitIndex` inside cfg `Int`, so `\A i \in Int` is complete for `StateMachineSafety` in this model. Always-on; not a `--disable-tla-opt` id.
 
-When `init:` uniquely determines a const-global list (length plus identity `xs[i] = i`) or set (length plus covering membership `1..n` in the set), Init emits `xs = <<1, 2, …>>` or `xs = {1, 2, …}` instead of `\in BoundedSeq` / `SUBSET` plus those filters. TypeOK may add `Len(x[n]) = Len(cluster)` for lists assigned `cluster.map(...)`, `DOMAIN x[n] = cluster` for maps assigned `cluster.associateWith(...)`, `x[n] \subseteq Range(cluster)` for id sets drawn from a sequence, and `x[n] \subseteq cluster` when `cluster` is already a set. The `.cfg` lists each user invariant once: a named operator that is only `&` of other invariants in the closure is still emitted in the `.tla` but omitted from `INVARIANT` lines. `IF P THEN FALSE ELSE TRUE` emits `~P`; `IF P THEN TRUE ELSE FALSE` emits `P`. Always-on; not named opt ids.
+When `init:` uniquely determines a const-global list (length plus identity `xs[i] = i`) or set (length plus covering membership `1..n` in the set), Init emits `xs = <<1, 2, …>>` or `xs = {1, 2, …}` instead of `\in BoundedSeq` / `SUBSET` plus those filters. Opaque index-sort url identity (`forall n : Node, n.url = n`) pins `Node_url = [n ∈ Node |-> n]` instead of `\in [Node -> String]`. TypeOK may add `Len(x[n]) = Len(cluster)` for lists assigned `cluster.map(...)`, `DOMAIN x[n] = cluster` for maps assigned `cluster.associateWith(...)`, `x[n] \subseteq Range(cluster)` for id sets drawn from a sequence, and `x[n] \subseteq cluster` when `cluster` is already a set. The `.cfg` lists each user invariant once: a named operator that is only `&` of other invariants in the closure is still emitted in the `.tla` but omitted from `INVARIANT` lines. `IF P THEN FALSE ELSE TRUE` emits `~P`; `IF P THEN TRUE ELSE FALSE` emits `P`. Always-on; not named opt ids.
 
 ### Lists and sequences
 

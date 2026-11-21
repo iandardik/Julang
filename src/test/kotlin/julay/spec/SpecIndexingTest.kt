@@ -185,55 +185,7 @@ class SpecIndexingTest {
     }
 
     @Test
-    fun plainGlobalOnConstIsError() {
-        val result = typeCheck(
-            """
-            type N
-            static proc Worker {
-                const cluster : List<String>
-                constructor initially(args : List<String>) { transit: cluster := args }
-            }
-            spec Bad := Worker[i : N] {
-              global Worker.cluster
-            }
-            """.trimIndent(),
-        )
-        assertTrue(
-            result.errors.any {
-                it.toString().contains(
-                    "\"Worker.cluster\" may change without declaring it \"const global Worker.cluster\", so either make it \"const global Worker.cluster\" or change the state var to be \"var cluster\" instead of \"const cluster\"",
-                )
-            },
-            result.toString(),
-        )
-    }
-
-    @Test
-    fun constGlobalOnVarIsError() {
-        val result = typeCheck(
-            """
-            type N
-            static proc Worker {
-                var cluster : List<String>
-                constructor initially(args : List<String>) { transit: cluster := args }
-            }
-            spec Bad := Worker[i : N] {
-              const global Worker.cluster
-            }
-            """.trimIndent(),
-        )
-        assertTrue(
-            result.errors.any {
-                it.toString().contains("\"Worker.cluster\" is a var") &&
-                    it.toString().contains("drop \"const\"") &&
-                    it.toString().contains("const cluster")
-            },
-            result.toString(),
-        )
-    }
-
-    @Test
-    fun constGlobalOnConstIsOk() {
+    fun plainGlobalOnConstIsOk() {
         val result = typeCheck(
             """
             type N
@@ -242,7 +194,69 @@ class SpecIndexingTest {
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
             spec Ok := Worker[i : N] {
+              global Worker.cluster
+            }
+            """.trimIndent(),
+        )
+        assertTrue(result.errors.isEmpty(), result.toString())
+    }
+
+    @Test
+    fun constGlobalKeywordIsParseError() {
+        val dir = Files.createTempDirectory("julay-spec-indexing-parse")
+        val file = dir.resolve("main.jul")
+        file.writeText(
+            """
+            type N
+            static proc Worker {
+                const cluster : List<String>
+                constructor initially(args : List<String>) { transit: cluster := args }
+            }
+            spec Bad := Worker[i : N] {
               const global Worker.cluster
+            }
+            """.trimIndent(),
+        )
+        try {
+            val (_, loadErrors) = loadCompilationUnit(file)
+            assertTrue(
+                loadErrors.isNotEmpty() &&
+                    loadErrors.any { it.toString().contains("const") || it.toString().contains("Syntax") },
+                loadErrors.toString(),
+            )
+        } finally {
+            dir.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun plainGlobalOnVarIsOk() {
+        val result = typeCheck(
+            """
+            type N
+            static proc Worker {
+                var cluster : List<String>
+                constructor initially(args : List<String>) { transit: cluster := args }
+            }
+            spec Ok := Worker[i : N] {
+              global Worker.cluster
+            }
+            """.trimIndent(),
+        )
+        assertTrue(result.errors.isEmpty(), result.toString())
+    }
+
+    @Test
+    fun globalOnConstIsOk() {
+        val result = typeCheck(
+            """
+            type N
+            static proc Worker {
+                const cluster : List<String>
+                constructor initially(args : List<String>) { transit: cluster := args }
+            }
+            spec Ok := Worker[i : N] {
+              global Worker.cluster
             }
             """.trimIndent(),
         )
@@ -259,7 +273,7 @@ class SpecIndexingTest {
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
             spec Ok := Worker[i : N] {
-              const global Worker.cluster
+              global Worker.cluster
               init: cluster.length = N.length
             }
             """.trimIndent(),
@@ -277,7 +291,7 @@ class SpecIndexingTest {
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
             spec Ok := Worker[i : N] {
-              const global Worker.cluster
+              global Worker.cluster
               init: length(cluster) = length(N)
             }
             """.trimIndent(),
@@ -295,7 +309,7 @@ class SpecIndexingTest {
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
             spec Bad := Worker[i : N] {
-              const global Worker.cluster
+              global Worker.cluster
               init: cluster.length
             }
             """.trimIndent(),
@@ -321,7 +335,7 @@ class SpecIndexingTest {
                 }
             }
             spec Bad := Worker[i : N] {
-              const global Worker.cluster
+              global Worker.cluster
               global Worker.extra
               init: extra = 0
             }
@@ -329,7 +343,9 @@ class SpecIndexingTest {
         )
         assertTrue(
             result.errors.any {
-                it.toString().contains("const-global") || it.toString().contains("unbound symbol \"extra\"")
+                it.toString().contains("frozen global") ||
+                    it.toString().contains("unbound symbol \"extra\"") ||
+                    it.toString().contains("listed global")
             },
             result.toString(),
         )
@@ -346,7 +362,7 @@ class SpecIndexingTest {
             }
             spec Bad := Worker[i : N] {
               N := {"a", "b", "c", "d"}
-              const global Worker.cluster
+              global Worker.cluster
               init: cluster.length = N.length
             }
             """.trimIndent(),
@@ -369,7 +385,7 @@ class SpecIndexingTest {
                 constructor initially(args : List<String>) { transit: cluster := args }
             }
             spec Bad := Worker[i : N] {
-              const global Worker.cluster
+              global Worker.cluster
               init: Worker[i].cluster.length = N.length
             }
             """.trimIndent(),
@@ -378,6 +394,56 @@ class SpecIndexingTest {
             result.errors.any { it.toString().contains("indexed access") },
             result.toString(),
         )
+    }
+
+    @Test
+    fun compositionBlockInitBareConstRequiresLeaf() {
+        val result = typeCheck(
+            """
+            type N
+            static proc Topology {
+                const cluster : List<String>
+                constructor initially(cluster : List<String>) { transit: cluster := cluster }
+            }
+            static proc Worker {
+                var flag : Boolean := false
+                constructor initially() { transit: flag := false }
+            }
+            spec Bad := Worker[i : N] || Topology {
+              N := {"a", "b"}
+              init: cluster.length = N.length
+            }
+            """.trimIndent(),
+        )
+        assertTrue(
+            result.errors.any {
+                it.toString().contains("unbound symbol \"cluster\"") ||
+                    it.toString().contains("Leaf.var")
+            },
+            result.toString(),
+        )
+    }
+
+    @Test
+    fun compositionBlockInitLeafVarIsOk() {
+        val result = typeCheck(
+            """
+            type N
+            static proc Topology {
+                const cluster : List<String>
+                constructor initially(cluster : List<String>) { transit: cluster := cluster }
+            }
+            static proc Worker {
+                var flag : Boolean := false
+                constructor initially() { transit: flag := false }
+            }
+            spec Ok := Worker[i : N] || Topology {
+              N := {"a", "b"}
+              init: Topology.cluster.length = N.length
+            }
+            """.trimIndent(),
+        )
+        assertTrue(result.errors.isEmpty(), result.toString())
     }
 
     @Test
@@ -395,7 +461,7 @@ class SpecIndexingTest {
                 }
             }
             spec Ok := Worker[i : N] {
-              const global Worker.cluster
+              global Worker.cluster
               init: forall n1 : N, forall n2 : N, (Worker[n1].me = Worker[n2].me) => (n1 = n2)
             }
             """.trimIndent(),
@@ -418,7 +484,7 @@ class SpecIndexingTest {
                 }
             }
             spec Bad := Worker[i : N] {
-              const global Worker.cluster
+              global Worker.cluster
               init: Worker[i].extra = 0
             }
             """.trimIndent(),

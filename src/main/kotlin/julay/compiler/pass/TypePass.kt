@@ -86,8 +86,9 @@ private var typePassIndexedPeerClasses: Map<String, ProcClassNode> = emptyMap()
 /** Expected index types for [typePassIndexedPeerClasses], when known. */
 private var typePassIndexedPeerParamTypes: Map<String, Type> = emptyMap()
 /**
- * Non-null while typing `init:`: leaf name → const-global var names. Indexed
- * `Leaf[i].var` is rejected for those names (scalars) and for mutable vars;
+ * Non-null while typing `init:`: leaf name → frozen global var names (listed
+ * `global` + proc `const`). Indexed `Leaf[i].var` is rejected for those names
+ * (scalars) and for mutable vars;
  * indexed `const` state is allowed.
  */
 private var typePassInitConstGlobals: Map<String, Set<String>>? = null
@@ -103,6 +104,37 @@ private var typePassStateEnv: Map<String, Type>? = null
 
 /** Fluents in scope for spec/invariant formulas (name → arity). */
 private var typePassFluentArities: Map<String, Int> = emptyMap()
+
+/**
+ * True for uninterpreted/typedef domains and record types used as create-index sorts
+ * (opaque CONSTANT atoms). Both support spec-only `.length` / `length(Sort)`.
+ */
+private fun isSpecSortName(name: String, registry: ObjClassRegistry): Boolean {
+    if (registry.domains.containsKey(name)) return true
+    if (typePassIndexedPeerParamTypes.values.any { ty ->
+            (ty as? ObjClassType)?.name == name || (ty as? DomainType)?.name == name
+        }
+    ) {
+        return true
+    }
+    return false
+}
+
+/** Create-index record sort compared to String (TLA atom carrier / url identity). */
+private fun specIndexObjStringEq(lhs: Type, rhs: Type): Boolean {
+    fun indexObj(t: Type): ObjClassType? {
+        val obj = t as? ObjClassType ?: return null
+        val isIndex = typePassIndexedPeerParamTypes.values.any { ty ->
+            (ty as? ObjClassType)?.name == obj.name
+        }
+        return if (isIndex) obj else null
+    }
+    return when {
+        lhs is StringType -> indexObj(rhs) != null
+        rhs is StringType -> indexObj(lhs) != null
+        else -> false
+    }
+}
 
 /**
  * Type an invariant or `init:` formula with the same [ASTNode.typePass] used for
@@ -871,13 +903,19 @@ private fun BinaryOpExprNode.typePassBinaryOp(
         emptyList()
     } else if (lhsType is ObjClassType || rhsType is ObjClassType) {
         when (op()) {
-            "=", "#" -> assertOrCompileError(
-                lhsType == rhsType,
-                OneLocCompileError(
-                    programLocation(),
-                    "Expected both sides of \"${op()}\" to have the same obj type, got $lhsType and $rhsType",
-                ),
-            )
+            "=", "#" -> {
+                // Spec/init: create-index record sorts are TLA string atoms; allow
+                // `n.url = n` (String ↔ Node) for opaque url-identity pins.
+                val atomId =
+                    typePassSpecFormula && specIndexObjStringEq(lhsType, rhsType)
+                assertOrCompileError(
+                    lhsType == rhsType || atomId,
+                    OneLocCompileError(
+                        programLocation(),
+                        "Expected both sides of \"${op()}\" to have the same obj type, got $lhsType and $rhsType",
+                    ),
+                )
+            }
             else -> listOf(OneLocCompileError(programLocation(), "Cannot apply \"${op()}\" to obj type $lhsType"))
         }
     } else if (lhsType is ListType || rhsType is ListType) {
@@ -1277,7 +1315,7 @@ private fun FieldAccessExprNode.typePassFieldAccess(
     funBuiltinEnv: Map<String, FunBuiltin>,
 ): List<CompileError> {
     if (typePassAllowSortDomains && fieldPath == listOf("length") && baseSymbol !in symbolEnv &&
-        registry.domains.containsKey(baseSymbol)
+        isSpecSortName(baseSymbol, registry)
     ) {
         resolveFieldAccess(intType, "length")
         inferExprType(symbolEnv)
@@ -1316,7 +1354,7 @@ private fun FieldAccessExprNode.typePassFieldAccess(
                 return listOf(
                     OneLocCompileError(
                         programLocation(),
-                        "\"init:\" may only mention const-global state; \"$baseSymbol.$varName\" is not const global",
+                        "\"init:\" may only mention frozen global state; \"$baseSymbol.$varName\" is not a listed global const",
                     ),
                 )
             }
@@ -1345,7 +1383,7 @@ private fun FieldAccessExprNode.typePassFieldAccess(
                 OneLocCompileError(
                     programLocation(),
                     "unbound \"$baseSymbol.${fieldPath.joinToString(".")}\" in init: " +
-                        "(use a const-global name, Leaf.var, or Sort.length)",
+                        "(use a frozen global name, Leaf.var, or Sort.length)",
                 ),
             )
         }
@@ -1438,7 +1476,7 @@ private fun peerStateRefType(
                     OneLocCompileError(
                         loc,
                         "\"init:\" cannot use indexed access \"$peerSym[i].$fieldName\"; " +
-                            "const-globals are scalars (write $peerSym.$fieldName or a bare name)",
+                            "frozen globals are scalars (write $peerSym.$fieldName or a bare name)",
                     )
                 } else {
                     OneLocCompileError(
@@ -1464,7 +1502,7 @@ private fun peerStateRefType(
                             OneLocCompileError(
                                 loc,
                                 "\"init:\" cannot use indexed access \"$peerSym[i].$fieldName\"; " +
-                                    "const-globals are scalars (write $peerSym.$fieldName or a bare name)",
+                                    "frozen globals are scalars (write $peerSym.$fieldName or a bare name)",
                             ),
                         ),
                     )
@@ -2054,7 +2092,7 @@ private fun SymbolValueExprNode.typePassSymbol(
             return listOf(
                 OneLocCompileError(
                     programLocation(),
-                    "unbound symbol \"$symbol\" in init: (use a const-global name, a sort name, or Sort.length)",
+                    "unbound symbol \"$symbol\" in init: (use Leaf.var, a listed global name, a sort name, or Sort.length)",
                 ),
             )
         }
@@ -2241,9 +2279,13 @@ private fun FunCallExprNode.typePassFunCall(
     if (typePassAllowSortDomains && callName() == "length" && callArgs().size == 1) {
         val arg = callArgs().single()
         if (arg is SymbolValueExprNode && arg.symbol !in symbolEnv &&
-            registry.domains.containsKey(arg.symbol)
+            isSpecSortName(arg.symbol, registry)
         ) {
-            arg.setInferredType(TypePassType.Inferred(registry.domains.getValue(arg.symbol)))
+            val sortType = registry.domains[arg.symbol]
+                ?: (registry.resolveTypeName(arg.symbol) as? TypeResolveResult.Found)?.type
+            if (sortType != null) {
+                arg.setInferredType(TypePassType.Inferred(sortType))
+            }
             setInferredType(TypePassType.Inferred(intType))
             return emptyList()
         }
@@ -2602,7 +2644,7 @@ private fun IndexExprNode.typePassIndex(
         val baseSym = (base as? SymbolValueExprNode)?.symbol
         if (baseSym != null && baseSym !in symbolEnv && isSpecPeerName(baseSym)) {
             val msg = if (typePassInitConstGlobals != null) {
-                "\"init:\" cannot index component \"$baseSym\"; const-globals are unindexed"
+                "\"init:\" cannot index component \"$baseSym\"; frozen globals are unindexed"
             } else {
                 "indexed component \"$baseSym\" requires a state variable: \"$baseSym[i].var\""
             }

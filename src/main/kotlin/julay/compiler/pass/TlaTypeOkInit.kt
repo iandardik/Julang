@@ -7,13 +7,102 @@ import julay.program.type.ListType
 import julay.program.type.MapType
 import julay.program.type.ObjClassType
 import julay.program.type.SetType
+import julay.program.type.StringType
 import julay.program.type.DomainType
 import julay.program.type.Type
 
 internal data class SingletonInitHit(
     val value: String,
     val consumed: List<ExprNode>,
+    /**
+     * Opaque index-sort id projection pin from identity `xs[i].id = i`
+     * (e.g. `Node_id` → `[ "n1" |-> 1, "n2" |-> 2 ]`).
+     */
+    val opaqueIdProjection: Pair<String, String>? = null,
 )
+
+/**
+ * Opaque url-identity `init:`: `forall n : Node, n.url = n` → pin `Node_url = [n ∈ Node |-> n]`.
+ *
+ * @return projection name (`Node_url`) paired with consumed exprs
+ */
+internal fun matchOpaqueUrlIdentityInits(
+    initExprs: List<ExprNode>,
+): List<Pair<String, ExprNode>> {
+    val out = mutableListOf<Pair<String, ExprNode>>()
+    initExprs.forEach { expr ->
+        val pname = opaqueUrlIdentityProjection(expr) ?: return@forEach
+        out += pname to expr
+    }
+    return out
+}
+
+/** `forall n : Sort, n.url = n` (or `n = n.url`) when Sort is an opaque index sort with String url. */
+private fun opaqueUrlIdentityProjection(expr: ExprNode): String? {
+    val q = unwrapInitParen(expr) as? QuantifiedExprNode ?: return null
+    if (!q.isUniversal()) return null
+    val binder = q.binderName()
+    val sortName = typeDomainConstant(q.binderTypeExpr()) ?: return null
+    if (!TlaOpaqueIndexSort.isOpaque(sortName)) return null
+    val urlField = TlaOpaqueIndexSort.fields(sortName).firstOrNull {
+        it.name == "url" && it.type is StringType
+    } ?: return null
+    val body = unwrapInitParen(q.quantifiedBody())
+    if (body !is BinaryOpExprNode || body.op() != "=") return null
+    val l = unwrapInitParen(body.lhsOperand())
+    val r = unwrapInitParen(body.rhsOperand())
+    fun isBinder(n: ExprNode) = n is SymbolValueExprNode && n.symbol == binder
+    fun isUrlOfBinder(n: ExprNode): Boolean {
+        return when (n) {
+            is MemberAccessExprNode ->
+                n.fieldName == urlField.name && isBinder(unwrapInitParen(n.baseExpr))
+            is FieldAccessExprNode ->
+                n.fieldPath == listOf(urlField.name) && n.baseSymbol == binder
+            is FieldAccessOnExprNode ->
+                n.fieldPath == listOf(urlField.name) && isBinder(unwrapInitParen(n.baseExpr))
+            else -> false
+        }
+    }
+    if (!((isUrlOfBinder(l) && isBinder(r)) || (isUrlOfBinder(r) && isBinder(l)))) return null
+    return TlaOpaqueIndexSort.projectionName(sortName, urlField.name)
+}
+
+/** Parse a TLC `.cfg` set literal `{ "n1", "n2" }` into element tokens (with quotes). */
+internal fun parseTlaCfgSet(cfg: String): List<String>? {
+    val t = cfg.trim()
+    if (!t.startsWith("{") || !t.endsWith("}")) return null
+    val body = t.substring(1, t.length - 1).trim()
+    if (body.isEmpty()) return emptyList()
+    val out = mutableListOf<String>()
+    val buf = StringBuilder()
+    var inString = false
+    var i = 0
+    while (i < body.length) {
+        val ch = body[i]
+        when {
+            ch == '"' -> {
+                buf.append(ch)
+                inString = !inString
+                if (!inString) {
+                    out += buf.toString()
+                    buf.clear()
+                }
+            }
+            inString -> {
+                buf.append(ch)
+                if (ch == '\\' && i + 1 < body.length) {
+                    buf.append(body[++i])
+                }
+            }
+            ch == ',' -> {}
+            !ch.isWhitespace() -> buf.append(ch)
+        }
+        i++
+    }
+    val tail = buf.toString().trim()
+    if (tail.isNotEmpty()) out += tail
+    return out
+}
 
 internal data class TypeOkShapePlan(
     val lenEq: Map<Pair<String, String>, String>,
@@ -29,16 +118,20 @@ internal data class TypeOkShapePlan(
  * For `List<{id: Int, url: String}>` with the same id identity and length from a
  * delayed model (e.g. NodeSet), emits `<<[id |-> 1, url |-> "n1"], …>>` using that
  * model's elements as urls (declaration order) — same create-index pattern as Raft.
+ * For opaque index-sort `List<Node>`, emits `<<"n1", "n2">>` and pins `Node_id`.
  * Does not pick a canonical `self`.
+ *
+ * @param opaqueAtoms record index-sort delayed models (name → cfg atom tokens)
  */
 internal fun matchSingletonConstGlobalInit(
     varName: String,
     type: Type,
     initExprs: List<ExprNode>,
     domains: Map<String, DomainType>,
+    opaqueAtoms: Map<String, List<String>> = emptyMap(),
 ): SingletonInitHit? {
     val lenHit = initExprs.mapNotNull { expr ->
-        lengthEqSize(expr, varName, domains)?.let { expr to it }
+        lengthEqSize(expr, varName, domains, opaqueAtoms)?.let { expr to it }
     }.singleOrNull() ?: return null
     if (lenHit.second < 0) return null
     val n = lenHit.second
@@ -53,17 +146,32 @@ internal fun matchSingletonConstGlobalInit(
                     val obj = type.elementType as? ObjClassType ?: return null
                     val fields = TlaFieldProjection.get().fieldsFor(obj)
                     if (fields.none { it.name == "id" && it.type is IntType }) return null
-                    val urls = lengthDomainCfgElements(lenHit.first, varName, domains) ?: return null
-                    if (urls.size != n) return null
-                    val hasUrl = fields.any { it.name == "url" }
-                    val records = (1..n).joinToString(", ") { i ->
-                        if (hasUrl) {
-                            "[id |-> $i, url |-> ${urls[i - 1]}]"
-                        } else {
-                            "[id |-> $i]"
+                    val atoms = lengthDomainCfgElements(lenHit.first, varName, domains, opaqueAtoms)
+                        ?: return null
+                    if (atoms.size != n) return null
+                    if (TlaOpaqueIndexSort.isOpaque(obj)) {
+                        // String-domain functions use :> / @@ (not `[ "n1" |-> 1 ]`).
+                        // Parens required: `=` binds tighter than `@@`.
+                        val idPin = atoms.mapIndexed { i, atom ->
+                            "($atom :> ${i + 1})"
+                        }.joinToString(" @@ ")
+                        SingletonInitHit(
+                            "<<${atoms.joinToString(", ")}>>",
+                            listOf(lenHit.first, idHit),
+                            opaqueIdProjection =
+                                TlaOpaqueIndexSort.projectionName(obj.name, "id") to "($idPin)",
+                        )
+                    } else {
+                        val hasUrl = fields.any { it.name == "url" }
+                        val records = (1..n).joinToString(", ") { i ->
+                            if (hasUrl) {
+                                "[id |-> $i, url |-> ${atoms[i - 1]}]"
+                            } else {
+                                "[id |-> $i]"
+                            }
                         }
+                        SingletonInitHit("<<$records>>", listOf(lenHit.first, idHit))
                     }
-                    SingletonInitHit("<<$records>>", listOf(lenHit.first, idHit))
                 }
             }
         }
@@ -248,6 +356,8 @@ internal fun tlaElemIsInt(type: Type): Boolean {
     if (type is IntType) return true
     if (!TlaEmitOpts.get().unwrapSingletons) return false
     val obj = type as? julay.program.type.ObjClassType ?: return false
+    // Opaque index sorts keep String/Int projections; never collapse to bare Int.
+    if (TlaOpaqueIndexSort.isOpaque(obj.name)) return false
     val single = TlaFieldProjection.get().singletonField(obj) ?: return false
     return single.type is IntType
 }
@@ -267,6 +377,7 @@ private fun lengthEqSize(
     expr: ExprNode,
     varName: String,
     domains: Map<String, DomainType>,
+    opaqueAtoms: Map<String, List<String>>,
 ): Int? {
     val e = unwrapInitParen(expr)
     if (e !is BinaryOpExprNode || e.op() != "=") return null
@@ -275,7 +386,7 @@ private fun lengthEqSize(
     fun size(lenExpr: ExprNode, other: ExprNode): Int? {
         if (!isLengthOfName(lenExpr, varName)) return null
         literalNonNegInt(other)?.let { return it }
-        return sortCardinality(other, domains)
+        return sortCardinality(other, domains, opaqueAtoms)
     }
     return size(l, r) ?: size(r, l)
 }
@@ -285,6 +396,7 @@ private fun lengthDomainCfgElements(
     lenEqExpr: ExprNode,
     varName: String,
     domains: Map<String, DomainType>,
+    opaqueAtoms: Map<String, List<String>>,
 ): List<String>? {
     val e = unwrapInitParen(lenEqExpr) as? BinaryOpExprNode ?: return null
     if (e.op() != "=") return null
@@ -293,33 +405,51 @@ private fun lengthDomainCfgElements(
     fun fromOther(lenExpr: ExprNode, other: ExprNode): List<String>? {
         if (!isLengthOfName(lenExpr, varName)) return null
         val name = lengthBaseName(other) ?: return null
-        return domains[name]?.cfgElements
+        return domains[name]?.cfgElements ?: opaqueAtoms[name]
     }
     return fromOther(l, r) ?: fromOther(r, l)
 }
 
-private fun sortCardinality(expr: ExprNode, domains: Map<String, DomainType>): Int? {
+private fun sortCardinality(
+    expr: ExprNode,
+    domains: Map<String, DomainType>,
+    opaqueAtoms: Map<String, List<String>>,
+): Int? {
     val name = lengthBaseName(expr) ?: return null
-    return domains[name]?.cfgElements?.size
+    return domains[name]?.cfgElements?.size ?: opaqueAtoms[name]?.size
 }
 
 private fun isLengthOfName(expr: ExprNode, name: String): Boolean =
     lengthBaseName(expr) == name
 
+/**
+ * State var mentioned as bare `cluster` or `Leaf.cluster` / `Leaf.cluster.length`.
+ * Returns the var name (`cluster`), not the leaf.
+ */
+private fun stateVarRefName(expr: ExprNode): String? {
+    val e = unwrapInitParen(expr)
+    return when (e) {
+        is SymbolValueExprNode -> e.symbol
+        is FieldAccessExprNode -> e.fieldPath.singleOrNull()
+        else -> null
+    }
+}
+
 private fun lengthBaseName(expr: ExprNode): String? {
     val e = unwrapInitParen(expr)
     return when (e) {
         is MemberAccessExprNode ->
-            if (e.fieldName == "length") {
-                (unwrapInitParen(e.baseExpr) as? SymbolValueExprNode)?.symbol
-            } else {
-                null
-            }
+            if (e.fieldName == "length") stateVarRefName(e.baseExpr) else null
         is FieldAccessExprNode ->
-            if (e.fieldPath == listOf("length")) e.baseSymbol else null
+            when {
+                e.fieldPath == listOf("length") -> e.baseSymbol // Sort.length
+                e.fieldPath.size >= 2 && e.fieldPath.last() == "length" ->
+                    e.fieldPath[e.fieldPath.size - 2] // Leaf.cluster.length
+                else -> null
+            }
         is FunCallExprNode ->
             if (e.callName() == "length") {
-                (e.callArgs().singleOrNull()?.let { unwrapInitParen(it) } as? SymbolValueExprNode)?.symbol
+                e.callArgs().singleOrNull()?.let { stateVarRefName(it) }
             } else {
                 null
             }
@@ -371,8 +501,7 @@ private fun isBinderInVar(expr: ExprNode, binder: String, varName: String): Bool
     val l = unwrapInitParen(e.lhsOperand())
     val r = unwrapInitParen(e.rhsOperand())
     val isBinder = l is SymbolValueExprNode && l.symbol == binder
-    val isVar = r is SymbolValueExprNode && r.symbol == varName
-    return isBinder && isVar
+    return isBinder && stateVarRefName(r) == varName
 }
 
 private fun isIdOfBinderEquals(expr: ExprNode, nodeBinder: String, intBinder: String): Boolean {
@@ -434,13 +563,12 @@ private fun isIdentityIndexEq(expr: ExprNode, binder: String, varName: String): 
     return (isIndexedVar(l) && isBinder(r)) || (isIndexedVar(r) && isBinder(l))
 }
 
-/** `xs[i]` or `xs[i].id` (unwrap-singletons). */
+/** `xs[i]` / `Leaf.xs[i]` or `…[i].id` (unwrap-singletons). */
 private fun asIndexOf(expr: ExprNode, varName: String, binder: String): Boolean {
     fun indexMatches(n: ExprNode): Boolean {
         val e = unwrapInitParen(n) as? IndexExprNode ?: return false
-        val base = unwrapInitParen(e.base) as? SymbolValueExprNode ?: return false
         val idx = unwrapInitParen(e.index) as? SymbolValueExprNode ?: return false
-        return base.symbol == varName && idx.symbol == binder
+        return stateVarRefName(e.base) == varName && idx.symbol == binder
     }
     val e = unwrapInitParen(expr)
     return when {

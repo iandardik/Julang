@@ -1,0 +1,34 @@
+type Node {
+    url : String
+    id : Int
+}
+
+type Key := String
+
+static proc Store {
+    var owners : Map<Key, Node>
+    var me : Node
+
+    constructor start(self : Node) {
+        transit:
+            me := self
+            owners := owners
+    }
+
+    internal transition claim(k : Key) {
+        transit:
+            owners[k] := me
+    }
+}
+
+invariant OwnsSelf := forall n : Node, forall k : Key,
+    (k in Store[n].owners) => (Store[n].owners[k] = n)
+
+spec Indexed := Store[n : Node] {
+    Node := { "n1", "n2" }
+    Key := { "k1", "k2" }
+} |= OwnsSelf {
+    unsynced start
+}
+
+compile Indexed

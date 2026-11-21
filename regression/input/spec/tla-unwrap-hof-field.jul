@@ -28,7 +28,7 @@ static proc Box {
 
 spec UnwrapHofField := Box[i : Ids] {
     Ids := { "a", "b", "c" }
-    const global Box.cluster
+    global Box.cluster
     init: cluster.length = Ids.length
     init: forall i : Int, (i >= 1 & i <= cluster.length) => (exists node : Node, node in cluster & node.id = i)
 } {

@@ -235,6 +235,57 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun indexRecordNodeEmitsConstantAndProjections() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-index-record").toFile()
+        try {
+            val source = File("regression/input/spec/index-record-node.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("Indexed.tla")
+            val cfg = File("Indexed.cfg")
+            assertTrue(tla.exists(), "expected Indexed.tla")
+            val tlaText = tla.readText()
+            val cfgText = cfg.readText()
+            assertTrue(
+                Regex("""CONSTANT[\s\n]+Node""").containsMatchIn(tlaText),
+                "expected Node as CONSTANT;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("Node_url") && tlaText.contains("Node_id"),
+                "expected field projection VARIABLES;\n$tlaText",
+            )
+            val claimDef = tlaText.substringAfter("claim(").substringBefore("\n\n")
+            assertTrue(
+                "Node_url" in claimDef && "Node_id" in claimDef &&
+                    claimDef.contains("UNCHANGED"),
+                "opaque projections must appear in action UNCHANGED;\n$claimDef",
+            )
+            assertTrue(
+                tlaText.contains("/\\ me = [n \\in Node |-> n]"),
+                "expected opaque me identity Init;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("owners[n][k] = n"),
+                "expected atom equality owners[k] = n;\n$tlaText",
+            )
+            assertTrue(
+                cfgText.contains("CONSTANT Node = {\"n1\", \"n2\"}"),
+                "expected string atom model in cfg;\n$cfgText",
+            )
+            tla.copyTo(File(work, "Indexed.tla"), overwrite = true)
+            cfg.copyTo(File(work, "Indexed.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "Indexed")
+        } finally {
+            work.deleteRecursively()
+            File("Indexed.tla").delete()
+            File("Indexed.cfg").delete()
+        }
+    }
+
+    @Test
     fun spawnWorkerCtorSyncCompilesAndTlcStarts() {
         assumeTlcPresent()
         val work = Files.createTempDirectory("julay-spec-spawn").toFile()
@@ -739,6 +790,22 @@ class SpecTlaTlcSmokeTest {
         assertTrue(
             Regex("""\\E x \\in Int""").containsMatchIn(offText) && !offText.contains("__s0"),
             "disabling from-collection should restore \\E x \\in Int;\n$offText",
+        )
+    }
+
+    @Test
+    fun fromCollectionDuplicateStructFieldArg() {
+        val source = File("regression/input/spec/tla-from-collection-dup-field.jul")
+        val (tlaText, _) = compileSpecTla(source, "DupField")
+        val recvDef = tlaText.substringAfter("recv(").substringBefore("\n\n")
+        val senderLets = Regex("""\bsender\s*==""").findAll(recvDef).count()
+        assertTrue(
+            senderLets == 1,
+            "same arg on two struct fields must LET-bind once (got $senderLets);\n$recvDef",
+        )
+        assertTrue(
+            recvDef.contains("msg.from = sender") || recvDef.contains("msg.src = sender"),
+            "second field should become an equality check against the LET;\n$recvDef",
         )
     }
 
@@ -2386,7 +2453,7 @@ class SpecTlaTlcSmokeTest {
                 "expected EXCEPT ![n] for per-instance state;\n$tlaText",
             )
             assertTrue(
-                (tlaText.contains("Len(cluster)") || tlaText.contains("Len(cluster)")) &&
+                (tlaText.contains("Cardinality(DOMAIN cluster)") || tlaText.contains("Len(cluster)")) &&
                     !tlaText.contains("cluster[i]"),
                 "expected unindexed Peer[i].cluster in invariant;\n$tlaText",
             )
@@ -2441,7 +2508,7 @@ class SpecTlaTlcSmokeTest {
             )
             val initBlock = tlaText.substringAfter("Init ==").substringBefore("\n\n")
             val constraint = listOf(
-                "Len(cluster) = Cardinality(Node)",
+                "Cardinality(DOMAIN cluster) = Cardinality(Node)",
                 "Len(cluster) = Cardinality(Node)",
             ).firstOrNull { it in initBlock }
             assertTrue(
@@ -2469,6 +2536,92 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun opaqueEmptyNodeEmitsSentinelOutsideLiveConstant() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-opaque-empty-node").toFile()
+        try {
+            val source = File("regression/input/spec/opaque-empty-node.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("EmptyNodeSpec.tla")
+            val cfg = File("EmptyNodeSpec.cfg")
+            assertTrue(tla.exists(), "expected EmptyNodeSpec.tla")
+            val tlaText = tla.readText()
+            val cfgText = cfg.readText()
+            assertTrue(
+                tlaText.contains("emptyNode ==") &&
+                    !tlaText.contains("CHOOSE __n \\in Node"),
+                "emptyNode should be the sentinel atom, not CHOOSE among Node;\n$tlaText",
+            )
+            assertFalse(
+                tlaText.contains("CHOOSE __n \\in Node : TRUE"),
+                "opaque empty must not havoc among live Node;\n$tlaText",
+            )
+            assertTrue(
+                cfgText.contains("CONSTANT Node = {\"n1\", \"n2\"}"),
+                "live Node cfg must not include the sentinel;\n$cfgText",
+            )
+            assertTrue(
+                "Node_url =" in tlaText && ":> \"\"" in tlaText,
+                "Node_url should pin sentinel;\n$tlaText",
+            )
+            assertTrue(
+                "(Node \\cup {\"\"})" in tlaText,
+                "Node-typed values should allow the sentinel;\n$tlaText",
+            )
+            tla.copyTo(File(work, "EmptyNodeSpec.tla"), overwrite = true)
+            cfg.copyTo(File(work, "EmptyNodeSpec.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "EmptyNodeSpec")
+        } finally {
+            work.deleteRecursively()
+            File("EmptyNodeSpec.tla").delete()
+            File("EmptyNodeSpec.cfg").delete()
+        }
+    }
+
+    @Test
+    fun compositionBlockInitConjoinsOnUnindexedConst() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-composition-block-init").toFile()
+        try {
+            val source = File("regression/input/spec/composition-block-init.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            compileJulFile(source.toPath(), keepBuild = false)
+            val tla = File("Sys.tla")
+            val cfg = File("Sys.cfg")
+            assertTrue(tla.exists(), "expected Sys.tla")
+            val tlaText = tla.readText()
+            val initBlock = tlaText.substringAfter("Init ==").substringBefore("\n\n")
+            assertTrue(
+                "/\\ cluster = <<\"n1\", \"n2\">>" in initBlock ||
+                    "/\\ cluster = <<\"n1\",\"n2\">>" in initBlock,
+                "expected opaque cluster singleton-folded from init:;\n$initBlock",
+            )
+            assertTrue(
+                "Node_url =" in initBlock &&
+                    "[n \\in Node |-> n]" in initBlock &&
+                    ":> \"\"" in initBlock,
+                "expected Node_url identity Init with empty sentinel;\n$initBlock",
+            )
+            assertTrue(
+                "Node_id =" in initBlock && ":> 1" in initBlock && ":> -1" in initBlock,
+                "expected Node_id pinned from cluster[i].id = i plus sentinel -1;\n$initBlock",
+            )
+            tla.copyTo(File(work, "Sys.tla"), overwrite = true)
+            cfg.copyTo(File(work, "Sys.cfg"), overwrite = true)
+            tla.delete()
+            cfg.delete()
+            assertTlcHealthyStart(work, "Sys")
+        } finally {
+            work.deleteRecursively()
+            File("Sys.tla").delete()
+            File("Sys.cfg").delete()
+        }
+    }
+
+    @Test
     fun constGlobalAssignEmitsEqualityCheck() {
         assumeTlcPresent()
         val work = Files.createTempDirectory("julay-spec-const-global-check").toFile()
@@ -2486,9 +2639,7 @@ class SpecTlaTlcSmokeTest {
                 "expected const-global Init as \\\\in BoundedSeq (enumerable);\n$tlaText",
             )
             assertTrue(
-                (tlaText.contains("/\\ cluster = <<\"a\">> \\* global const check") ||
-                    tlaText.contains("/\\ cluster = <<\"a\">> \\* global const check")) &&
-                    !tlaText.contains("cluster'") &&
+                tlaText.contains("/\\ cluster = <<\"a\">> \\* global const check") &&
                     !tlaText.contains("cluster'"),
                 "expected unprimed equality check for non-arg RHS;\n$tlaText",
             )

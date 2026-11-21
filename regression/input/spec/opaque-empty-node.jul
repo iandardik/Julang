@@ -1,0 +1,38 @@
+type Node {
+    url : String
+    id : Int
+}
+
+fun emptyNode() : Node =
+    Node {
+        id := -1,
+        url := ""
+    }
+
+static proc Store {
+    var owner : Node
+    var me : Node
+
+    constructor start(self : Node) {
+        transit:
+            me := self
+            owner := emptyNode()
+    }
+
+    internal transition clear() {
+        transit:
+            owner := emptyNode()
+    }
+}
+
+invariant Ok := forall n : Node,
+    Store[n].me = n & (Store[n].owner = emptyNode() | Store[n].owner = n)
+
+spec EmptyNodeSpec := Store[n : Node] {
+    Node := { "n1", "n2" }
+    init: forall n : Node, n.url = n
+} |= Ok {
+    unsynced start
+}
+
+compile EmptyNodeSpec

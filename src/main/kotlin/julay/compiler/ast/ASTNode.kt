@@ -178,12 +178,52 @@ class SpecNode(
     internal fun unsyncedActionNames(): List<String> = unsyncedActionNames
     override fun toString(): String {
         val export = if (isExported) "export " else ""
-        val body = if (unsyncedActionNames.isEmpty()) {
-            ""
+        val extras = (value as? SpecCompositionBlockNode)?.blockToString()
+        val unsynced = if (unsyncedActionNames.isEmpty()) {
+            null
         } else {
-            " {\n  unsynced ${unsyncedActionNames.joinToString(", ")}\n}"
+            "  unsynced ${unsyncedActionNames.joinToString(", ")}"
         }
-        return "${export}spec $name := $value$body"
+        val lines = listOfNotNull(extras, unsynced)
+        val body = if (lines.isEmpty()) "" else " {\n${lines.joinToString("\n")}\n}"
+        val core = (value as? SpecCompositionBlockNode)?.systemBody() ?: value
+        return "${export}spec $name := $core$body"
+    }
+}
+
+/**
+ * Composition trailing block on `spec Name := system { … }` (models / init / global).
+ * Does not create an index; extras are pushed onto expanded leaves like create-index items.
+ */
+class SpecCompositionBlockNode(
+    private val body: ASTNode,
+    private val loc: ProgramLoc,
+    private val globalDecls: List<GlobalDeclNames> = emptyList(),
+    private val initExprs: List<ExprNode> = emptyList(),
+    private val typeModels: List<TypeModelNode> = emptyList(),
+    private val funModels: List<FunModelNode> = emptyList(),
+) : ASTNode(listOf(body) + initExprs + typeModels + funModels) {
+    override fun programLocation() = loc
+    internal fun systemBody() = body
+    internal fun globalDecls(): List<GlobalDeclNames> = globalDecls
+    internal fun globalVarRefs(): List<GlobalVarRef> = globalDecls.flatMap { it.refs }
+    internal fun initExprs(): List<ExprNode> = initExprs
+    internal fun typeModels(): List<TypeModelNode> = typeModels
+    internal fun funModels(): List<FunModelNode> = funModels
+    internal fun blockToString(): String? {
+        if (globalDecls.isEmpty() && initExprs.isEmpty() && typeModels.isEmpty() && funModels.isEmpty()) {
+            return null
+        }
+        val lines = globalDecls.map { decl ->
+            "  global ${decl.refs.joinToString(", ")}"
+        } + typeModels.map { it.toString().prependIndent("  ") } +
+            funModels.map { it.toString().prependIndent("  ") } +
+            initExprs.map { "  init: $it" }
+        return lines.joinToString("\n")
+    }
+    override fun toString(): String {
+        val block = blockToString()
+        return if (block == null) "$body" else "$body {\n$block\n}"
     }
 }
 
@@ -389,7 +429,7 @@ class AgSpecExprNode(
     }
 }
 
-/** One create-index `global` / `const global` target: `Leaf.var`. */
+/** One create-index `global` target: `Leaf.var`. */
 data class GlobalVarRef(
     val leafName: String,
     val varName: String,
@@ -397,10 +437,9 @@ data class GlobalVarRef(
     override fun toString(): String = "$leafName.$varName"
 }
 
-/** Create-index `{ global Leaf.x }` / `{ const global Leaf.x }` refs with source location. */
+/** Create-index `{ global Leaf.x }` refs with source location. */
 data class GlobalDeclNames(
     val refs: List<GlobalVarRef>,
-    val isConst: Boolean,
     val loc: ProgramLoc,
 )
 
@@ -410,7 +449,7 @@ class ParamProcExprNode(
     /** Null when this is an apply-index `Name[n]` (type comes from enclosing `with`). */
     private val paramType: TypeExpr?,
     private val loc: ProgramLoc,
-    /** Create-index `global` / `const global` decls; empty for apply-index. */
+    /** Create-index `global` decls; empty for apply-index. */
     private val globalDecls: List<GlobalDeclNames> = emptyList(),
     /** Create-index `init:` Boolean exprs; empty for apply-index. */
     private val initExprs: List<ExprNode> = emptyList(),
@@ -425,12 +464,10 @@ class ParamProcExprNode(
     internal fun paramType(): TypeExpr? = paramType
     internal fun isApplyIndex(): Boolean = paramType == null
     internal fun globalDecls(): List<GlobalDeclNames> = globalDecls
-    /** All `Leaf.var` refs on this create-index (const and plain). */
+    /** All `Leaf.var` refs on this create-index. */
     internal fun globalVarRefs(): List<GlobalVarRef> = globalDecls.flatMap { it.refs }
     /** Bare var names (legacy helpers); prefer [globalVarRefs] / per-leaf filtering. */
     internal fun globalVarNames(): List<String> = globalVarRefs().map { it.varName }
-    internal fun globalConstVarNames(): List<String> =
-        globalDecls.filter { it.isConst }.flatMap { it.refs.map { ref -> ref.varName } }
     internal fun initExprs(): List<ExprNode> = initExprs
     internal fun typeModels(): List<TypeModelNode> = typeModels
     internal fun funModels(): List<FunModelNode> = funModels
@@ -441,8 +478,7 @@ class ParamProcExprNode(
         }
         val lines = globalDecls.map { decl ->
             val names = decl.refs.joinToString(", ")
-            val kw = if (decl.isConst) "const global" else "global"
-            "  $kw $names"
+            "  global $names"
         } + typeModels.map { it.toString().prependIndent("  ") } +
             funModels.map { it.toString().prependIndent("  ") } +
             initExprs.map { expr ->

@@ -156,15 +156,38 @@ fun tlaCodegenPass(
     val recordNames = unit.modules.flatMap { m ->
         m.root.declNodes().filterIsInstance<ObjClassNode>().map { it.name() }
     }.toSet()
+    val opaqueSorts = collectOpaqueIndexSorts(leaves, ast.cachedObjClassRegistry()
+        ?: error("ObjClassRegistry required for TLA codegen"))
+    TlaOpaqueIndexSort.install(opaqueSorts)
     var mergedDomains = ast.cachedObjClassRegistry()?.domains?.toMutableMap() ?: mutableMapOf()
+    val recordIndexModels = linkedMapOf<String, String>()
     val domainModelErrors = mutableListOf<CompileError>()
     leaves.forEach { leaf ->
         val models = leaf.typeModels + (leafSpecNodes[leaf.name]?.typeModels() ?: emptyList())
-        val (merged, errs) = mergeSpecTypeModels(models, mergedDomains, recordNames)
-        mergedDomains = merged.toMutableMap()
-        domainModelErrors += errs
+        val mergedResult = mergeSpecTypeModels(models, mergedDomains, recordNames)
+        mergedDomains = mergedResult.domains.toMutableMap()
+        recordIndexModels.putAll(mergedResult.recordIndexModels)
+        domainModelErrors += mergedResult.errors
+    }
+    // Record delayed models are only legal for create-index sorts.
+    recordIndexModels.keys.forEach { name ->
+        if (name !in opaqueSorts) {
+            domainModelErrors += OneLocCompileError(
+                SourceLoc(1 to 1, unit.entryPath),
+                "delayed model for record type \"$name\" is only allowed when \"$name\" is used as a create-index sort",
+            )
+        }
+    }
+    opaqueSorts.keys.forEach { name ->
+        if (name !in recordIndexModels) {
+            domainModelErrors += OneLocCompileError(
+                SourceLoc(1 to 1, unit.entryPath),
+                "record index sort \"$name\" requires a delayed model for this spec compile",
+            )
+        }
     }
     if (domainModelErrors.isNotEmpty()) {
+        TlaOpaqueIndexSort.clear()
         val msg = domainModelErrors.joinToString("\n") {
             (it as? OneLocCompileError)?.msg ?: it.toString()
         }
@@ -174,6 +197,9 @@ fun tlaCodegenPass(
     val domainModels = domains.mapNotNull { (name, d) ->
         d.cfgElements?.let { name to "{${it.joinToString(", ")}}" }
     }.toMap().toMutableMap()
+    recordIndexModels.forEach { (name, cfg) ->
+        domainModels[name] = cfg
+    }
     // Peeled DynProc models → CONSTANT + cfg (not a DomainType). Implicit default
     // (`dp1`..`dp3`, clash-renamed) is filled in after cfg string literals are known.
     leaves.mapNotNull { it.dynProcModel }.distinctBy { it.name() }.forEach { model ->
@@ -371,6 +397,7 @@ fun tlaCodegenPass(
         TlaSymbolTypes.set(emptyMap())
         TlaVarProjection.set(TlaRelevantVars.IDENTITY)
         TlaFieldVarProjection.set(TlaFieldVars.IDENTITY)
+        TlaOpaqueIndexSort.clear()
     }
 }
 
@@ -497,19 +524,53 @@ private fun emitProjectedTla(
 
     // cfg Int/Nat may be finite \E bounds; TypeOK uses TypeOKInt (Int \cup Nat \cup extras).
     val typeOkIntRange = "TypeOKInt"
+    // Opaque sentinel pins `*_id[sent] = -1` (matches Go emptyNode); ensure TypeOKInt covers it.
+    if (TlaOpaqueIndexSort.sorts().values.any { ty -> ty.fields.any { it.type is IntType } }) {
+        intModelValues += -1
+    }
     val typeOkIntDef = emitTypeOkIntDef(intModelValues)
 
     val intConstraintRange = constraintIntRange(intModelValues)
+    val opaqueAtoms: Map<String, List<String>> = buildMap {
+        TlaOpaqueIndexSort.sorts().keys.forEach { name ->
+            val cfg = domainModels[name] ?: return@forEach
+            val atoms = parseTlaCfgSet(cfg) ?: return@forEach
+            put(name, atoms)
+        }
+    }
+    // Empty/sentinel opaque literals use an atom outside the live create-index CONSTANT.
+    TlaOpaqueIndexSort.installSentinels(opaqueAtoms)
+    TlaOpaqueIndexSort.sorts().keys.forEach { sort ->
+        TlaOpaqueIndexSort.sentinelRaw(sort)?.let { stringModelValues += it }
+    }
     val singletonConstGlobals = linkedMapOf<Pair<String, String>, String>()
     val consumedInitExprs = mutableSetOf<ExprNode>()
+    // Projection Init pins from `init:` (url identity / cluster[i].id = i); default is `\in`.
+    val opaqueProjectionPins = linkedMapOf<String, String>()
     leaves.forEach { leaf ->
+        matchOpaqueUrlIdentityInits(leaf.initExprs).forEach { (pname, expr) ->
+            val sort = TlaOpaqueIndexSort.sorts().keys.firstOrNull { s ->
+                pname == TlaOpaqueIndexSort.projectionName(s, "url")
+            } ?: return@forEach
+            opaqueProjectionPins.putIfAbsent(pname, "[n \\in $sort |-> n]")
+            consumedInitExprs += expr
+        }
         val pc = pclassesForTla[leaf.name] ?: return@forEach
         pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
             if (vn.name !in leaf.globalConstVars) return@forEach
-            val hit = matchSingletonConstGlobalInit(vn.name, safeType(vn), leaf.initExprs, domains) ?: return@forEach
+            val hit = matchSingletonConstGlobalInit(
+                vn.name, safeType(vn), leaf.initExprs, domains, opaqueAtoms,
+            ) ?: return@forEach
             singletonConstGlobals[leaf.tlaName to vn.name] = hit.value
             consumedInitExprs += hit.consumed
+            hit.opaqueIdProjection?.let { (pname, value) ->
+                opaqueProjectionPins.putIfAbsent(pname, value)
+            }
         }
+    }
+    // Url-identity pin puts sort atoms in a String-typed projection; cfg String must cover them.
+    if (opaqueProjectionPins.keys.any { it.endsWith("_url") }) {
+        addOpaqueIndexSortStringAtoms(opaqueAtoms, stringModelValues)
     }
     dropConsumedOnlyTypeConstants(leaves, invClosure + assumeInvClosure, consumedInitExprs, constants)
     val variables = mutableListOf<String>()
@@ -517,6 +578,45 @@ private fun emitProjectedTla(
     val initParts = mutableListOf<String>()
     val typeOkParts = mutableListOf<String>()
     val constraintParts = mutableListOf<String>()
+    // Opaque index-sort field projections: VARIABLES Node_url / Node_id.
+    // Domain is live sort ∪ {sentinel}; create-index still uses bare CONSTANT [sort].
+    // Default Init is membership; `init:` may pin url identity or id from cluster.
+    TlaOpaqueIndexSort.sorts().forEach { (sort, ty) ->
+        ty.fields.forEach { field ->
+            val pname = TlaOpaqueIndexSort.projectionName(sort, field.name)
+            if (pname in variables || pname in constants) return@forEach
+            variables += pname
+            val valueDom = TlaOpaqueIndexSort.valueDomain(sort)
+            val sent = TlaOpaqueIndexSort.sentinelTla(sort)
+            val sentField = TlaOpaqueIndexSort.sentinelFieldTla(sort, field)
+            // Init is emitted before TypeOKInt; use an inline Int∪{-1} there. TypeOK can name TypeOKInt.
+            val initRange = when (field.type) {
+                is IntType -> "(Int \\cup {-1})"
+                else -> typeToTlaDomain(field.type)
+            }
+            val typeOkRange = when (field.type) {
+                is IntType -> typeOkIntRange
+                else -> typeToTlaDomain(field.type)
+            }
+            // Projection String ranges need a TLC CONSTANT; Int/Nat/Boolean come from EXTENDS.
+            if (typeOkRange == "String") {
+                constants += "String"
+                cfgOverrides += "String"
+            }
+            val apaRange = julayTypeToApalache(field.type)
+            stateVarApalacheTypes[pname] = "$valueDom -> $apaRange"
+            val initConjunct = when {
+                opaqueProjectionPins[pname] != null -> {
+                    val pin = opaqueProjectionPins.getValue(pname)
+                    "/\\ $pname = ($sent :> $sentField) @@ $pin"
+                }
+                else ->
+                    "/\\ $pname \\in [$valueDom -> $initRange] /\\ $pname[$sent] = $sentField"
+            }
+            initParts += initConjunct
+            typeOkParts += "/\\ $pname \\in [$valueDom -> $typeOkRange]"
+        }
+    }
     emitFluentInit(fluentPlan, variables, initParts)
     fluentPlan.fluents.forEach { fl ->
         val params = fluentParamTypes(fl, registry)
@@ -653,6 +753,13 @@ private fun emitProjectedTla(
                 }
                 if (folded != null) {
                     initParts += folded
+                } else if (vn.name in leaf.globalConstVars) {
+                    val singleton = singletonConstGlobals[leaf.tlaName to vn.name]
+                    if (singleton != null) {
+                        initParts += "/\\ $v = $singleton"
+                    } else {
+                        initParts += "/\\ $v \\in ${typeToTlaDomain(effectiveVarType(leaf, vn), leafClass = leaf.name, varName = vn.name)}"
+                    }
                 } else {
                     initParts += "/\\ $v = ${defaultTlaValue(effectiveVarType(leaf, vn), leafClass = leaf.name, varName = vn.name)}"
                 }
@@ -766,27 +873,38 @@ private fun emitProjectedTla(
     // Prefer singleton const-global `cluster = <<…>>` from create-index `init:` when present;
     // only empty-pin indexed (non-const-global) open membership.
     val clusterSingletonInit = initParts.any { it.trimStart().startsWith("/\\ cluster = <<") }
+    // Prefer opaque record index-sort name (e.g. Node); fall back to legacy NodeSet.
+    val indexSortName = TlaOpaqueIndexSort.sorts().keys.firstOrNull() ?: "NodeSet"
+    val opaqueIndex = TlaOpaqueIndexSort.sorts().isNotEmpty()
     val meInPin = Regex("""^/\\ me(_[A-Za-z0-9]+)? \\in """)
     for (i in initParts.indices) {
         val line = initParts[i]
         val trimmed = line.trimStart()
         when {
             "me_url \\in" in line ->
-                initParts[i] = "/\\ me_url = [n \\in NodeSet |-> n]"
-            meInPin.containsMatchIn(trimmed) -> {
+                initParts[i] = "/\\ me_url = [n \\in $indexSortName |-> n]"
+            meInPin.containsMatchIn(trimmed) && "[$indexSortName ->" in trimmed -> {
                 val meVar = Regex("""^/\\ (me(?:_[A-Za-z0-9]+)?) \\in """)
                     .find(trimmed)?.groupValues?.get(1) ?: "me"
-                initParts[i] = if (clusterSingletonInit) {
-                    // Align me with const-global cluster peers (url = NodeSet index).
-                    "/\\ $meVar = [n \\in NodeSet |-> " +
-                        "cluster[CHOOSE i \\in DOMAIN cluster : cluster[i].url = n]]"
-                } else {
-                    "/\\ $meVar = [n \\in NodeSet |-> [id |-> 0, url |-> n]]"
+                initParts[i] = when {
+                    // Opaque cluster elems are sort atoms (e.g. "n1"), not records — never .url.
+                    clusterSingletonInit && opaqueIndex ->
+                        "/\\ $meVar = [n \\in $indexSortName |-> " +
+                            "cluster[CHOOSE i \\in DOMAIN cluster : cluster[i] = n]]"
+                    clusterSingletonInit ->
+                        // Record NodeInfo peers: match index atom against .url.
+                        "/\\ $meVar = [n \\in $indexSortName |-> " +
+                            "cluster[CHOOSE i \\in DOMAIN cluster : cluster[i].url = n]]"
+                    opaqueIndex ->
+                        // Opaque index-sort: each index maps to itself (atom identity).
+                        "/\\ $meVar = [n \\in $indexSortName |-> n]"
+                    else ->
+                        "/\\ $meVar = [n \\in $indexSortName |-> [id |-> 0, url |-> n]]"
                 }
             }
-            "cluster \\in" in line && "NodeSet ->" in line ->
+            "cluster \\in" in line && ("NodeSet ->" in line || "$indexSortName ->" in line) ->
                 initParts[i] =
-                    "/\\ cluster = [n \\in NodeSet |-> [__j \\in {} |-> [id |-> 0, url |-> \"\"]]]"
+                    "/\\ cluster = [n \\in $indexSortName |-> [__j \\in {} |-> [id |-> 0, url |-> \"\"]]]"
         }
     }
     // TLC evaluates Init conjuncts in order; me's CHOOSE over cluster must follow cluster = <<…>>.
@@ -1442,18 +1560,23 @@ private fun typeOkVarRange(
             "[$key -> ${typeOkVarRange(type.valueType, intRange)}]"
         }
         is ObjClassType -> {
-            val single = TlaFieldProjection.get().singletonField(type)
-            if (single != null) {
-                typeOkVarRange(single.type, intRange, type.name, single.name)
+            if (TlaOpaqueIndexSort.isOpaque(type)) {
+                // Locals may hold the empty sentinel; create-index stays on bare CONSTANT.
+                TlaOpaqueIndexSort.valueDomain(type.name)
             } else {
-                val fields = TlaFieldProjection.get().fieldsFor(type)
-                if (fields.isEmpty()) {
-                    "[dummy: {0}]"
+                val single = TlaFieldProjection.get().singletonField(type)
+                if (single != null) {
+                    typeOkVarRange(single.type, intRange, type.name, single.name)
                 } else {
-                    val rendered = fields.joinToString(", ") { f ->
-                        "${f.name}: ${typeOkVarRange(f.type, intRange, type.name, f.name)}"
+                    val fields = TlaFieldProjection.get().fieldsFor(type)
+                    if (fields.isEmpty()) {
+                        "[dummy: {0}]"
+                    } else {
+                        val rendered = fields.joinToString(", ") { f ->
+                            "${f.name}: ${typeOkVarRange(f.type, intRange, type.name, f.name)}"
+                        }
+                        "[$rendered]"
                     }
-                    "[$rendered]"
                 }
             }
         }
@@ -1742,7 +1865,11 @@ private fun buildTlaActions(
     foldedCtorLeaves: Set<String> = emptySet(),
     fluentVarNames: List<String> = emptyList(),
 ): TlaBuildResult {
-    val allVars = allTlaVars(leaves, pclasses, stateVarNames, foldedCtorLeaves) + fluentVarNames
+    // Opaque index-sort projections (Node_id, Node_url, …) are VARIABLES but never primed;
+    // include them in allVars so every action's UNCHANGED covers them for TLC.
+    val allVars = allTlaVars(leaves, pclasses, stateVarNames, foldedCtorLeaves) +
+        fluentVarNames +
+        TlaOpaqueIndexSort.allProjectionNames().sorted()
     val stateVarsByLeaf = leaves.associate { leaf ->
         leaf.tlaName to (
             pclasses[leaf.name]
@@ -2239,7 +2366,8 @@ private fun emitConjoined(
                         val rhs = emitFieldVarProjectedRhs(
                             offer.leaf.name, root, update.key, expr, assignPrefix, ::emitExpr,
                         )
-                        addAssignPart("/\\ $v = $rhs \\* global const check")
+                        // Parenthesize `[1 |-> …]` so `/\\` junctions do not parse `[` as a new item.
+                        addAssignPart("/\\ $v = ${parenIfBracketExpr(rhs)} \\* global const check")
                     } else {
                         val assignPrefix = if (indexes(root)) {
                             "/\\ $v' = [$v EXCEPT ![$self] = "
@@ -2519,6 +2647,9 @@ private fun emitConjoined(
             // Index binders stay as action params (for Next `\E n \in …`); do not LET-shadow them.
             if (tlaArg in indexBinderNames) {
                 parts += "/\\ $rhs = $tlaArg"
+            } else if (letBindings.any { it.first == tlaArg }) {
+                // Same arg on multiple struct fields (e.g. src := sender, from := sender).
+                parts += "/\\ $rhs = $tlaArg"
             } else {
                 letBindings += tlaArg to rhs
             }
@@ -2742,18 +2873,26 @@ private fun emitInitConstraintParts(
     }
     if (withInits.isEmpty()) return
     initParts += "\\* init constraints"
-    // Create-index inits are copied onto every child leaf; emit each ExprNode once.
+    // Create-index / composition-block inits are copied onto every child leaf; emit once.
+    // Use all leaves in leafCtx and the union of frozen consts so bare names resolve
+    // even when the first leaf that carries the ExprNode is not the owner (e.g. Store
+    // vs ClusterInfo.cluster).
+    val fullCtx = linkedMapOf<String, SpecLeaf>()
+    leaves.forEach { leaf ->
+        fullCtx[leaf.name] = leaf
+        fullCtx[leaf.tlaName] = leaf
+    }
+    val allBareConsts = leaves.flatMap { it.globalConstVars }.toSet()
     val seen = mutableSetOf<ExprNode>()
     withInits.forEach { leaf ->
-        val leafCtx = mapOf(leaf.name to leaf, leaf.tlaName to leaf)
         leaf.initExprs.forEach { expr ->
             if (expr in skipExprs || !seen.add(expr)) return@forEach
             val body = exprToTla(
                 expr,
-                leafCtx = leafCtx,
+                leafCtx = fullCtx,
                 argNames = emptySet(),
                 self = null,
-                bareStateVars = leaf.globalConstVars,
+                bareStateVars = allBareConsts,
                 reservedNames = constants,
                 stateVarNames = stateVarNames,
                 linePrefix = "",
@@ -2782,6 +2921,9 @@ private fun dropConsumedOnlyTypeConstants(
             if (expr !in consumedInitExprs) collectTypeConstants(expr, fromLive)
         }
     }
+    // Opaque index sorts stay as CONSTANTs (projection Init / TypeOK / binders use them
+    // even when the only `init:` mention was a consumed url-identity forall).
+    fromLive += TlaOpaqueIndexSort.sorts().keys
     constants.removeAll(fromConsumed - fromLive)
 }
 
@@ -3036,9 +3178,15 @@ private fun emitFoldedCtorAssumptions(
             linePrefix = "/\\ $v = ",
             globalByLeaf = globalVarsByLeaf(leaves),
         )
-        initParts += "/\\ $v = $rhs \\* global const check"
+        initParts += "/\\ $v = ${parenIfBracketExpr(rhs)} \\* global const check"
     }
     errorFormulas.forEach { initParts += "/\\ $it" }
+}
+
+/** Wrap TLA function/record literals so they are safe after `/\\` in a junction. */
+private fun parenIfBracketExpr(tla: String): String {
+    val trimmed = tla.trimStart()
+    return if (trimmed.startsWith("[")) "($trimmed)" else tla
 }
 
 /**
@@ -3128,18 +3276,23 @@ internal fun defaultTlaValue(
     is MapType ->
         "[__k \\in {} |-> ${defaultTlaValue(type.valueType, fieldOfObj, fieldName, leafClass, varName)}]"
     is ObjClassType -> {
-        val single = TlaFieldProjection.get().singletonField(type)
-        if (single != null) {
-            defaultTlaValue(single.type, fieldOfObj = type.name, fieldName = single.name)
+        if (TlaOpaqueIndexSort.isOpaque(type)) {
+            // Empty/default opaque value is the sentinel outside the live create-index set.
+            TlaOpaqueIndexSort.sentinelTla(type.name)
         } else {
-            val fields = TlaFieldProjection.get().fieldsFor(type)
-            if (fields.isEmpty()) {
-                "[dummy |-> 0]"
+            val single = TlaFieldProjection.get().singletonField(type)
+            if (single != null) {
+                defaultTlaValue(single.type, fieldOfObj = type.name, fieldName = single.name)
             } else {
-                val rendered = fields.joinToString(", ") { f ->
-                    "${f.name} |-> ${defaultTlaValue(f.type, fieldOfObj = type.name, fieldName = f.name)}"
+                val fields = TlaFieldProjection.get().fieldsFor(type)
+                if (fields.isEmpty()) {
+                    "[dummy |-> 0]"
+                } else {
+                    val rendered = fields.joinToString(", ") { f ->
+                        "${f.name} |-> ${defaultTlaValue(f.type, fieldOfObj = type.name, fieldName = f.name)}"
+                    }
+                    "[$rendered]"
                 }
-                "[$rendered]"
             }
         }
     }
@@ -3321,6 +3474,21 @@ internal fun addStringCarrierDomainElements(
         if (d.carrierType !is StringType) return@forEach
         d.cfgElements?.forEach { elem ->
             rawStringFromCfgElement(elem)?.let { into += it }
+        }
+    }
+}
+
+/**
+ * Opaque index-sort delayed-model atoms (e.g. Node = {"n1","n2"}) are TLC model values
+ * that also appear as String when url projections are pinned to identity.
+ */
+internal fun addOpaqueIndexSortStringAtoms(
+    opaqueAtoms: Map<String, List<String>>,
+    into: MutableSet<String>,
+) {
+    opaqueAtoms.values.forEach { atoms ->
+        atoms.forEach { tok ->
+            rawStringFromCfgElement(tok)?.let { into += it }
         }
     }
 }
@@ -3595,24 +3763,29 @@ internal fun typeToTlaDomain(
     is IntType -> "Int"
     is RealType -> "Int"
     is StringType -> "String"
-    is DomainType -> type.name
-    // Seq(S) is infinite; TLC needs a length-bounded set of sequences.
-    is ListType -> "BoundedSeq(${typeToTlaDomain(type.elementType)}, MaxListLen)"
-    is SetType -> "SUBSET ${typeToTlaDomain(type.elementType)}"
-    is MapType -> "[${typeToTlaDomain(type.keyType)} -> ${typeToTlaDomain(type.valueType)}]"
+        is DomainType -> type.name
+        // Seq(S) is infinite; TLC needs a length-bounded set of sequences.
+        is ListType -> "BoundedSeq(${typeToTlaDomain(type.elementType)}, MaxListLen)"
+        is SetType -> "SUBSET ${typeToTlaDomain(type.elementType)}"
+        is MapType -> "[${typeToTlaDomain(type.keyType)} -> ${typeToTlaDomain(type.valueType)}]"
     is ObjClassType -> {
-        val single = TlaFieldProjection.get().singletonField(type)
-        if (single != null) {
-            typeToTlaDomain(single.type, type.name, single.name)
+        if (TlaOpaqueIndexSort.isOpaque(type)) {
+            // Locals / map values / `\E` may hold the empty sentinel; create-index uses bare CONSTANT.
+            TlaOpaqueIndexSort.valueDomain(type.name)
         } else {
-            val fields = TlaFieldProjection.get().fieldsFor(type)
-            if (fields.isEmpty()) {
-                "[dummy: {0}]"
+            val single = TlaFieldProjection.get().singletonField(type)
+            if (single != null) {
+                typeToTlaDomain(single.type, type.name, single.name)
             } else {
-                val rendered = fields.joinToString(", ") { f ->
-                    "${f.name}: ${typeToTlaDomain(f.type, type.name, f.name)}"
+                val fields = TlaFieldProjection.get().fieldsFor(type)
+                if (fields.isEmpty()) {
+                    "[dummy: {0}]"
+                } else {
+                    val rendered = fields.joinToString(", ") { f ->
+                        "${f.name}: ${typeToTlaDomain(f.type, type.name, f.name)}"
+                    }
+                    "[$rendered]"
                 }
-                "[$rendered]"
             }
         }
     }
@@ -4034,22 +4207,26 @@ private fun exprIsMapTyped(expr: ExprNode): Boolean = try {
     false
 }
 
-private fun tlaLengthOf(baseRendered: String, baseExpr: ExprNode): String =
-    when (try { baseExpr.getType() } catch (_: RuntimeException) { null }) {
-        // Lists emit as Int-> for Apalache; DOMAIN cardinality = length.
-        is ListType -> "Cardinality(DOMAIN $baseRendered)"
-        is StringType -> "Len($baseRendered)"
-        is SetType -> "Cardinality($baseRendered)"
-        is MapType -> "Cardinality(DOMAIN $baseRendered)"
-        is DomainType -> "Cardinality($baseRendered)"
+private fun tlaLengthOf(baseRendered: String, baseExpr: ExprNode): String {
+    val ty = try { baseExpr.getType() } catch (_: RuntimeException) { null }
+    return when {
+        ty is ListType -> "Cardinality(DOMAIN $baseRendered)"
+        ty is StringType -> "Len($baseRendered)"
+        ty is SetType -> "Cardinality($baseRendered)"
+        ty is MapType -> "Cardinality(DOMAIN $baseRendered)"
+        ty is DomainType -> "Cardinality($baseRendered)"
+        // Opaque index-sort record: CONSTANT set of atoms (same as DomainType).
+        ty is ObjClassType && TlaOpaqueIndexSort.isOpaque(ty) -> "Cardinality($baseRendered)"
         else -> "Cardinality(DOMAIN $baseRendered)"
     }
+}
 
 private fun tlaLengthOfType(baseRendered: String, type: Type?): String =
-    when (type) {
-        is SetType, is DomainType -> "Cardinality($baseRendered)"
-        is MapType -> "Cardinality(DOMAIN $baseRendered)"
-        is StringType -> "Len($baseRendered)"
+    when {
+        type is SetType || type is DomainType -> "Cardinality($baseRendered)"
+        type is ObjClassType && TlaOpaqueIndexSort.isOpaque(type) -> "Cardinality($baseRendered)"
+        type is MapType -> "Cardinality(DOMAIN $baseRendered)"
+        type is StringType -> "Len($baseRendered)"
         else -> "Cardinality(DOMAIN $baseRendered)"
     }
 
@@ -4912,6 +5089,10 @@ internal fun emitFieldVarProjectedRhs(
     if (rhsType is ObjClassType) {
         val single = TlaFieldProjection.get().singletonField(rhsType)
         if (single != null && single.name == kept) return rhs
+        // Opaque index-sort atoms: kept field is a projection VARIABLE, not a record select.
+        if (TlaOpaqueIndexSort.isOpaque(rhsType)) {
+            return emitUnwrappedFieldPath(rhs, rhsType, listOf(kept))
+        }
     }
     return "$rhs.$kept"
 }
@@ -4929,6 +5110,25 @@ internal fun emitUnwrappedFieldPath(
         } else {
             path
         }
+    // Opaque index-sort atoms: field access is a projection VARIABLE application.
+    if (type is ObjClassType && TlaOpaqueIndexSort.isOpaque(type) && afterFieldVar.isNotEmpty()) {
+        var acc = base
+        var ty: Type? = type
+        for (seg in afterFieldVar) {
+            val sort = (ty as? ObjClassType)?.takeIf { TlaOpaqueIndexSort.isOpaque(it) }
+            if (sort != null && sort.fields.any { it.name == seg }) {
+                acc = "${TlaOpaqueIndexSort.projectionName(sort.name, seg)}[$acc]"
+                ty = sort.fields.first { it.name == seg }.type
+            } else {
+                acc = "$acc.$seg"
+                ty = when (val r = ty?.let { resolveFieldPath(it, listOf(seg)) }) {
+                    is FieldPathResult.Resolved -> r.type
+                    else -> null
+                }
+            }
+        }
+        return acc
+    }
     val dropped = if (type != null) {
         TlaFieldProjection.get().dropUnwrappedPath(type, afterFieldVar)
     } else {
@@ -5341,14 +5541,30 @@ internal fun emitObjClassLiteralToTla(
     } catch (_: RuntimeException) {
         expr.className
     }
-    val fieldEntries = TlaFieldProjection.get().filterLiteralEntries(objName, expr.fieldEntries)
-    if (fieldEntries.isEmpty()) {
-        return "[dummy |-> 0]"
-    }
     val objType = try {
         expr.structType
     } catch (_: RuntimeException) {
         null
+    }
+    // Opaque index-sort: non-empty String field → atom label; empty/sentinel → outside-live atom.
+    if (objType is ObjClassType && TlaOpaqueIndexSort.isOpaque(objType)) {
+        val stringField = objType.fields.firstOrNull { it.type is StringType }?.name
+        val atomEntry = expr.fieldEntries.firstOrNull { (n, _) -> n == stringField }
+            ?: expr.fieldEntries.firstOrNull()
+        if (atomEntry != null) {
+            val v = atomEntry.second
+            val isEmptyAtom = v is LiteralValueExprNode && (
+                v.literalText().isEmpty() || v.literalText() == "-1"
+            )
+            if (!isEmptyAtom) {
+                return render(v, linePrefix)
+            }
+        }
+        return TlaOpaqueIndexSort.sentinelTla(objType.name)
+    }
+    val fieldEntries = TlaFieldProjection.get().filterLiteralEntries(objName, expr.fieldEntries)
+    if (fieldEntries.isEmpty()) {
+        return "[dummy |-> 0]"
     }
     if (fieldEntries.size == 1 && objType is ObjClassType &&
         TlaFieldProjection.get().singletonField(objType) != null
@@ -5447,8 +5663,10 @@ internal fun exprToTla(
             when {
                 sym in symbolOverrides -> symbolOverrides.getValue(sym)
                 sym in argNames -> sym
-                sym in bareStateVars && leafCtx.values.toSet().size == 1 -> {
-                    stateRead(leafCtx.values.first(), sym)
+                sym in bareStateVars -> {
+                    val owners = leafCtx.values.toSet().filter { sym in it.globalConstVars }
+                    val owner = owners.singleOrNull() ?: leafCtx.values.toSet().singleOrNull()
+                    if (owner != null) stateRead(owner, sym) else sym
                 }
                 else -> {
                     val plan = TlaFluentEmit.get()
@@ -5488,36 +5706,25 @@ internal fun exprToTla(
             )
         }
         is ListLiteralExprNode -> {
+            // Emit TLA sequences (`<<…>>`); `[1 |-> …]` is not valid (fields must be ids).
             if (expr.elements.isEmpty()) {
-                val elemDefault = try {
-                    when (val ty = expr.getType()) {
-                        is ListType -> defaultTlaValue(ty.elementType)
-                        else -> "0"
-                    }
-                } catch (_: RuntimeException) {
-                    "0"
-                }
-                "[__j \\in {} |-> $elemDefault]"
+                "<<>>"
             } else if (isMultiLineExpr(expr)) {
                 val bodyIndent = exprBodyIndent(linePrefix)
                 val closeIndent = exprKeywordIndent(linePrefix)
                 buildString {
-                    append("[\n")
+                    append("<<\n")
                     expr.elements.forEachIndexed { idx, el ->
                         append(bodyIndent)
-                        append("${idx + 1} |-> ")
                         append(rec(el, bodyIndent, PREC_BOTTOM))
                         if (idx < expr.elements.lastIndex) append(",")
                         append("\n")
                     }
                     append(closeIndent)
-                    append("]")
+                    append(">>")
                 }
             } else {
-                val pairs = expr.elements.mapIndexed { idx, el ->
-                    "${idx + 1} |-> ${rec(el)}"
-                }.joinToString(", ")
-                "[$pairs]"
+                "<<${expr.elements.joinToString(", ") { rec(it) }}>>"
             }
         }
         is LetExprNode -> {
@@ -5572,12 +5779,16 @@ internal fun exprToTla(
                 val baseRendered = when {
                     base in symbolOverrides -> symbolOverrides.getValue(base)
                     base in argNames -> base
-                    base in bareStateVars && leafCtx.values.toSet().size == 1 -> {
-                        stateRead(leafCtx.values.first(), base)
+                    base in bareStateVars -> {
+                        val owners = leafCtx.values.toSet().filter { base in it.globalConstVars }
+                        val owner = owners.singleOrNull() ?: leafCtx.values.toSet().singleOrNull()
+                        if (owner != null) stateRead(owner, base) else base
                     }
                     else -> base
                 }
-                return tlaLengthOfType(baseRendered, TlaSymbolTypes.get()[base])
+                val ty = TlaSymbolTypes.get()[base]
+                    ?: TlaOpaqueIndexSort.sorts()[base]
+                return tlaLengthOfType(baseRendered, ty)
             }
             if (expr.fieldPath.isNotEmpty()) {
                 val varName = expr.fieldPath[0]
@@ -5605,7 +5816,13 @@ internal fun exprToTla(
                 leafVarName
             } else {
                 // Object field on arg or state var: base.field… (with indexing when needed)
-                val stateLeaf = leafCtx.values.singleOrNull()
+                val stateLeaf = when {
+                    base in bareStateVars ->
+                        leafCtx.values.toSet().filter { base in it.globalConstVars }
+                            .singleOrNull()
+                            ?: leafCtx.values.toSet().singleOrNull()
+                    else -> leafCtx.values.singleOrNull()
+                }
                 val baseRendered = when {
                     base in argNames -> base
                     base in bareStateVars && stateLeaf != null -> {
@@ -5992,6 +6209,7 @@ internal fun exprToTla(
             val q = if (universal) "\\A" else "\\E"
             val binders = mutableListOf<Pair<String, String>>()
             val renames = mutableListOf<Pair<String, String>>()
+            val binderTypes = linkedMapOf<String, Type>()
             var cur: ExprNode = expr
             var multiLine = false
             while (cur is QuantifiedExprNode && cur.isUniversal() == universal) {
@@ -6004,6 +6222,8 @@ internal fun exprToTla(
                 val binder = if (origBinder in reservedNames) "q_$origBinder" else origBinder
                 binders += binder to domain
                 if (binder != origBinder) renames += origBinder to binder
+                // So `n.url` on an opaque index-sort binder becomes Node_url[n].
+                TlaOpaqueIndexSort.sorts()[domain]?.let { binderTypes[binder] = it }
                 cur = cur.quantifiedBody()
             }
             fun fixBinders(s: String): String {
@@ -6013,16 +6233,20 @@ internal fun exprToTla(
                 }
                 return out
             }
+            fun emitBody(prefix: String): String =
+                TlaSymbolTypes.withExtra(binderTypes) {
+                    fixBinders(rec(cur, prefix, PREC_BOTTOM))
+                }
             if (multiLine) {
                 val groups = groupConsecutiveSameDomain(binders)
                 val bodyPrefix = linePrefix + "  ".repeat(groups.size)
-                val body = fixBinders(rec(cur, bodyPrefix, PREC_BOTTOM))
+                val body = emitBody(bodyPrefix)
                 wrapTlaQuantifier(q, binders, body, multiLine = true, linePrefix = linePrefix)
             } else {
                 val header = groupConsecutiveSameDomain(binders).joinToString(" ") { (names, domain) ->
                     "$q ${names.joinToString(", ")} \\in $domain :"
                 }
-                val body = fixBinders(rec(cur, "$linePrefix$header ", PREC_BOTTOM))
+                val body = emitBody("$linePrefix$header ")
                 "$header $body"
             }
         }
