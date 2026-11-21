@@ -1,18 +1,15 @@
 import julay.funlib.length
 import julay.funlib.listOf
 import julay.funlib.setOf
-import node.cluster_info.ClusterInfo
-import node.lib.NodeInfo
-import node.lib.emptyNodeInfo
+import node.lib.Node
+import node.lib.emptyNode
 import node.lib.PutResult
 import node.lib.GetResult
 import node.lib.OwnerEntry
 import node.lib.Key
 import node.lib.Value
 
-export proc ShardLogic := PathLogic || ClusterInfo
-
-proc PathLogic := (Put || BroadcastOwnership || RecvBroadcastOwnership)
+export proc ShardLogic := (Put || BroadcastOwnership || RecvBroadcastOwnership)
     || Get || Owners
 
 
@@ -20,19 +17,19 @@ proc Put {
     const putKey : Key
     const putVal : Value
     var step : String
-    var me : NodeInfo
-    var keyOwner : NodeInfo
+    var me : Node
+    var keyOwner : Node
 
     constructor put(key : Key, val : Value) {
         transit:
             putKey := key
             putVal := val
             step := "getMyInfo"
-            me := emptyNodeInfo()
-            keyOwner := emptyNodeInfo()
+            me := emptyNode()
+            keyOwner := emptyNode()
     }
 
-    client transition getMyInfo(myInfo : NodeInfo) {
+    client transition getMyInfo(myInfo : Node) {
         guard:
             step = "getMyInfo"
         transit:
@@ -40,17 +37,27 @@ proc Put {
             step := "ownerOf"
     }
 
-    client transition ownerOf(key : Key, owner : NodeInfo) {
+    client transition ownerOf(key : Key, owner : Node) {
         guard:
             & step = "ownerOf"
             & key = putKey
         transit:
-            let meIsOwner : Boolean := (owner = emptyNodeInfo() | owner = me)
+            let meIsOwner : Boolean := (owner = emptyNode() | owner = me)
             keyOwner := if (meIsOwner) { me } else { owner }
-            step := if (meIsOwner) { "broadcast" } else { "redirect" }
+            step := if (meIsOwner) { "putKV" } else { "redirect" }
     }
 
-    transition broadcastOwnership(key : Key, myInfo : NodeInfo) {
+    client transition putKV(key : Key, val : Value, owner : Node) {
+        guard:
+            & step = "putKV"
+            & key = putKey
+            & val = putVal
+            & owner = keyOwner
+        transit:
+            step := "broadcast"
+    }
+
+    transition broadcastOwnership(key : Key, myInfo : Node) {
         guard:
             & step = "broadcast"
             & key = putKey
@@ -59,29 +66,17 @@ proc Put {
             step := "midBroadcast"
     }
 
-    transition broadcastDone(resolvedOwner : NodeInfo) {
+    transition broadcastDone(resolvedOwner : Node) {
         guard:
             step = "midBroadcast"
         transit:
-            keyOwner := resolvedOwner 
-            step := if (keyOwner = me) {
-                "put"
+            keyOwner := resolvedOwner
+            step := if (resolvedOwner = me) {
+                "done"
             } else {
-                // if another node ended up owning the key then don't add it
-                // to the store; instead, redirect to that node and wait for
-                // their broadcast for adding the ownership info to the store.
+                // lost ownership during broadcast; redirect to the known owner
                 "redirect"
             }
-    }
-
-    client transition putKV(key : Key, val : Value, owner : NodeInfo) {
-        guard:
-            & step = "put"
-            & key = putKey
-            & val = putVal
-            & owner = keyOwner
-        transit:
-            step := "done"
     }
 
     return putDone(result : PutResult) {
@@ -98,20 +93,20 @@ proc Put {
 proc Get {
     const getKey : Key
     var step : String
-    var me : NodeInfo
-    var keyOwner : NodeInfo
+    var me : Node
+    var keyOwner : Node
     var value : Value
 
     constructor get(key : Key) {
         transit:
             getKey := key
             step := "getMyInfo"
-            me := emptyNodeInfo()
-            keyOwner := emptyNodeInfo()
+            me := emptyNode()
+            keyOwner := emptyNode()
             value := ""
     }
 
-    client transition getMyInfo(myInfo : NodeInfo) {
+    client transition getMyInfo(myInfo : Node) {
         guard:
             step = "getMyInfo"
         transit:
@@ -119,25 +114,38 @@ proc Get {
             step := "ownerOf"
     }
 
-    client transition ownerOf(key : Key, owner : NodeInfo) {
+    client transition ownerOf(key : Key, owner : Node) {
         guard:
             & step = "ownerOf"
             & key = getKey
         transit:
             keyOwner := owner
-            step := if (owner = emptyNodeInfo()) {
+            step := if (owner = emptyNode()) {
                 "missing"
             } else if (owner = me) {
-                "getvalue"
+                "keyCommitted"
             } else {
                 "redirect"
+            }
+    }
+
+    client transition keyCommitted(key : Key, isCommitted : Boolean) {
+        guard:
+            & step = "keyCommitted"
+            & key = getKey
+        transit:
+            step := if (isCommitted) {
+                "getValue"
+            } else {
+                // do not return an uncommitted value to the client
+                "missing"
             }
     }
 
     // look up the value of the key if this node owns it.
     client transition getValue(getKey : Key, getVal : Value) {
         guard:
-            & step = "getvalue"
+            & step = "getValue"
             & getKey = this.getKey
         transit:
             value := getVal
@@ -198,21 +206,21 @@ proc Owners {
  */
 proc BroadcastOwnership {
     const bcKey : Key
-    const me : NodeInfo
+    const me : Node
     var step : String
     var clusterSize : Int
     var peerIdx : Int
-    var peerInfo : NodeInfo
-    var knownOwner : NodeInfo
+    var peerInfo : Node
+    var knownOwner : Node
 
-    constructor broadcastOwnership(key : Key, myInfo : NodeInfo) {
+    constructor broadcastOwnership(key : Key, myInfo : Node) {
         transit:
             bcKey := key
             me := myInfo
             step := "getClusterSize"
             clusterSize := 2
             peerIdx := 1
-            peerInfo := emptyNodeInfo()
+            peerInfo := emptyNode()
             knownOwner := myInfo
     }
 
@@ -224,21 +232,47 @@ proc BroadcastOwnership {
             step := "peerAt"
     }
 
-    client transition peerAt(idx : Int, peer : NodeInfo) {
+    client transition peerAt(idx : Int, peer : Node) {
         guard:
             & step = "peerAt"
+            & knownOwner = me
             & peerIdx <= clusterSize
             & idx = peerIdx
         transit:
             peerInfo := peer
-            step := if (peer = me | peer = emptyNodeInfo()) {
+            step := if (peer = me | peer = emptyNode()) {
                 "nextPeer"
             } else {
-                "broadcast"
+                "keyInStore"
             }
     }
 
-    transition broadcastOwnershipToPeer(peer : NodeInfo, key : Key, myInfo : NodeInfo) {
+    // in between each peer broadcast, check to make sure that the key is
+    // still in the store (uncommitted); if it isn't, it means that another
+    // node claimed ownership over the key. if we lose ownership, then we
+    // redirect the client to the new owner.
+    client transition keyInStore(key : Key, present : Boolean) {
+        guard:
+            & step = "keyInStore"
+            & key = bcKey
+        transit:
+            step := if (present) {
+                "broadcast"
+            } else {
+                "ownerOf"
+            }
+    }
+
+    client transition ownerOf(key : Key, owner : Node) {
+        guard:
+            & step = "ownerOf"
+            & key = bcKey
+        transit:
+            knownOwner := owner
+            step := "done"
+    }
+
+    transition broadcastOwnershipToPeer(peer : Node, key : Key, myInfo : Node) {
         guard:
             & step = "broadcast"
             & peer = peerInfo
@@ -248,7 +282,7 @@ proc BroadcastOwnership {
             step := "midBroadcast"
     }
 
-    transition doneBroadcastOwnershipToPeer(owner : NodeInfo) {
+    transition doneBroadcastOwnershipToPeer(owner : Node) {
         guard:
             & step = "midBroadcast"
         transit:
@@ -258,50 +292,112 @@ proc BroadcastOwnership {
 
     internal transition nextPeer() {
         guard:
-            step = "nextPeer"
+            & step = "nextPeer"
+            & knownOwner = me
         transit:
-            peerIdx := if (knownOwner = me) {
-                peerIdx + 1
-            } else {
-                // if we find a different owner of the same key then abort the broadcast
-                clusterSize + 1
-            }
+            peerIdx := peerIdx + 1
             step := "peerAt"
     }
 
-    return broadcastDone(resolvedOwner : NodeInfo) {
+    client transition commitKey(key : Key) {
         guard:
-            & resolvedOwner = knownOwner
+            // the first two guards mean that all peers agree that the broadcast
+            // is complete and we're the owner of the key
+            & step = "peerAt"
             & peerIdx > clusterSize
+            & knownOwner = me
+            & key = bcKey
+        transit:
+            step := "done"
+    }
+
+    // if at any point we realize that the knownOwner is not "me" then drop
+    // the key and finish broadcasting.
+    client transition dropKey(key : Key) {
+        guard:
+            & step ~= "done"
+            & knownOwner ~= me
+            & key = bcKey
+        transit:
+            step := "done"
+    }
+
+    return broadcastDone(resolvedOwner : Node) {
+        guard:
+            & step = "done"
+            & resolvedOwner = knownOwner
     }
 }
 
-// TODO implement
-// 2. Add committed to store for keys and return whether the key exists
 proc RecvBroadcastOwnership {
     const bcKey : Key
-    const bcOwner : NodeInfo
+    const bcOwner : Node
     var state : String
+    var localOwner : Node
+    var replyOwner : Node
 
-    constructor recvBroadcastOwnership(key : Key, sender : NodeInfo) {
+    constructor recvBroadcastOwnership(key : Key, sender : Node) {
         transit:
             bcKey := key
             bcOwner := sender
-            state := "addOwnedKey"
+            localOwner := emptyNode()
+            replyOwner := sender
+            state := "keyInStore"
     }
 
-    client transition addOwnedKey(key : Key, owner : NodeInfo) {
+    client transition keyInStore(key : Key, present : Boolean) {
+        guard:
+            & state = "keyInStore"
+            & key = bcKey
+        transit:
+            state := if (present) {
+                "ownerOf"
+            } else {
+                "addOwnedKey"
+            }
+    }
+
+    client transition ownerOf(key : Key, owner : Node) {
+        guard:
+            & state = "ownerOf"
+            & key = bcKey
+        transit:
+            localOwner := owner
+            state := "keyCommitted"
+    }
+
+    client transition keyCommitted(key : Key, isCommitted : Boolean) {
+        guard:
+            & state = "keyCommitted"
+            & key = bcKey
+        transit:
+            // committed keys always keep the local owner; else higher id wins
+            let localWins : Boolean := isCommitted | (localOwner.id >= bcOwner.id)
+            replyOwner := if (localWins) { localOwner } else { bcOwner }
+            state := if (localWins) { "done" } else { "dropKey" }
+    }
+
+    client transition addOwnedKey(key : Key, owner : Node) {
         guard:
             & state = "addOwnedKey"
             & key = bcKey
             & owner = bcOwner
         transit:
+            replyOwner := bcOwner
             state := "done"
     }
 
-    return doneRecvBroadcastOwnership(owner : NodeInfo) {
+    client transition dropKey(key : Key) {
+        guard:
+            & state = "dropKey"
+            & key = bcKey
+        transit:
+            state := "done"
+    }
+
+    return doneRecvBroadcastOwnership(owner : Node) {
         guard:
             & state = "done"
-            & owner = bcOwner
+            & owner = replyOwner
     }
 }

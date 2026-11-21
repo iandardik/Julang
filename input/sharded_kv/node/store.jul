@@ -1,38 +1,50 @@
 import julay.funlib.mapOf
-import node.lib.NodeInfo
+import julay.funlib.setOf
+import node.lib.Node
 import node.lib.OwnerEntry
-import node.lib.emptyNodeInfo
+import node.lib.emptyNode
 import node.lib.Key
 import node.lib.Value
 
+/* KV Store for a node. putKV adds a key uncommitted and must be
+ * committed separately with a call to commitKey.
+ */
 export static proc Store {
     var store : Map<Key, Value>
-    var owners : Map<Key, NodeInfo>
+    var owners : Map<Key, Node>
+    var committed : Set<Key>
 
     constructor initially(args : List<String>) {
         transit:
             store := mapOf()
             owners := mapOf()
+            committed := setOf()
     }
 
-    service transition ownerOf(key : Key, owner : NodeInfo) {
-        guard:
-            owner = if (key in owners) {
-                owners[key]
-            } else {
-                emptyNodeInfo()
-            }
-    }
+    /* getters */
 
     service transition getValue(getKey : Key, getVal : Value) {
         guard:
             getVal = store[getKey]
     }
 
-    service transition putKV(key : Key, val : Value, owner : NodeInfo) {
-        transit:
-            store[key] := val
-            owners[key] := owner
+    service transition ownerOf(key : Key, owner : Node) {
+        guard:
+            owner = if (key in owners) {
+                owners[key]
+            } else {
+                emptyNode()
+            }
+    }
+
+    service transition keyInStore(key : Key, present : Boolean) {
+        guard:
+            present = (key in store)
+    }
+
+    service transition keyCommitted(key : Key, isCommitted : Boolean) {
+        guard:
+            isCommitted = (key in committed)
     }
 
     service transition getAllOwners(allOwners : List<OwnerEntry>) {
@@ -43,9 +55,28 @@ export static proc Store {
             })
     }
 
-    service transition addOwnedKey(key : Key, owner : NodeInfo) {
+    /* setters / API for changing state */
+
+    service transition putKV(key : Key, val : Value, owner : Node) {
+        transit:
+            store[key] := val
+            owners[key] := owner
+    }
+
+    service transition addOwnedKey(key : Key, owner : Node) {
         transit:
             owners[key] := owner
     }
-}
 
+    service transition commitKey(key : Key) {
+        transit:
+            committed := committed + setOf(key)
+    }
+
+    service transition dropKey(key : Key) {
+        transit:
+            store := store.remove(key)
+            owners := owners.remove(key)
+            committed := committed - setOf(key)
+    }
+}

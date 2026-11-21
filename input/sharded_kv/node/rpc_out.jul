@@ -1,7 +1,7 @@
 import julay.funlib.doHttpRequest
 import julay.funlib.parseInt
 import julay.funlib.split
-import node.lib.NodeInfo
+import node.lib.Node
 import node.lib.fieldValue
 import node.lib.Key
 
@@ -18,9 +18,9 @@ proc SendOwnershipBroadcast {
     const dest : String
     const body : String
     var sent : Boolean
-    var knownOwner : NodeInfo
+    var knownOwner : Node
 
-    constructor broadcastOwnershipToPeer(peer : NodeInfo, key : Key, myInfo : NodeInfo) {
+    constructor broadcastOwnershipToPeer(peer : Node, key : Key, myInfo : Node) {
         transit:
             dest := peer.url
             body := "k=" + key + "|id=" + (myInfo.id + "") + "|url=" + myInfo.url
@@ -39,7 +39,7 @@ proc SendOwnershipBroadcast {
             })
             sent := resp.code >= 0
             knownOwner := if (sent) {
-                NodeInfo {
+                Node {
                     id := parseInt(ownershipBodyField(resp.body, 1)),
                     url := ownershipBodyField(resp.body, 2)
                 }
@@ -48,7 +48,7 @@ proc SendOwnershipBroadcast {
             }
     }
 
-    return doneBroadcastOwnershipToPeer(owner : NodeInfo) {
+    return doneBroadcastOwnershipToPeer(owner : Node) {
         guard:
             & sent
             & owner = knownOwner

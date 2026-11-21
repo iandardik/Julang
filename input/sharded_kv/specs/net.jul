@@ -1,21 +1,19 @@
 import julay.funlib.setOf
 import node.lib.Key
 import node.lib.Value
-import node.lib.NodeInfo
-
-export type NodeSet := String
+import node.lib.Node
 
 type OwnershipReq {
-    src : NodeSet
-    dest : NodeSet
+    src : Node
+    dest : Node
     k : Key
-    from : NodeInfo
+    from : Node
 }
 
 type OwnershipReply {
-    src : NodeSet
-    dest : NodeSet
-    owner : NodeInfo
+    src : Node
+    dest : Node
+    owner : Node
 }
 
 // assume a perfect network for intra-cluster messages
@@ -26,28 +24,28 @@ static spec OwnershipReqs {
 
     constructor initially(args : List<String>) {}
 
-    transition broadcastOwnershipToPeer(peer : NodeInfo, key : Key, myInfo : NodeInfo) also (n : NodeSet) {
-        guard: myInfo.url = n
+    transition broadcastOwnershipToPeer(peer : Node, key : Key, myInfo : Node) also (n : Node) {
+        guard: myInfo = n
         transit:
             ownershipReqs := ownershipReqs + setOf(OwnershipReq {
                 src := n,
-                dest := peer.url,
+                dest := peer,
                 k := key,
                 from := myInfo
             })
     }
 
-    transition recvBroadcastOwnership(key : Key, sender : NodeInfo) also (n : NodeSet) {
+    transition recvBroadcastOwnership(key : Key, sender : Node) also (n : Node) {
         guard:
             OwnershipReq {
-                src := sender.url,
+                src := sender,
                 dest := n,
                 k := key,
                 from := sender
             } in ownershipReqs
         transit:
             ownershipReqs := ownershipReqs - setOf(OwnershipReq {
-                src := sender.url,
+                src := sender,
                 dest := n,
                 k := key,
                 from := sender
@@ -60,7 +58,7 @@ static spec OwnershipReplies {
 
     constructor initially(args : List<String>) {}
 
-    transition doneRecvBroadcastOwnership(owner : NodeInfo) also (n : NodeSet, dest : NodeSet) {
+    transition doneRecvBroadcastOwnership(owner : Node) also (n : Node, dest : Node) {
         transit:
             ownershipReplies := ownershipReplies + setOf(OwnershipReply {
                 src := n,
@@ -69,7 +67,7 @@ static spec OwnershipReplies {
             })
     }
 
-    transition doneBroadcastOwnershipToPeer(owner : NodeInfo) also (n : NodeSet, src : NodeSet) {
+    transition doneBroadcastOwnershipToPeer(owner : Node) also (n : Node, src : Node) {
         guard:
             OwnershipReply {
                 src := src,

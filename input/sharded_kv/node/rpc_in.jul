@@ -6,7 +6,7 @@ import julay.funlib.length
 import julay.funlib.setOf
 import node.lib.fieldValue
 import node.lib.parseCfg
-import node.lib.NodeInfo
+import node.lib.Node
 import node.lib.PutResult
 import node.lib.GetResult
 import node.lib.OwnerEntry
@@ -61,12 +61,12 @@ proc HandleRpc {
     }
 
     /* body: k=<k>|id=<id>|url=<url> — matches RpcOut broadcastOwnershipToPeer */
-    transition recvBroadcastOwnership(key : Key, sender : NodeInfo) {
+    transition recvBroadcastOwnership(key : Key, sender : Node) {
         guard:
             & step = "route"
             & path = "rpc/ownership"
             & key = bodyField(body, 1)
-            & sender = NodeInfo {
+            & sender = Node {
                 id := parseInt(bodyField(body, 2)),
                 url := bodyField(body, 3)
             }
@@ -122,7 +122,7 @@ proc HandleRpc {
             respCode := 200
     }
 
-    transition doneRecvBroadcastOwnership(owner : NodeInfo) {
+    transition doneRecvBroadcastOwnership(owner : Node) {
         guard:
             step = "wait"
         transit:
