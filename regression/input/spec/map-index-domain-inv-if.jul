@@ -1,0 +1,36 @@
+/*
+ * Invariant under if (k in store) { store[k] = v } must not gain a redundant
+ * outer k in store on the then comparison (membership already guards the read).
+ */
+import julay.funlib.mapOf
+
+type N
+
+static proc Box {
+    var store : Map<String, String>
+
+    constructor initially(args : List<String>) {
+        transit:
+            store := mapOf()
+    }
+
+    internal transition put(k : String, v : String) {
+        guard:
+            true
+        transit:
+            store[k] := v
+    }
+}
+
+invariant GuardedRead := forall n : N, forall k : String, forall v : String,
+    if (k in Box[n].store) {
+        Box[n].store[k] = v
+    } else {
+        true
+    }
+
+spec MapIndexDomainInvIf := Box[n : N] {
+    N := {"a"}
+} |= GuardedRead
+
+compile MapIndexDomainInvIf

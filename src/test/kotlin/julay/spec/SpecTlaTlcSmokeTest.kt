@@ -2259,6 +2259,81 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun invertedIfMapIndexDeterminedNoActionDomainGuard() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-inverted-if-map").toFile()
+        try {
+            val source = File("regression/input/spec/map-index-inverted-if.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            val emit = compileSpecEmit(source, "InvertedIfMapIndex")
+            val ownerOf = Regex(
+                """^ownerOf\w*\([^\n]*\) ==([\s\S]*?)(?=^\w+\(|^Next ==)""",
+                setOf(RegexOption.MULTILINE),
+            ).find(emit.tlaText)?.groupValues?.get(1)
+                ?: error("missing ownerOf;\n${emit.tlaText}")
+            assertFalse(
+                Regex("""/\\ key \\in DOMAIN owners""").containsMatchIn(ownerOf),
+                "inverted if else owners[key] must not get action-level DOMAIN;\n$ownerOf",
+            )
+            assertTrue(
+                ownerOf.contains("IF") && ownerOf.contains("DOMAIN owners"),
+                "LET should still protect the read with IF … DOMAIN;\n$ownerOf",
+            )
+            File(work, "InvertedIfMapIndex.tla").writeText(emit.tlaText)
+            File(work, "InvertedIfMapIndex.cfg").writeText(emit.cfgText)
+            assertTlcHealthyStart(work, "InvertedIfMapIndex")
+        } finally {
+            work.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun whenGuardMapIndexDeterminedNoActionDomainGuard() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-when-map").toFile()
+        try {
+            val source = File("regression/input/spec/map-index-when-guard.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            val emit = compileSpecEmit(source, "WhenGuardMapIndex")
+            val ownerOf = Regex(
+                """^ownerOf\w*\([^\n]*\) ==([\s\S]*?)(?=^\w+\(|^Next ==)""",
+                setOf(RegexOption.MULTILINE),
+            ).find(emit.tlaText)?.groupValues?.get(1)
+                ?: error("missing ownerOf;\n${emit.tlaText}")
+            assertFalse(
+                Regex("""/\\ key \\in DOMAIN owners""").containsMatchIn(ownerOf),
+                "when (key in owners) -> owners[key] must not get action-level DOMAIN;\n$ownerOf",
+            )
+            File(work, "WhenGuardMapIndex.tla").writeText(emit.tlaText)
+            File(work, "WhenGuardMapIndex.cfg").writeText(emit.cfgText)
+            assertTlcHealthyStart(work, "WhenGuardMapIndex")
+        } finally {
+            work.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun mapIndexInvariantUnderIfDoesNotDuplicateOuterDomain() {
+        val source = File("regression/input/spec/map-index-domain-inv-if.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        val (tlaText, _) = compileSpecTla(source, "MapIndexDomainInvIf")
+        val inv = tlaText.substringAfter("GuardedRead ==").substringBefore("\n====")
+        // Then-arm comparison must not be wrapped as (k ∈ DOMAIN & store[k] = v) under an
+        // IF that already tests k ∈ DOMAIN — look for the redundant pattern.
+        assertFalse(
+            Regex(
+                """IF k \\in DOMAIN store\[n\].*THEN\s*\(?\s*k \\in DOMAIN store\[n\]\s*/\\""",
+                setOf(RegexOption.DOT_MATCHES_ALL),
+            ).containsMatchIn(inv),
+            "if (k in store) then store[k]=v must not re-conjoin k in store on the then arm;\n$inv",
+        )
+        assertTrue(
+            inv.contains("store[n][k] = v") || inv.contains("store[n][k]=v"),
+            "expected store read in GuardedRead;\n$inv",
+        )
+    }
+
+    @Test
     fun hubClientsParentChildDoNotFuseOwnerOf() {
         assumeTlcPresent()
         val work = Files.createTempDirectory("julay-hub-clients-pc").toFile()
@@ -2301,6 +2376,52 @@ class SpecTlaTlcSmokeTest {
             File(work, "HubClients.tla").writeText(tlaText)
             File(work, "HubClients.cfg").writeText(emit.cfgText)
             assertTlcHealthyStart(work, "HubClients")
+        } finally {
+            work.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun hubOrdinaryParentChildDoNotFuseLookup() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-hub-ordinary-pc").toFile()
+        try {
+            val source = File("regression/input/spec/hub-ordinary-parent-child.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            val emit = compileSpecEmit(source, "HubOrdinary")
+            val tlaText = emit.tlaText
+            assertTrue(
+                tlaText.contains("lookup_Store_Parent") && tlaText.contains("lookup_Store_Child"),
+                "expected ordinary hub-paired lookup_Store_Parent and lookup_Store_Child;\n$tlaText",
+            )
+            assertFalse(
+                Regex("""^lookup\(""", RegexOption.MULTILINE).containsMatchIn(tlaText) ||
+                    Regex("""^lookup_Parent_Child\(""", RegexOption.MULTILINE).containsMatchIn(tlaText) ||
+                    Regex("""^lookup_Child_Parent\(""", RegexOption.MULTILINE).containsMatchIn(tlaText),
+                "lookup must not fuse Parent+Child peers of an ordinary hub;\n$tlaText",
+            )
+            fun actionBody(name: String): String {
+                val m = Regex(
+                    """^$name\([^\n]*\) ==([\s\S]*?)(?=^\w+\(|^Next ==)""",
+                    setOf(RegexOption.MULTILINE),
+                ).find(tlaText) ?: error("missing def $name;\n$tlaText")
+                return m.groupValues[1]
+            }
+            val parentBody = actionBody("lookup_Store_Parent")
+            val childBody = actionBody("lookup_Store_Child")
+            assertTrue(
+                parentBody.contains("/\\ Parent_constructed") &&
+                    !parentBody.contains("/\\ Child_constructed"),
+                "Store↔Parent lookup must enable on Parent only;\n$parentBody",
+            )
+            assertTrue(
+                childBody.contains("/\\ Child_constructed") &&
+                    !childBody.contains("/\\ Parent_constructed"),
+                "Store↔Child lookup must enable on Child only;\n$childBody",
+            )
+            File(work, "HubOrdinary.tla").writeText(tlaText)
+            File(work, "HubOrdinary.cfg").writeText(emit.cfgText)
+            assertTlcHealthyStart(work, "HubOrdinary")
         } finally {
             work.deleteRecursively()
         }

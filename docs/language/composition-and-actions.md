@@ -117,7 +117,7 @@ For ordinary (non-`service`/`client`, non-`internal`, non-`timer`) multi-class o
 
 Illegal (except parent↔child): dynamic↔dynamic only, three or more statics, or two-or-more statics plus a dynamic. Parent↔child ordinary sync is the one allowed dynamic↔dynamic case — see [Parent/child inference](children.md).
 
-**`service` / `client`** pairs skip these ordinary-shape checks: the service is the hub; any number of clients may sync with it (never with each other). Prefer tagging static hub APIs as `service` and callers as `client` when the hub must stay in the external alphabet (multiple handlers, printers, nested assemblies). In TLA+, each client is paired with the service alone — including when two clients are parent/child of each other (matches Go hub channels).
+**`service` / `client`** pairs skip these ordinary-shape checks: the service is the hub; any number of clients may sync with it (never with each other). Prefer tagging static hub APIs as `service` and callers as `client` when the hub must stay in the external alphabet (multiple handlers, printers, nested assemblies). In TLA+, each peer is paired with the unique hub alone — for both `service`/`client` and ordinary static-hub shapes — including when two peers are parent/child of each other (matches Go hub channels). Parent↔child fusion is never used for hub APIs.
 
 `static proc` classes may appear **at most once** in a composition. Only dynamic procs may be spawned via non-`initially` constructors.
 

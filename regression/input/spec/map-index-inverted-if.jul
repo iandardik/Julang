@@ -1,0 +1,58 @@
+/*
+ * Inverted if (~(key in owners)) else owners[key] must not get an action-level
+ * DOMAIN enabling guard (else arm is the membership-true case).
+ */
+import julay.funlib.mapOf
+
+type Key := String
+
+static proc Store {
+    var owners : Map<Key, String> := mapOf()
+
+    constructor initially(args : List<String>) {}
+
+    service transition ownerOf(key : Key, owner : String) {
+        guard:
+            owner = if (~(key in owners)) {
+                ""
+            } else {
+                owners[key]
+            }
+    }
+}
+
+proc Put {
+    var step : String
+    var putKey : Key
+    var keyOwner : String
+
+    constructor start(k : Key) {
+        transit:
+            putKey := k
+            keyOwner := ""
+            step := "ownerOf"
+    }
+
+    client transition ownerOf(key : Key, owner : String) {
+        guard:
+            & step = "ownerOf"
+            & key = putKey
+        transit:
+            keyOwner := owner
+            step := "done"
+    }
+
+    internal return finish() {
+        guard: step = "done"
+    }
+}
+
+invariant Inv := true
+
+spec InvertedIfMapIndex := Store || Put |= Inv {
+    Key := {"k1"}
+    DynProc := {"dp1"}
+    unsynced start
+}
+
+compile InvertedIfMapIndex

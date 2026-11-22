@@ -1,0 +1,86 @@
+/*
+ * Ordinary (untagged) static hub + parent/child peers: each peer syncs with the
+ * hub alone — never parent↔child fused — in TLA (composition hub shape).
+ */
+import julay.funlib.mapOf
+
+type Key := String
+
+static proc Store {
+    var owners : Map<Key, String> := mapOf()
+
+    constructor initially(args : List<String>) {}
+
+    transition lookup(key : Key, owner : String) {
+        guard:
+            owner = if (key in owners) {
+                owners[key]
+            } else {
+                ""
+            }
+    }
+}
+
+proc Parent {
+    var step : String
+    var putKey : Key
+
+    constructor start(k : Key) {
+        transit:
+            putKey := k
+            step := "lookup"
+    }
+
+    transition lookup(key : Key, owner : String) {
+        guard:
+            & step = "lookup"
+            & key = putKey
+        transit:
+            step := "spawn"
+    }
+
+    transition spawnChild(k : Key) {
+        guard:
+            & step = "spawn"
+            & k = putKey
+        transit:
+            step := "done"
+    }
+
+    internal return finish() {
+        guard: step = "done"
+    }
+}
+
+proc Child {
+    const bcKey : Key
+    var step : String
+
+    constructor spawnChild(k : Key) {
+        transit:
+            bcKey := k
+            step := "lookup"
+    }
+
+    transition lookup(key : Key, owner : String) {
+        guard:
+            & step = "lookup"
+            & key = bcKey
+        transit:
+            step := "done"
+    }
+
+    internal return childDone() {
+        guard: step = "done"
+    }
+}
+
+invariant Inv := true
+
+spec HubOrdinary := Store || (Parent || Child) |= Inv {
+    Key := {"k1"}
+    DynProc := {"dp1"}
+    unsynced start
+}
+
+compile HubOrdinary

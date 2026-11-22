@@ -1341,14 +1341,22 @@ private fun offerIsStatic(offer: TlaActionOffer, pclasses: Map<String, ProcClass
  * Parent↔child pairs for one action name: each `B<A>` child offer (constructor or sync)
  * with each syncable offer of an `A` occurrence. Null when no child meets its parent here.
  *
- * Service/client hubs are excluded: clients sync only with the service (never with each
- * other or with a parent merely because of `childof`). Matches Go hub-channel semantics.
+ * Hubs are excluded (matches Go hub-channel semantics and composition shapes):
+ * - `service` + `client`: clients sync only with the service, never with each other
+ * - ordinary hub (one static default + ≥1 dynamic defaults): peers sync with the static hub
+ *   only — parent↔child must not fuse two dynamics that both call the same hub
  */
-internal fun parentChildOfferPairs(group: List<TlaActionOffer>): List<List<TlaActionOffer>>? {
+internal fun parentChildOfferPairs(
+    group: List<TlaActionOffer>,
+    pclasses: Map<String, ProcClassNode> = emptyMap(),
+): List<List<TlaActionOffer>>? {
     val syncables = group.filter { isSyncableTlaOffer(it) }
     if (syncables.any { it.role == TSAction.SyncRole.Service } &&
         syncables.any { it.role == TSAction.SyncRole.Client }
     ) {
+        return null
+    }
+    if (pclasses.isNotEmpty() && isOrdinaryStaticHubShape(syncables, pclasses)) {
         return null
     }
     val pairs = mutableListOf<List<TlaActionOffer>>()
@@ -1358,6 +1366,18 @@ internal fun parentChildOfferPairs(group: List<TlaActionOffer>): List<List<TlaAc
         }.forEach { parent -> pairs += listOf(parent, child) }
     }
     return pairs.ifEmpty { null }
+}
+
+/** Ordinary hub shape: exactly one static default-role offer and ≥1 dynamic default offers. */
+private fun isOrdinaryStaticHubShape(
+    syncables: List<TlaActionOffer>,
+    pclasses: Map<String, ProcClassNode>,
+): Boolean {
+    val defaults = syncables.filter { it.role == TSAction.SyncRole.Default }
+    if (defaults.isEmpty()) return false
+    val statics = defaults.filter { offerIsStatic(it, pclasses) }
+    val dynamics = defaults.filter { !offerIsStatic(it, pclasses) }
+    return statics.size == 1 && dynamics.isNotEmpty()
 }
 
 private fun hubPairedOfferLists(
@@ -1468,7 +1488,7 @@ internal fun collectEmittedOfferLists(
             locals.forEach { result += listOf(it) }
             return@forEach
         }
-        parentChildOfferPairs(group)?.let { pairs ->
+        parentChildOfferPairs(group, pclasses)?.let { pairs ->
             pairs.forEach { result += it }
             val paired = pairs.flatten().toSet()
             (constructors + locals + syncables).filter { it !in paired }.forEach { result += listOf(it) }
@@ -2001,7 +2021,7 @@ private fun buildTlaActions(
             return@forEach
         }
 
-        parentChildOfferPairs(group)?.let { pairs ->
+        parentChildOfferPairs(group, pclasses)?.let { pairs ->
             val needDisambiguate = pairs.size > 1
             pairs.forEach { pair ->
                 val (parent, child) = pair
