@@ -1,0 +1,86 @@
+/*
+ * Parent and child that both client the same service must each sync with the
+ * service alone — never with each other — in TLA (matches Go hub channels).
+ */
+import julay.funlib.mapOf
+
+type Key := String
+
+static proc Store {
+    var owners : Map<Key, String> := mapOf()
+
+    constructor initially(args : List<String>) {}
+
+    service transition ownerOf(key : Key, owner : String) {
+        guard:
+            owner = if (key in owners) {
+                owners[key]
+            } else {
+                ""
+            }
+    }
+}
+
+proc Parent {
+    var step : String
+    var putKey : Key
+
+    constructor start(k : Key) {
+        transit:
+            putKey := k
+            step := "lookup"
+    }
+
+    client transition ownerOf(key : Key, owner : String) {
+        guard:
+            & step = "lookup"
+            & key = putKey
+        transit:
+            step := "spawn"
+    }
+
+    transition spawnChild(k : Key) {
+        guard:
+            & step = "spawn"
+            & k = putKey
+        transit:
+            step := "done"
+    }
+
+    internal return finish() {
+        guard: step = "done"
+    }
+}
+
+proc Child {
+    const bcKey : Key
+    var step : String
+
+    constructor spawnChild(k : Key) {
+        transit:
+            bcKey := k
+            step := "lookup"
+    }
+
+    client transition ownerOf(key : Key, owner : String) {
+        guard:
+            & step = "lookup"
+            & key = bcKey
+        transit:
+            step := "done"
+    }
+
+    internal return childDone() {
+        guard: step = "done"
+    }
+}
+
+invariant Inv := true
+
+spec HubClients := Store || (Parent || Child) |= Inv {
+    Key := {"k1"}
+    DynProc := {"dp1"}
+    unsynced start
+}
+
+compile HubClients

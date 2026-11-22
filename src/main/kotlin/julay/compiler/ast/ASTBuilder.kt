@@ -474,6 +474,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                         safeName = null,
                         isLeft = true,
                     ),
+                    explicitAngleAg = true,
                 )
             }
             circularGuarantee -> {
@@ -518,6 +519,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                         safeName = safeName,
                         isLeft = false,
                     ),
+                    explicitAngleAg = true,
                 )
             }
             else -> {
@@ -532,6 +534,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 }
                 return AgSpecExprNode(
                     assume, visit(ctx.system_expr()), normalizeGuarantee(guaranteeRaw), loc,
+                    explicitAngleAg = true,
                 )
             }
         }

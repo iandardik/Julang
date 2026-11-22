@@ -163,6 +163,91 @@ internal fun collectMapIndexesInValue(expr: ExprNode): List<IndexExprNode> = whe
     else -> expr.children.filterIsInstance<ExprNode>().flatMap { collectMapIndexesInValue(it) }
 }
 
+/**
+ * Like [collectMapIndexesInValue], but omits indexes already guarded by an enclosing
+ * `key in map` (under `&`) on an `if` condition. Used for determined-arg action DOMAIN
+ * guards: `owner = if (key in owners) { owners[key] } else { empty }` must stay enabled
+ * when the map is empty — the emitted `IF … \in DOMAIN …` already protects the read.
+ */
+internal fun collectUnguardedMapIndexesInValue(expr: ExprNode): List<IndexExprNode> =
+    collectUnguardedMapIndexesInValue(expr, emptySet())
+
+private fun collectUnguardedMapIndexesInValue(
+    expr: ExprNode,
+    assumedIn: Set<String>,
+): List<IndexExprNode> = when (expr) {
+    is IndexExprNode -> {
+        val nested =
+            collectUnguardedMapIndexesInValue(expr.base, assumedIn) +
+                collectUnguardedMapIndexesInValue(expr.index, assumedIn)
+        val self = try {
+            if (expr.base.getType() is MapType) {
+                val shape = mapIndexShape(expr)
+                if (shape in assumedIn) emptyList() else listOf(expr)
+            } else {
+                emptyList()
+            }
+        } catch (_: RuntimeException) {
+            emptyList()
+        }
+        nested + self
+    }
+    is BinaryOpExprNode -> when (expr.op()) {
+        "&", "|", "=>", "<=>", "in", "~in" -> emptyList()
+        else ->
+            collectUnguardedMapIndexesInValue(expr.lhsOperand(), assumedIn) +
+                collectUnguardedMapIndexesInValue(expr.rhsOperand(), assumedIn)
+    }
+    is UnaryOpExprNode -> when (expr.op()) {
+        "~" -> emptyList()
+        else -> collectUnguardedMapIndexesInValue(expr.operand(), assumedIn)
+    }
+    is QuantifiedExprNode -> emptyList()
+    is ParenExprNode -> collectUnguardedMapIndexesInValue(expr.innerExpr(), assumedIn)
+    is IfElseExprNode -> {
+        val thenAssumed = assumedIn + membershipInShapes(expr.condExpr())
+        collectUnguardedMapIndexesInValue(expr.thenExpr(), thenAssumed) +
+            collectUnguardedMapIndexesInValue(expr.elseExpr(), assumedIn)
+    }
+    is LetExprNode -> collectUnguardedMapIndexesInValue(expr.bodyExpr(), assumedIn)
+    else -> expr.children.filterIsInstance<ExprNode>().flatMap {
+        collectUnguardedMapIndexesInValue(it, assumedIn)
+    }
+}
+
+/** `key in map` conjuncts as map-index shapes (`map[key]` string form). */
+private fun membershipInShapes(cond: ExprNode): Set<String> {
+    val e = unwrapParensForDomain(cond)
+    return when {
+        e is BinaryOpExprNode && e.op() == "&" ->
+            membershipInShapes(e.lhsOperand()) + membershipInShapes(e.rhsOperand())
+        e is BinaryOpExprNode && e.op() == "in" ->
+            setOf("${exprShape(e.rhsOperand())}[${exprShape(e.lhsOperand())}]")
+        else -> emptySet()
+    }
+}
+
+private fun mapIndexShape(idx: IndexExprNode): String =
+    "${exprShape(idx.base)}[${exprShape(idx.index)}]"
+
+/** Stable shape for matching `key in map` against `map[key]` (not AST toString). */
+private fun exprShape(expr: ExprNode): String {
+    val e = unwrapParensForDomain(expr)
+    return when (e) {
+        is SymbolValueExprNode -> e.symbol
+        is IndexExprNode -> "${exprShape(e.base)}[${exprShape(e.index)}]"
+        is FieldAccessExprNode ->
+            e.baseSymbol + e.fieldPath.joinToString("") { ".$it" }
+        else -> e.toString()
+    }
+}
+
+private fun unwrapParensForDomain(expr: ExprNode): ExprNode {
+    var e = expr
+    while (e is ParenExprNode) e = e.innerExpr()
+    return e
+}
+
 private fun typedBoolBinary(op: String, lhs: ExprNode, rhs: ExprNode, loc: ProgramLoc): BinaryOpExprNode =
     BinaryOpExprNode(op, lhs, rhs, loc).also {
         it.setInferredType(TypePassType.Inferred(boolType))

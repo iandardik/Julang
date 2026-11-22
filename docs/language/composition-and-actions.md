@@ -117,7 +117,7 @@ For ordinary (non-`service`/`client`, non-`internal`, non-`timer`) multi-class o
 
 Illegal (except parent↔child): dynamic↔dynamic only, three or more statics, or two-or-more statics plus a dynamic. Parent↔child ordinary sync is the one allowed dynamic↔dynamic case — see [Parent/child inference](children.md).
 
-**`service` / `client`** pairs skip these ordinary-shape checks: the service is the hub; any number of clients may sync with it (never with each other). Prefer tagging static hub APIs as `service` and callers as `client` when the hub must stay in the external alphabet (multiple handlers, printers, nested assemblies).
+**`service` / `client`** pairs skip these ordinary-shape checks: the service is the hub; any number of clients may sync with it (never with each other). Prefer tagging static hub APIs as `service` and callers as `client` when the hub must stay in the external alphabet (multiple handlers, printers, nested assemblies). In TLA+, each client is paired with the service alone — including when two clients are parent/child of each other (matches Go hub channels).
 
 `static proc` classes may appear **at most once** in a composition. Only dynamic procs may be spawned via non-`initially` constructors.
 
@@ -166,6 +166,8 @@ Leave **ordinary** (untagged) syncs for two-static peers or composition-private 
 
 Generated TLA+ specs use `Fairness == SF_vars(Next)`: if any `Next` arm is enabled infinitely often, a non-stuttering step must occur infinitely often. That covers internals, timers, returns, synchronizations, and unsynchronized / environment arms, so a done dynamic proc cannot stutter forever while its return stays enabled.
 
+Dynamic slots are **one-shot** in TLA (`retired` after return; see [Children — TLA](children.md#tla)): open-env schedules that starve a live worker by forever reconstructing another class on the same `DynProc` id are not in the model. Compound `SF_vars(Next)` remains.
+
 This is an idealization of the outside world (the environment is not obligated to act in Go) and of synchronizations: in Go, a sync fires only when one side is parked waiting on the other. A proc that always has some local action ready never parks. So if *both* sides of a sync always have local work, the sync can be starved indefinitely, even though TLC assumes it eventually fires.
 
 For local actions, SF matches the Go runtime more closely: a proc's `select` chooses uniformly at random among its ready cases, so an action that is enabled infinitely often is taken with probability 1.
@@ -178,7 +180,7 @@ A || B   // TLC: ping eventually fires.  Go: ping may never fire.
 
 Liveness properties proved by TLC (including each dynamic proc's `Terminates` property) hold for the Go program only if no synchronization the property depends on is starved this way. In practice, avoid procs that spin on internal actions while also waiting on a sync.
 
-Assume–guarantee Obls are an extra caveat: their default `.cfg` checks **safety only** (`SpecSafety`, no `PROPERTY *Terminates`), because open environment arms can re-enable work forever. See [Specifications — AG Obl `.cfg`](specifications.md#ag-obl-cfg-safety-by-default-no-terminates).
+Explicit angle-bracket AG Obls (`<A> Sys <G>`) use a safety-only default `.cfg` (`SpecSafety`, no `PROPERTY *Terminates`). Trailing `Sys |= G` and plain systems still list `*Terminates` even with `unsynced` open-env arms. See [Specifications — Explicit AG Obl `.cfg`](specifications.md#explicit-ag-obl-cfg-safety-by-default-no-terminates).
 
 ## See also
 

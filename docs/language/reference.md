@@ -72,7 +72,7 @@ Leaf-spec actions: `transition name(args) also (aux : T) { … }` (leaf specs on
 
 `LocalInv |= <A> C <G>` attaches a local inductive invariant: the Obl checks `LocalInv` while A/G remain the contract. Same prefix works on circular comma forms. See [Local inductive invariant](specifications.md#local-inductive-invariant-localinv--a-c-g).
 
-Circular AG uses comma slots: `<P, A> C1 <G>` / `<G> C2 <A, Safe>` (A/G fluent). Compiling a matched pair also emits `CircSide` TLC side conditions. See [Specifications — Circular AG](specifications.md#circular-ag-comma-slots). AG Obl `.cfg`s default to safety-only (`SpecSafety`, no `PROPERTY *Terminates`); see [AG Obl `.cfg`](specifications.md#ag-obl-cfg-safety-by-default-no-terminates).
+Circular AG uses comma slots: `<P, A> C1 <G>` / `<G> C2 <A, Safe>` (A/G fluent). Compiling a matched pair also emits `CircSide` TLC side conditions. See [Specifications — Circular AG](specifications.md#circular-ag-comma-slots). Explicit angle-bracket AG Obl `.cfg`s default to safety-only (`SpecSafety`, no `PROPERTY *Terminates`); `Sys |= G` keeps liveness — see [Explicit AG Obl `.cfg`](specifications.md#explicit-ag-obl-cfg-safety-by-default-no-terminates).
 
 `compile` targets: **proc** → native binary (fails if the assembly reaches an uninterpreted type); **spec** (composition or leaf) → `.tla` / `.cfg`. Leaf specs must not appear in `proc Name := …` assemblies. Only `static proc` / `static spec` may declare `constructor initially`. Dynamic procs and dynamic leaf specs must have at least one named `return` action.
 

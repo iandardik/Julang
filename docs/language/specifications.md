@@ -63,11 +63,11 @@ spec Obl := LocalInv |= <Asm> Sys <G>    // local inductive Inv; contract A/G st
 
 Invariant assume/guarantee formulas are type-checked against the AG **system** leaves (missing leaf state or wrong indexing is a compile error). Formula assumes do not compose env leaves into the TLC model.
 
-#### AG Obl `.cfg`: safety by default (no `*Terminates`)
+#### Explicit AG Obl `.cfg`: safety by default (no `*Terminates`)
 
-An assume–guarantee composition (`<Asm> Sys <G>` / `|=`) is an **obligation** (Obl): TLC proves the guarantee under the assume, typically against an open environment (unbound injectors / stubs). Declare those intentional unbound ordinary actions with `unsynced a, b` on the composition Spec (exact allowlist; see [composition-and-actions](composition-and-actions.md)). That model is for **safety** (invariants), not worker liveness.
+An **explicit** assume–guarantee composition written with angle brackets (`<Asm> Sys <G>`, circular `<P, A> C <G>` / `<G> C <A, Safe>`, or `LocalInv |= <A> C <G>`) is an obligation (Obl) whose default TLC campaign is **safety only**. Trailing `Sys |= G` and plain systems are not treated that way: they keep fairness and `PROPERTY *Terminates` in the `.cfg` (including when the Spec lists `unsynced` open-env actions).
 
-For every AG Obl, `julayc` therefore emits:
+For every **explicit** AG Obl, `julayc` therefore emits:
 
 | Artifact | Behavior |
 |----------|----------|
@@ -75,9 +75,7 @@ For every AG Obl, `julayc` therefore emits:
 | `.cfg` | `SPECIFICATION SpecSafety` (no fairness). Lists guarantee `INVARIANT`s. **Does not** list `PROPERTY *Terminates`. |
 | `.apalache.cfg` | Only with `--opt-tla=apalache`: INIT/NEXT safety cfg (plus Snowcat `@type` in the `.tla`). Off by default. |
 
-Plain / non-AG specs keep `SPECIFICATION Spec` and `PROPERTY <Class>Terminates` for each dynamic leaf.
-
-**Why:** Open env actions (e.g. `goKeyCount`) can inject forever, so `constructed ~> ~constructed` fails even when the protocol is fine. That is a false liveness CE for the Obl cut, not a Go runtime bug. Re-enable liveness later with a closed/fairer env and a dedicated cfg (`SPECIFICATION Spec` + `PROPERTY …Terminates`), not as the default Obl check.
+`Sys |= G`, plain systems, and leaf specs keep `SPECIFICATION Spec` and `PROPERTY <Class>Terminates` for each dynamic leaf.
 
 #### Circular AG (comma slots)
 

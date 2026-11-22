@@ -309,6 +309,14 @@ class SpecTlaTlcSmokeTest {
                 tlaText.contains("~Worker_constructed[i]"),
                 "expected parameterized ctor enabling on Worker for spawnWorker;\n$tlaText",
             )
+            assertTrue(
+                tlaText.contains("~Worker_retired[i]"),
+                "expected ctor to require ~Worker_retired;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("Worker_retired' = [Worker_retired EXCEPT ![i] = TRUE]"),
+                "internal return should retire Worker slot;\n$tlaText",
+            )
             val spawnDef = tlaText.substringAfter("spawnWorker(i, id_) ==").substringBefore("\n\n")
             assertTrue(
                 !spawnDef.trimStart().startsWith("\\E i \\in DynProc :"),
@@ -2183,6 +2191,151 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun mapIndexDeterminedLetInJunctionParses() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-map-index-let-in").toFile()
+        try {
+            val source = File("regression/input/spec/map-index-let-in-junction.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            val emit = compileSpecEmit(source, "MapIndexLetIn")
+            val tlaText = emit.tlaText
+            // Nested map-index LET must indent its IN body past the `/\\` column.
+            val ownerOf = Regex(
+                """^ownerOf\w*\([^\n]*\) ==([\s\S]*?)(?=^\w+\(|^Next ==)""",
+                setOf(RegexOption.MULTILINE),
+            ).find(tlaText)?.groupValues?.get(1)
+                ?: error("missing ownerOf action;\n$tlaText")
+            assertTrue(
+                ownerOf.contains("LET owner ==") && ownerOf.contains("LET meIsOwner =="),
+                "expected map-index owner LET nested with transit meIsOwner LET;\n$ownerOf",
+            )
+            assertFalse(
+                Regex("""(?m)^  IN\n  /\\""").containsMatchIn(ownerOf) ||
+                    Regex("""(?m)^  IN\n  /\\""").containsMatchIn(tlaText),
+                "IN body must not start a `/\\` at the same column as the LET conjunct;\n$ownerOf",
+            )
+            // IF-guarded owners[key] must not gain an action-level DOMAIN enabling guard.
+            assertFalse(
+                Regex("""/\\ key \\in DOMAIN owners""").containsMatchIn(ownerOf),
+                "if (key in owners) { owners[key] } else … must stay enabled on empty map;\n$ownerOf",
+            )
+            assertTrue(
+                ownerOf.contains("IF key \\in DOMAIN owners"),
+                "emitted LET should still protect the map read with IF … DOMAIN;\n$ownerOf",
+            )
+            File(work, "MapIndexLetIn.tla").writeText(tlaText)
+            File(work, "MapIndexLetIn.cfg").writeText(emit.cfgText)
+            assertTlcHealthyStart(work, "MapIndexLetIn")
+        } finally {
+            work.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun bareMapIndexDeterminedStillEmitsDomainGuard() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-bare-map-index").toFile()
+        try {
+            val source = File("regression/input/spec/map-index-bare-determined.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            val emit = compileSpecEmit(source, "BareMapIndex")
+            val tlaText = emit.tlaText
+            val getValue = Regex(
+                """^getValue\w*\([^\n]*\) ==([\s\S]*?)(?=^\w+\(|^Next ==)""",
+                setOf(RegexOption.MULTILINE),
+            ).find(tlaText)?.groupValues?.get(1)
+                ?: error("missing getValue action;\n$tlaText")
+            assertTrue(
+                Regex("""/\\ getKey_? \\in DOMAIN store""").containsMatchIn(getValue) ||
+                    Regex("""/\\ getKey \\in DOMAIN store""").containsMatchIn(getValue),
+                "bare getVal = store[getKey] must emit an action-level DOMAIN guard;\n$getValue",
+            )
+            File(work, "BareMapIndex.tla").writeText(tlaText)
+            File(work, "BareMapIndex.cfg").writeText(emit.cfgText)
+            assertTlcHealthyStart(work, "BareMapIndex")
+        } finally {
+            work.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun hubClientsParentChildDoNotFuseOwnerOf() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-hub-clients-pc").toFile()
+        try {
+            val source = File("regression/input/spec/hub-clients-parent-child.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            val emit = compileSpecEmit(source, "HubClients")
+            val tlaText = emit.tlaText
+            // Separate Store↔Parent and Store↔Child ownerOf actions (not Parent+Child fused).
+            assertTrue(
+                tlaText.contains("ownerOf_Store_Parent") && tlaText.contains("ownerOf_Store_Child"),
+                "expected hub-paired ownerOf_Store_Parent and ownerOf_Store_Child;\n$tlaText",
+            )
+            assertFalse(
+                Regex("""^ownerOf\(""", RegexOption.MULTILINE).containsMatchIn(tlaText) ||
+                    Regex("""^ownerOf_Parent_Child\(""", RegexOption.MULTILINE).containsMatchIn(tlaText) ||
+                    Regex("""^ownerOf_Child_Parent\(""", RegexOption.MULTILINE).containsMatchIn(tlaText),
+                "ownerOf must not fuse Parent+Child clients;\n$tlaText",
+            )
+            // Enabling guard: each paired action requires its client, not the other.
+            fun actionBody(name: String): String {
+                val m = Regex(
+                    """^$name\([^\n]*\) ==([\s\S]*?)(?=^\w+\(|^Next ==)""",
+                    setOf(RegexOption.MULTILINE),
+                ).find(tlaText) ?: error("missing def $name;\n$tlaText")
+                return m.groupValues[1]
+            }
+            val parentBody = actionBody("ownerOf_Store_Parent")
+            val childBody = actionBody("ownerOf_Store_Child")
+            assertTrue(
+                parentBody.contains("/\\ Parent_constructed") &&
+                    !parentBody.contains("/\\ Child_constructed"),
+                "Store↔Parent ownerOf must enable on Parent only;\n$parentBody",
+            )
+            assertTrue(
+                childBody.contains("/\\ Child_constructed") &&
+                    !childBody.contains("/\\ Parent_constructed"),
+                "Store↔Child ownerOf must enable on Child only;\n$childBody",
+            )
+            File(work, "HubClients.tla").writeText(tlaText)
+            File(work, "HubClients.cfg").writeText(emit.cfgText)
+            assertTlcHealthyStart(work, "HubClients")
+        } finally {
+            work.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun dynProcSlotRetiredBlocksReconstruct() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-spec-no-reconstruct").toFile()
+        try {
+            val source = File("regression/input/spec/dynproc-no-reconstruct.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            val emit = compileSpecEmit(source, "NoReconstruct")
+            val tlaText = emit.tlaText
+            assertTrue(
+                Regex("""Worker_retired = \[i \\in DynProc \|-> FALSE\]""").containsMatchIn(tlaText),
+                "expected Worker_retired in Init;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("~Worker_retired[i]"),
+                "constructor must gate on ~retired;\n$tlaText",
+            )
+            assertTrue(
+                tlaText.contains("Worker_retired' = [Worker_retired EXCEPT ![i] = TRUE]"),
+                "return must set retired;\n$tlaText",
+            )
+            File(work, "NoReconstruct.tla").writeText(tlaText)
+            File(work, "NoReconstruct.cfg").writeText(emit.cfgText)
+            assertTlcHealthyStart(work, "NoReconstruct")
+        } finally {
+            work.deleteRecursively()
+        }
+    }
+
+    @Test
     fun returnClearsConstructedAndEmitsTerminates() {
         assumeTlcPresent()
         val work = Files.createTempDirectory("julay-spec-return").toFile()
@@ -2199,6 +2352,19 @@ class SpecTlaTlcSmokeTest {
             assertTrue(
                 dieDef.contains("Leaf_constructed' = [Leaf_constructed EXCEPT ![i] = FALSE]"),
                 "expected return action to clear Leaf_constructed;\n$dieDef",
+            )
+            assertTrue(
+                dieDef.contains("Leaf_retired' = [Leaf_retired EXCEPT ![i] = TRUE]"),
+                "expected return action to retire the slot;\n$dieDef",
+            )
+            val startDef = tlaText.substringAfter("start(i) ==").substringBefore("\n\n")
+            assertTrue(
+                startDef.contains("~Leaf_constructed[i]") && startDef.contains("~Leaf_retired[i]"),
+                "constructor must require ~constructed and ~retired;\n$startDef",
+            )
+            assertTrue(
+                Regex("""Leaf_retired = \[i \\in DynProc \|-> FALSE\]""").containsMatchIn(tlaText),
+                "expected Leaf_retired init FALSE;\n$tlaText",
             )
             assertTrue(
                 tlaText.contains("LeafTerminates == \\A i \\in DynProc : (Leaf_constructed[i] ~> ~Leaf_constructed[i])"),
@@ -2662,6 +2828,39 @@ class SpecTlaTlcSmokeTest {
         } finally {
             work.deleteRecursively()
         }
+    }
+
+    @Test
+    fun modelsKeepsCfgLivenessExplicitAgOmits() {
+        assumeTlcPresent()
+        val source = File("regression/input/spec/ag-cfg-liveness.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        val models = compileSpecEmit(source, "ModelsSpec", compileNames = listOf("ModelsSpec", "ExplicitAgSpec"))
+        val explicit = compileSpecEmit(source, "ExplicitAgSpec", compileNames = listOf("ModelsSpec", "ExplicitAgSpec"))
+        assertTrue(
+            models.cfgText.contains("SPECIFICATION Spec"),
+            "Sys |= G should use Spec;\n${models.cfgText}",
+        )
+        assertFalse(
+            models.cfgText.contains("SPECIFICATION SpecSafety"),
+            "Sys |= G must not use SpecSafety;\n${models.cfgText}",
+        )
+        assertTrue(
+            models.cfgText.contains("PROPERTY LeafTerminates"),
+            "Sys |= G (even with unsynced) should list Terminates;\n${models.cfgText}",
+        )
+        assertTrue(
+            explicit.cfgText.contains("SPECIFICATION SpecSafety"),
+            "explicit <A> Sys <G> should use SpecSafety;\n${explicit.cfgText}",
+        )
+        assertFalse(
+            explicit.cfgText.contains("PROPERTY LeafTerminates"),
+            "explicit AG must omit PROPERTY *Terminates;\n${explicit.cfgText}",
+        )
+        assertTrue(
+            explicit.tlaText.contains("LeafTerminates =="),
+            "explicit AG still defines Terminates in the .tla;\n${explicit.tlaText}",
+        )
     }
 
     @Test

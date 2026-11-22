@@ -342,7 +342,7 @@ private fun typePassSpec(
     return SpecTypePassResult(errors, warnings)
 }
 
-private val SYNTHETIC_GLOBAL_NAMES = setOf("constructed", "killed", "terminated")
+private val SYNTHETIC_GLOBAL_NAMES = setOf("constructed", "killed", "terminated", "retired")
 
 private fun declaredStateVars(
     leafName: String,

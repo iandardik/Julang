@@ -1,0 +1,55 @@
+/*
+ * Bare determined `v = store[k]` (no IF) must still emit an action-level DOMAIN guard.
+ */
+import julay.funlib.mapOf
+
+type Key := String
+type Value := String
+
+static proc Store {
+    var store : Map<Key, Value> := mapOf()
+
+    constructor initially(args : List<String>) {}
+
+    service transition getValue(getKey : Key, getVal : Value) {
+        guard:
+            getVal = store[getKey]
+    }
+}
+
+proc Get {
+    var getKey : Key
+    var step : String
+    var value : Value
+
+    constructor start(k : Key) {
+        transit:
+            getKey := k
+            step := "get"
+            value := ""
+    }
+
+    client transition getValue(getKey : Key, getVal : Value) {
+        guard:
+            & step = "get"
+            & getKey = this.getKey
+        transit:
+            value := getVal
+            step := "done"
+    }
+
+    internal return finish() {
+        guard: step = "done"
+    }
+}
+
+invariant Inv := true
+
+spec BareMapIndex := Store || Get |= Inv {
+    Key := {"k1"}
+    Value := {"v1", ""}
+    DynProc := {"dp1"}
+    unsynced start
+}
+
+compile BareMapIndex

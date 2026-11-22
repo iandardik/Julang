@@ -241,7 +241,11 @@ fun tlaCodegenPass(
     }
 
     val invariants = invariantsEarly
-    val ag = spec.specNodeValue() as? AgSpecExprNode
+    val ag = when (val v = spec.specNodeValue()) {
+        is AgSpecExprNode -> v
+        is SpecCompositionBlockNode -> v.systemBody() as? AgSpecExprNode
+        else -> null
+    }
     val registry = ast.cachedObjClassRegistry()
         ?: error("ObjClassRegistry required for TLA codegen")
     val circSideInvNames = circularSide?.let { p ->
@@ -388,7 +392,9 @@ fun tlaCodegenPass(
             unusedFieldWarnings = unusedFieldWarnings,
             domains = domains,
             circularSide = circularSide,
-            isAgObl = ag != null,
+            // Only explicit `<A> Sys <G>` (and circular / LocalInv |= <…>) omit cfg liveness.
+            // Trailing `Sys |= G` and plain systems keep Spec + PROPERTY *Terminates.
+            omitCfgLiveness = ag?.isExplicitAngleAg() == true,
         )
     } finally {
         TlaFieldProjection.set(TlaRelevantFields.IDENTITY)
@@ -419,7 +425,7 @@ private fun emitProjectedTla(
     unusedFieldWarnings: List<OneLocCompileWarning>,
     domains: Map<String, DomainType>,
     circularSide: CircularAgPair? = null,
-    isAgObl: Boolean = false,
+    omitCfgLiveness: Boolean = false,
 ): TlaCodegenResult {
     val registry = fluentPlan.registry
     val cfgDomainModels = domainModels.toMutableMap()
@@ -640,6 +646,7 @@ private fun emitProjectedTla(
             initParts += proj.initComment()
         }
         val constructed = stateTlaName(leaf.tlaName, "constructed", stateVarNames)
+        val retired = stateTlaName(leaf.tlaName, "retired", stateVarNames)
         val parentDomain = parentLinkDomain(leaf, leaves)
         val parentVar = if (parentDomain != null) stateTlaName(leaf.tlaName, "parent", stateVarNames) else null
         val paramDomain = leafParamDomain(leaf)
@@ -666,6 +673,10 @@ private fun emitProjectedTla(
                 stateVarApalacheTypes[constructed] = indexedApalacheType("Bool", domain, instDomain)
                 initParts += "/\\ $constructed = ${initMap("FALSE")}"
                 typeOkParts += typeOkConjunct(constructed, "BOOLEAN", domain, instDomain)
+                variables += retired
+                stateVarApalacheTypes[retired] = indexedApalacheType("Bool", domain, instDomain)
+                initParts += "/\\ $retired = ${initMap("FALSE")}"
+                typeOkParts += typeOkConjunct(retired, "BOOLEAN", domain, instDomain)
             }
             if (parentVar != null) {
                 variables += parentVar
@@ -739,6 +750,10 @@ private fun emitProjectedTla(
                 stateVarApalacheTypes[constructed] = "Bool"
                 initParts += "/\\ $constructed = FALSE"
                 typeOkParts += typeOkConjunct(constructed, "BOOLEAN", null)
+                variables += retired
+                stateVarApalacheTypes[retired] = "Bool"
+                initParts += "/\\ $retired = FALSE"
+                typeOkParts += typeOkConjunct(retired, "BOOLEAN", null)
             }
             pc.localDecls().filterIsInstance<VarNode>().forEach { vn ->
                 if (!TlaVarProjection.get().isRelevant(leaf.name, vn.name)) return@forEach
@@ -1102,11 +1117,10 @@ private fun emitProjectedTla(
             appendLine("SPECIFICATION SpecSC1")
             appendLine("INVARIANT TypeOK")
             appendLine("INVARIANT SC1")
-        } else if (isAgObl) {
-            // AG Obls: safety-only default cfg. Open env injectors (goKeyCount, …) can
-            // re-enable dynamic leaves forever, so Spec+Fairness+*Terminates is a false
-            // liveness CE — not a runtime bug. Operators stay in the .tla; docs:
-            // specifications.md § AG Obl .cfg.
+        } else if (omitCfgLiveness) {
+            // Explicit `<A> Sys <G>` (and circular / LocalInv |= <…>): safety-only default
+            // cfg. Operators stay in the .tla; docs: specifications.md § AG Obl .cfg.
+            // Trailing `Sys |= G` and plain systems use Spec + *Terminates below.
             appendLine("SPECIFICATION SpecSafety")
             appendLine("INVARIANT TypeOK")
         } else {
@@ -1126,8 +1140,8 @@ private fun emitProjectedTla(
                 appendLine("INVARIANT $invOp")
             }
         }
-        // Non-AG only: AG Obls omit PROPERTY *Terminates (see isAgObl / SpecSafety above).
-        if (circularSide == null && !isAgObl) {
+        // Explicit angle-bracket AG Obls omit PROPERTY *Terminates; |= and plain keep them.
+        if (circularSide == null && !omitCfgLiveness) {
             terminatesPropNames.forEach { name ->
                 appendLine("PROPERTY $name")
             }
@@ -1326,8 +1340,17 @@ private fun offerIsStatic(offer: TlaActionOffer, pclasses: Map<String, ProcClass
 /**
  * Parent↔child pairs for one action name: each `B<A>` child offer (constructor or sync)
  * with each syncable offer of an `A` occurrence. Null when no child meets its parent here.
+ *
+ * Service/client hubs are excluded: clients sync only with the service (never with each
+ * other or with a parent merely because of `childof`). Matches Go hub-channel semantics.
  */
 internal fun parentChildOfferPairs(group: List<TlaActionOffer>): List<List<TlaActionOffer>>? {
+    val syncables = group.filter { isSyncableTlaOffer(it) }
+    if (syncables.any { it.role == TSAction.SyncRole.Service } &&
+        syncables.any { it.role == TSAction.SyncRole.Client }
+    ) {
+        return null
+    }
     val pairs = mutableListOf<List<TlaActionOffer>>()
     group.filter { it.leaf.parentClass != null }.forEach { child ->
         group.filter { p ->
@@ -1436,16 +1459,19 @@ internal fun collectEmittedOfferLists(
         val locals = group.filter { isLocalTlaOffer(it) }
         val syncables = group.filter { isSyncableTlaOffer(it) }
 
-        parentChildOfferPairs(group)?.let { pairs ->
-            pairs.forEach { result += it }
-            val paired = pairs.flatten().toSet()
-            (constructors + locals + syncables).filter { it !in paired }.forEach { result += listOf(it) }
-            return@forEach
-        }
+        // Prefer service/client (and ordinary hub) pairing before parent↔child. Otherwise a
+        // parent and child that both `client` the same service (e.g. ownerOf) are fused into
+        // one action and the Store service arm is dropped.
         hubPairedOfferLists(syncables, pclasses)?.let { pairs ->
             pairs.forEach { result += it }
             constructors.forEach { result += listOf(it) }
             locals.forEach { result += listOf(it) }
+            return@forEach
+        }
+        parentChildOfferPairs(group)?.let { pairs ->
+            pairs.forEach { result += it }
+            val paired = pairs.flatten().toSet()
+            (constructors + locals + syncables).filter { it !in paired }.forEach { result += listOf(it) }
             return@forEach
         }
 
@@ -1918,29 +1944,8 @@ private fun buildTlaActions(
         val locals = group.filter { isLocalTlaOffer(it) }
         val syncables = group.filter { isSyncableTlaOffer(it) }
 
-        parentChildOfferPairs(group)?.let { pairs ->
-            val needDisambiguate = pairs.size > 1
-            pairs.forEach { pair ->
-                val (parent, child) = pair
-                if (needDisambiguate) {
-                    emit(
-                        "${actionName}_${parent.leaf.tlaName}_${child.leaf.tlaName}",
-                        pair,
-                        "$actionName action where ${parent.leaf.tlaName} is the parent and " +
-                            "${child.leaf.tlaName} is the child",
-                    )
-                } else {
-                    emit(actionName, pair)
-                }
-            }
-            val paired = pairs.flatten().toSet()
-            val rest = (constructors + locals + syncables).filter { it !in paired }
-            rest.forEach { offer ->
-                emit("${actionName}_${offer.leaf.tlaName}", listOf(offer), "$actionName action on ${offer.leaf.tlaName}")
-            }
-            return@forEach
-        }
-
+        // Prefer service/client (and ordinary hub) pairing before parent↔child — same order as
+        // [collectEmittedOfferLists]. Parent+child that both client a service must not fuse.
         hubPairedOfferLists(syncables, pclasses)?.let { pairs ->
             val needDisambiguate = pairs.size > 1
             pairs.forEach { pair ->
@@ -1992,6 +1997,29 @@ private fun buildTlaActions(
                 val name = if (disambiguateLocals) "${actionName}_${offer.leaf.tlaName}" else actionName
                 val comment = if (disambiguateLocals) "$actionName action on ${offer.leaf.tlaName}" else null
                 emit(name, listOf(offer), comment)
+            }
+            return@forEach
+        }
+
+        parentChildOfferPairs(group)?.let { pairs ->
+            val needDisambiguate = pairs.size > 1
+            pairs.forEach { pair ->
+                val (parent, child) = pair
+                if (needDisambiguate) {
+                    emit(
+                        "${actionName}_${parent.leaf.tlaName}_${child.leaf.tlaName}",
+                        pair,
+                        "$actionName action where ${parent.leaf.tlaName} is the parent and " +
+                            "${child.leaf.tlaName} is the child",
+                    )
+                } else {
+                    emit(actionName, pair)
+                }
+            }
+            val paired = pairs.flatten().toSet()
+            val rest = (constructors + locals + syncables).filter { it !in paired }
+            rest.forEach { offer ->
+                emit("${actionName}_${offer.leaf.tlaName}", listOf(offer), "$actionName action on ${offer.leaf.tlaName}")
             }
             return@forEach
         }
@@ -2065,6 +2093,7 @@ private fun allTlaVars(
         val base = mutableListOf<String>()
         if (leaf.tlaName !in foldedCtorLeaves) {
             base += stateTlaName(leaf.tlaName, "constructed", stateVarNames)
+            base += stateTlaName(leaf.tlaName, "retired", stateVarNames)
         }
         if ((leaf.tlaName to "parent") in stateVarNames) {
             base += stateTlaName(leaf.tlaName, "parent", stateVarNames)
@@ -2486,14 +2515,23 @@ private fun emitConjoined(
             )
         }
         if (offer.decl.isReturn && offer.leaf.tlaName !in foldedCtorLeaves) {
-            // A return frees the slot.
+            // A return frees the slot for concurrency but retires it for the TLC run.
             val c = stateTlaName(offer.leaf.tlaName, "constructed", stateVarNames)
+            val r = stateTlaName(offer.leaf.tlaName, "retired", stateVarNames)
             targetChanged += c
+            targetChanged += r
             addAssignPart(
                 if (self != null) {
                     "/\\ $c' = [$c EXCEPT ![$self] = FALSE]"
                 } else {
                     "/\\ $c' = FALSE"
+                },
+            )
+            addAssignPart(
+                if (self != null) {
+                    "/\\ $r' = [$r EXCEPT ![$self] = TRUE]"
+                } else {
+                    "/\\ $r' = TRUE"
                 },
             )
         }
@@ -2535,8 +2573,10 @@ private fun emitConjoined(
         parts += "\\* ${offer.leaf.name} ${tlaTransitionTypeLabel(offer)} logic"
         if (offer.leaf.tlaName !in foldedCtorLeaves) {
             val c = stateTlaName(offer.leaf.tlaName, "constructed", stateVarNames)
+            val r = stateTlaName(offer.leaf.tlaName, "retired", stateVarNames)
             if (offer.isConstructor) {
                 parts += if (self != null) "/\\ ~$c[$self]" else "/\\ ~$c"
+                parts += if (self != null) "/\\ ~$r[$self]" else "/\\ ~$r"
             } else {
                 parts += if (self != null) "/\\ $c[$self]" else "/\\ $c"
             }
@@ -2675,9 +2715,10 @@ private fun emitConjoined(
         if (tlaArg in indexBinderNames) {
             parts += "/\\ $tlaArg = ${emitBound(expr)}"
         } else if (collectMapIndexesInValue(expr).isNotEmpty()) {
-            // Inject DOMAIN guards so TLC short-circuits before `store[k]` when the client
-            // binds `k` by equality and the hub only determines `v = store[k]` (no Julay-level
-            // `k in store`, which would break Go channel direction for the same action).
+            // Inject DOMAIN guards so TLC short-circuits before bare `store[k]` when the client
+            // binds `k` by equality and the hub determines `v = store[k]`. Skip indexes already
+            // under `if (k in store) { store[k] } else …` — an action-level DOMAIN conjunct
+            // would disable the ELSE (empty-map ownerOf) and is redundant with the emitted IF.
             // Only indexes whose key is an outer action/plan binder — skip HOF/lambda
             // binders like `owners.keys.map(k -> owners[k])` (emitting free `k` breaks TLC).
             val outerIndexKeys = buildSet {
@@ -2685,7 +2726,7 @@ private fun emitConjoined(
                 addAll(indexBinderNames)
                 addAll(bindNames)
             }
-            for (idx in collectMapIndexesInValue(expr).distinctBy { it.toString() }) {
+            for (idx in collectUnguardedMapIndexesInValue(expr).distinctBy { it.toString() }) {
                 var indexExpr = idx.index
                 while (indexExpr is ParenExprNode) indexExpr = indexExpr.innerExpr()
                 val idxSym = (indexExpr as? SymbolValueExprNode)?.symbol ?: continue
@@ -2756,9 +2797,9 @@ internal fun indexBinderName(leaf: SpecLeaf, reserved: Set<String>, sharedBinder
 
 /**
  * Map (leafTlaName, julayVarName) → TLA identifier.
- * `constructed` is `Leaf_constructed` unless that leaf's sole unsynced constructor was folded
- * into Init (then the flag is omitted). `killed` only for [killTargets] (by tlaName);
- * other vars are bare unless duplicated or reserved.
+ * `constructed` / `retired` are `Leaf_constructed` / `Leaf_retired` unless that leaf's sole
+ * unsynced constructor was folded into Init (then both flags are omitted). `killed` only for
+ * [killTargets] (by tlaName); other vars are bare unless duplicated or reserved.
  *
  * Future: Julay source may allow composite qualifiers such as `Y.X.n` where `proc Y := X || ...`;
  * not implemented — invariants still write `X.n` and are expanded per occurrence at emit time.
@@ -2779,6 +2820,7 @@ internal fun buildStateVarNames(
     leaves.forEach { leaf ->
         val id = leaf.tlaName
         out[id to "constructed"] = "${id}_constructed"
+        out[id to "retired"] = "${id}_retired"
         if (parentLinkDomain(leaf, leaves) != null) {
             out[id to "parent"] = "${id}_parent"
         }
@@ -5227,11 +5269,18 @@ private fun typeOfBaseExpr(expr: ExprNode): Type? = try {
     (expr as? SymbolValueExprNode)?.let { TlaSymbolTypes.get()[it.symbol] }
 }
 
+/**
+ * Wrap [body] in `LET` binders. Multi-line form indents the `IN` body by 4 spaces so the
+ * result stays valid when embedded as a junction conjunct (`/\ LET … IN /\ …`): SANY rejects
+ * a `/\\` after `IN` at the same column as that conjunct's `/\\`.
+ */
 internal fun wrapTlaLet(bindings: List<Pair<String, String>>, body: String): String {
     if (bindings.isEmpty()) return body
     val defs = bindings.joinToString("\n      ") { (n, e) -> "$n == $e" }
-    return if (body.contains('\n')) {
-        "LET $defs\n  IN\n  $body"
+    val multiLine = body.contains('\n') || defs.contains('\n')
+    return if (multiLine) {
+        val indentedBody = padPreservingRelative(body, "    ")
+        "LET $defs\n     IN\n$indentedBody"
     } else {
         "LET $defs IN $body"
     }

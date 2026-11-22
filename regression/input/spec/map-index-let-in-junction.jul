@@ -1,0 +1,62 @@
+/*
+ * Determined map-index arg (owner = owners[key]) plus a transit `let` must emit a
+ * nested LET whose IN body is indented past the outer `/\\` junction (SANY rejects
+ * `/\\` after `IN` at the same column as the LET conjunct).
+ */
+import julay.funlib.mapOf
+
+type Key := String
+
+static proc Store {
+    var owners : Map<Key, String> := mapOf()
+
+    constructor initially(args : List<String>) {}
+
+    service transition ownerOf(key : Key, owner : String) {
+        guard:
+            owner = if (key in owners) {
+                owners[key]
+            } else {
+                ""
+            }
+    }
+}
+
+proc Put {
+    var step : String
+    var putKey : Key
+    var me : String
+    var keyOwner : String
+
+    constructor start(k : Key, self : String) {
+        transit:
+            putKey := k
+            me := self
+            keyOwner := ""
+            step := "ownerOf"
+    }
+
+    client transition ownerOf(key : Key, owner : String) {
+        guard:
+            & step = "ownerOf"
+            & key = putKey
+        transit:
+            let meIsOwner : Boolean := (owner = "" | owner = me)
+            keyOwner := if (meIsOwner) { me } else { owner }
+            step := if (meIsOwner) { "done" } else { "redirect" }
+    }
+
+    internal return finish() {
+        guard: step = "done" | step = "redirect"
+    }
+}
+
+invariant Inv := true
+
+spec MapIndexLetIn := Store || Put |= Inv {
+    Key := {"k1"}
+    DynProc := {"dp1"}
+    unsynced start
+}
+
+compile MapIndexLetIn

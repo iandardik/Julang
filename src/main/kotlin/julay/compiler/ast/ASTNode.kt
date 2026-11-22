@@ -401,6 +401,12 @@ class AgSpecExprNode(
      * Checked as the Obl INVARIANT; contract A/G/Safe names stay on the AG slots.
      */
     private val localInvName: String? = null,
+    /**
+     * True when written with angle brackets (`<A> Sys <G>` / circular forms),
+     * including `LocalInv |= <A> C <G>`. False for trailing `Sys |= G` sugar.
+     * Explicit AG Obls omit cfg liveness (`SpecSafety`, no `PROPERTY *Terminates`).
+     */
+    private val explicitAngleAg: Boolean = false,
 ) : ASTNode(listOfNotNull(assume, system, guarantee)) {
     override fun programLocation() = loc
     internal fun assumeExpr() = assume
@@ -408,9 +414,15 @@ class AgSpecExprNode(
     internal fun guaranteeExpr() = guarantee
     internal fun circularSlots() = circular
     internal fun localInvName() = localInvName
+    /** Explicit `<A> Sys <G>` (not `Sys |= G`). */
+    internal fun isExplicitAngleAg(): Boolean = explicitAngleAg
     /** Attach `LocalInv |= …` without changing A/G/circular slots. */
     internal fun withLocalInv(name: String): AgSpecExprNode =
-        AgSpecExprNode(assume, system, guarantee, loc, circular, localInvName = name)
+        AgSpecExprNode(
+            assume, system, guarantee, loc, circular,
+            localInvName = name,
+            explicitAngleAg = explicitAngleAg,
+        )
     override fun toString(): String {
         val a = when {
             circular != null && circular.isLeft -> {

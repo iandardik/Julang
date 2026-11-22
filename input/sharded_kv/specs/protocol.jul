@@ -13,11 +13,10 @@ spec Cluster := (Store || ShardLogic || MeInfo)[n : Node] || ClusterConf {
     Node := { "n1", "n2" }
     Key := { "k1", "k2"}
     Value := { "v1", "v2" }
-    DynProc := { "dp1"}
+    DynProc := { "dp1" }
     init: ClusterConf.cluster.length = Node.length
     init: forall i : Int, (i >= 1 & i <= ClusterConf.cluster.length) => ClusterConf.cluster[i].id = i
     init: forall n : Node, n.url = n
-    //init: ClusterInfo.me = ClusterInfo.cluster[1]
 }
 
 // system invariants
@@ -47,6 +46,6 @@ invariant ProtocolInvs := KeysUnique
     & NoStaleKeys
 
 
-export spec SysSpec := <true> Cluster || PerfectNet <ProtocolInvs> {
+export spec SysSpec := Cluster || PerfectNet |= ProtocolInvs {
     unsynced put, putDone, get, getDone, owners, ownersDone
 }

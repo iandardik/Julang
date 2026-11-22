@@ -33,6 +33,6 @@ proc Leaf {
 
 invariant Inv := true
 
-spec ReturnSpec := <true> Boss || Leaf <Inv>
+spec ReturnSpec := Boss || Leaf |= Inv
 
 compile ReturnSpec
