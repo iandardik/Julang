@@ -292,7 +292,7 @@ spec Bad := P[n : Int] {
 }
 ```
 
-Models are merged from the compile target’s system AST (create-index items and leaf-spec bodies, including aliased specs). Two different sets for the same name in one compile → error.
+Models are merged from the compile target’s system AST (create-index items, composition trailing blocks, and leaf-spec bodies, including aliased specs). Complementary pins on nested aliases layer; two different sets for the same name → error (no overwrite). Example: [Types and expressions — delayed models](types-and-expressions.md#delayed-models).
 
 ### Fun overrides
 

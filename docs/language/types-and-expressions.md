@@ -72,9 +72,25 @@ static spec Net[n : NodeSet] {
 }
 ```
 
-Models are collected from the **spec you `compile`** (create-index items and leaf-spec bodies in that system, including aliased specs). Two disagreeing models for one name → error.
+Models are collected from the **spec you `compile`** (create-index items, composition trailing blocks, and leaf-spec bodies in that system, including aliased specs). Complementary pins on nested aliases layer; two disagreeing models for one name → error (no overwrite):
 
-The same create-index / leaf-spec blocks may also contain **fun overrides** `name := expr` for nullary user funs (TLA body only; see [Specifications — Fun overrides](specifications.md#fun-overrides)).
+```jul
+type Node
+type Value := String
+fun maxBatchEntries() : Int = 32
+
+spec A := X[n : Node] {
+    Node := { "n1", "n2" }
+}
+spec B := A {
+    Value := { "", "v1", "v2" }   // ok: new pin
+    maxBatchEntries := 2          // ok: fun override (see Specifications)
+    Node := { "n3" }              // error: conflicts with A's Node model
+}
+compile B
+```
+
+The same create-index / composition / leaf-spec blocks may also contain **fun overrides** `name := expr` for nullary user funs (TLA body only; see [Specifications — Fun overrides](specifications.md#fun-overrides)).
 
 **Rules (any violation is a compile error):**
 
