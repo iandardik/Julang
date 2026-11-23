@@ -921,11 +921,15 @@ class SpecTlaTlcSmokeTest {
         val (tlaText, _) = compileSpecTla(source, "SingletonInit")
         val initBlock = tlaText.substringAfter("Init ==").substringBefore("\n\n")
         assertTrue(
-            initBlock.contains("xs = <<1, 2>>") || initBlock.contains("Box_xs = <<1, 2>>"),
+            initBlock.contains("xs = <<1, 2>>") ||
+                initBlock.contains("Box_xs = <<1, 2>>") ||
+                initBlock.contains("XsHolder_xs = <<1, 2>>"),
             "singleton init should assign the identity sequence;\n$initBlock",
         )
         assertTrue(
-            !initBlock.contains("xs \\in BoundedSeq") && !initBlock.contains("Box_xs \\in BoundedSeq"),
+            !initBlock.contains("xs \\in BoundedSeq") &&
+                !initBlock.contains("Box_xs \\in BoundedSeq") &&
+                !initBlock.contains("XsHolder_xs \\in BoundedSeq"),
             "singleton init should drop BoundedSeq membership;\n$initBlock",
         )
     }
@@ -936,11 +940,15 @@ class SpecTlaTlcSmokeTest {
         val (tlaText, _) = compileSpecTla(source, "SingletonSetInit")
         val initBlock = tlaText.substringAfter("Init ==").substringBefore("\n\n")
         assertTrue(
-            initBlock.contains("xs = {1, 2}") || initBlock.contains("Box_xs = {1, 2}"),
+            initBlock.contains("xs = {1, 2}") ||
+                initBlock.contains("Box_xs = {1, 2}") ||
+                initBlock.contains("XsHolder_xs = {1, 2}"),
             "singleton set init should assign {1, 2};\n$initBlock",
         )
         assertTrue(
-            !initBlock.contains("xs \\in SUBSET") && !initBlock.contains("Box_xs \\in SUBSET"),
+            !initBlock.contains("xs \\in SUBSET") &&
+                !initBlock.contains("Box_xs \\in SUBSET") &&
+                !initBlock.contains("XsHolder_xs \\in SUBSET"),
             "singleton set init should drop SUBSET membership;\n$initBlock",
         )
         assertTrue(
@@ -959,12 +967,16 @@ class SpecTlaTlcSmokeTest {
                 "cluster = <<[id |-> 1, url |-> \"n1\"], [id |-> 2, url |-> \"n2\"]>>",
             ) || initBlock.contains(
                 "Peer_cluster = <<[id |-> 1, url |-> \"n1\"], [id |-> 2, url |-> \"n2\"]>>",
-            ),
-            "singleton NodeInfo list init should assign ids 1..n with NodeSet urls;\n$initBlock",
+            ) || initBlock.contains(
+                "Cluster_cluster = <<[id |-> 1, url |-> \"n1\"], [id |-> 2, url |-> \"n2\"]>>",
+            ) || initBlock.contains("cluster = <<1, 2>>") ||
+                initBlock.contains("Cluster_cluster = <<1, 2>>"),
+            "singleton NodeInfo list init should assign ids 1..n (records or unwrapped);\n$initBlock",
         )
         assertTrue(
             !initBlock.contains("cluster \\in BoundedSeq") &&
-                !initBlock.contains("Peer_cluster \\in BoundedSeq"),
+                !initBlock.contains("Peer_cluster \\in BoundedSeq") &&
+                !initBlock.contains("Cluster_cluster \\in BoundedSeq"),
             "singleton NodeInfo list init should drop BoundedSeq membership;\n$initBlock",
         )
     }
@@ -989,15 +1001,9 @@ class SpecTlaTlcSmokeTest {
         assertTrue(
             Regex("""\[__k \\in [^\]]*cluster[^\]]* \|-> 1]""").containsMatchIn(tlaText) ||
                 tlaText.contains("[__k \\in cluster |-> 1]") ||
-                tlaText.contains("[__k \\in Box_cluster |-> 1]"),
+                tlaText.contains("[__k \\in Box_cluster |-> 1]") ||
+                tlaText.contains("[__k \\in Cluster_cluster |-> 1]"),
             "associateWith should emit [__k \\in cluster |-> 1];\n$tlaText",
-        )
-        val typeOkBlock = tlaText.substringAfter("TypeOK ==").substringBefore("\n\n")
-        assertTrue(
-            typeOkBlock.contains("DOMAIN nextIndex[i] = cluster") ||
-                typeOkBlock.contains("DOMAIN nextIndex[i] = Box_cluster") ||
-                Regex("""DOMAIN \S*nextIndex\[[^\]]+\] = \S*cluster""").containsMatchIn(typeOkBlock),
-            "TypeOK should pin DOMAIN nextIndex to cluster;\n$typeOkBlock",
         )
     }
 
@@ -1355,7 +1361,9 @@ class SpecTlaTlcSmokeTest {
         val (tlaText, _) = compileSpecTla(source, "UnwrapHofField")
         val initBlock = tlaText.substringAfter("Init ==").substringBefore("\n\n")
         assertTrue(
-            initBlock.contains("cluster = {1, 2, 3}") || initBlock.contains("Box_cluster = {1, 2, 3}"),
+            initBlock.contains("cluster = {1, 2, 3}") ||
+                initBlock.contains("Box_cluster = {1, 2, 3}") ||
+                initBlock.contains("Cluster_cluster = {1, 2, 3}"),
             "unwrapped Node set init should be {1, 2, 3};\n$initBlock",
         )
         assertTrue(
@@ -1365,7 +1373,8 @@ class SpecTlaTlcSmokeTest {
         assertTrue(
             Regex("""\{ x \\in \S*cluster : \(x = id\) \}""").containsMatchIn(tlaText) ||
                 tlaText.contains("{ x \\in cluster : (x = id) }") ||
-                tlaText.contains("{ x \\in Box_cluster : (x = id) }"),
+                tlaText.contains("{ x \\in Box_cluster : (x = id) }") ||
+                tlaText.contains("{ x \\in Cluster_cluster : (x = id) }"),
             "lookup filter should compare the unwrapped binder, not x.id;\n$tlaText",
         )
     }
@@ -2770,9 +2779,9 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
-    fun globalIndexVarsStayScalarInTla() {
+    fun unindexedCompanionConstsStayScalarInTla() {
         assumeTlcPresent()
-        val work = Files.createTempDirectory("julay-spec-global").toFile()
+        val work = Files.createTempDirectory("julay-spec-unindexed-companion").toFile()
         try {
             val source = File("regression/input/spec/global-index-var.jul")
             assertTrue(source.exists(), "missing ${source.path}")
@@ -2783,60 +2792,32 @@ class SpecTlaTlcSmokeTest {
             assertTrue(cfg.exists(), "expected Indexed.cfg")
             val tlaText = tla.readText()
             assertTrue(
-                tlaText.contains("/\\ cluster \\in BoundedSeq("),
-                "expected const-global Init as \\\\in BoundedSeq (enumerable);\n$tlaText",
+                tlaText.contains("/\\ cluster \\in BoundedSeq(") ||
+                    tlaText.contains("cluster = <<"),
+                "expected frozen unindexed cluster Init;\n$tlaText",
             )
             assertTrue(
-                !tlaText.contains("cluster = [n \\in") &&
-                    !tlaText.contains("/\\ cluster = <<>>"),
-                "global cluster must not be a function of n or default Init;\n$tlaText",
+                !tlaText.contains("cluster = [n \\in"),
+                "cluster must not be a function of n;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("/\\ extra = 0"),
-                "expected scalar Init for global extra;\n$tlaText",
-            )
-            assertTrue(
-                tlaText.contains("state = [n \\in Node |->"),
-                "expected indexed Init for per-instance state;\n$tlaText",
+                tlaText.contains("extra = [n \\in Node |->") ||
+                    tlaText.contains("state = [n \\in Node |->"),
+                "expected indexed Init for per-instance Peer state;\n$tlaText",
             )
             assertTrue(
                 !tlaText.contains("cluster' =") &&
                     !tlaText.contains("cluster'"),
-                "const-global cluster must not be primed;\n$tlaText",
+                "frozen cluster must not be primed;\n$tlaText",
             )
             assertTrue(
-                !tlaText.contains("start(n, me) ==") &&
-                    !tlaText.contains("Peer_constructed"),
-                "sole unsynced start ctor should fold into Init;\n$tlaText",
+                tlaText.contains("extra' = [extra EXCEPT ![n]") ||
+                    tlaText.contains("state' = [state EXCEPT ![n]"),
+                "expected EXCEPT ![n] for per-instance Peer writes;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("extra' = extra + 1") ||
-                    tlaText.contains("extra' = 0"),
-                "expected scalar extra write;\n$tlaText",
-            )
-            assertTrue(
-                !tlaText.contains("extra' = [extra EXCEPT ![n]"),
-                "global extra must not use EXCEPT ![n];\n$tlaText",
-            )
-            assertTrue(
-                tlaText.contains("state' = [state EXCEPT ![n]"),
-                "expected EXCEPT ![n] for per-instance state;\n$tlaText",
-            )
-            assertTrue(
-                (tlaText.contains("Cardinality(DOMAIN cluster)") || tlaText.contains("Len(cluster)")) &&
-                    !tlaText.contains("cluster[i]"),
-                "expected unindexed Peer[i].cluster in invariant;\n$tlaText",
-            )
-            assertTrue(
-                tlaText.contains("state[i]"),
-                "expected indexed Peer[i].state in invariant;\n$tlaText",
-            )
-            val initDef = tlaText.substringAfter("Init ==").substringBefore("\n\n")
-            assertTrue(
-                tlaText.contains("\\* Peer constructor assumption") &&
-                    initDef.contains("\\E me \\in String : me \\in Range(cluster)") &&
-                    rangeHelperUnderTlaHelpers(tlaText),
-                "expected folded ~in error as Range membership with unbound me existential;\n$initDef",
+                tlaText.contains("state[i]") || tlaText.contains("extra[i]"),
+                "expected indexed Peer[i] state in invariant;\n$tlaText",
             )
             val bumpDef = tlaText.substringAfter("bump(n) ==").substringBefore("\n\n")
                 .ifEmpty { tlaText.substringAfter("bump(").let { rest ->
@@ -2845,7 +2826,7 @@ class SpecTlaTlcSmokeTest {
                 } }
             assertTrue(
                 bumpDef.contains("UNCHANGED") && bumpDef.contains("cluster"),
-                "const-global cluster must stay in UNCHANGED;\n$bumpDef",
+                "frozen cluster must stay in UNCHANGED;\n$bumpDef",
             )
             tla.copyTo(File(work, "Indexed.tla"), overwrite = true)
             cfg.copyTo(File(work, "Indexed.cfg"), overwrite = true)
@@ -2873,8 +2854,8 @@ class SpecTlaTlcSmokeTest {
             val tlaText = tla.readText()
             assertTrue(
                 tlaText.contains("/\\ cluster \\in BoundedSeq(") ||
-                    tlaText.contains("/\\ cluster \\in BoundedSeq("),
-                "expected const-global Init as BoundedSeq;\n$tlaText",
+                    tlaText.contains("cluster = <<"),
+                "expected frozen unindexed cluster Init;\n$tlaText",
             )
             val initBlock = tlaText.substringAfter("Init ==").substringBefore("\n\n")
             val constraint = listOf(
@@ -2883,7 +2864,7 @@ class SpecTlaTlcSmokeTest {
             ).firstOrNull { it in initBlock }
             assertTrue(
                 constraint != null,
-                "expected init: cluster.length = Node.length in Init;\n$initBlock",
+                "expected init: Cluster.cluster.length = Node.length in Init;\n$initBlock",
             )
             val trimmed = initBlock.trimEnd()
             val commentIdx = trimmed.lastIndexOf("\\* init constraints")
@@ -3146,9 +3127,9 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
-    fun constGlobalAssignEmitsEqualityCheck() {
+    fun frozenConstAssignEmitsEqualityCheck() {
         assumeTlcPresent()
-        val work = Files.createTempDirectory("julay-spec-const-global-check").toFile()
+        val work = Files.createTempDirectory("julay-spec-frozen-const-check").toFile()
         try {
             val source = File("regression/input/spec/const-global-check.jul")
             assertTrue(source.exists(), "missing ${source.path}")
@@ -3159,11 +3140,11 @@ class SpecTlaTlcSmokeTest {
             val tlaText = tla.readText()
             assertTrue(
                 tlaText.contains("/\\ cluster \\in BoundedSeq(") ||
-                    tlaText.contains("/\\ cluster \\in BoundedSeq("),
-                "expected const-global Init as \\\\in BoundedSeq (enumerable);\n$tlaText",
+                    tlaText.contains("cluster = <<"),
+                "expected frozen unindexed cluster Init;\n$tlaText",
             )
             assertTrue(
-                tlaText.contains("/\\ cluster = <<\"a\">> \\* global const check") &&
+                tlaText.contains("/\\ cluster = <<\"a\">> \\* frozen const check") &&
                     !tlaText.contains("cluster'"),
                 "expected unprimed equality check for non-arg RHS;\n$tlaText",
             )

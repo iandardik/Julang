@@ -1,13 +1,20 @@
 type Ids
 
-static proc Box {
+static proc Cluster {
     const cluster : Set<Int>
+
+    constructor initially(cluster : Set<Int>) {
+        transit:
+            cluster := cluster
+    }
+}
+
+static proc Box {
     var nextIndex : Map<Int, Int>
     var n : Int
 
     constructor start(cluster : Set<Int>) {
         transit:
-            cluster := cluster
             nextIndex := cluster.associateWith(x -> 1)
             n := 0
     }
@@ -18,12 +25,10 @@ static proc Box {
     }
 }
 
-spec AssocMap := Box[i : Ids] {
+spec AssocMap := (Box[i : Ids] || Cluster) {
     Ids := { "a", "b" }
-    global Box.cluster
-    init: cluster.length = Ids.length
-    init: forall i : Int, (i >= 1 & i <= cluster.length) => i in cluster
-} {
+    init: Cluster.cluster.length = Ids.length
+    init: forall i : Int, (i >= 1 & i <= Cluster.cluster.length) => i in Cluster.cluster
     unsynced bump, start
 }
 

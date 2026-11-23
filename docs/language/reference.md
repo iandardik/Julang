@@ -9,7 +9,7 @@ Compact cheat sheet. For explanations, use the other chapters.
 `var` `const` `constructor` `transition` `return`  
 `service` `client` `internal` `timer`  
 `guard` `before` `transit` `error` `after`  
-`also` `with` `this` `global` `init`  
+`also` `with` `this` `init`  
 `forall` `exists` `if` `else` `let` `when` `in` `to`  
 `true` `false` `listOf` `setOf` `mapOf`
 
@@ -54,13 +54,12 @@ spec Name := System |= Guarantee
 spec Name := System
 spec Name := System { unsynced act1, act2 } // exact open-env ordinary allowlist (TLA)
 spec Name := with (v : T) { System }       // shared apply-binder scope
-spec Name := System[v : T] { global Leaf.x } // create-index; x unindexed in TLA+ (frozen if proc const)
-spec Name := System[v : T] { global Leaf.x; init: expr } // extra Init conjuncts (frozen globals)
+spec Name := (A || B)[v : T] || Topology { init: Topology.x.length = T.length } // unindexed companion + init
 spec Name := System[v : T] { DynProc := { … } } // optional; default {"dp1","dp2"}
 compile Name1, Name2, ...
 ```
 
-System atoms: `Name[v : T]` **creates** an index (lifts state); `{ global Leaf.x }` on create-index leaves that var scalar in TLA+ (and freezes it when the proc declares `const x`; does not affect the native binary). Names must be proc-qualified. Shared immutable topology can also sit outside the create-index via composition. Inside `with`, only `Name[v]` **applies** a shared binder. Shorthand `(A || B)[n : T]` desugars to create-temps + `with` + applies — see [Specifications](specifications.md#indexes-create-with-and-apply). Parent/child edges are inferred from nested `||` — see [Parent/child inference](children.md).
+System atoms: `Name[v : T]` **creates** an index (lifts state). Shared immutable topology sits **outside** the create-index as an unindexed sibling (`…[n] || ClusterConf`); composition `init:` freezes that leaf’s proc `const`s in TLA+. Inside `with`, only `Name[v]` **applies** a shared binder. Shorthand `(A || B)[n : T]` desugars to create-temps + `with` + applies — see [Specifications](specifications.md#indexes-create-with-and-apply). Parent/child edges are inferred from nested `||` — see [Parent/child inference](children.md).
 
 Leaf-spec actions: `transition name(args) also (aux : T) { … }` (leaf specs only). Bodies may read peer state `P.var` / `P[idx].var` (compile checks composition + indexing).
 

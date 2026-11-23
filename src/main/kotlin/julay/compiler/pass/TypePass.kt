@@ -91,10 +91,9 @@ private var typePassIndexedPeerParamTypes: Map<String, Type> = emptyMap()
  */
 private var typePassIndexedPeerInstParamTypes: Map<String, Type> = emptyMap()
 /**
- * Non-null while typing `init:`: leaf name → frozen global var names (listed
- * `global` + proc `const`). Indexed `Leaf[i].var` is rejected for those names
- * (scalars) and for mutable vars;
- * indexed `const` state is allowed.
+ * Non-null while typing `init:`: leaf name → frozen unindexed proc `const`s
+ * (composition `init:` on an unindexed leaf). Indexed `Leaf[i].var` is rejected
+ * for those names (scalars) and for mutable vars; indexed `const` state is allowed.
  */
 private var typePassInitConstGlobals: Map<String, Set<String>>? = null
 /** True while typing invariant/`init:` formulas (tighter peer indexing, no effects). */
@@ -1503,7 +1502,7 @@ private fun FieldAccessExprNode.typePassFieldAccess(
                 return listOf(
                     OneLocCompileError(
                         programLocation(),
-                        "\"init:\" may only mention frozen global state; \"$baseSymbol.$varName\" is not a listed global const",
+                        "\"init:\" may only mention frozen unindexed const state; \"$baseSymbol.$varName\" is not a frozen const",
                     ),
                 )
             }
@@ -1532,7 +1531,7 @@ private fun FieldAccessExprNode.typePassFieldAccess(
                 OneLocCompileError(
                     programLocation(),
                     "unbound \"$baseSymbol.${fieldPath.joinToString(".")}\" in init: " +
-                        "(use a frozen global name, Leaf.var, or Sort.length)",
+                        "(use Leaf.var for a frozen unindexed const, or Sort.length)",
                 ),
             )
         }
@@ -1631,7 +1630,7 @@ private fun peerStateRefType(
                     OneLocCompileError(
                         loc,
                         "\"init:\" cannot use indexed access \"$peerSym[i].$fieldName\"; " +
-                            "frozen globals are scalars (write $peerSym.$fieldName or a bare name)",
+                            "frozen consts are scalars (write $peerSym.$fieldName)",
                     )
                 } else {
                     OneLocCompileError(
@@ -1686,7 +1685,7 @@ private fun peerStateRefType(
                             OneLocCompileError(
                                 loc,
                                 "\"init:\" cannot use indexed access \"$peerSym[i].$fieldName\"; " +
-                                    "frozen globals are scalars (write $peerSym.$fieldName or a bare name)",
+                                    "frozen consts are scalars (write $peerSym.$fieldName)",
                             ),
                         ),
                     )
@@ -2303,7 +2302,7 @@ private fun SymbolValueExprNode.typePassSymbol(
             return listOf(
                 OneLocCompileError(
                     programLocation(),
-                    "unbound symbol \"$symbol\" in init: (use Leaf.var, a listed global name, a sort name, or Sort.length)",
+                    "unbound symbol \"$symbol\" in init: (use Leaf.var, a sort name, or Sort.length)",
                 ),
             )
         }
@@ -2855,7 +2854,7 @@ private fun IndexExprNode.typePassIndex(
         val baseSym = (base as? SymbolValueExprNode)?.symbol
         if (baseSym != null && baseSym !in symbolEnv && isSpecPeerName(baseSym)) {
             val msg = if (typePassInitConstGlobals != null) {
-                "\"init:\" cannot index component \"$baseSym\"; frozen globals are unindexed"
+                "\"init:\" cannot index component \"$baseSym\"; frozen consts are unindexed"
             } else {
                 "indexed component \"$baseSym\" requires a state variable: \"$baseSym[i].var\""
             }

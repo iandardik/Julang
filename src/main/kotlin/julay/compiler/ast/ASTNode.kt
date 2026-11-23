@@ -194,31 +194,26 @@ class SpecNode(
 }
 
 /**
- * Composition trailing block on `spec Name := system { … }` (models / init / global).
+ * Composition trailing block on `spec Name := system { … }` (models / init).
  * Does not create an index; extras are pushed onto expanded leaves like create-index items.
  */
 class SpecCompositionBlockNode(
     private val body: ASTNode,
     private val loc: ProgramLoc,
-    private val globalDecls: List<GlobalDeclNames> = emptyList(),
     private val initExprs: List<ExprNode> = emptyList(),
     private val typeModels: List<TypeModelNode> = emptyList(),
     private val funModels: List<FunModelNode> = emptyList(),
 ) : ASTNode(listOf(body) + initExprs + typeModels + funModels) {
     override fun programLocation() = loc
     internal fun systemBody() = body
-    internal fun globalDecls(): List<GlobalDeclNames> = globalDecls
-    internal fun globalVarRefs(): List<GlobalVarRef> = globalDecls.flatMap { it.refs }
     internal fun initExprs(): List<ExprNode> = initExprs
     internal fun typeModels(): List<TypeModelNode> = typeModels
     internal fun funModels(): List<FunModelNode> = funModels
     internal fun blockToString(): String? {
-        if (globalDecls.isEmpty() && initExprs.isEmpty() && typeModels.isEmpty() && funModels.isEmpty()) {
+        if (initExprs.isEmpty() && typeModels.isEmpty() && funModels.isEmpty()) {
             return null
         }
-        val lines = globalDecls.map { decl ->
-            "  global ${decl.refs.joinToString(", ")}"
-        } + typeModels.map { it.toString().prependIndent("  ") } +
+        val lines = typeModels.map { it.toString().prependIndent("  ") } +
             funModels.map { it.toString().prependIndent("  ") } +
             initExprs.map { "  init: $it" }
         return lines.joinToString("\n")
@@ -443,28 +438,12 @@ class AgSpecExprNode(
     }
 }
 
-/** One create-index `global` target: `Leaf.var`. */
-data class GlobalVarRef(
-    val leafName: String,
-    val varName: String,
-) {
-    override fun toString(): String = "$leafName.$varName"
-}
-
-/** Create-index `{ global Leaf.x }` refs with source location. */
-data class GlobalDeclNames(
-    val refs: List<GlobalVarRef>,
-    val loc: ProgramLoc,
-)
-
 class ParamProcExprNode(
     private val body: ASTNode,
     private val paramName: String,
     /** Null when this is an apply-index `Name[n]` (type comes from enclosing `with`). */
     private val paramType: TypeExpr?,
     private val loc: ProgramLoc,
-    /** Create-index `global` decls; empty for apply-index. */
-    private val globalDecls: List<GlobalDeclNames> = emptyList(),
     /** Create-index `init:` Boolean exprs; empty for apply-index. */
     private val initExprs: List<ExprNode> = emptyList(),
     /** Create-index delayed domain models (`Name := { … }`). */
@@ -477,23 +456,15 @@ class ParamProcExprNode(
     internal fun paramName() = paramName
     internal fun paramType(): TypeExpr? = paramType
     internal fun isApplyIndex(): Boolean = paramType == null
-    internal fun globalDecls(): List<GlobalDeclNames> = globalDecls
-    /** All `Leaf.var` refs on this create-index. */
-    internal fun globalVarRefs(): List<GlobalVarRef> = globalDecls.flatMap { it.refs }
-    /** Bare var names (legacy helpers); prefer [globalVarRefs] / per-leaf filtering. */
-    internal fun globalVarNames(): List<String> = globalVarRefs().map { it.varName }
     internal fun initExprs(): List<ExprNode> = initExprs
     internal fun typeModels(): List<TypeModelNode> = typeModels
     internal fun funModels(): List<FunModelNode> = funModels
     override fun toString(): String {
         val index = if (paramType == null) "$body[$paramName]" else "$body[$paramName : $paramType]"
-        if (globalDecls.isEmpty() && initExprs.isEmpty() && typeModels.isEmpty() && funModels.isEmpty()) {
+        if (initExprs.isEmpty() && typeModels.isEmpty() && funModels.isEmpty()) {
             return index
         }
-        val lines = globalDecls.map { decl ->
-            val names = decl.refs.joinToString(", ")
-            "  global $names"
-        } + typeModels.map { it.toString().prependIndent("  ") } +
+        val lines = typeModels.map { it.toString().prependIndent("  ") } +
             funModels.map { it.toString().prependIndent("  ") } +
             initExprs.map { expr ->
                 "  init: $expr"

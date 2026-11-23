@@ -8,30 +8,35 @@ type Node {
 fun lookup(cluster : Set<Node>, id : Int) : Node =
     cluster.filter(x -> x.id = id).toList()[1]
 
-static proc Box {
+static proc Cluster {
     const cluster : Set<Node>
-    var n : Int
 
-    constructor start(cluster : Set<Node>) {
+    constructor initially(cluster : Set<Node>) {
         transit:
             cluster := cluster
-            n := 0
         error:
             cluster.map(x -> x.id).length ~= cluster.length -> "dup ids"
     }
+}
 
-    transition pick(id : Int) {
+static proc Box {
+    var n : Int
+
+    constructor start() {
+        transit:
+            n := 0
+    }
+
+    transition pick(id : Int, cluster : Set<Node>) {
         guard: lookup(cluster, id) in cluster
         transit: n := n + 1
     }
 }
 
-spec UnwrapHofField := Box[i : Ids] {
+spec UnwrapHofField := (Box[i : Ids] || Cluster) {
     Ids := { "a", "b", "c" }
-    global Box.cluster
-    init: cluster.length = Ids.length
-    init: forall i : Int, (i >= 1 & i <= cluster.length) => (exists node : Node, node in cluster & node.id = i)
-} {
+    init: Cluster.cluster.length = Ids.length
+    init: forall i : Int, (i >= 1 & i <= Cluster.cluster.length) => (exists node : Node, node in Cluster.cluster & node.id = i)
     unsynced pick, start
 }
 

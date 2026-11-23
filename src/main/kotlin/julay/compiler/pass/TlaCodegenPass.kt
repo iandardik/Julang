@@ -2512,7 +2512,7 @@ private fun emitConjoined(
                         val domain = typeToTlaDomain(expr.getType())
                         addAssignPart(
                             if (constGlobal) {
-                                "/\\ $v \\in $domain \\* global const check"
+                                "/\\ $v \\in $domain \\* frozen const check"
                             } else if (indexes(root)) {
                                 "/\\ \\E __io \\in $domain: $v' = [$v EXCEPT ![$self] = __io]"
                             } else {
@@ -2525,7 +2525,7 @@ private fun emitConjoined(
                             offer.leaf.name, root, update.key, expr, assignPrefix, ::emitExpr,
                         )
                         // Parenthesize `[1 |-> …]` so `/\\` junctions do not parse `[` as a new item.
-                        addAssignPart("/\\ $v = ${parenIfBracketExpr(rhs)} \\* global const check")
+                        addAssignPart("/\\ $v = ${parenIfBracketExpr(rhs)} \\* frozen const check")
                     } else {
                         val assignPrefix = if (indexes(root)) {
                             "/\\ $v' = [$v EXCEPT ![$self] = "
@@ -2567,13 +2567,13 @@ private fun emitConjoined(
                         addAssignPart(
                             when {
                                 quietMapPut && constGlobal ->
-                                    "/\\ \\E __io \\in $domain: $v = ${emitMapIndexPutRhs(v, k, "__io")} \\* global const check"
+                                    "/\\ \\E __io \\in $domain: $v = ${emitMapIndexPutRhs(v, k, "__io")} \\* frozen const check"
                                 quietMapPut && indexes(update.collectionVar) ->
                                     "/\\ \\E __io \\in $domain: $v' = [$v EXCEPT ![$self] = ${emitMapIndexPutRhs("@", k, "__io")}]"
                                 quietMapPut ->
                                     "/\\ \\E __io \\in $domain: $v' = ${emitMapIndexPutRhs(v, k, "__io")}"
                                 constGlobal ->
-                                    "/\\ \\E __io \\in $domain: $v = [$v EXCEPT ![$k] = __io] \\* global const check"
+                                    "/\\ \\E __io \\in $domain: $v = [$v EXCEPT ![$k] = __io] \\* frozen const check"
                                 indexes(update.collectionVar) ->
                                     "/\\ \\E __io \\in $domain: $v' = [$v EXCEPT ![$self] = [@ EXCEPT ![$k] = __io]]"
                                 else ->
@@ -2585,7 +2585,7 @@ private fun emitConjoined(
                             val putPrefix = "/\\ $v = "
                             val vv = emitExpr(update.value, putPrefix)
                             addAssignPart(
-                                "$putPrefix${emitMapIndexPutRhs(v, k, vv)} \\* global const check",
+                                "$putPrefix${emitMapIndexPutRhs(v, k, vv)} \\* frozen const check",
                             )
                         } else if (indexes(update.collectionVar)) {
                             val putPrefix = "/\\ $v' = [$v EXCEPT ![$self] = "
@@ -2599,7 +2599,7 @@ private fun emitConjoined(
                     } else if (constGlobal) {
                         val putPrefix = "/\\ $v = [$v EXCEPT ![$k] = "
                         val vv = emitExpr(update.value, putPrefix)
-                        addAssignPart("/\\ $v = [$v EXCEPT ![$k] = $vv] \\* global const check")
+                        addAssignPart("/\\ $v = [$v EXCEPT ![$k] = $vv] \\* frozen const check")
                     } else {
                         val putPrefix = if (indexes(update.collectionVar)) {
                             "/\\ $v' = [$v EXCEPT ![$self] = [@ EXCEPT ![$k] = "
@@ -3082,7 +3082,7 @@ private fun emitInitConstraintParts(
                 stateVarNames = stateVarNames,
                 linePrefix = "",
                 parentPrec = PREC_BOTTOM,
-                globalByLeaf = globalVarsByLeaf(leaves),
+
             )
             addInitConjunct(initParts, body)
         }
@@ -3200,7 +3200,7 @@ private fun ctorSymbolOverrides(
             stateVarNames = stateVarNames,
             symbolOverrides = overrides,
             linePrefix = "",
-            globalByLeaf = globalVarsByLeaf(leaves),
+
         )
         overrides[update.name] = rhs
     }
@@ -3256,7 +3256,7 @@ private fun foldedCtorVarInit(
         stateVarNames = stateVarNames,
         symbolOverrides = overrides,
         linePrefix = assignPrefix,
-        globalByLeaf = globalVarsByLeaf(leaves),
+
     )
     return if (indexed) {
         "/\\ $v = [$binder \\in $domain |-> $rhs]"
@@ -3330,7 +3330,7 @@ private fun emitFoldedCtorAssumptions(
             stateVarNames = stateVarNames,
             symbolOverrides = overrides + existsArgTla,
             linePrefix = "/\\ ",
-            globalByLeaf = globalVarsByLeaf(leaves),
+
         )
         val existsWrap = existsArgs.reversed().fold(body) { inner, arg ->
             val ty = argTypes[arg]?.let { typeToTlaDomain(it) } ?: "Int"
@@ -3361,9 +3361,9 @@ private fun emitFoldedCtorAssumptions(
             stateVarNames = stateVarNames,
             symbolOverrides = overrides,
             linePrefix = "/\\ $v = ",
-            globalByLeaf = globalVarsByLeaf(leaves),
+
         )
-        initParts += "/\\ $v = ${parenIfBracketExpr(rhs)} \\* global const check"
+        initParts += "/\\ $v = ${parenIfBracketExpr(rhs)} \\* frozen const check"
     }
     errorFormulas.forEach { initParts += "/\\ $it" }
 }
@@ -3419,15 +3419,6 @@ internal fun collectSortLengthConstants(
     walk(expr)
 }
 
-internal fun globalVarsByLeaf(leaves: List<SpecLeaf>): Map<String, Set<String>> {
-    val out = mutableMapOf<String, Set<String>>()
-    leaves.forEach { leaf ->
-        if (leaf.globalVars.isEmpty()) return@forEach
-        out[leaf.name] = leaf.globalVars
-        out[leaf.tlaName] = leaf.globalVars
-    }
-    return out
-}
 
 internal fun tlaVar(leaf: String, varName: String): String = "${varName}_$leaf"
 
@@ -3599,7 +3590,7 @@ private fun emitInvariantDefs(
             stateVarNames = remapped,
             linePrefix = "",
             parentPrec = PREC_BOTTOM,
-            globalByLeaf = globalVarsByLeaf(leaves),
+
         )
         return if (body.contains('\n') || isMultiLineExpr(formula)) {
             val indented = body.lineSequence().joinToString("\n") { "  $it" }
@@ -5944,19 +5935,17 @@ internal fun exprToTla(
     linePrefix: String = "",
     /** Parent operator precedence; wrap this expr in parens when its prec is lower. */
     parentPrec: Int = PREC_BOTTOM,
-    /** Class / TLA leaf name → `global` state vars (omit index on Peer[idx].var). */
-    globalByLeaf: Map<String, Set<String>> = emptyMap(),
 ): String {
     if (TlaSkipConjuncts.skipped(expr)) return "TRUE"
     fun rec(e: ExprNode, prefix: String = linePrefix, prec: Int = parentPrec): String =
         exprToTla(
             e, leafCtx, argNames, self, bareStateVars, reservedNames, stateVarNames, symbolOverrides,
-            prefix, prec, globalByLeaf,
+            prefix, prec,
         )
     fun recWithOverrides(e: ExprNode, extra: Map<String, String>, prefix: String = linePrefix, prec: Int = parentPrec): String =
         exprToTla(
             e, leafCtx, argNames, self, bareStateVars, reservedNames, stateVarNames,
-            symbolOverrides + extra, prefix, prec, globalByLeaf,
+            symbolOverrides + extra, prefix, prec,
         )
     fun stateRead(leaf: SpecLeaf, varName: String): String {
         val v = stateTlaName(leaf.tlaName, varName, stateVarNames)
@@ -6008,7 +5997,7 @@ internal fun exprToTla(
             }
             exprToTla(
                 inner, leafCtx, forcedArgs, self, bareStateVars, reservedNames, stateVarNames,
-                symbolOverrides - root, linePrefix, parentPrec, globalByLeaf,
+                symbolOverrides - root, linePrefix, parentPrec,
             )
         }
         is ListLiteralExprNode -> {
@@ -6168,13 +6157,7 @@ internal fun exprToTla(
                     val mapped = stateVarNames[leafName to expr.fieldName]
                         ?: peer?.let { stateVarNames[it.tlaName to expr.fieldName] }
                     if (mapped != null && leafName !in argNames && leafName !in bareStateVars) {
-                        val globals = globalByLeaf[leafName].orEmpty() +
-                            (peer?.let { globalByLeaf[it.tlaName].orEmpty() } ?: emptySet())
-                        if (expr.fieldName in globals) {
-                            mapped
-                        } else {
-                            "$mapped[${rec(outer.index)}][${rec(base.index)}]"
-                        }
+                        "$mapped[${rec(outer.index)}][${rec(base.index)}]"
                     } else {
                         val stateLeaf = leafCtx.values.singleOrNull()
                         emitUnwrappedFieldPath(
@@ -6192,13 +6175,7 @@ internal fun exprToTla(
                     val mapped = stateVarNames[leafName to expr.fieldName]
                         ?: peer?.let { stateVarNames[it.tlaName to expr.fieldName] }
                     if (mapped != null && leafName !in argNames && leafName !in bareStateVars) {
-                        val globals = globalByLeaf[leafName].orEmpty() +
-                            (peer?.let { globalByLeaf[it.tlaName].orEmpty() } ?: emptySet())
-                        if (expr.fieldName in globals) {
-                            mapped
-                        } else {
-                            "$mapped[${rec(base.index)}]"
-                        }
+                        "$mapped[${rec(base.index)}]"
                     } else {
                         val stateLeaf = leafCtx.values.singleOrNull()
                         val idxBase = (base.base as SymbolValueExprNode).symbol

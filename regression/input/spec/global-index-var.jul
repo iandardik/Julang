@@ -1,22 +1,27 @@
 type Node
 
-static proc Peer {
+static proc Cluster {
     const cluster : List<String>
+
+    constructor initially(cluster : List<String>) {
+        transit:
+            cluster := cluster
+    }
+}
+
+static proc Peer {
     var extra : Int
     var state : String
 
-    constructor start(me : String, cluster : List<String>) {
+    constructor start(me : String) {
         transit:
-            cluster := cluster
             extra := 0
             state := "idle"
-        error:
-            (me ~in cluster) -> "not in cluster"
     }
 
     internal transition bump() {
         guard:
-            extra < 3 & cluster.length >= 0 & state ~= ""
+            extra < 3 & state ~= ""
         transit:
             extra := extra + 1
             state := "busy"
@@ -24,13 +29,12 @@ static proc Peer {
 }
 
 invariant All := forall i : Node,
-    Peer[i].extra >= 0 & (Peer[i].state = "busy" | Peer[i].state = "idle") & Peer[i].cluster = Peer[i].cluster
+    Peer[i].extra >= 0 & (Peer[i].state = "busy" | Peer[i].state = "idle") &
+    Cluster.cluster = Cluster.cluster
 
-spec Indexed := Peer[n : Node] {
+spec Indexed := (Peer[n : Node] || Cluster) |= All {
     Node := {"n1", "n2"}
-  global Peer.cluster
-  global Peer.extra
-} |= All {
+    init: Cluster.cluster.length = Node.length
     unsynced start
 }
 

@@ -76,7 +76,6 @@ RETURN : 'return' ;
 ALSO : 'also' ;
 WITH : 'with' ;
 THIS : 'this' ;
-GLOBAL : 'global' ;
 INIT : 'init' ;
 UNSYNCED : 'unsynced' ;
 

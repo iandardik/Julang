@@ -58,25 +58,14 @@ data class SpecLeaf(
      */
     val withScopeId: String? = null,
     /**
-     * Create-index `global` state vars: emitted as scalar TLA VARIABLES (not functions of
-     * the index). Model-only; does not affect JAR codegen.
-     * Only vars listed as `global ThisLeaf.var` apply here.
-     */
-    val globalVars: Set<String> = emptySet(),
-    /**
-     * Subset of [globalVars] that are proc `const`: Init is unconstrained (`\\in` TypeOK),
-     * constructors never prime the variable. Derived at materialize time (not a keyword).
+     * Proc `const`s on an **unindexed** leaf that carries composition/`init:`:
+     * Init is unconstrained (`\\in` TypeOK), constructors never prime the variable.
+     * Shared topology uses an unindexed sibling leaf (not create-index `global`).
      */
     val globalConstVars: Set<String> = emptySet(),
     /**
-     * Qualified create-index global refs not yet bound to a concrete leaf (e.g. listed on
-     * `(Store || ShardLogic)[n]` as `ClusterInfo.cluster` before `ShardLogic` expands).
-     * Materialized into [globalVars] when the leaf name matches.
-     */
-    val pendingGlobalRefs: List<GlobalVarRef> = emptyList(),
-    /**
-     * Create-index `init:` Boolean exprs: extra Init conjuncts over frozen globals /
-     * uninterpreted `.length`.
+     * Create-index / composition `init:` Boolean exprs: extra Init conjuncts over
+     * frozen unindexed consts / uninterpreted `.length`.
      */
     val initExprs: List<ExprNode> = emptyList(),
     /** Create-index delayed domain models (`Name := { … }`). */
@@ -92,8 +81,8 @@ data class SpecLeaf(
     val isParameterized: Boolean get() = paramName != null && paramType != null
     val isDualIndexed: Boolean
         get() = isParameterized && instParamName != null && instParamType != null
-    /** True when this leaf is create-indexed and [varName] is not a `global` model var. */
-    fun indexesState(varName: String): Boolean = isParameterized && varName !in globalVars
+    /** True when this leaf is create-indexed (every state var is a function of the index). */
+    fun indexesState(@Suppress("UNUSED_PARAMETER") varName: String): Boolean = isParameterized
     fun identityKey(): String {
         val base = if (paramName != null) "$name[$paramName:${paramType}]" else name
         val withInst = if (instParamName != null) "$base[${instParamName}:${instParamType}]" else base
@@ -151,7 +140,6 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
             is SpecCompositionBlockNode -> {
                 // Trailing `spec A := system { models; init: … }` — push extras onto system leaves
                 // only (not AG assume leaves).
-                val globalRefs = n.globalVarRefs()
                 val inits = n.initExprs()
                 val typeModels = n.typeModels()
                 val funModels = n.funModels()
@@ -164,7 +152,6 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
                 }
                 bodyLeaves.forEach { child ->
                     out += child.copy(
-                        pendingGlobalRefs = child.pendingGlobalRefs + globalRefs,
                         initExprs = child.initExprs + inits,
                         typeModels = child.typeModels + domainTypeModels,
                         funModels = child.funModels + funModels,
@@ -174,24 +161,19 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
             }
             is ParamProcExprNode -> {
                 val paramName = n.paramName()
-                val globalRefs = n.globalVarRefs()
                 val inits = n.initExprs()
                 val typeModels = n.typeModels()
                 val funModels = n.funModels()
                 // DynProc is a reserved create-index slot set, not a domain type.
                 val dynProcModel = typeModels.firstOrNull { it.name() == DYN_PROC_MODEL }
                 val domainTypeModels = typeModels.filter { it.name() != DYN_PROC_MODEL }
-                fun withGlobals(child: SpecLeaf): SpecLeaf {
-                    // Keep all qualified refs until alias expansion (ShardLogic → ClusterInfo);
-                    // materialize matching Leaf.var in expandLeavesToPclasses.
-                    val hasPending = globalRefs.isNotEmpty()
-                    return if (!hasPending && inits.isEmpty() && domainTypeModels.isEmpty() &&
+                fun withExtras(child: SpecLeaf): SpecLeaf {
+                    return if (inits.isEmpty() && domainTypeModels.isEmpty() &&
                         funModels.isEmpty() && dynProcModel == null
                     ) {
                         child
                     } else {
                         child.copy(
-                            pendingGlobalRefs = child.pendingGlobalRefs + globalRefs,
                             initExprs = child.initExprs + inits,
                             typeModels = child.typeModels + domainTypeModels,
                             funModels = child.funModels + funModels,
@@ -205,9 +187,9 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
                         // Create-indexed children keep lifting; binder renamed to the with-name.
                         flattenSpecLeaves(n.paramBody(), intro).forEach { child ->
                             out += if (child.isParameterized) {
-                                withGlobals(child.copy(paramName = paramName, withScopeId = withScopeId))
+                                withExtras(child.copy(paramName = paramName, withScopeId = withScopeId))
                             } else {
-                                withGlobals(
+                                withExtras(
                                     child.copy(
                                         paramName = paramName,
                                         paramType = null,
@@ -223,7 +205,7 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
                         val pType = n.paramType()!!
                         flattenSpecLeaves(n.paramBody(), intro).forEach { child ->
                             out += if (!child.isParameterized) {
-                                withGlobals(
+                                withExtras(
                                     child.copy(
                                         paramName = paramName,
                                         paramType = pType,
@@ -231,7 +213,7 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
                                     ),
                                 )
                             } else {
-                                withGlobals(child)
+                                withExtras(child)
                             }
                         }
                     }
@@ -242,7 +224,7 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
                         val scopeId = withScopeId ?: freshWithScopeId()
                         flattenSpecLeaves(n.paramBody(), intro).forEach { child ->
                             out += if (!child.isParameterized) {
-                                withGlobals(
+                                withExtras(
                                     child.copy(
                                         paramName = paramName,
                                         paramType = pType,
@@ -250,7 +232,7 @@ fun flattenSpecLeaves(node: ASTNode?, introducingAssembly: String = ""): List<Sp
                                     ),
                                 )
                             } else {
-                                withGlobals(
+                                withExtras(
                                     child.copy(withScopeId = child.withScopeId ?: scopeId),
                                 )
                             }
@@ -347,9 +329,7 @@ fun expandLeavesToPclasses(
     fun pushDown(outer: SpecLeaf, child: SpecLeaf): SpecLeaf {
         var c = child.copy(
             withScopeId = outer.withScopeId ?: child.withScopeId,
-            globalVars = child.globalVars + outer.globalVars,
             globalConstVars = child.globalConstVars + outer.globalConstVars,
-            pendingGlobalRefs = child.pendingGlobalRefs + outer.pendingGlobalRefs,
             initExprs = child.initExprs + outer.initExprs,
             typeModels = child.typeModels + outer.typeModels,
             funModels = child.funModels + outer.funModels,
@@ -380,41 +360,25 @@ fun expandLeavesToPclasses(
         return pc.localDecls().filterIsInstance<VarNode>().associateBy { it.name }
     }
 
-    fun materializeGlobals(leaf: SpecLeaf): SpecLeaf {
-        val matched = leaf.pendingGlobalRefs.filter { it.leafName == leaf.name }.map { it.varName }.toSet()
-        val withPending = leaf.copy(
-            globalVars = leaf.globalVars + matched,
-            pendingGlobalRefs = emptyList(),
-        )
-        val declaredVars = declaredStateVars(withPending.name)
-        // Listed `global Leaf.var` + proc `const` → freeze. Unindexed leaves: all proc
-        // `const`s are already scalars, so freeze them the same way (Init `\in`, `Leaf.var` in init:).
-        val listedGlobals = if (declaredVars.isEmpty()) {
-            emptySet()
-        } else {
-            withPending.globalVars.intersect(declaredVars.keys)
-        }
-        val listedFrozen = listedGlobals.filter { name -> declaredVars[name]?.isConst == true }.toSet()
+    fun materializeFrozenConsts(leaf: SpecLeaf): SpecLeaf {
+        val declaredVars = declaredStateVars(leaf.name)
         // Composition-block `init:` is pushed onto all leaves; freeze unindexed proc
         // consts so Init uses `\in` and `Leaf.var` type-checks / emits.
         val unindexedFrozen = if (
-            !withPending.isParameterized &&
-            withPending.initExprs.isNotEmpty() &&
+            !leaf.isParameterized &&
+            leaf.initExprs.isNotEmpty() &&
             declaredVars.isNotEmpty()
         ) {
             declaredVars.filter { it.value.isConst }.keys
         } else {
             emptySet()
         }
-        return withPending.copy(
-            globalVars = listedGlobals,
-            globalConstVars = listedFrozen + unindexedFrozen,
-        )
+        return leaf.copy(globalConstVars = unindexedFrozen)
     }
 
     fun expand(leaf: SpecLeaf) {
         when {
-            leaf.name in leafSpecs || leaf.name in pclasses -> out += materializeGlobals(leaf)
+            leaf.name in leafSpecs || leaf.name in pclasses -> out += materializeFrozenConsts(leaf)
             leaf.name in procAliases -> {
                 val proc = procAliases.getValue(leaf.name)
                 flattenSpecLeaves(proc.procNodeValue(), leaf.name).forEach { child ->
@@ -434,7 +398,7 @@ fun expandLeavesToPclasses(
                     visiting.remove(leaf.name)
                 }
             }
-            else -> out += materializeGlobals(leaf)
+            else -> out += materializeFrozenConsts(leaf)
         }
     }
     leaves.forEach { expand(it) }

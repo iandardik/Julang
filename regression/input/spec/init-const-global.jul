@@ -1,21 +1,26 @@
 type Node
 
-static proc Peer {
+static proc Cluster {
     const cluster : List<String>
-    var state : String
 
-    constructor start(me : String, cluster : List<String>) {
+    constructor initially(cluster : List<String>) {
         transit:
             cluster := cluster
+    }
+}
+
+static proc Peer {
+    var state : String
+
+    constructor start(me : String) {
+        transit:
             state := "idle"
     }
 }
 
-spec Indexed := Peer[n : Node] {
+spec Indexed := (Peer[n : Node] || Cluster) {
     Node := {"n1", "n2"}
-  global Peer.cluster
-  init: cluster.length = Node.length
-} {
+    init: Cluster.cluster.length = Node.length
     unsynced start
 }
 

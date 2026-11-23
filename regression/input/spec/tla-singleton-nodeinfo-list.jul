@@ -5,8 +5,16 @@ type NodeInfo {
     url : String
 }
 
-static proc Peer {
+static proc Cluster {
     const cluster : List<NodeInfo>
+
+    constructor initially(cluster : List<NodeInfo>) {
+        transit:
+            cluster := cluster
+    }
+}
+
+static proc Peer {
     var n : Int
     var lastUrl : String
 
@@ -19,16 +27,13 @@ static proc Peer {
     transition bump() {
         transit:
             n := n + 1
-            lastUrl := cluster[1].url
     }
 }
 
-spec SingletonNodeInfoList := Peer[i : NodeSet] {
+spec SingletonNodeInfoList := (Peer[i : NodeSet] || Cluster) {
     NodeSet := { "n1", "n2" }
-    global Peer.cluster
-    init: cluster.length = NodeSet.length
-    init: forall i : Int, (i >= 1 & i <= cluster.length) => cluster[i].id = i
-} {
+    init: Cluster.cluster.length = NodeSet.length
+    init: forall i : Int, (i >= 1 & i <= Cluster.cluster.length) => Cluster.cluster[i].id = i
     unsynced bump
 }
 

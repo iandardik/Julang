@@ -346,7 +346,6 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             else -> throw RuntimeException("Invalid spec body")
         }
         val unsynced = mutableListOf<String>()
-        val globalDecls = mutableListOf<GlobalDeclNames>()
         val initExprs = mutableListOf<ExprNode>()
         val typeModels = mutableListOf<TypeModelNode>()
         val funModels = mutableListOf<FunModelNode>()
@@ -357,19 +356,6 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 return@forEach
             }
             val indexItem = item.create_index_item() ?: return@forEach
-            val decl = indexItem.global_decl()
-            if (decl != null) {
-                globalDecls += GlobalDeclNames(
-                    refs = decl.global_var_ref().map { ref ->
-                        GlobalVarRef(
-                            leafName = ref.ID(0).text,
-                            varName = ref.ID(1).text,
-                        )
-                    },
-                    loc = sourceLocation(decl),
-                )
-                return@forEach
-            }
             val model = indexItem.type_model()
             if (model != null) {
                 val node = visit(model)
@@ -396,13 +382,11 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             initExprs += expr
         }
         val hasCompositionExtras =
-            globalDecls.isNotEmpty() || initExprs.isNotEmpty() ||
-                typeModels.isNotEmpty() || funModels.isNotEmpty()
+            initExprs.isNotEmpty() || typeModels.isNotEmpty() || funModels.isNotEmpty()
         val wrapped = if (hasCompositionExtras) {
             SpecCompositionBlockNode(
                 body = value,
                 loc = sourceLocation(ctx),
-                globalDecls = globalDecls,
                 initExprs = initExprs,
                 typeModels = typeModels,
                 funModels = funModels,
@@ -565,53 +549,39 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             ctx.COLON() != null -> {
                 val paramName = ctx.ID().text
                 val paramType = parseTypeExpr(ctx.typeExpr())
-                val globalDecls = mutableListOf<GlobalDeclNames>()
                 val initExprs = mutableListOf<ExprNode>()
                 val typeModels = mutableListOf<TypeModelNode>()
                 val funModels = mutableListOf<FunModelNode>()
                 ctx.create_index_item().forEach { item ->
-                    val decl = item.global_decl()
-                    if (decl != null) {
-                        globalDecls += GlobalDeclNames(
-                            refs = decl.global_var_ref().map { ref ->
-                                GlobalVarRef(
-                                    leafName = ref.ID(0).text,
-                                    varName = ref.ID(1).text,
-                                )
-                            },
-                            loc = sourceLocation(decl),
-                        )
+                    val model = item.type_model()
+                    if (model != null) {
+                        val node = visit(model)
+                        if (node !is TypeModelNode) {
+                            throw RuntimeException("Expected TypeModelNode but got $node")
+                        }
+                        typeModels += node
                     } else {
-                        val model = item.type_model()
-                        if (model != null) {
-                            val node = visit(model)
-                            if (node !is TypeModelNode) {
-                                throw RuntimeException("Expected TypeModelNode but got $node")
+                        val funModel = item.fun_model()
+                        if (funModel != null) {
+                            val node = visit(funModel)
+                            if (node !is FunModelNode) {
+                                throw RuntimeException("Expected FunModelNode but got $node")
                             }
-                            typeModels += node
+                            funModels += node
                         } else {
-                            val funModel = item.fun_model()
-                            if (funModel != null) {
-                                val node = visit(funModel)
-                                if (node !is FunModelNode) {
-                                    throw RuntimeException("Expected FunModelNode but got $node")
-                                }
-                                funModels += node
-                            } else {
-                                val init = item.init_clause()
-                                    ?: return@forEach
-                                val expr = visit(init.expr())
-                                if (expr !is ExprNode) {
-                                    throw RuntimeException("Expected init: clause to be an expression")
-                                }
-                                initExprs += expr
+                            val init = item.init_clause()
+                                ?: return@forEach
+                            val expr = visit(init.expr())
+                            if (expr !is ExprNode) {
+                                throw RuntimeException("Expected init: clause to be an expression")
                             }
+                            initExprs += expr
                         }
                     }
                 }
                 ParamProcExprNode(
                     primary, paramName, paramType, sourceLocation(ctx),
-                    globalDecls, initExprs, typeModels, funModels,
+                    initExprs, typeModels, funModels,
                 )
             }
             ctx.LBRACK() != null -> {

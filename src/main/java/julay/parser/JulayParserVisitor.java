@@ -173,18 +173,6 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitCreate_index_item(JulayParser.Create_index_itemContext ctx);
 	/**
-	 * Visit a parse tree produced by {@link JulayParser#global_decl}.
-	 * @param ctx the parse tree
-	 * @return the visitor result
-	 */
-	T visitGlobal_decl(JulayParser.Global_declContext ctx);
-	/**
-	 * Visit a parse tree produced by {@link JulayParser#global_var_ref}.
-	 * @param ctx the parse tree
-	 * @return the visitor result
-	 */
-	T visitGlobal_var_ref(JulayParser.Global_var_refContext ctx);
-	/**
 	 * Visit a parse tree produced by {@link JulayParser#init_clause}.
 	 * @param ctx the parse tree
 	 * @return the visitor result

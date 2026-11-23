@@ -96,7 +96,7 @@ spec
     ;
 
 /* Optional block on composition specs (`spec A := B || C { … }`):
- * delayed models / init / global (same items as create-index) plus unsynced. */
+ * delayed models / init (same items as create-index) plus unsynced. */
 composition_spec_item
     : unsynced_decl
     | create_index_item
@@ -155,20 +155,9 @@ system_atom
     ;
 
 create_index_item
-    : global_decl
-    | init_clause
+    : init_clause
     | type_model
     | fun_model
-    ;
-
-// Create-index: `global Leaf.var` (proc-qualified; required). Shared immutable
-// topology uses unindexed leaf composition, not a separate const-global keyword.
-global_decl
-    : GLOBAL global_var_ref (COMMA global_var_ref)*
-    ;
-
-global_var_ref
-    : ID DOT ID
     ;
 
 init_clause

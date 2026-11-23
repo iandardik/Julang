@@ -15,6 +15,7 @@ invariant StateMachineSafety :=
 invariant AllInvariants := OneLeaderPerTerm & StateMachineSafety
 
 spec ClusterSpec := RaftProtocol[n : NodeSet] {
+    // TODO: `global` keyword removed — move cluster to an unindexed companion leaf (ClusterConf-style).
     global RaftProtocol.cluster
     NodeSet := { "n1", "n2", "n3" }
     Value := { "", "v1", "v2" }

@@ -1,7 +1,15 @@
 type Ids
 
-static proc Box {
+static proc XsHolder {
     const xs : List<Int>
+
+    constructor initially(xs : List<Int>) {
+        transit:
+            xs := xs
+    }
+}
+
+static proc Box {
     var n : Int
 
     constructor initially(args : List<String>) {
@@ -14,12 +22,10 @@ static proc Box {
     }
 }
 
-spec SingletonInit := Box[i : Ids] {
+spec SingletonInit := (Box[i : Ids] || XsHolder) {
     Ids := { "a", "b" }
-    global Box.xs
-    init: xs.length = Ids.length
-    init: forall i : Int, (i >= 1 & i <= xs.length) => xs[i] = i
-} {
+    init: XsHolder.xs.length = Ids.length
+    init: forall i : Int, (i >= 1 & i <= XsHolder.xs.length) => XsHolder.xs[i] = i
     unsynced bump
 }
 
