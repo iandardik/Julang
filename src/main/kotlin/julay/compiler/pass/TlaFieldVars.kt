@@ -2,6 +2,7 @@ package julay.compiler.pass
 
 import julay.compiler.ast.*
 import julay.compiler.decl.TransitUpdate
+import julay.compiler.decl.assignedRoots
 import julay.program.type.ObjClassType
 import julay.program.type.Type
 
@@ -87,11 +88,7 @@ internal fun analyzeTlaFieldVars(
         if (offer.isConstructor) return true
         if (offer.decl.isReturn) return true
         return offer.decl.transits.any { update ->
-            when (update) {
-                is TransitUpdate.Assign -> relevant.contains(offer.leaf.name to update.transitRootVar())
-                is TransitUpdate.IndexPut -> relevant.contains(offer.leaf.name to update.transitRootVar())
-                is TransitUpdate.Let -> false
-            }
+            update.assignedRoots().any { root -> relevant.contains(offer.leaf.name to root) }
         }
     }
 
@@ -103,11 +100,8 @@ internal fun analyzeTlaFieldVars(
         group.any { offer ->
             if (offer.isConstructor || offer.decl.isReturn) return@any true
             offer.decl.transits.any { update ->
-                when (update) {
-                    is TransitUpdate.Assign, is TransitUpdate.IndexPut ->
-                        !requireRelevant || relevant.contains(offer.leaf.name to update.transitRootVar())
-                    is TransitUpdate.Let -> false
-                }
+                val roots = update.assignedRoots()
+                roots.isNotEmpty() && (!requireRelevant || roots.any { relevant.contains(offer.leaf.name to it) })
             }
         }
 
@@ -150,7 +144,11 @@ internal fun analyzeTlaFieldVars(
                         return@forEach
                     }
                     val bound = offer.decl.action.args.map { it.name }.toMutableSet()
-                    offer.decl.transits.forEach { update ->
+                    offer.decl.actionLets.forEach { al ->
+                        walkReads(al.init, offer.leaf.name, bound)
+                        bound += al.name
+                    }
+                    fun walkUpdate(update: TransitUpdate) {
                         when (update) {
                             is TransitUpdate.Let -> {
                                 walkReads(update.init, offer.leaf.name, bound)
@@ -168,8 +166,14 @@ internal fun analyzeTlaFieldVars(
                                     walkReads(update.value, offer.leaf.name, bound)
                                 }
                             }
+                            is TransitUpdate.If -> {
+                                walkReads(update.cond, offer.leaf.name, bound)
+                                update.thenUpdates.forEach { walkUpdate(it) }
+                                update.elseUpdates.forEach { walkUpdate(it) }
+                            }
                         }
                     }
+                    offer.decl.transits.forEach { walkUpdate(it) }
                 }
             }
             if (fieldReads.values.sumOf { it.size } + wholeReads.size != before) changed = true

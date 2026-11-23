@@ -1,0 +1,4 @@
+source: regression/input/type-errors/transit-let-in-guard.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - 'Unknown variable "t"'

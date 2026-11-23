@@ -1,5 +1,0 @@
-source: regression/input/type-errors/map-unguarded-read.jul
-expectCompileFailure: true
-expectCompileOutputContains:
-  - "map read requires explicit membership"
-  - "Found type errors; exiting."

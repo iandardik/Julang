@@ -78,7 +78,7 @@ internal fun analyzeTlaLiteralDomains(
         offer.decl.errors.forEach { arm ->
             walkLits(arm.condExpr(), offer.leaf.name, ::varSite, ::fieldSite, inWrite = false)
         }
-        offer.decl.transits.forEach { update ->
+        fun walkUpdate(update: TransitUpdate) {
             when (update) {
                 is TransitUpdate.Assign -> {
                     if (TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar())) {
@@ -94,8 +94,15 @@ internal fun analyzeTlaLiteralDomains(
                 }
                 is TransitUpdate.Let ->
                     walkLits(update.init, offer.leaf.name, ::varSite, ::fieldSite, inWrite = false)
+                is TransitUpdate.If -> {
+                    walkLits(update.cond, offer.leaf.name, ::varSite, ::fieldSite, inWrite = false)
+                    update.thenUpdates.forEach { walkUpdate(it) }
+                    update.elseUpdates.forEach { walkUpdate(it) }
+                }
             }
         }
+        offer.decl.actionLets.forEach { walkUpdate(it) }
+        offer.decl.transits.forEach { walkUpdate(it) }
     }
     usedFuns.forEach { walkLits(it.funBody(), "", ::varSite, ::fieldSite, inWrite = false) }
     invClosure.forEach { walkLits(it.invariantFormula(), "", ::varSite, ::fieldSite, inWrite = false) }

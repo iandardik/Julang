@@ -628,17 +628,6 @@ func (m Map[K, V]) TryGet(k K) (V, bool) {
 	return e.value, true
 }
 
-// SoftGet returns m[k], or the zero value of V if k is missing.
-// Julay map indexing uses Get (panic if missing) after explicit membership checks.
-func (m Map[K, V]) SoftGet(k K) V {
-	v, ok := m.TryGet(k)
-	if ok {
-		return v
-	}
-	var zero V
-	return zero
-}
-
 // Put inserts or overwrites (copy-on-write).
 func (m Map[K, V]) Put(k K, v V) Map[K, V] {
 	key := KeyOf(k)

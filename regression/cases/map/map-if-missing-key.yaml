@@ -1,0 +1,6 @@
+source: regression/input/map/map-if-missing-key.jul
+programs:
+  - name: MapIfMissingKeyTest
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/map-if-missing-key.stdout

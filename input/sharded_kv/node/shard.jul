@@ -34,27 +34,22 @@ proc Put {
             step = "getMyInfo"
         transit:
             me := myInfo
-            step := "ownerOf"
+            step := "putKV"
     }
 
-    client transition ownerOf(key : Key, owner : Node) {
-        guard:
-            & step = "ownerOf"
-            & key = putKey
-        transit:
-            let meIsOwner : Boolean := (owner = emptyNode() | owner = me)
-            keyOwner := if (meIsOwner) { me } else { owner }
-            step := if (meIsOwner) { "putKV" } else { "redirect" }
-    }
-
-    client transition putKV(key : Key, val : Value, owner : Node) {
+    client transition putIfOwner(key : Key, val : Value, myInfo : Node, owner : Node) {
         guard:
             & step = "putKV"
             & key = putKey
             & val = putVal
-            & owner = keyOwner
+            & myInfo = me
         transit:
-            step := "broadcast"
+            keyOwner := owner
+            step := if (me = owner) {
+                "broadcast"
+            } else {
+                "redirect"
+            }
     }
 
     transition broadcastOwnership(key : Key, myInfo : Node) {
@@ -77,6 +72,18 @@ proc Put {
                 // lost ownership during broadcast; redirect to the known owner
                 "redirect"
             }
+    }
+
+    // if at any point we realize that we're not the owner of the key
+    // then redirect the client to the owner
+    client transition ownerOf(key : Key, owner : Node) {
+        guard:
+            & key = putKey
+            & owner ~in setOf(me, emptyNode())
+            & step ~= "getMyInfo"
+        transit:
+            keyOwner := owner
+            step := "redirect"
     }
 
     return putDone(result : PutResult) {

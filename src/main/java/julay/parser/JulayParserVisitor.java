@@ -317,6 +317,12 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 */
 	T visitAction_body(JulayParser.Action_bodyContext ctx);
 	/**
+	 * Visit a parse tree produced by {@link JulayParser#action_let}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitAction_let(JulayParser.Action_letContext ctx);
+	/**
 	 * Visit a parse tree produced by {@link JulayParser#guard}.
 	 * @param ctx the parse tree
 	 * @return the visitor result
@@ -340,6 +346,12 @@ public interface JulayParserVisitor<T> extends ParseTreeVisitor<T> {
 	 * @return the visitor result
 	 */
 	T visitError_arm(JulayParser.Error_armContext ctx);
+	/**
+	 * Visit a parse tree produced by {@link JulayParser#transit_stmt}.
+	 * @param ctx the parse tree
+	 * @return the visitor result
+	 */
+	T visitTransit_stmt(JulayParser.Transit_stmtContext ctx);
 	/**
 	 * Visit a parse tree produced by {@link JulayParser#var_transit}.
 	 * @param ctx the parse tree

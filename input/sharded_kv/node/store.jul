@@ -58,10 +58,15 @@ export static proc Store {
 
     /* setters / API for changing state */
 
-    service transition putKV(key : Key, val : Value, owner : Node) {
+    service transition putIfOwner(key : Key, val : Value, myInfo : Node, owner : Node) {
+        let keyOwner : Node := if (key in owners) owners[key] else myInfo
+        guard:
+            owner = keyOwner
         transit:
-            store[key] := val
-            owners[key] := owner
+            if (keyOwner = myInfo) {
+                owners[key] := myInfo
+                store[key] := val
+            }
     }
 
     service transition addOwnedKey(key : Key, owner : Node) {

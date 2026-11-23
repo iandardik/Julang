@@ -1,5 +1,5 @@
 /*
- * Unguarded map read is a compile error (no soft-default / auto membership).
+ * Unguarded map read compiles; backends use hard lookup (no soft-default).
  */
 import julay.funlib.mapOf
 

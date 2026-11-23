@@ -1,0 +1,57 @@
+import julay.funlib.exitProgram
+import julay.funlib.mapOf
+import julay.funlib.println
+
+/*
+ * Statement-if false arm must not evaluate store[k] when k is absent.
+ * Not-owner path: owners has key, store does not; then-arm skipped.
+ */
+static proc MapIfMissing {
+    var store : Map<String, Int>
+    var owners : Map<String, String>
+    var me : String
+    var done : Boolean
+    var print : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            store := mapOf()
+            owners := mapOf("a" to "alice")
+            me := "bob"
+            done := false
+            print := false
+    }
+
+    internal transition putIfOwner(key : String, val : Int) {
+        let iAmOwner : Boolean := if (key in owners) { owners[key] = me } else { false }
+        guard:
+            ~done & key = "a" & val = 1
+        transit:
+            if (iAmOwner) {
+                store[key] := val
+                owners[key] := me
+            }
+            done := true
+            print := true
+    }
+
+    internal transition println(msg : String) {
+        guard:
+            print & done & (msg = "ok")
+        transit:
+            print := false
+        after:
+            println(msg)
+    }
+
+    internal transition exitSystem() {
+        guard:
+            done & ~print
+        after:
+            exitProgram(0)
+    }
+}
+
+proc MapIfMissingKeyTest := MapIfMissing
+
+compile MapIfMissingKeyTest

@@ -1,0 +1,6 @@
+source: regression/input/expr/transit-if-else.jul
+programs:
+  - name: P
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/expr-transit-if-else.stdout

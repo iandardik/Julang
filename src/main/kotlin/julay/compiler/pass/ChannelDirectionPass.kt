@@ -597,14 +597,18 @@ fun actionBodyReferencesArg(decl: ActionDecl, argName: String): Boolean {
         calls.any { call -> call.callArgs().any { exprReferencesSymbol(it, argName) } }
     if (callsRef(decl.befores) || callsRef(decl.afters)) return true
     if (decl.errors.any { arm -> errorArmRefsArg(arm, argName) }) return true
-    return decl.transits.any { update ->
-        when (update) {
-            is TransitUpdate.Assign -> exprReferencesSymbol(update.expr, argName)
-            is TransitUpdate.IndexPut ->
-                exprReferencesSymbol(update.index, argName) || exprReferencesSymbol(update.value, argName)
-            is TransitUpdate.Let -> exprReferencesSymbol(update.init, argName)
-        }
+    if (decl.actionLets.any { exprReferencesSymbol(it.init, argName) }) return true
+    fun walk(update: TransitUpdate): Boolean = when (update) {
+        is TransitUpdate.Assign -> exprReferencesSymbol(update.expr, argName)
+        is TransitUpdate.IndexPut ->
+            exprReferencesSymbol(update.index, argName) || exprReferencesSymbol(update.value, argName)
+        is TransitUpdate.Let -> exprReferencesSymbol(update.init, argName)
+        is TransitUpdate.If ->
+            exprReferencesSymbol(update.cond, argName) ||
+                update.thenUpdates.any { walk(it) } ||
+                update.elseUpdates.any { walk(it) }
     }
+    return decl.transits.any { walk(it) }
 }
 
 /** Residual (non-binding) guard conjuncts that mention [argName]. */

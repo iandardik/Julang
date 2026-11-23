@@ -2,7 +2,7 @@ import julay.funlib.exitProgram
 import julay.funlib.mapOf
 
 /*
- * Unguarded map read must fail at compile time (explicit membership required).
+ * Missing-key map read must panic at runtime (aligned with TLA domain error).
  */
 static proc MapMissingKey {
     var mp : Map<String, Int>
@@ -16,14 +16,9 @@ static proc MapMissingKey {
 
     internal transition bad() {
         guard:
-            n = 0
+            true
         transit:
             n := mp["missing"]
-    }
-
-    internal transition exitSystem() {
-        guard:
-            false
         after:
             exitProgram(0)
     }

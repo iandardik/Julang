@@ -1,0 +1,36 @@
+import julay.funlib.mapOf
+
+type N
+
+static proc Box {
+    var store : Map<String, Int>
+    var owners : Map<String, String>
+    var me : String
+
+    constructor initially(args : List<String>) {
+        transit:
+            store := mapOf()
+            owners := mapOf("a" to "alice")
+            me := "bob"
+    }
+
+    internal transition putIfOwner(key : String, val : Int) {
+        let iAmOwner : Boolean := if (key in owners) { owners[key] = me } else { false }
+        guard:
+            true
+        transit:
+            if (iAmOwner) {
+                store[key] := val
+                owners[key] := me
+            }
+    }
+}
+
+invariant StoreOk := forall i : N, forall k : String,
+    (k in Box[i].store) => Box[i].store[k] >= 0
+
+spec TransitIfActionLet := Box[i : N] {
+    N := {"a"}
+} |= StoreOk
+
+compile TransitIfActionLet

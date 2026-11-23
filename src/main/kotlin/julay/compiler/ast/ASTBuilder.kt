@@ -822,8 +822,30 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
             ctx.transit(),
             ctx.error(),
             ctx.after(),
+            ctx.action_let(),
         )
         return visit(body)
+    }
+
+    override fun visitConstructor_body(ctx: JulayParser.Constructor_bodyContext?): ASTNode {
+        val body = oneChoice(
+            ctx!!.before(),
+            ctx.transit(),
+            ctx.error(),
+            ctx.after(),
+            ctx.action_let(),
+        )
+        return visit(body)
+    }
+
+    override fun visitAction_let(ctx: JulayParser.Action_letContext?): ASTNode {
+        val name = ctx!!.ID().text
+        val typeExpr = parseTypeExpr(ctx.typeExpr())
+        val init = visit(ctx.expr())
+        if (init !is ExprNode) {
+            throw RuntimeException("Expected action let initializer to be an expression")
+        }
+        return ActionLetNode(name, typeExpr, init, sourceLocation(ctx))
     }
 
     override fun visitReturn_action(ctx: JulayParser.Return_actionContext?): ASTNode {
@@ -877,7 +899,7 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
     }
 
     override fun visitTransit(ctx: JulayParser.TransitContext?): ASTNode {
-        val transits = ctx!!.var_transit()
+        val transits = ctx!!.transit_stmt()
             .map { visit(it) }
             .map {
                 if (it !is ActionBodyNode) {
@@ -886,6 +908,38 @@ class ASTBuilder(private val sourcePath: Path) : JulayParserBaseVisitor<ASTNode>
                 it
             }
         return TransitNode(transits, sourceLocation(ctx))
+    }
+
+    override fun visitTransit_stmt(ctx: JulayParser.Transit_stmtContext?): ASTNode {
+        if (ctx!!.IF() != null) {
+            val cond = visit(ctx.expr()).let {
+                if (it !is ExprNode) {
+                    throw RuntimeException("Expected if-condition to be an expression")
+                }
+                it
+            }
+            val stmts = ctx.transit_stmt()
+            val thenCtxs: List<JulayParser.Transit_stmtContext>
+            val elseCtxs: List<JulayParser.Transit_stmtContext>
+            if (ctx.ELSE() == null) {
+                thenCtxs = stmts
+                elseCtxs = emptyList()
+            } else {
+                val elseToken = ctx.ELSE().symbol
+                thenCtxs = stmts.filter { it.start.tokenIndex < elseToken.tokenIndex }
+                elseCtxs = stmts.filter { it.start.tokenIndex > elseToken.tokenIndex }
+            }
+            val thenBody = thenCtxs.map { visit(it) }.map {
+                if (it !is ActionBodyNode) throw RuntimeException("Expected ActionBody but got $it")
+                it
+            }
+            val elseBody = elseCtxs.map { visit(it) }.map {
+                if (it !is ActionBodyNode) throw RuntimeException("Expected ActionBody but got $it")
+                it
+            }
+            return IfTransitNode(cond, thenBody, elseBody, sourceLocation(ctx))
+        }
+        return visit(ctx.var_transit())
     }
 
     override fun visitError(ctx: JulayParser.ErrorContext?): ASTNode {

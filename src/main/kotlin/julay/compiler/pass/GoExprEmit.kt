@@ -389,7 +389,7 @@ private fun IndexExprNode.indexToGo(ctx: GoEmitCtx): String {
     val baseStr = base.toGoString(ctx)
     val indexStr = index.toGoString(ctx)
     return when (val baseTy = base.getType()) {
-        // Map reads require explicit membership in Julay; Get panics if missing.
+        // Get panics if missing (matches TLA bare apply / domain error).
         is MapType -> "($baseStr).Get($indexStr)"
         is ListType -> "($baseStr).Get($indexStr)"
         else -> "($baseStr).Get($indexStr)"

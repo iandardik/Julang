@@ -74,12 +74,22 @@ fun compileProgram(
         GO_BUILD_TIMEOUT_MINUTES,
     )
     if (goResult.timedOut) {
-        println("go build timed out for program \"${program.name}\" after ${GO_BUILD_TIMEOUT_MINUTES}m:\n${goResult.output}")
-        return
+        println(
+            "Internal compiler error: timed out while building program \"${program.name}\" " +
+                "(after ${GO_BUILD_TIMEOUT_MINUTES}m).",
+        )
+        exitProcess(1)
     }
     if (goResult.exitCode != 0) {
-        println("go build failed for program \"${program.name}\" (exit ${goResult.exitCode}):\n${goResult.output}")
-        return
+        // Never surface generated Go paths/diagnostics to users — that is a codegen bug.
+        println(
+            "Internal compiler error: failed to build program \"${program.name}\". " +
+                "This is a compiler bug; please report it.",
+        )
+        if (keepBuild) {
+            System.err.println(goResult.output)
+        }
+        exitProcess(1)
     }
     if (!keepBuild) {
         deleteDirectory(buildDir)

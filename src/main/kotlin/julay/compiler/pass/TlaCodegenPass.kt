@@ -1541,10 +1541,8 @@ internal fun offerGroupHasEmittedUpdate(group: List<TlaActionOffer>): Boolean =
     group.any { offer ->
         if (offer.isConstructor || offer.decl.isReturn) return@any true
         offer.decl.transits.any { update ->
-            when (update) {
-                is TransitUpdate.Assign, is TransitUpdate.IndexPut ->
-                    TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar())
-                is TransitUpdate.Let -> false
+            update.assignedRoots().any { root ->
+                TlaVarProjection.get().isRelevant(offer.leaf.name, root)
             }
         }
     }
@@ -2343,7 +2341,12 @@ private fun emitConjoined(
     }
 
 
-    fun emitTransitUpdates(offer: TlaActionOffer, targetParts: MutableList<String>, targetChanged: MutableSet<String>) {
+    fun emitTransitUpdates(
+        offer: TlaActionOffer,
+        targetParts: MutableList<String>,
+        targetChanged: MutableSet<String>,
+        baseOverrides: Map<String, String> = exprOverrides,
+    ) {
         val self = selfOf(offer.leaf)
         val auxNames = auxNamesByLeaf[offer.leaf.tlaName].orEmpty()
         val baseArgNames = offer.decl.action.args.map { it.name }.toSet() + auxNames + bindNames
@@ -2353,9 +2356,11 @@ private fun emitConjoined(
         taken += baseArgNames
         taken += bare
         taken += stateVarNames.filter { it.key.first == offer.leaf.tlaName }.map { it.value }
+        taken += baseOverrides.values
         self?.let { taken += it }
 
         val letOverrides = linkedMapOf<String, String>()
+        letOverrides.putAll(baseOverrides)
         val bindings = mutableListOf<TransitLetEmit>()
         val prefixParts = mutableListOf<String>()
         val scopedParts = mutableListOf<String>()
@@ -2368,12 +2373,102 @@ private fun emitConjoined(
                 expr, leafCtx, effectiveArgNames(), self,
                 bareStateVars = bare,
                 stateVarNames = stateVarNames,
-                symbolOverrides = exprOverrides + letOverrides.toMap(),
+                symbolOverrides = letOverrides.toMap(),
                 linePrefix = linePrefix,
             )
 
         fun addAssignPart(part: String) {
             if (seenLet) scopedParts += part else prefixParts += part
+        }
+
+        fun emitIfBlock(ifUpdate: TransitUpdate.If) {
+            fun armRhs(
+                updates: List<TransitUpdate>,
+                root: String,
+                oldV: String,
+            ): String? {
+                var result: String? = null
+                val localOverrides = letOverrides.toMutableMap()
+                fun emitLocal(expr: ExprNode, linePrefix: String): String =
+                    exprToTla(
+                        expr, leafCtx, baseArgNames + localOverrides.values, self,
+                        bareStateVars = bare,
+                        stateVarNames = stateVarNames,
+                        symbolOverrides = localOverrides,
+                        linePrefix = linePrefix,
+                    )
+                for (u in updates) {
+                    when (u) {
+                        is TransitUpdate.Let -> {
+                            if (!u.name.isDiscardBinding()) {
+                                localOverrides[u.name] = emitLocal(u.init, "")
+                            }
+                        }
+                        is TransitUpdate.Assign -> {
+                            if (u.key.substringBefore('.') != root) continue
+                            result = emitLocal(u.expr, "")
+                        }
+                        is TransitUpdate.IndexPut -> {
+                            if (u.collectionVar != root) continue
+                            val k = emitLocal(u.index, "")
+                            val quietMapPut = TlaSymbolTypes.get()[u.collectionVar] is MapType &&
+                                TlaEmitOpts.get().mapIndexPutRebuild
+                            val vv = emitLocal(u.value, "")
+                            result = when {
+                                quietMapPut && indexes(root) -> emitMapIndexPutRhs("@", k, vv)
+                                quietMapPut -> emitMapIndexPutRhs(oldV, k, vv)
+                                indexes(root) -> "[@ EXCEPT ![$k] = $vv]"
+                                else -> "[$oldV EXCEPT ![$k] = $vv]"
+                            }
+                        }
+                        is TransitUpdate.If -> {
+                            val t = armRhs(u.thenUpdates, root, oldV)
+                            val e = armRhs(u.elseUpdates, root, oldV)
+                            if (t != null || e != null) {
+                                val c = emitLocal(u.cond, "")
+                                result = "IF ($c) THEN (${t ?: oldV}) ELSE (${e ?: oldV})"
+                            }
+                        }
+                    }
+                }
+                return result
+            }
+
+            val condTla = emitExpr(ifUpdate.cond, "")
+            val roots = linkedSetOf<String>()
+            fun collectRoots(updates: List<TransitUpdate>) {
+                updates.forEach { u ->
+                    when (u) {
+                        is TransitUpdate.Assign -> roots += u.key.substringBefore('.')
+                        is TransitUpdate.IndexPut -> roots += u.collectionVar
+                        is TransitUpdate.If -> {
+                            collectRoots(u.thenUpdates)
+                            collectRoots(u.elseUpdates)
+                        }
+                        is TransitUpdate.Let -> {}
+                    }
+                }
+            }
+            collectRoots(ifUpdate.thenUpdates)
+            collectRoots(ifUpdate.elseUpdates)
+            for (root in roots) {
+                if (!TlaVarProjection.get().isRelevant(offer.leaf.name, root)) continue
+                if (root in offer.leaf.globalConstVars) continue
+                val v = stateTlaName(offer.leaf.tlaName, root, stateVarNames)
+                targetChanged += v
+                val oldInner = if (indexes(root)) "@" else v
+                val thenRhs = armRhs(ifUpdate.thenUpdates, root, oldInner) ?: oldInner
+                val elseRhs = armRhs(ifUpdate.elseUpdates, root, oldInner) ?: oldInner
+                if (indexes(root)) {
+                    addAssignPart(
+                        "/\\ $v' = [$v EXCEPT ![$self] = IF ($condTla) THEN ($thenRhs) ELSE ($elseRhs)]",
+                    )
+                } else {
+                    addAssignPart(
+                        "/\\ $v' = IF ($condTla) THEN ($thenRhs) ELSE ($elseRhs)",
+                    )
+                }
+            }
         }
 
         offer.decl.transits.forEach { update ->
@@ -2521,6 +2616,8 @@ private fun emitConjoined(
                         )
                     }
                 }
+            
+                is TransitUpdate.If -> emitIfBlock(update)
             }
         }
         if (offer.isConstructor && offer.leaf.tlaName !in foldedCtorLeaves) {
@@ -2633,22 +2730,52 @@ private fun emitConjoined(
         val auxNames = auxNamesByLeaf[offer.leaf.tlaName].orEmpty()
         val argNames = offer.decl.action.args.map { it.name }.toSet() + auxNames + bindNames
         val leafCtx = mapOf(offer.leaf.name to offer.leaf, offer.leaf.tlaName to offer.leaf)
+        val bare = stateVarsByLeaf[offer.leaf.tlaName].orEmpty()
+
+        // Action-level lets: LET-bind once around this offer's guards + transit.
+        val actionLetTaken = mutableSetOf<String>()
+        actionLetTaken += argNames
+        actionLetTaken += bare
+        actionLetTaken += exprOverrides.values
+        val actionLetBindings = mutableListOf<Pair<String, String>>()
+        val actionLetOverrides = linkedMapOf<String, String>()
+        offer.decl.actionLets.forEach { al ->
+            if (al.name.isDiscardBinding()) return@forEach
+            val tlaName = allocTlaName(al.name, actionLetTaken)
+            val initTla = exprToTla(
+                al.init, leafCtx, argNames + actionLetOverrides.values, self,
+                bareStateVars = bare,
+                stateVarNames = stateVarNames,
+                symbolOverrides = exprOverrides + actionLetOverrides,
+                linePrefix = "/\\ LET $tlaName == ",
+            )
+            actionLetBindings += tlaName to initTla
+            actionLetOverrides[al.name] = tlaName
+        }
+        val offerParts = mutableListOf<String>()
+        val offerOverrides = exprOverrides + actionLetOverrides
 
         offer.decl.guards.forEach { g ->
-            // Flatten top-level `&` so each Julay conjunct is its own `/\\` line.
             flattenTopLevelAnd(g).forEach { conjunct ->
                 if (bindPlan.skipped(conjunct)) return@forEach
-                parts += "/\\ ${exprToTla(
-                    conjunct, leafCtx, argNames, self,
-                    bareStateVars = stateVarsByLeaf[offer.leaf.tlaName].orEmpty(),
+                offerParts += "/\\ ${exprToTla(
+                    conjunct, leafCtx, argNames + actionLetOverrides.values, self,
+                    bareStateVars = bare,
                     stateVarNames = stateVarNames,
-                    symbolOverrides = exprOverrides,
+                    symbolOverrides = offerOverrides,
                     linePrefix = "/\\ ",
                 )}"
             }
         }
 
-        emitTransitUpdates(offer, parts, changed)
+        emitTransitUpdates(offer, offerParts, changed, offerOverrides)
+        if (actionLetBindings.isNotEmpty()) {
+            // Must be a conjunct: bare LET between /\\ neighbors is a TLA+ parse error.
+            val body = offerParts.joinToString("\n  ").ifEmpty { "TRUE" }
+            parts += "/\\ ${wrapTlaLet(actionLetBindings, body)}"
+        } else {
+            parts += offerParts
+        }
     }
 
     val fluentPlan = TlaFluentEmit.get()
@@ -2735,7 +2862,7 @@ private fun emitConjoined(
         if (tlaArg in indexBinderNames) {
             parts += "/\\ $tlaArg = ${emitBound(expr)}"
         } else if (collectMapIndexesInValue(expr).isNotEmpty()) {
-            // Map indexes must be membership-guarded in Julay; still emit as LET for nesting.
+            // Nest after prior /\ conjuncts so TLC short-circuits before bare m[k].
             mapIndexLets += tlaArg to emitBound(expr, "      $tlaArg == ")
         } else {
             letBindings += tlaArg to emitBound(expr, "      $tlaArg == ")
@@ -3461,8 +3588,7 @@ private fun emitInvariantDefs(
         fullCtx[leaf.tlaName] = leaf
     }
     fun formatInv(name: String, remapped: Map<Pair<String, String>, String>): String {
-        // `mp[k] = v` → `k in mp & mp[k] = v` so TLA application is domain-guarded.
-        val formula = withMapIndexDomainGuards(node.invariantFormula())
+        val formula = node.invariantFormula()
         val body = exprToTla(
             formula,
             leafCtx = fullCtx,
@@ -3730,7 +3856,7 @@ internal fun widenDomainModelsFromAssignedLiterals(
     }
 
     emittedOffers.forEach { offer ->
-        offer.decl.transits.forEach { update ->
+        fun walkUpdate(update: TransitUpdate) {
             when (update) {
                 is TransitUpdate.Assign -> {
                     val ty = leafVarType(offer.leaf, update.transitRootVar())
@@ -3754,8 +3880,15 @@ internal fun widenDomainModelsFromAssignedLiterals(
                     noteLiteral(update.type, update.init)
                     walkObjFields(update.init)
                 }
+                is TransitUpdate.If -> {
+                    walkObjFields(update.cond)
+                    update.thenUpdates.forEach { walkUpdate(it) }
+                    update.elseUpdates.forEach { walkUpdate(it) }
+                }
             }
         }
+        offer.decl.actionLets.forEach { walkUpdate(it) }
+        offer.decl.transits.forEach { walkUpdate(it) }
         offer.decl.guards.forEach { walkObjFields(it) }
     }
     leaves.forEach { leaf ->
@@ -3795,7 +3928,7 @@ private fun collectCfgLiteralsFromOffer(
     strs: MutableSet<String>,
 ) {
     offer.decl.guards.forEach { collectCfgLiteralsFromExpr(it, ints, strs) }
-    offer.decl.transits.forEach { update ->
+    fun walk(update: TransitUpdate) {
         when (update) {
             is TransitUpdate.Let -> collectCfgLiteralsFromExpr(update.init, ints, strs)
             is TransitUpdate.Assign -> {
@@ -3809,8 +3942,15 @@ private fun collectCfgLiteralsFromOffer(
                     collectCfgLiteralsFromExpr(update.value, ints, strs)
                 }
             }
+            is TransitUpdate.If -> {
+                collectCfgLiteralsFromExpr(update.cond, ints, strs)
+                update.thenUpdates.forEach { walk(it) }
+                update.elseUpdates.forEach { walk(it) }
+            }
         }
     }
+    offer.decl.actionLets.forEach { walk(it) }
+    offer.decl.transits.forEach { walk(it) }
 }
 
 private fun collectCfgLiteralsFromExpr(expr: ExprNode, ints: MutableSet<Int>, strs: MutableSet<String>) {
@@ -3834,17 +3974,20 @@ private fun collectStringLiteralsFromExpr(expr: ExprNode, into: MutableSet<Strin
 
 private fun offerContainsIntToStringCoerce(offer: TlaActionOffer): Boolean {
     if (offer.decl.guards.any { exprContainsIntToStringCoerce(it) }) return true
-    return offer.decl.transits.any { update ->
-        when (update) {
-            is TransitUpdate.Let -> exprContainsIntToStringCoerce(update.init)
-            is TransitUpdate.Assign ->
-                TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar()) &&
-                    exprContainsIntToStringCoerce(update.expr)
-            is TransitUpdate.IndexPut ->
-                TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar()) &&
-                    (exprContainsIntToStringCoerce(update.index) || exprContainsIntToStringCoerce(update.value))
-        }
+    fun walk(update: TransitUpdate): Boolean = when (update) {
+        is TransitUpdate.Let -> exprContainsIntToStringCoerce(update.init)
+        is TransitUpdate.Assign ->
+            TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar()) &&
+                exprContainsIntToStringCoerce(update.expr)
+        is TransitUpdate.IndexPut ->
+            TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar()) &&
+                (exprContainsIntToStringCoerce(update.index) || exprContainsIntToStringCoerce(update.value))
+        is TransitUpdate.If ->
+            exprContainsIntToStringCoerce(update.cond) ||
+                update.thenUpdates.any { walk(it) } ||
+                update.elseUpdates.any { walk(it) }
     }
+    return offer.decl.actionLets.any { walk(it) } || offer.decl.transits.any { walk(it) }
 }
 
 private fun exprContainsIntToStringCoerce(expr: ExprNode): Boolean {
@@ -4095,17 +4238,22 @@ private fun collectActionArgDomainModels(
     }
 }
 
-internal fun offerRefsArg(offer: TlaActionOffer, argName: String): Boolean =
-    offer.decl.guards.any { exprReferencesSymbol(it, argName) } ||
+internal fun offerRefsArg(offer: TlaActionOffer, argName: String): Boolean {
+    fun walk(update: TransitUpdate): Boolean = when (update) {
+        is TransitUpdate.Assign -> exprReferencesSymbol(update.expr, argName)
+        is TransitUpdate.IndexPut ->
+            exprReferencesSymbol(update.index, argName) || exprReferencesSymbol(update.value, argName)
+        is TransitUpdate.Let -> exprReferencesSymbol(update.init, argName)
+        is TransitUpdate.If ->
+            exprReferencesSymbol(update.cond, argName) ||
+                update.thenUpdates.any { walk(it) } ||
+                update.elseUpdates.any { walk(it) }
+    }
+    return offer.decl.guards.any { exprReferencesSymbol(it, argName) } ||
         offer.decl.errors.any { exprReferencesSymbol(it.condExpr(), argName) } ||
-        offer.decl.transits.any { update ->
-            when (update) {
-                is TransitUpdate.Assign -> exprReferencesSymbol(update.expr, argName)
-                is TransitUpdate.IndexPut ->
-                    exprReferencesSymbol(update.index, argName) || exprReferencesSymbol(update.value, argName)
-                is TransitUpdate.Let -> exprReferencesSymbol(update.init, argName)
-            }
-        }
+        offer.decl.actionLets.any { exprReferencesSymbol(it.init, argName) } ||
+        offer.decl.transits.any { walk(it) }
+}
 
 /**
  * Finite TLC models for `\E` domains of IO / unsupported-builtin havoc (same sites as
@@ -4119,35 +4267,41 @@ private fun collectIoHavocDomainModels(
     fun needsHavocDomain(expr: ExprNode): Boolean =
         exprContainsIoHavoc(expr) || exprContainsUnsupportedTlaBuiltin(expr)
 
-    offers.forEach { offer ->
-        offer.decl.transits.forEach { update ->
-            when (update) {
-                is TransitUpdate.Assign -> if (
-                    TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar()) &&
-                    needsHavocDomain(update.expr)
-                ) {
-                    try {
-                        collectDomainModelNames(update.expr.getType(), into)
-                    } catch (_: RuntimeException) {
-                    }
-                }
-                is TransitUpdate.IndexPut -> if (
-                    TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar()) &&
-                    needsHavocDomain(update.value)
-                ) {
-                    try {
-                        collectDomainModelNames(update.value.getType(), into)
-                    } catch (_: RuntimeException) {
-                    }
-                }
-                is TransitUpdate.Let -> if (needsHavocDomain(update.init)) {
-                    try {
-                        collectDomainModelNames(update.init.getType(), into)
-                    } catch (_: RuntimeException) {
-                    }
+    fun walk(offer: TlaActionOffer, update: TransitUpdate) {
+        when (update) {
+            is TransitUpdate.Assign -> if (
+                TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar()) &&
+                needsHavocDomain(update.expr)
+            ) {
+                try {
+                    collectDomainModelNames(update.expr.getType(), into)
+                } catch (_: RuntimeException) {
                 }
             }
+            is TransitUpdate.IndexPut -> if (
+                TlaVarProjection.get().isRelevant(offer.leaf.name, update.transitRootVar()) &&
+                needsHavocDomain(update.value)
+            ) {
+                try {
+                    collectDomainModelNames(update.value.getType(), into)
+                } catch (_: RuntimeException) {
+                }
+            }
+            is TransitUpdate.Let -> if (needsHavocDomain(update.init)) {
+                try {
+                    collectDomainModelNames(update.init.getType(), into)
+                } catch (_: RuntimeException) {
+                }
+            }
+            is TransitUpdate.If -> {
+                update.thenUpdates.forEach { walk(offer, it) }
+                update.elseUpdates.forEach { walk(offer, it) }
+            }
         }
+    }
+    offers.forEach { offer ->
+        offer.decl.actionLets.forEach { walk(offer, it) }
+        offer.decl.transits.forEach { walk(offer, it) }
     }
 }
 
@@ -4431,6 +4585,8 @@ internal fun offersUseSlice(offers: List<TlaActionOffer>): Boolean =
                     is TransitUpdate.IndexPut ->
                         exprContainsSlice(update.index) || exprContainsSlice(update.value)
                     is TransitUpdate.Let -> exprContainsSlice(update.init)
+                
+                    is TransitUpdate.If -> false
                 }
             }
     }
@@ -4519,6 +4675,8 @@ internal fun offerContainsUnsupportedTlaBuiltin(offer: TlaActionOffer): Boolean 
                     exprContainsUnsupportedTlaBuiltin(update.index) ||
                         exprContainsUnsupportedTlaBuiltin(update.value)
                 is TransitUpdate.Let -> exprContainsUnsupportedTlaBuiltin(update.init)
+            
+                is TransitUpdate.If -> false
             }
         }
 
@@ -4541,6 +4699,8 @@ internal fun offersUseStartsWith(offers: List<TlaActionOffer>): Boolean =
                     is TransitUpdate.IndexPut ->
                         exprContainsStartsWith(update.index) || exprContainsStartsWith(update.value)
                     is TransitUpdate.Let -> exprContainsStartsWith(update.init)
+                
+                    is TransitUpdate.If -> false
                 }
             }
     }
@@ -4568,6 +4728,8 @@ internal fun offersUseListMembership(offers: List<TlaActionOffer>): Boolean =
                     is TransitUpdate.IndexPut ->
                         exprContainsListMembership(update.index) || exprContainsListMembership(update.value)
                     is TransitUpdate.Let -> exprContainsListMembership(update.init)
+                
+                    is TransitUpdate.If -> false
                 }
             }
     }
@@ -4684,6 +4846,8 @@ private fun offersUseExpr(offers: List<TlaActionOffer>, pred: (ExprNode) -> Bool
                     is TransitUpdate.Assign -> pred(update.expr)
                     is TransitUpdate.IndexPut -> pred(update.index) || pred(update.value)
                     is TransitUpdate.Let -> pred(update.init)
+                
+                    is TransitUpdate.If -> false
                 }
             }
     }
@@ -4723,6 +4887,9 @@ internal fun collectUnsupportedBuiltinWarnings(
                     visit(update.value)
                 }
                 is TransitUpdate.Let -> visit(update.init)
+            
+                is TransitUpdate.If -> {
+                }
             }
         }
     }
@@ -4747,6 +4914,9 @@ internal fun collectUserFunsUsedInOffers(
                     collectUserFunNodesFromExpr(update.value, used)
                 }
                 is TransitUpdate.Let -> collectUserFunNodesFromExpr(update.init, used)
+            
+                is TransitUpdate.If -> {
+                }
             }
         }
     }
@@ -6246,7 +6416,7 @@ internal fun exprToTla(
         is IndexExprNode -> {
             val idx = rec(expr.index, linePrefix, PREC_BOTTOM)
             val baseTla = rec(expr.base, linePrefix, PREC_ATOM)
-            // Map reads require explicit membership at the Julay source; emit bare apply.
+            // Bare apply: missing key is a TLC domain error (matches Go Get panic).
             "$baseTla[$idx]"
         }
         is UnaryOpExprNode -> {

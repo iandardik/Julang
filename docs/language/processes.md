@@ -66,15 +66,16 @@ A **transition** body may include:
 
 | Clause | Meaning |
 |--------|---------|
+| action-level `let` | Pure binding over pre-state (+ earlier action lets); in scope for `guard:` / `error:` / `before:` / `transit:` / `after:` — see [Effects](effects.md#action-level-let) |
 | `guard:` | Boolean condition; must hold (with peers’ constraints) to take the step |
 | `before:` | Calls before state updates (IO allowed; no assignments)—see [Before/after and IO](effects.md) |
-| `transit:` | State updates and optional statement `let`s (may include IO in expressions)—see [Before/after and IO](effects.md) |
+| `transit:` | State updates, statement `let`s, and statement `if`/`else` (may include IO in expressions)—see [Before/after and IO](effects.md) |
 | `error:` | Pre-state checks: at runtime, if a condition holds, throw; no transit / `after:`. In TLA+, each condition is negated and emitted as an enabling assumption (guard). |
 | `after:` | Calls after state updates (IO allowed; no assignments)—see [Before/after and IO](effects.md) |
 
 Modifiers: `service` (hub; stays external), `client` (syncs only with a service), `internal` (occurrence-local solo step), `timer` (local timer fire; see [Effects](effects.md)), or none (ordinary sync — composition-private when peers meet under `||`).
 
-**Constructors cannot have `guard:` or `before:`.** A constructor body may only use `transit:`, `error:`, and `after:`. Spawning is gated by peers’ transition guards, not by a guard on the constructor itself. Put setup IO in `after:` (after state is assigned) or in a following transition. Constructor transit `let` initializers and assignment RHSs must not reference any state variable (including self-updates); use args or earlier lets that do not read state — see [Effects](effects.md).
+**Constructors cannot have `guard:` or `before:`.** A constructor body may use action-level `let`, `transit:`, `error:`, and `after:`. Spawning is gated by peers’ transition guards, not by a guard on the constructor itself. Put setup IO in `after:` (after state is assigned) or in a following transition. Constructor action/transit `let` initializers and assignment RHSs must not reference any state variable (including self-updates); use args or earlier lets that do not read state — see [Effects](effects.md).
 
 Example (from [`regression/input/basic/test1.jul`](../../regression/input/basic/test1.jul)):
 

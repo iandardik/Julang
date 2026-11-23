@@ -57,6 +57,8 @@ abstract class ActionBodyNode(
     open fun befores() : List<CallStmtNode> = body.flatMap { it.befores() }
     open fun afters() : List<CallStmtNode> = body.flatMap { it.afters() }
     open fun errors() : List<ErrorArmNode> = body.flatMap { it.errors() }
+    /** Action-level lets (not transit-local). */
+    open fun actionLets() : List<TransitUpdate.Let> = body.flatMap { it.actionLets() }
 }
 
 abstract class ExprNode(children : List<ASTNode>) : ASTNode(children) {
@@ -881,6 +883,7 @@ class ConstructorNode(
                 body.flatMap { it.befores() },
                 body.flatMap { it.afters() },
                 body.flatMap { it.errors() },
+                actionLets = body.flatMap { it.actionLets() },
             )
         )
     }
@@ -927,6 +930,7 @@ class TransitionNode(
                 body.flatMap { it.befores() },
                 body.flatMap { it.afters() },
                 body.flatMap { it.errors() },
+                actionLets = body.flatMap { it.actionLets() },
             )
         )
     }
@@ -1145,6 +1149,72 @@ class IndexTransitNode(
         listOf(TransitUpdate.IndexPut(collectionVar, index, value))
 
     override fun toString(): String = "$collectionVar[$index] := $value"
+}
+
+/** Statement-level `if` inside `transit:` (optional else). */
+class IfTransitNode(
+    val cond: ExprNode,
+    val thenBody: List<ActionBodyNode>,
+    val elseBody: List<ActionBodyNode>,
+    private val loc: ProgramLoc,
+) : ActionBodyNode(thenBody + elseBody, listOf(cond)) {
+    override fun programLocation() = loc
+
+    override fun transitVars(): List<Pair<String, ProgramLoc>> =
+        (thenBody + elseBody).flatMap { it.transitVars() }
+
+    override fun transits(): List<TransitUpdate> =
+        listOf(
+            TransitUpdate.If(
+                cond,
+                thenBody.flatMap { it.transits() },
+                elseBody.flatMap { it.transits() },
+            ),
+        )
+
+    override fun toString(): String {
+        val thenStr = thenBody.joinToString("\n") { "$it".prependIndent() }
+        return if (elseBody.isEmpty()) {
+            "if ($cond) {\n$thenStr\n}"
+        } else {
+            val elseStr = elseBody.joinToString("\n") { "$it".prependIndent() }
+            "if ($cond) {\n$thenStr\n} else {\n$elseStr\n}"
+        }
+    }
+}
+
+/**
+ * Action-level `let` (sibling of guard/transit). Visible to the whole action;
+ * not a transit update.
+ */
+class ActionLetNode(
+    private val name: String,
+    private val typeExpr: TypeExpr,
+    private val initExpr: ExprNode,
+    private val loc: ProgramLoc,
+    resolvedType: Type? = null,
+) : ActionBodyNode(listOf(), listOf(initExpr)) {
+    private var letTypeResolution: Type? = resolvedType
+
+    val resolvedLetType: Type
+        get() = letTypeResolution
+            ?: throw RuntimeException("Type not resolved for action let binding \"$name\" at $loc")
+
+    override fun programLocation() = loc
+    internal fun letName(): String = name
+    internal fun letTypeExpr(): TypeExpr = typeExpr
+    internal fun letTypeName(): String = typeExpr.toString()
+    internal fun letInitExpr(): ExprNode = initExpr
+    internal fun resolvedLetTypeOrNull(): Type? = letTypeResolution
+
+    internal fun resolveLetType(type: Type) {
+        letTypeResolution = type
+    }
+
+    override fun actionLets(): List<TransitUpdate.Let> =
+        listOf(TransitUpdate.Let(name, resolvedLetType, initExpr))
+
+    override fun toString(): String = "let $name : $typeExpr := $initExpr"
 }
 
 class LetTransitNode(

@@ -629,6 +629,18 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 *
 	 * <p>The default implementation does nothing.</p>
 	 */
+	@Override public void enterAction_let(JulayParser.Action_letContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitAction_let(JulayParser.Action_letContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
 	@Override public void enterGuard(JulayParser.GuardContext ctx) { }
 	/**
 	 * {@inheritDoc}
@@ -672,6 +684,18 @@ public class JulayParserBaseListener implements JulayParserListener {
 	 * <p>The default implementation does nothing.</p>
 	 */
 	@Override public void exitError_arm(JulayParser.Error_armContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void enterTransit_stmt(JulayParser.Transit_stmtContext ctx) { }
+	/**
+	 * {@inheritDoc}
+	 *
+	 * <p>The default implementation does nothing.</p>
+	 */
+	@Override public void exitTransit_stmt(JulayParser.Transit_stmtContext ctx) { }
 	/**
 	 * {@inheritDoc}
 	 *

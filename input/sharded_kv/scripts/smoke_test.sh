@@ -3,8 +3,10 @@
 #
 # Usage: ./smoke_test.sh [configPath]
 # Env: SHARD_NODE_BIN, SHARD_CLIENT_BIN, LISTEN_TIMEOUT_S (default 15)
+#
+# Each check prints PASS or FAIL. Exit 0 only if every check passed.
 
-set -euo pipefail
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SKV_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -54,6 +56,31 @@ wait_listen() {
   return 1
 }
 
+PASS_N=0
+FAIL_N=0
+
+# check NAME PATTERN OUTPUT — prints PASS/FAIL; OUTPUT is the client response.
+check() {
+  local name="$1"
+  local pattern="$2"
+  local out="$3"
+  echo "-- $name"
+  if [[ -n "$out" ]]; then
+    echo "$out" | sed 's/^/   /'
+  else
+    echo "   (empty response)"
+  fi
+  if printf '%s\n' "$out" | grep -Eq -- "$pattern"; then
+    echo "   => PASS"
+    PASS_N=$((PASS_N + 1))
+    return 0
+  else
+    echo "   => FAIL (expected match: $pattern)"
+    FAIL_N=$((FAIL_N + 1))
+    return 1
+  fi
+}
+
 echo "== stop any prior cluster =="
 "$SCRIPT_DIR/stop_cluster.sh" "$CONFIG" || true
 
@@ -74,34 +101,29 @@ sleep 0.5
 U0="${URLS[0]}"
 U1="${URLS[1]}"
 
-echo "== put new key via node1 =="
-out="$("$CLIENT" "$U0" put smokeKey smokeVal)"
-echo "$out"
-echo "$out" | grep -q '^200 ok$'
+echo "== checks =="
+out="$("$CLIENT" "$U0" put smokeKey smokeVal)" || out="(client exit $?)"
+check "put new key via node1" '^200 ok$' "$out" || true
 
-echo "== get via node1 =="
-out="$("$CLIENT" "$U0" get smokeKey)"
-echo "$out"
-echo "$out" | grep -q '^200 v=smokeVal$'
+out="$("$CLIENT" "$U0" get smokeKey)" || out="(client exit $?)"
+check "get via node1" '^200 v=smokeVal$' "$out" || true
 
-echo "== owners via node1 =="
-out="$("$CLIENT" "$U0" owners)"
-echo "$out"
-echo "$out" | grep -q 'smokeKey->'
+out="$("$CLIENT" "$U0" owners)" || out="(client exit $?)"
+check "owners via node1" 'smokeKey->' "$out" || true
 
-echo "== get via node2 (expect redirect then value) =="
-out="$("$CLIENT" "$U1" get smokeKey)"
-echo "$out"
-echo "$out" | grep -q 'v=smokeVal'
+out="$("$CLIENT" "$U1" get smokeKey)" || out="(client exit $?)"
+check "get via node2 (redirect then value)" 'v=smokeVal' "$out" || true
 
-echo "== put same key via node2 (redirect then ok) =="
-out="$("$CLIENT" "$U1" put smokeKey smokeVal2)"
-echo "$out"
-echo "$out" | grep -q 'ok'
+out="$("$CLIENT" "$U1" put smokeKey smokeVal2)" || out="(client exit $?)"
+check "put same key via node2 (redirect then ok)" 'ok' "$out" || true
 
-echo "== verify value on owner =="
-out="$("$CLIENT" "$U0" get smokeKey)"
-echo "$out"
-echo "$out" | grep -q '^200 v=smokeVal2$'
+out="$("$CLIENT" "$U0" get smokeKey)" || out="(client exit $?)"
+check "verify value on owner" '^200 v=smokeVal2$' "$out" || true
 
-echo "== smoke OK =="
+echo "== summary: $PASS_N passed, $FAIL_N failed =="
+if [[ "$FAIL_N" -eq 0 ]]; then
+  echo "SMOKE PASS"
+  exit 0
+fi
+echo "SMOKE FAIL"
+exit 1

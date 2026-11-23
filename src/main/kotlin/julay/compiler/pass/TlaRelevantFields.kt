@@ -177,7 +177,7 @@ private class RelevantFieldCollector(
         }
         offer.decl.guards.forEach { walkExpr(it, env, inComparison = false) }
         offer.decl.errors.forEach { arm -> walkExpr(arm.condExpr(), env, inComparison = false) }
-        offer.decl.transits.forEach { update ->
+        fun walkUpdate(update: TransitUpdate) {
             when (update) {
                 is TransitUpdate.Assign -> walkExpr(update.expr, env, inComparison = false)
                 is TransitUpdate.IndexPut -> {
@@ -189,8 +189,15 @@ private class RelevantFieldCollector(
                     env[update.name] = update.type
                     noteType(update.type)
                 }
+                is TransitUpdate.If -> {
+                    walkExpr(update.cond, env, inComparison = false)
+                    update.thenUpdates.forEach { walkUpdate(it) }
+                    update.elseUpdates.forEach { walkUpdate(it) }
+                }
             }
         }
+        offer.decl.actionLets.forEach { walkUpdate(it) }
+        offer.decl.transits.forEach { walkUpdate(it) }
     }
 
     fun walkFun(funNode: FunNode) {

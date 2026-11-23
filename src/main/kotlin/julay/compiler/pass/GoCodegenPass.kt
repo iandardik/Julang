@@ -339,18 +339,21 @@ private fun emitConstructor(
             }
         }
     }
+    val (actionLetCode, ctxWithLets) = emitActionLetBindings(ctor, ctx, indent = "\t")
+    sb.append(actionLetCode)
+    var ctorCtx = ctxWithLets
     for (arm in ctor.errors) {
-        val cond = arm.condExpr().toGoString(ctx)
-        val msg = arm.msgExpr().toGoString(ctx)
+        val cond = arm.condExpr().toGoString(ctorCtx)
+        val msg = arm.msgExpr().toGoString(ctorCtx)
         sb.appendLine("\tif $cond { julay.Fail(julay.ToStringOf($msg)) }")
     }
     val stateVarTypes = pc.stateVars.associate { it.name to it.type }
-    val ctorTransit = emitTransitBody(ctor, ctx, sequential = true, stateVarTypes).trimEnd()
+    val ctorTransit = emitTransitBody(ctor, ctorCtx, sequential = true, stateVarTypes).trimEnd()
     if (ctorTransit.isNotEmpty()) {
         sb.appendLine(ctorTransit.prependIndent("\t"))
     }
     for (stmt in ctor.afters) {
-        sb.appendLine("\t${stmt.toGoStmtString(ctx)}")
+        sb.appendLine("\t${stmt.toGoStmtString(ctorCtx)}")
     }
     sb.appendLine("\treturn p")
     sb.appendLine("}")
@@ -459,22 +462,24 @@ private fun emitRunLoop(
         when (c.role) {
             CaseRole.Local -> {
                 sb.appendLine("\t\tcase <-case_$safe:")
-                val argBindings = localCaseArgBindings(decl, safe, stateVars, sb)
+                val (argBindings, letBindings) = localCaseArgBindings(decl, safe, stateVars, sb)
                 sb.append(
                     emitFireBody(
                         pc, decl, c.dir, CaseRole.Local, stateVars, argBindings,
                         dynamicCtorNames, procClassByName, linkage,
+                        letBindings = letBindings,
                     ),
                 )
             }
             CaseRole.Timer -> {
                 sb.appendLine("\t\tcase <-case_$safe:")
                 sb.appendLine("\t\t\tp.timers.ClearFired(\"${c.name.escapeGoStringLiteral()}\")")
-                val argBindings = localCaseArgBindings(decl, safe, stateVars, sb)
+                val (argBindings, letBindings) = localCaseArgBindings(decl, safe, stateVars, sb)
                 sb.append(
                     emitFireBody(
                         pc, decl, c.dir, CaseRole.Timer, stateVars, argBindings,
                         dynamicCtorNames, procClassByName, linkage,
+                        letBindings = letBindings,
                     ),
                 )
             }
@@ -533,10 +538,14 @@ private fun emitRunLoop(
                 }
                 // Materialize receiver-bound args (including reply args) for body + reply channel.
                 val bound = computeBoundArgs(decl, availableFromOther = dir.senderBoundArgs.toSet())
-                val recvCtx = GoEmitCtx(
+                // Action lets may appear in equality RHS used for reply args (`owner = keyOwner`).
+                var recvCtx = GoEmitCtx(
                     stateVars = stateVars,
                     argBindings = argBindings.toMap(),
                 )
+                val (actionLetCode, ctxWithLets) = emitActionLetBindings(decl, recvCtx, indent = "\t\t\t")
+                sb.append(actionLetCode)
+                recvCtx = ctxWithLets
                 // Membership before equality so `getKey in store & getVal = store[getKey]`
                 // binds getKey before evaluating the map read.
                 val receiverOwned = (bound.boundArgs - dir.senderBoundArgs.toSet()).toList()
@@ -592,6 +601,7 @@ private fun emitRunLoop(
                     emitFireBody(
                         pc, decl, dir, CaseRole.Receiver, stateVars, argBindings,
                         dynamicCtorNames, procClassByName, linkage,
+                        letBindings = recvCtx.letBindings,
                     ),
                 )
             }
@@ -644,6 +654,11 @@ private fun emitEnablementLocals(
         residualMentionsArg(decl, bound, arg, skipMembershipOf = emptySet())
     }
     var bindCtx = ctx
+    run {
+        val (letCode, withLets) = emitActionLetBindings(decl, bindCtx, indent = "\t\t")
+        sb.append(letCode)
+        bindCtx = withLets
+    }
     if (residualNeedsEq) {
         for (arg in eqArgs) {
             val rhs = findEqualityRhs(decl, arg) ?: continue
@@ -755,6 +770,11 @@ private fun emitSenderEnablement(
     sb.appendLine("\t\tvar ch_send_$safe chan msg_$chanId = nil")
     sb.appendLine("\t\tvar payload_$safe msg_$chanId")
     var bindCtx = ctx
+    run {
+        val (letCode, withLets) = emitActionLetBindings(decl, bindCtx, indent = "\t\t")
+        sb.append(letCode)
+        bindCtx = withLets
+    }
     val scoped = senderScopedArgBindings(decl, dir, safe)
     for (arg in dir.senderBoundArgs) {
         val local = scoped.getValue(arg)
@@ -836,15 +856,19 @@ private fun emitReceiverEnablement(
  * Equality args are rebound in the select case; membership args keep the
  * enablement-time locals (`arg_action`). Both use [actionScopedGoIdent].
  */
+/** Returns arg bindings and any action-let bindings already emitted into [sb]. */
 private fun localCaseArgBindings(
     decl: ActionDecl,
     safe: String,
     stateVars: Set<String>,
     sb: StringBuilder,
-): Map<String, String> {
+): Pair<Map<String, String>, Map<String, String>> {
     val bound = computeBoundArgs(decl)
     val bindings = LinkedHashMap<String, String>()
     var ctx = GoEmitCtx(stateVars = stateVars)
+    val (actionLetCode, ctxWithLets) = emitActionLetBindings(decl, ctx, indent = "\t\t\t")
+    sb.append(actionLetCode)
+    ctx = ctxWithLets
     for (arg in decl.action.args.map { it.name }) {
         if (arg in bound.equalityBound) {
             val rhs = findEqualityRhs(decl, arg) ?: continue
@@ -857,7 +881,7 @@ private fun localCaseArgBindings(
             bindings[arg] = actionScopedGoIdent(arg, safe)
         }
     }
-    return bindings
+    return bindings to ctx.letBindings
 }
 
 private fun emitFireBody(
@@ -870,10 +894,14 @@ private fun emitFireBody(
     dynamicCtorNames: Map<String, List<String>>,
     procClassByName: Map<String, ProcClassDecl>,
     linkage: GoLinkage,
+    letBindings: Map<String, String> = emptyMap(),
 ): String {
-    val ctx = GoEmitCtx(stateVars = stateVars, argBindings = argBindings)
+    var ctx = GoEmitCtx(stateVars = stateVars, argBindings = argBindings, letBindings = letBindings)
 
     val sb = StringBuilder()
+    val (actionLetCode, ctxWithLets) = emitActionLetBindings(decl, ctx, indent = "\t\t\t")
+    sb.append(actionLetCode)
+    ctx = ctxWithLets
     // errors
     for (arm in decl.errors) {
         val cond = arm.condExpr().toGoString(ctx)
@@ -934,13 +962,6 @@ private fun emitFireBody(
     return sb.toString()
 }
 
-private fun indexPutGo(base: String, idx: String, value: String, collectionType: Type?): String =
-    if (collectionType is MapType) {
-        "($base).Put($idx, $value)"
-    } else {
-        "($base).SetAt($idx, $value)"
-    }
-
 private fun emitTransitBody(
     decl: ActionDecl,
     ctx: GoEmitCtx,
@@ -949,98 +970,8 @@ private fun emitTransitBody(
 ): String {
     if (decl.transits.isEmpty()) return ""
     val sb = StringBuilder()
-    var localCtx = ctx
-    if (sequential) {
-        for ((i, update) in decl.transits.withIndex()) {
-            when (update) {
-                is TransitUpdate.Let -> {
-                    val bind = if (update.name.isDiscardBinding()) "__discard_t$i" else "${update.name.toGoSafeIdent()}__t"
-                    sb.appendLine("$bind := ${update.init.toGoString(localCtx)}")
-                    if (update.name.isDiscardBinding()) {
-                        sb.appendLine("_ = $bind")
-                    } else {
-                        localCtx = localCtx.withLet(update.name, bind)
-                    }
-                }
-                is TransitUpdate.Assign -> {
-                    sb.appendLine("${assignTarget(update.key, localCtx)} = ${update.expr.toGoString(localCtx)}")
-                }
-                is TransitUpdate.IndexPut -> {
-                    val base = stateOrLocal(update.collectionVar, localCtx)
-                    val idx = update.index.toGoString(localCtx)
-                    val value = update.value.toGoString(localCtx)
-                    val ty = stateVarTypes[update.collectionVar]
-                    sb.appendLine(
-                        "${assignTarget(update.collectionVar, localCtx)} = " +
-                            indexPutGo(base, idx, value, ty),
-                    )
-                }
-            }
-        }
-        return sb.toString()
-    }
-
-    data class Pending(val key: String, val temp: String, val kind: String)
-    val pending = mutableListOf<Pending>()
-    for ((i, update) in decl.transits.withIndex()) {
-        when (update) {
-            is TransitUpdate.Let -> {
-                val bind = if (update.name.isDiscardBinding()) "__discard_t$i" else "${update.name.toGoSafeIdent()}__t"
-                sb.appendLine("$bind := ${update.init.toGoString(localCtx)}")
-                if (update.name.isDiscardBinding()) {
-                    sb.appendLine("_ = $bind")
-                } else {
-                    localCtx = localCtx.withLet(update.name, bind)
-                }
-            }
-            is TransitUpdate.Assign -> {
-                val temp = "__t$i"
-                sb.appendLine("$temp := ${update.expr.toGoString(localCtx)}")
-                pending += Pending(update.key, temp, "assign")
-            }
-            is TransitUpdate.IndexPut -> {
-                val idxTemp = "__idx$i"
-                val valTemp = "__val$i"
-                sb.appendLine("$idxTemp := ${update.index.toGoString(localCtx)}")
-                sb.appendLine("$valTemp := ${update.value.toGoString(localCtx)}")
-                pending += Pending(update.collectionVar, "$idxTemp|$valTemp", "index")
-            }
-        }
-    }
-    for (p in pending) {
-        when (p.kind) {
-            "assign" -> sb.appendLine("${assignTarget(p.key, localCtx)} = ${p.temp}")
-            "index" -> {
-                val (idx, value) = p.temp.split("|")
-                val base = stateOrLocal(p.key, localCtx)
-                sb.appendLine(
-                    "${assignTarget(p.key, localCtx)} = " +
-                        indexPutGo(base, idx, value, stateVarTypes[p.key]),
-                )
-            }
-        }
-    }
+    emitTransitUpdatesGo(decl.transits, ctx, sequential, stateVarTypes, sb)
     return sb.toString()
-}
-
-private fun assignTarget(key: String, ctx: GoEmitCtx): String {
-    val parts = key.split(".")
-    val root = parts[0]
-    val rootGo = when {
-        root in ctx.letBindings -> ctx.letBindings.getValue(root)
-        root in ctx.stateVars -> "${ctx.procRecv}.$root"
-        else -> "${ctx.procRecv}.$root"
-    }
-    if (parts.size == 1) return rootGo
-    // Nested field update: for simplicity assign whole root with copy — field path
-    // Go structs are values; nested updates need rebuild. Simple path: p.obj.Field = ...
-    return parts.drop(1).fold(rootGo) { acc, seg -> "$acc.${seg.toGoObjFieldIdent()}" }
-}
-
-private fun stateOrLocal(name: String, ctx: GoEmitCtx): String = when {
-    name in ctx.letBindings -> ctx.letBindings.getValue(name)
-    name in ctx.stateVars -> "${ctx.procRecv}.$name"
-    else -> "${ctx.procRecv}.$name"
 }
 
 private fun residualGuardGo(
@@ -1067,7 +998,13 @@ private fun residualGuardGo(
             }
             // Skip conjuncts that reference skipArgs
             if (skipArgs.any { exprReferencesSymbol(c.expr, it) }) continue
-            val subst = c.letEnv.entries.fold(c.expr) { acc, (n, r) -> substituteExpr(acc, n, r) }
+            // Inline action-level lets (pure) so enablement sees the same bindings as fire.
+            var subst = c.letEnv.entries.fold(c.expr) { acc, (n, r) -> substituteExpr(acc, n, r) }
+            for (al in decl.actionLets.asReversed()) {
+                if (!al.name.isDiscardBinding()) {
+                    subst = substituteExpr(subst, al.name, al.init)
+                }
+            }
             parts += "(${subst.toGoString(ctx)})"
         }
     }

@@ -147,12 +147,29 @@ service transition putKVIfOwner(key : Key, val : Value, owner : Node) {
 }
 ```
 
-Use a result reply instead (always sync; client leaves the retry step on failure):
+Prefer a shared action-level `let` plus statement `if` so the false path does not read missing map keys (expression-`if` with an identity `else { store[key] }` would domain-error after ownership changes):
+
+```jul
+service transition putKVIfOwner(key : Key, val : Value, myInfo : Node, owner : Node) {
+    let iAmOwner : Boolean := key ~in owners | owners[key] = myInfo
+    guard: owner = if (iAmOwner) { myInfo } else { owners[key] }
+    transit:
+        if (iAmOwner) {
+            store[key] := val
+            owners[key] := myInfo
+        }
+}
+```
+
+Or reply an `ok` flag and branch the client with expression-`if` on the step only:
 
 ```jul
 service transition putKVIfOwner(key : Key, val : Value, owner : Node, ok : Boolean) {
     guard: ok <=> (owners[key] in setOf(owner, emptyNode()))
-    transit: store := if (ok) { /* put key */ store } else { store }
+    transit:
+        if (ok) {
+            store[key] := val
+        }
 }
 client transition putKVIfOwner(...) {
     guard: step = "putKV" & key = putKey & ...

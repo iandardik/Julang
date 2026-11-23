@@ -1,0 +1,21 @@
+import julay.funlib.readln
+
+static proc S {
+    var x : String
+
+    constructor initially(args : List<String>) {
+        transit:
+            x := ""
+    }
+
+    internal transition go() {
+        let t : String := readln()
+        guard: true
+        transit:
+            x := t
+    }
+}
+
+proc P := S
+
+compile P

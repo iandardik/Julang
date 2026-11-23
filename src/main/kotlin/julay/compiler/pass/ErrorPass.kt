@@ -746,42 +746,100 @@ private fun duplicateAssignmentErrors(
 private fun transitAssignmentNodes(body: List<ActionBodyNode>): List<ActionBodyNode> =
     body.flatMap { node ->
         when (node) {
-            is TransitNode -> node.transitBodies()
+            is TransitNode -> flattenTransitStmts(node.transitBodies())
             else -> emptyList()
         }
     }
 
-private fun actionBodyAssignmentErrors(body: List<ActionBodyNode>): List<CompileError> {
-    val transitNodes = transitAssignmentNodes(body)
-    val seenLets = mutableSetOf<String>()
-    val assignToLetErrors = mutableListOf<CompileError>()
-    for (node in transitNodes) {
+/** Flatten transit stmts; if-arms are included so duplicate checks see nested assigns. */
+private fun flattenTransitStmts(stmts: List<ActionBodyNode>): List<ActionBodyNode> =
+    stmts.flatMap { node ->
         when (node) {
-            is LetTransitNode -> seenLets += node.letName()
-            is VarTransitNode -> {
-                if (node.varName in seenLets) {
-                    assignToLetErrors += OneLocCompileError(
-                        node.programLocation(),
-                        "Cannot assign to transit let binding \"${node.varName}\"",
-                    )
-                }
-            }
-            is IndexTransitNode -> {
-                if (node.collectionVar in seenLets) {
-                    assignToLetErrors += OneLocCompileError(
-                        node.programLocation(),
-                        "Cannot assign to transit let binding \"${node.collectionVar}\"",
-                    )
-                }
-            }
-            else -> {}
+            is IfTransitNode ->
+                flattenTransitStmts(node.thenBody) + flattenTransitStmts(node.elseBody)
+            else -> listOf(node)
         }
     }
-    val varTransitAssignments = transitNodes.flatMap { it.transitVars() }
-    val wholeCollectionAssigns = transitNodes.filterIsInstance<VarTransitNode>()
+
+private fun actionBodyAssignmentErrors(body: List<ActionBodyNode>): List<CompileError> {
+    val topTransit = body.filterIsInstance<TransitNode>().flatMap { it.transitBodies() }
+    val flatNodes = flattenTransitStmts(topTransit)
+    val actionLetNames = body.filterIsInstance<ActionLetNode>().map { it.letName() }.toSet()
+    val seenLets = mutableSetOf<String>()
+    val assignToLetErrors = mutableListOf<CompileError>()
+    fun checkAssignToLet(nodes: List<ActionBodyNode>, letsInScope: Set<String>) {
+        var scope = letsInScope
+        for (node in nodes) {
+            when (node) {
+                is LetTransitNode -> scope = scope + node.letName()
+                is VarTransitNode -> {
+                    if (node.varName in scope || node.varName in actionLetNames) {
+                        assignToLetErrors += OneLocCompileError(
+                            node.programLocation(),
+                            "Cannot assign to let binding \"${node.varName}\"",
+                        )
+                    }
+                }
+                is IndexTransitNode -> {
+                    if (node.collectionVar in scope || node.collectionVar in actionLetNames) {
+                        assignToLetErrors += OneLocCompileError(
+                            node.programLocation(),
+                            "Cannot assign to let binding \"${node.collectionVar}\"",
+                        )
+                    }
+                }
+                is IfTransitNode -> {
+                    checkAssignToLet(node.thenBody, scope)
+                    checkAssignToLet(node.elseBody, scope)
+                }
+                else -> {}
+            }
+        }
+    }
+    checkAssignToLet(topTransit, seenLets)
+
+    // Unconditional duplicates + same-arm duplicates: strip arm prefixes that differ only as T vs E.
+    // Strategy: for each arm path, check duplicates within that path; also check top-level vs any.
+    val dupErrors = mutableListOf<CompileError>()
+    fun dupCheck(nodes: List<ActionBodyNode>) {
+        val keys = nodes.flatMap { n ->
+            when (n) {
+                is VarTransitNode -> listOf(n.transitKey() to n.programLocation())
+                is IfTransitNode -> {
+                    dupCheck(n.thenBody)
+                    dupCheck(n.elseBody)
+                    emptyList()
+                }
+                else -> emptyList()
+            }
+        }
+        dupErrors += duplicateAssignmentErrors(keys) { name ->
+            "Expected at most one assignment per variable, but found multiple assignments for \"$name\""
+        }
+        // Unconditional assign conflicts with assign inside nested if
+        val unconditional = nodes.filterIsInstance<VarTransitNode>().map { it.transitKey() to it.programLocation() }
+        val inIf = nodes.filterIsInstance<IfTransitNode>().flatMap { ifn ->
+            flattenTransitStmts(ifn.thenBody + ifn.elseBody).filterIsInstance<VarTransitNode>()
+                .map { it.transitKey() to it.programLocation() }
+        }
+        for ((uName, uLoc) in unconditional) {
+            for ((iName, iLoc) in inIf) {
+                if (uName == iName) {
+                    dupErrors += TwoLocsCompileError(
+                        uLoc,
+                        iLoc,
+                        "Expected at most one assignment per variable, but found multiple assignments for \"$uName\"",
+                    )
+                }
+            }
+        }
+    }
+    dupCheck(topTransit)
+
+    val wholeCollectionAssigns = flatNodes.filterIsInstance<VarTransitNode>()
         .filter { it.fieldPath.isEmpty() }
         .map { it.varName to it.programLocation() }
-    val indexPutNodes = transitNodes.filterIsInstance<IndexTransitNode>()
+    val indexPutNodes = flatNodes.filterIsInstance<IndexTransitNode>()
     val overlapErrors = wholeCollectionAssigns.flatMap { (varName, loc) ->
         indexPutNodes.filter { it.collectionVar == varName }.map { put ->
             TwoLocsCompileError(
@@ -791,9 +849,7 @@ private fun actionBodyAssignmentErrors(body: List<ActionBodyNode>): List<Compile
             )
         }
     }
-    return assignToLetErrors + duplicateAssignmentErrors(varTransitAssignments) { name ->
-        "Expected at most one assignment per variable, but found multiple assignments for \"$name\""
-    } + overlapErrors
+    return assignToLetErrors + dupErrors + overlapErrors
 }
 
 private fun ConstructorNode.errorPassConstructor(procs: Set<String>, librariesInUse: Set<String>): List<CompileError> {

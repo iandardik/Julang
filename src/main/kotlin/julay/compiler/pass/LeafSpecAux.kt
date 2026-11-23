@@ -46,16 +46,19 @@ fun collectLeafSpecAuxParams(
         )
     }
 
-    fun refs(name: String): Boolean =
-        guards.any { exprReferencesSymbol(it, name) } ||
-            transits.any { update ->
-                when (update) {
-                    is TransitUpdate.Assign -> exprReferencesSymbol(update.expr, name)
-                    is TransitUpdate.IndexPut ->
-                        exprReferencesSymbol(update.index, name) || exprReferencesSymbol(update.value, name)
-                    is TransitUpdate.Let -> exprReferencesSymbol(update.init, name)
-                }
-            }
+    fun refs(name: String): Boolean {
+        fun walk(update: TransitUpdate): Boolean = when (update) {
+            is TransitUpdate.Assign -> exprReferencesSymbol(update.expr, name)
+            is TransitUpdate.IndexPut ->
+                exprReferencesSymbol(update.index, name) || exprReferencesSymbol(update.value, name)
+            is TransitUpdate.Let -> exprReferencesSymbol(update.init, name)
+            is TransitUpdate.If ->
+                exprReferencesSymbol(update.cond, name) ||
+                    update.thenUpdates.any { walk(it) } ||
+                    update.elseUpdates.any { walk(it) }
+        }
+        return guards.any { exprReferencesSymbol(it, name) } || transits.any { walk(it) }
+    }
 
     val out = mutableListOf<LeafSpecAuxParam>()
     if (declParam != null && declType != null && refs(declParam)) {

@@ -2,6 +2,7 @@ package julay.compiler.pass
 
 import julay.compiler.ast.*
 import julay.compiler.decl.TransitUpdate
+import julay.compiler.decl.assignedRoots
 
 /**
  * Per-leaf state var/const relevance for TLA+ emission (`unused-vars`).
@@ -51,11 +52,7 @@ internal fun analyzeTlaRelevantVars(
         if (offer.isConstructor) return true
         if (offer.decl.isReturn) return true
         return offer.decl.transits.any { update ->
-            when (update) {
-                is TransitUpdate.Assign -> relevant.contains(offer.leaf.name to update.transitRootVar())
-                is TransitUpdate.IndexPut -> relevant.contains(offer.leaf.name to update.transitRootVar())
-                is TransitUpdate.Let -> false
-            }
+            update.assignedRoots().any { root -> relevant.contains(offer.leaf.name to root) }
         }
     }
 
@@ -63,18 +60,19 @@ internal fun analyzeTlaRelevantVars(
         group.any { offer ->
             if (offer.isConstructor || offer.decl.isReturn) return@any true
             offer.decl.transits.any { update ->
-                when (update) {
-                    is TransitUpdate.Assign, is TransitUpdate.IndexPut ->
-                        !requireRelevant || relevant.contains(offer.leaf.name to update.transitRootVar())
-                    is TransitUpdate.Let -> false
-                }
+                val roots = update.assignedRoots()
+                roots.isNotEmpty() && (!requireRelevant || roots.any { relevant.contains(offer.leaf.name to it) })
             }
         }
 
     fun seedAndPropagate(groups: List<List<TlaActionOffer>>) {
         groups.forEach { group ->
             group.forEach { offer ->
-                val bound = boundNamesOf(offer)
+                val bound = boundNamesOf(offer).toMutableSet()
+                offer.decl.actionLets.forEach { al ->
+                    collectStateReads(al.init, offer.leaf.name, varsByLeaf, bound, relevant)
+                    bound += al.name
+                }
                 offer.decl.guards.forEach { collectStateReads(it, offer.leaf.name, varsByLeaf, bound, relevant) }
                 offer.decl.errors.forEach { arm ->
                     collectStateReads(arm.condExpr(), offer.leaf.name, varsByLeaf, bound, relevant)
@@ -100,7 +98,11 @@ internal fun analyzeTlaRelevantVars(
                         return@forEach
                     }
                     val bound = boundNamesOf(offer).toMutableSet()
-                    offer.decl.transits.forEach { update ->
+                    offer.decl.actionLets.forEach { al ->
+                        collectStateReads(al.init, offer.leaf.name, varsByLeaf, bound, relevant)
+                        bound += al.name
+                    }
+                    fun walkUpdate(update: TransitUpdate) {
                         when (update) {
                             is TransitUpdate.Let -> {
                                 collectStateReads(update.init, offer.leaf.name, varsByLeaf, bound, relevant)
@@ -117,8 +119,14 @@ internal fun analyzeTlaRelevantVars(
                                     collectStateReads(update.value, offer.leaf.name, varsByLeaf, bound, relevant)
                                 }
                             }
+                            is TransitUpdate.If -> {
+                                collectStateReads(update.cond, offer.leaf.name, varsByLeaf, bound, relevant)
+                                update.thenUpdates.forEach { walkUpdate(it) }
+                                update.elseUpdates.forEach { walkUpdate(it) }
+                            }
                         }
                     }
+                    offer.decl.transits.forEach { walkUpdate(it) }
                 }
             }
             if (relevant.size != before) changed = true

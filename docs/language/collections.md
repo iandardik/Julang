@@ -160,7 +160,7 @@ missing := "z" ~in mp
 
 ### Indexing
 
-`mp[k]` requires a key of type `K` and yields `V`. The key must be **explicitly** present in the same expression (`k in mp & …`, `if (k in mp) { … }`, `(k in mp) => …`) or earlier in the same action’s `guard:` before a `transit:` / `after:` read, or via `mp.keys` iteration. Unguarded map reads are a **compile error**. Map writes `mp[k] := v` do not need prior membership (insert/overwrite).
+`mp[k]` requires a key of type `K` and yields `V`. A missing key is a **runtime failure** on both backends: Go panics (`Key … is missing in the map`); TLA+/TLC reports a domain error on bare `mp[k]`. Use `k in mp`, `if (k in mp) { … }`, or similar when the key may be absent. Map writes `mp[k] := v` insert or overwrite and do not need prior membership.
 
 ### Updates
 
@@ -327,7 +327,7 @@ Higher-order calls that only depend on concrete process state are encoded by eva
 
 For **TLA+ / TLC**, list and set `.map` / `.filter` / `.length` / `.toSet` / `.toList`, set `.associateWith`, and map `.remove` are emitted (Julay list indexes already match TLA `Sequences`); `.fold` and map HOFs are not — see [Specifications — TLA+ translation limits](specifications.md#tla-translation-limits). `.toList` order is unspecified in TLC (`SetToSeq` via `CHOOSE`). `allDistinct(xs)` emits `Len(xs) = Cardinality(Range(xs))`. Set `.associateWith(n -> e)` emits `[__k \in S |-> e]`. Map `.remove(k)` emits `[__k \in DOMAIN mp \ {k} |-> mp[__k]]`.
 
-List indexing throws on out-of-bounds. Map reads require explicit `k in mp` (compile-checked); missing-key at runtime panics in Go if a guard is bypassed.
+List indexing throws on out-of-bounds. Map reads panic in Go / domain-error in TLA+ when the key is missing (same hard failure on both backends).
 
 ## See also
 

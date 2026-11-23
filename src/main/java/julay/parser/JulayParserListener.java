@@ -518,6 +518,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 */
 	void exitAction_body(JulayParser.Action_bodyContext ctx);
 	/**
+	 * Enter a parse tree produced by {@link JulayParser#action_let}.
+	 * @param ctx the parse tree
+	 */
+	void enterAction_let(JulayParser.Action_letContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#action_let}.
+	 * @param ctx the parse tree
+	 */
+	void exitAction_let(JulayParser.Action_letContext ctx);
+	/**
 	 * Enter a parse tree produced by {@link JulayParser#guard}.
 	 * @param ctx the parse tree
 	 */
@@ -557,6 +567,16 @@ public interface JulayParserListener extends ParseTreeListener {
 	 * @param ctx the parse tree
 	 */
 	void exitError_arm(JulayParser.Error_armContext ctx);
+	/**
+	 * Enter a parse tree produced by {@link JulayParser#transit_stmt}.
+	 * @param ctx the parse tree
+	 */
+	void enterTransit_stmt(JulayParser.Transit_stmtContext ctx);
+	/**
+	 * Exit a parse tree produced by {@link JulayParser#transit_stmt}.
+	 * @param ctx the parse tree
+	 */
+	void exitTransit_stmt(JulayParser.Transit_stmtContext ctx);
 	/**
 	 * Enter a parse tree produced by {@link JulayParser#var_transit}.
 	 * @param ctx the parse tree

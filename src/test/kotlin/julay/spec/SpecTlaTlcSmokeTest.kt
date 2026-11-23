@@ -1093,6 +1093,32 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
+    fun transitIfAndActionLetEmitOuterLetAndIdentityElse() {
+        val source = File("regression/input/spec/transit-if-action-let.jul")
+        val (tlaText, _) = compileSpecTla(source, "TransitIfActionLet")
+        val putDef = tlaText.substringAfter("putIfOwner(").substringBefore("\n\n")
+        assertTrue(
+            putDef.contains("iAmOwner") &&
+                (putDef.contains("/\\ LET iAmOwner") || putDef.contains("/\\ LET\n") ||
+                    Regex("""/\\ LET\s+iAmOwner""").containsMatchIn(putDef)),
+            "expected conjunctive /\\ LET for action-level iAmOwner;\n$putDef",
+        )
+        assertTrue(
+            putDef.contains("IF (") && putDef.contains("THEN") && putDef.contains("ELSE"),
+            "expected IF/THEN/ELSE for statement-if transit;\n$putDef",
+        )
+        // False path identity-else: whole var (`ELSE store`) or indexed EXCEPT slot (`ELSE (@)`).
+        assertTrue(
+            putDef.contains("ELSE store") || putDef.contains("ELSE (@)"),
+            "expected identity else on store when if arm skipped;\n$putDef",
+        )
+        assertFalse(
+            putDef.contains("ELSE store[key]") || putDef.contains("ELSE @[key]"),
+            "identity else must not read missing map key;\n$putDef",
+        )
+    }
+
+    @Test
     fun mapIndexInInvariantRequiresExplicitMembership() {
         val source = File("regression/input/spec/map-index-domain-inv.jul")
         val (tlaText, _) = compileSpecTla(source, "MapIndexDomainInv")
@@ -2272,11 +2298,23 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
-    fun unguardedMapIndexIsCompileError() {
+    fun unguardedMapIndexEmitsBareApplyNoSoftDefault() {
         val source = File("regression/input/spec/map-index-soft-default.jul")
         assertTrue(source.exists(), "missing ${source.path}")
-        val checked = prepareCheckedCompilation(source.toPath())
-        assertNull(checked, "unguarded owners[key] must fail type checking")
+        val (tlaText, _) = compileSpecTla(source, "SoftDefaultMapIndex")
+        val claim = Regex(
+            """^claim\w*\([^\n]*\) ==([\s\S]*?)(?=^\w+\(|^Next ==)""",
+            setOf(RegexOption.MULTILINE),
+        ).find(tlaText)?.groupValues?.get(1)
+            ?: error("missing claim action;\n$tlaText")
+        assertTrue(
+            claim.contains("owners[key]") || claim.contains("owners[key_"),
+            "unguarded map read should emit bare apply;\n$claim",
+        )
+        assertFalse(
+            Regex("""IF key_? \\in DOMAIN owners THEN owners\[key""").containsMatchIn(claim),
+            "must not soft-default map reads;\n$claim",
+        )
     }
 
     @Test

@@ -1,0 +1,70 @@
+import julay.funlib.exitProgram
+import julay.funlib.mapOf
+import julay.funlib.println
+
+/*
+ * Action-level let used in a reply equality (`owner = keyOwner`) must be emitted
+ * before the reply is sent on the service side.
+ */
+static proc Store {
+    var owners : Map<String, String>
+    var me : String
+
+    constructor initially(args : List<String>) {
+        transit:
+            owners := mapOf("a" to "alice")
+            me := "alice"
+    }
+
+    service transition putIfOwner(key : String, myInfo : String, owner : String) {
+        let keyOwner : String := if (key in owners) { owners[key] } else { myInfo }
+        guard:
+            owner = keyOwner
+        transit:
+            if (keyOwner = myInfo) {
+                owners[key] := myInfo
+            }
+    }
+}
+
+static proc Client {
+    var step : String
+    var got : String
+    var print : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            step := "put"
+            got := ""
+            print := false
+    }
+
+    client transition putIfOwner(key : String, myInfo : String, owner : String) {
+        guard:
+            step = "put" & key = "a" & myInfo = "alice"
+        transit:
+            got := owner
+            step := "done"
+            print := true
+    }
+
+    internal transition println(msg : String) {
+        guard:
+            print & step = "done" & (msg = got)
+        transit:
+            print := false
+        after:
+            println(msg)
+    }
+
+    internal transition exitSystem() {
+        guard:
+            step = "done" & ~print
+        after:
+            exitProgram(0)
+    }
+}
+
+proc ActionLetReplyEq := Store || Client
+
+compile ActionLetReplyEq

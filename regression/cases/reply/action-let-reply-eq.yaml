@@ -1,0 +1,6 @@
+source: regression/input/reply/action-let-reply-eq.jul
+programs:
+  - name: ActionLetReplyEq
+    run:
+      timeoutMs: 60000
+      expectStdout: regression/expected/reply-action-let-reply-eq.stdout

@@ -364,6 +364,8 @@ fun ASTNode.typePass(
     is HandlerRefExprNode -> typePassHandlerRef()
     is TransitNode -> typePassTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is LetTransitNode -> typePassLetTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    is ActionLetNode -> typePassActionLet(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    is IfTransitNode -> typePassIfTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is VarTransitNode -> typePassVarTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is IndexTransitNode -> typePassIndexTransit(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
     is ErrorNode -> typePassError(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
@@ -540,9 +542,8 @@ private fun ConstructorNode.typePassConstructor(
 }
 
 /**
- * Type-check action body parts in order. Membership proven in `guard:` (and error
- * conditions) is assumed for later `transit:` / `after:` / `before:` expressions
- * in the same action.
+ * Type-check action body parts. Action-level lets are typed in source order first
+ * (each seeing earlier action lets), then every other clause sees the full action-let env.
  */
 private fun typePassActionBody(
     parts: List<ActionBodyNode>,
@@ -553,39 +554,29 @@ private fun typePassActionBody(
     funBuiltinEnv: Map<String, FunBuiltin>,
 ): List<CompileError> {
     val errors = mutableListOf<CompileError>()
-    var assumedIn = emptySet<String>()
+    var actionLetEnv = emptyMap<String, Type>()
+    for (part in parts) {
+        if (part !is ActionLetNode) continue
+        val env = actionEnv + actionLetEnv
+        val e = part.typePassActionLet(env, registry, funEnv, typeParamEnv, funBuiltinEnv)
+        errors += e
+        if (e.isEmpty() && !part.letName().isDiscardBinding()) {
+            actionLetEnv = actionLetEnv + (part.letName() to part.resolvedLetType)
+        }
+    }
+    if (errors.isNotEmpty()) return errors
+    val envWithLets = actionEnv + actionLetEnv
     for (part in parts) {
         when (part) {
-            is GuardNode -> {
-                val e = part.typePass(actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-                errors += e
-                if (e.isEmpty()) {
-                    assumedIn = assumedIn + membershipInShapes(part.guardExpr())
-                }
-            }
-            is ErrorNode -> {
-                val e = part.typePass(actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-                errors += e
-                if (e.isEmpty()) {
-                    part.errors().forEach { arm ->
-                        assumedIn = assumedIn + membershipInShapes(arm.condExpr())
-                    }
-                }
-            }
+            is ActionLetNode -> {} // already typed
             is TransitNode ->
-                errors += part.typePassTransit(
-                    actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, assumedIn,
-                )
+                errors += part.typePassTransit(envWithLets, registry, funEnv, typeParamEnv, funBuiltinEnv)
             is BeforeNode ->
-                errors += part.typePassBefore(
-                    actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, assumedIn,
-                )
+                errors += part.typePassBefore(envWithLets, registry, funEnv, typeParamEnv, funBuiltinEnv)
             is AfterNode ->
-                errors += part.typePassAfter(
-                    actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, assumedIn,
-                )
+                errors += part.typePassAfter(envWithLets, registry, funEnv, typeParamEnv, funBuiltinEnv)
             else ->
-                errors += part.typePass(actionEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+                errors += part.typePass(envWithLets, registry, funEnv, typeParamEnv, funBuiltinEnv)
         }
     }
     return errors
@@ -653,7 +644,7 @@ private fun GuardNode.typePassGuard(symbolEnv: Map<String, Type>, registry: ObjC
     if (guardTypeErrors.isNotEmpty()) {
         return guardTypeErrors
     }
-    return mapIndexMembershipErrors(guardExpr())
+    return emptyList()
 }
 
 private fun ErrorNode.typePassError(
@@ -667,17 +658,11 @@ private fun ErrorNode.typePassError(
     if (childrenErrors.isNotEmpty()) {
         return childrenErrors
     }
-    val condTypeErrors = errors().flatMap { arm ->
+    return errors().flatMap { arm ->
         assertOrCompileError(
             arm.condExpr().getType() is BoolType,
             OneLocCompileError(arm.programLocation(), "Expected error conditions to be Boolean-valued expressions"),
         )
-    }
-    if (condTypeErrors.isNotEmpty()) {
-        return condTypeErrors
-    }
-    return errors().flatMap { arm ->
-        mapIndexMembershipErrors(arm.condExpr()) + mapIndexMembershipErrors(arm.msgExpr())
     }
 }
 
@@ -687,31 +672,45 @@ private fun TransitNode.typePassTransit(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
-    assumedIn: Set<String> = emptySet(),
+): List<CompileError> =
+    typePassTransitStmts(transitBodies(), symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+
+/** Type a flat list of transit statements; lets are scoped to this list (and if-arms). */
+private fun typePassTransitStmts(
+    stmts: List<ActionBodyNode>,
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
 ): List<CompileError> {
     var letEnv = emptyMap<String, Type>()
     val errors = mutableListOf<CompileError>()
-    for (item in transitBodies()) {
+    for (item in stmts) {
         val rhsEnv = symbolEnv + letEnv
         when (item) {
             is LetTransitNode -> {
                 val itemErrors = item.typePassLetTransit(
-                    rhsEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, assumedIn,
+                    rhsEnv, registry, funEnv, typeParamEnv, funBuiltinEnv,
                 )
                 errors += itemErrors
-                // Discard `_` may be rebound freely but is never in scope for later expressions.
                 if (itemErrors.isEmpty() && !item.letName().isDiscardBinding()) {
                     letEnv = letEnv + (item.letName() to item.resolvedLetType)
                 }
             }
+            is IfTransitNode -> {
+                errors += item.typePassIfTransit(
+                    rhsEnv, registry, funEnv, typeParamEnv, funBuiltinEnv,
+                )
+            }
             is VarTransitNode -> {
                 errors += item.typePassVarTransit(
-                    symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, rhsEnv, assumedIn,
+                    symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, rhsEnv,
                 )
             }
             is IndexTransitNode -> {
                 errors += item.typePassIndexTransit(
-                    symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, rhsEnv, assumedIn,
+                    symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv, rhsEnv,
                 )
             }
             else -> {
@@ -722,13 +721,84 @@ private fun TransitNode.typePassTransit(
     return errors
 }
 
+private fun IfTransitNode.typePassIfTransit(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+): List<CompileError> {
+    val condErrors = cond.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    if (condErrors.isNotEmpty()) return condErrors
+    val boolErrors = assertOrCompileError(
+        cond.getType() is BoolType,
+        OneLocCompileError(cond.programLocation(), "Expected if-condition to be Boolean"),
+    )
+    if (boolErrors.isNotEmpty()) return boolErrors
+    return typePassTransitStmts(thenBody, symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) +
+        typePassTransitStmts(elseBody, symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+}
+
+private fun ActionLetNode.typePassActionLet(
+    symbolEnv: Map<String, Type>,
+    registry: ObjClassRegistry,
+    funEnv: Map<String, FunNode>,
+    typeParamEnv: Map<String, Type>,
+    funBuiltinEnv: Map<String, FunBuiltin>,
+): List<CompileError> {
+    val typeErrors = when (val result = registry.resolveTypeExpr(letTypeExpr(), typeParamEnv, programLocation())) {
+        is TypeResolveResult.Found -> {
+            resolveLetType(typingView(result.type))
+            listOfNotNull(sortDomainBan(result.type, programLocation()))
+        }
+        is TypeResolveResult.Error ->
+            listOf(
+                OneLocCompileError(
+                    programLocation(),
+                    "Unknown type \"${letTypeName()}\" for action let binding \"${letName()}\"",
+                ),
+            )
+    }
+    if (typeErrors.isNotEmpty()) return typeErrors
+
+    val selfRefErrors = assertOrCompileError(
+        letName() in symbolEnv || !exprReferencesSymbol(letInitExpr(), letName()),
+        OneLocCompileError(
+            letInitExpr().programLocation(),
+            "let initializer for \"${letName()}\" cannot reference the bound name",
+        ),
+    )
+    if (selfRefErrors.isNotEmpty()) return selfRefErrors
+
+    val declaredType = resolvedLetType
+    applyExpectedCollectionType(letInitExpr(), declaredType)
+    val initErrors = letInitExpr().typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
+    if (initErrors.isNotEmpty()) return initErrors
+
+    if (exprContainsIoHavoc(letInitExpr())) {
+        return listOf(
+            OneLocCompileError(
+                letInitExpr().programLocation(),
+                "action let \"${letName()}\" initializer cannot perform IO (evaluated at enablement)",
+            ),
+        )
+    }
+
+    return assertOrCompileError(
+        letInitExpr().getType() == declaredType,
+        OneLocCompileError(
+            letInitExpr().programLocation(),
+            "Expected let initializer for \"${letName()}\" to have type $declaredType but got ${letInitExpr().getType()}",
+        ),
+    )
+}
+
 private fun LetTransitNode.typePassLetTransit(
     symbolEnv: Map<String, Type>,
     registry: ObjClassRegistry,
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
-    assumedIn: Set<String> = emptySet(),
 ): List<CompileError> {
     val typeErrors = when (val result = registry.resolveTypeExpr(letTypeExpr(), typeParamEnv, programLocation())) {
         is TypeResolveResult.Found -> {
@@ -775,7 +845,7 @@ private fun LetTransitNode.typePassLetTransit(
     if (typeMatchErrors.isNotEmpty()) {
         return typeMatchErrors
     }
-    return mapIndexMembershipErrors(letInitExpr(), assumedIn)
+    return emptyList()
 }
 
 private fun VarTransitNode.typePassVarTransit(
@@ -785,7 +855,6 @@ private fun VarTransitNode.typePassVarTransit(
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
     rhsEnv: Map<String, Type> = symbolEnv,
-    assumedIn: Set<String> = emptySet(),
 ): List<CompileError> {
     // Transit targets are always process state (never action args), even when names collide.
     val lhsEnv = typePassStateEnv ?: symbolEnv
@@ -808,7 +877,6 @@ private fun VarTransitNode.typePassVarTransit(
     if (childrenErrors.isNotEmpty()) {
         return childrenErrors
     }
-    val membershipErrors = mapIndexMembershipErrors(transitExpr(), assumedIn)
     val varErrors = if (fieldPath.isEmpty()) {
         assertOrCompileError(
             transitExpr().getType() == varType,
@@ -842,7 +910,7 @@ private fun VarTransitNode.typePassVarTransit(
             }
         }
     }
-    return childrenErrors + varErrors + membershipErrors
+    return childrenErrors + varErrors
 }
 
 private fun BeforeNode.typePassBefore(
@@ -851,13 +919,8 @@ private fun BeforeNode.typePassBefore(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
-    assumedIn: Set<String> = emptySet(),
 ): List<CompileError> =
-    befores().flatMap { stmt ->
-        val typed = stmt.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-        if (typed.isNotEmpty()) typed
-        else stmt.callArgs().flatMap { mapIndexMembershipErrors(it, assumedIn) }
-    }
+    befores().flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
 
 private fun AfterNode.typePassAfter(
     symbolEnv: Map<String, Type>,
@@ -865,13 +928,8 @@ private fun AfterNode.typePassAfter(
     funEnv: Map<String, FunNode>,
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
-    assumedIn: Set<String> = emptySet(),
 ): List<CompileError> =
-    afters().flatMap { stmt ->
-        val typed = stmt.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv)
-        if (typed.isNotEmpty()) typed
-        else stmt.callArgs().flatMap { mapIndexMembershipErrors(it, assumedIn) }
-    }
+    afters().flatMap { it.typePass(symbolEnv, registry, funEnv, typeParamEnv, funBuiltinEnv) }
 
 private fun CallStmtNode.typePassCallStmt(
     symbolEnv: Map<String, Type>,
@@ -2841,7 +2899,6 @@ private fun IndexTransitNode.typePassIndexTransit(
     typeParamEnv: Map<String, Type>,
     funBuiltinEnv: Map<String, FunBuiltin>,
     rhsEnv: Map<String, Type> = symbolEnv,
-    assumedIn: Set<String> = emptySet(),
 ): List<CompileError> {
     // Index assignment targets are always process state (never action args).
     val lhsEnv = typePassStateEnv ?: symbolEnv
@@ -2904,11 +2961,7 @@ private fun IndexTransitNode.typePassIndexTransit(
         }
         else -> {}
     }
-    if (errors.isNotEmpty()) {
-        return errors
-    }
-    // Index put is a write of collectionVar; still check map reads inside index/value exprs.
-    return mapIndexMembershipErrors(index, assumedIn) + mapIndexMembershipErrors(value, assumedIn)
+    return errors
 }
 
 private fun SetLiteralExprNode.typePassSetLiteral(
@@ -3113,10 +3166,7 @@ private fun FunNode.typePassFunBody(
             "Expected function \"${name()}\" to return $returnType but body has type ${funBody().getType()}",
         ),
     )
-    if (returnErrors.isNotEmpty()) {
-        return returnErrors
-    }
-    return mapIndexMembershipErrors(funBody())
+    return returnErrors
 }
 
 private fun ReturnActionNode.typePassReturnAction(

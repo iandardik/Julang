@@ -1,0 +1,4 @@
+source: regression/input/type-errors/action-let-io.jul
+expectCompileFailure: true
+expectCompileOutputContains:
+  - 'action let "t" initializer cannot perform IO (evaluated at enablement)'

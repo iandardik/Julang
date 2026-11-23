@@ -27,6 +27,11 @@ data class ActionDecl(
     val errors: List<ErrorArmNode> = emptyList(),
     /** Named `return` action that terminates the instance (no transit/after). */
     val isReturnAction: Boolean = false,
+    /**
+     * Action-scoped lets (siblings of guard/transit), evaluated against pre-state
+     * and visible to guards, transit, before/after, and error arms.
+     */
+    val actionLets: List<TransitUpdate.Let> = emptyList(),
 ) {
     val isTimer: Boolean get() = action.isTimer
     val isReturn: Boolean get() = isReturnAction

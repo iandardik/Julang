@@ -5,6 +5,7 @@ import julay.compiler.OneLocCompileError
 import julay.compiler.TypeExpr
 import julay.compiler.ast.*
 import julay.compiler.decl.TransitUpdate
+import julay.compiler.decl.forEachLeaf
 
 /** Errors for `with` / create-index / apply-index misuse in a system expression. */
 fun withIndexStructureErrors(node: ASTNode?, insideWith: Boolean = false): List<CompileError> {
@@ -74,7 +75,7 @@ fun collectPeerStateRefs(pc: ProcClassNode, knownPeers: Set<String>): List<PeerS
             is TransitionNode -> {
                 decl.body().forEach { b ->
                     b.guards().forEach { walkExpr(it) }
-                    b.transits().forEach { u ->
+                    b.transits().forEachLeaf { u ->
                         when (u) {
                             is TransitUpdate.Assign -> walkExpr(u.expr)
                             is TransitUpdate.IndexPut -> {
@@ -82,6 +83,7 @@ fun collectPeerStateRefs(pc: ProcClassNode, knownPeers: Set<String>): List<PeerS
                                 walkExpr(u.value)
                             }
                             is TransitUpdate.Let -> walkExpr(u.init)
+                            is TransitUpdate.If -> {}
                         }
                     }
                 }
@@ -89,7 +91,7 @@ fun collectPeerStateRefs(pc: ProcClassNode, knownPeers: Set<String>): List<PeerS
             is ConstructorNode -> {
                 decl.body().forEach { b ->
                     b.guards().forEach { walkExpr(it) }
-                    b.transits().forEach { u ->
+                    b.transits().forEachLeaf { u ->
                         when (u) {
                             is TransitUpdate.Assign -> walkExpr(u.expr)
                             is TransitUpdate.IndexPut -> {
@@ -97,6 +99,7 @@ fun collectPeerStateRefs(pc: ProcClassNode, knownPeers: Set<String>): List<PeerS
                                 walkExpr(u.value)
                             }
                             is TransitUpdate.Let -> walkExpr(u.init)
+                            is TransitUpdate.If -> {}
                         }
                     }
                 }

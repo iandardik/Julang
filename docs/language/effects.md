@@ -51,12 +51,34 @@ Session teardown builtins (`exitSession`, `killSessionPeer`) are **removed**.
 
 Effectful **functions** (and any other callable) may appear in action clauses as follows. Execution order after a successful sync is:
 
-1. `error:` checks (pre-state)
-2. **`before:`** calls (transitions only — constructors cannot have `before:`)
-3. **`transit:`** (statement `let`s top-to-bottom against pre-state, then assignment RHSs against pre-state + in-scope lets, then simultaneous apply). In **constructors**, neither let initializers nor assignment RHSs may reference any state variable (including self-updates) — use args / pure exprs, or earlier lets that do not read state.
-4. **`after:`** calls
+1. **Action-level `let`s** (pure bindings over pre-state; see below) — not a separate runtime phase; shared by guard / error / before / transit / after
+2. `error:` checks (pre-state)
+3. **`before:`** calls (transitions only — constructors cannot have `before:`)
+4. **`transit:`** (statement `let`s and statement `if`/`else`, then assignment RHSs; simultaneous apply within each executed arm). In **constructors**, neither let initializers nor assignment RHSs may reference any state variable (including self-updates) — use args / pure exprs, or earlier lets that do not read state.
+5. **`after:`** calls
 
 You must import the function first, e.g. `import julay.funlib.println`.
+
+### Action-level `let`
+
+Sibling of `guard:` / `transit:` (not a `let:` section). Same shape as a transit statement `let`, but visible to **guards, error conditions/messages, before/after call args, and transit** (including transit `if` conditions):
+
+```jul
+transition putIfOwner(key : Key, val : Value, myInfo : Node, owner : Node) {
+    let iAmOwner : Boolean := key ~in owners | owners[key] = myInfo
+    guard:
+        owner = if (iAmOwner) { myInfo } else { owners[key] }
+    transit:
+        if (iAmOwner) {
+            store[key] := val
+            owners[key] := myInfo
+        }
+}
+```
+
+- Typed in source order against pre-state + earlier action lets.
+- Initializers must be **pure** (no value-returning IO); they are evaluated at Go enablement when the guard mentions them.
+- Transit-local `let`s stay inside `transit:` (or inside `if` arms) and are **not** visible to guards.
 
 ### `before:` and `after:`
 
@@ -113,7 +135,7 @@ transit:
 
 Semantics:
 
-1. Each `let` initializer is evaluated top-to-bottom against **pre-transit** state, plus earlier lets in this block. In **transitions**, lets **may** read state variables; in **constructors**, they must not (state is still undefined).
+1. Each `let` initializer is evaluated top-to-bottom against **pre-transit** state, plus earlier lets in this block (and action-level lets). In **transitions**, lets **may** read state variables; in **constructors**, they must not (state is still undefined).
 2. Every assignment RHS is evaluated against pre-transit state plus lets textually **above** it.
 3. All assignments are then applied **simultaneously** (later lines do not observe earlier assigns).
 4. **In constructors only:** neither a let initializer nor an assignment RHS may reference any state variable (including self-updates — no `x := x + 1` or `let t := x`). Use constructor args, pure expressions, or earlier lets that do not read state. Inline `var`/`const` initializers likewise must not reference state.
@@ -131,10 +153,24 @@ Ordinary **transitions** may still read any state in assign RHSs (`log := log + 
 
 Rules:
 
-- Lets are scoped to this transit only; they do not persist as `var`/`const`.
+- Transit lets are scoped to this transit only; they do not persist as `var`/`const` and are not visible to guards.
 - Lets are not assignable targets (`t := …` after `let t …` is an error).
-- A let may shadow a state var or arg; the initializer may still refer to the outer same-named symbol (as with [expression `let`](types-and-expressions.md#expression-let)).
-- Prefer statement `let` when one value must feed **several** assigns; use expression `let` for a binding inside a single expression.
+- A let may shadow a state var, arg, or action-level let; the initializer may still refer to the outer same-named symbol (as with [expression `let`](types-and-expressions.md#expression-let)).
+- Prefer statement `let` when one value must feed **several** assigns; use expression `let` for a binding inside a single expression; use **action-level** `let` when the same binding must appear in both guard and transit.
+
+### Transit statement `if`
+
+Inside `transit:`, `if (cond) { … } else { … }` (else optional) branches assigns, index puts, lets, and nested `if`s. The condition must be Boolean. Arms use the same simultaneous-assign rules as flat transit. A missing `else` is a no-op for those targets — the false path does **not** evaluate then-arm RHSs (so `if (c) { m[k] := v }` is safe when `c` is false and `k` is absent from `m`).
+
+```jul
+transit:
+    if (iAmOwner) {
+        store[key] := val
+        owners[key] := myInfo
+    }
+```
+
+Go emits a real branch; TLA+ emits one primed update per root with lazy `IF cond THEN … ELSE v` (identity else when that arm does not assign the root).
 
 ### TLA+ translation (IO havoc)
 

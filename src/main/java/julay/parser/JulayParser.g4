@@ -274,6 +274,7 @@ constructor_body
     | transit
     | error
     | after
+    | action_let
     ;
 
 action_body
@@ -282,6 +283,12 @@ action_body
     | transit
     | error
     | after
+    | action_let
+    ;
+
+/** Action-scoped let shared by guard / transit / before / after (pre-state bindings). */
+action_let
+    : LET ID COLON typeExpr ASGN_EQ expr
     ;
 
 guard
@@ -289,7 +296,7 @@ guard
     ;
 
 transit
-    : TRANSIT COLON var_transit*
+    : TRANSIT COLON transit_stmt*
     ;
 
 error
@@ -298,6 +305,11 @@ error
 
 error_arm
     : expr ARROW expr
+    ;
+
+transit_stmt
+    : var_transit
+    | IF LPAREN expr RPAREN LCURLY transit_stmt* RCURLY (ELSE LCURLY transit_stmt* RCURLY)?
     ;
 
 var_transit

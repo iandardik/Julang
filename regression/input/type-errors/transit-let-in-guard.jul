@@ -1,0 +1,20 @@
+static proc S {
+    var x : Int
+
+    constructor initially(args : List<String>) {
+        transit:
+            x := 0
+    }
+
+    internal transition go() {
+        guard:
+            t = 1
+        transit:
+            let t : Int := 1
+            x := t
+    }
+}
+
+proc P := S
+
+compile P

@@ -3,6 +3,7 @@ import node.shard.ShardLogic
 import node.cluster_info.ClusterConf
 import node.cluster_info.MeInfo
 import specs.net.PerfectNet
+import node.lib.emptyNode
 import node.lib.Node
 import node.lib.Key
 import node.lib.Value
@@ -10,10 +11,10 @@ import node.lib.Value
 type DynProc
 
 spec Cluster := (Store || ShardLogic || MeInfo)[n : Node] || ClusterConf {
-    Node := { "n1", "n2" }
+    Node := { "n1", "n2", "n3" }
     Key := { "k1", "k2"}
     Value := { "v1", "v2" }
-    DynProc := { "dp1" }
+    DynProc := { "dp1", "dp2" }
     init: ClusterConf.cluster.length = Node.length
     init: forall i : Int, (i >= 1 & i <= ClusterConf.cluster.length) => ClusterConf.cluster[i].id = i
     init: forall n : Node, n.url = n
@@ -36,6 +37,9 @@ invariant KeyUniquelyOwned := forall n1,n2,owner1,owner2 : Node, forall k : Key,
 invariant OwnerHasValue := forall n : Node, forall k : Key,
     (k in Store[n].owners & Store[n].owners[k] = n) => (k in Store[n].store)
 
+invariant NoEmptyOwner := forall n : Node, forall k : Key,
+    ~(k in Store[n].owners & Store[n].owners[k] = emptyNode())
+
 invariant NoStaleKeys := forall n : Node, forall k : Key, forall d : DynProc,
     (Put[n][d].step = "done" & Put[n][d].putKey = k &
      k in Store[n].owners & Store[n].owners[k] = n) => (k in Store[n].committed)
@@ -44,6 +48,7 @@ invariant ProtocolInvs := KeysUnique
     & CommittedImpliesOwn
     & KeyUniquelyOwned
     & OwnerHasValue
+    & NoEmptyOwner
     & NoStaleKeys
 
 
