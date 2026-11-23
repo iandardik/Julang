@@ -1,0 +1,60 @@
+/*
+ * Client residual-filters on a pure-query reply arg (reply commit filter).
+ * Store binds owner from key; Client only commits when owner ~in {""}.
+ */
+import julay.funlib.mapOf
+import julay.funlib.setOf
+
+type Key := String
+
+static proc Store {
+    var owners : Map<Key, String> := mapOf()
+
+    constructor initially(args : List<String>) {}
+
+    service transition ownerOf(key : Key, owner : String) {
+        guard:
+            owner = if (key in owners) {
+                owners[key]
+            } else {
+                ""
+            }
+    }
+}
+
+proc Client {
+    var step : String
+    var putKey : Key
+    var known : String
+
+    constructor start(k : Key) {
+        transit:
+            putKey := k
+            step := "lookup"
+            known := ""
+    }
+
+    client transition ownerOf(key : Key, owner : String) {
+        guard:
+            & step = "lookup"
+            & key = putKey
+            & owner ~in setOf("")
+        transit:
+            known := owner
+            step := "done"
+    }
+
+    internal return finish() {
+        guard: step = "done"
+    }
+}
+
+invariant Inv := true
+
+spec ReplyCommit := Store || Client |= Inv {
+    Key := {"k1"}
+    DynProc := {"dp1"}
+    unsynced start
+}
+
+compile ReplyCommit

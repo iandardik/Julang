@@ -25,7 +25,8 @@ export static proc Store {
 
     service transition getValue(getKey : Key, getVal : Value) {
         guard:
-            getVal = store[getKey]
+            & getKey in store
+            & getVal = store[getKey]
     }
 
     service transition ownerOf(key : Key, owner : Node) {

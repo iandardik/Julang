@@ -43,7 +43,8 @@ proc Put {
 }
 
 invariant NoStaleKeys := forall n : Node, forall k : Key, forall d : DynProc,
-    (Put[n][d].step = "done" & Put[n][d].putKey = k & Store[n].owners[k] = n) =>
+    (Put[n][d].step = "done" & Put[n][d].putKey = k &
+     k in Store[n].owners & Store[n].owners[k] = n) =>
         (k in Store[n].committed)
 
 spec DualInvSpec := (Store || Put)[n : Node] {

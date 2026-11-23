@@ -412,7 +412,7 @@ When `init:` uniquely determines a const-global list (length plus identity `xs[i
 |-------|------|
 | `e in xs` / `e ~in xs` on lists | `e \in Range(xs)` / `e \notin Range(xs)` (`Range` under `\* TLA+ helpers`) |
 | `k in mp` / `k ~in mp` on maps | `k \in DOMAIN mp` / `k \notin DOMAIN mp` |
-| `mp[k] = v` (and other comparisons) in invariants | Desugars to `k in mp & mp[k] = v` for **unguarded** reads so TLA+ only applies `mp` when `k \in DOMAIN mp`. Under `if (k in mp) { … }` / inverted `if` / `when` membership arms, membership stays paired with the read — no extra outer enabling conjunct. Bare determined `v = mp[k]` still gets an action-level `k \in DOMAIN mp`. |
+| `mp[k]` (reads, including invariants) | Bare `mp[k]` in TLA+ / Go `Get`. Julay requires an explicit local membership proof (`k in mp`, `if`/`when`, `&` / `=>` antecedent, or `mp.keys` iteration) or the compiler errors. No soft-default and no auto-injected DOMAIN enabling conjunct. |
 | `e in s` / `e ~in s` on sets | `e \in s` / `e \notin s` |
 | `listOf()` / list literals | `<<>>` / `<<…>>` |
 | `setOf()` / set literals | `{}` / `{…}` |

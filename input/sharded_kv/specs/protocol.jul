@@ -22,22 +22,23 @@ spec Cluster := (Store || ShardLogic || MeInfo)[n : Node] || ClusterConf {
 // system invariants
 
 invariant KeysUnique := forall n1,n2 : Node, forall k : Key, forall v1,v2 : Value,
-    (k in Store[n1].committed & Store[n1].store[k] = v1 &
-     k in Store[n2].committed & Store[n2].store[k] = v2) => (n1 = n2 & v1 = v2)
+    (k in Store[n1].committed & k in Store[n1].store & Store[n1].store[k] = v1 &
+     k in Store[n2].committed & k in Store[n2].store & Store[n2].store[k] = v2) => (n1 = n2 & v1 = v2)
 
 invariant CommittedImpliesOwn := forall n : Node, forall k : Key,
     (k in Store[n].committed) =>
-        (k in Store[n].store & Store[n].owners[k] = n)
+        (k in Store[n].store & k in Store[n].owners & Store[n].owners[k] = n)
 
 invariant KeyUniquelyOwned := forall n1,n2,owner1,owner2 : Node, forall k : Key,
-    (k in Store[n1].committed & Store[n1].owners[k] = owner1 &
-     k in Store[n2].committed & Store[n2].owners[k] = owner2) => owner1 = owner2
+    (k in Store[n1].committed & k in Store[n1].owners & Store[n1].owners[k] = owner1 &
+     k in Store[n2].committed & k in Store[n2].owners & Store[n2].owners[k] = owner2) => owner1 = owner2
 
 invariant OwnerHasValue := forall n : Node, forall k : Key,
-    (k in Store[n].committed) => (Store[n].owners[k] = n <=> k in Store[n].store)
+    (k in Store[n].owners & Store[n].owners[k] = n) => (k in Store[n].store)
 
 invariant NoStaleKeys := forall n : Node, forall k : Key, forall d : DynProc,
-    (Put[n][d].step = "done" & Put[n][d].putKey = k & Store[n].owners[k] = n) => (k in Store[n].committed)
+    (Put[n][d].step = "done" & Put[n][d].putKey = k &
+     k in Store[n].owners & Store[n].owners[k] = n) => (k in Store[n].committed)
 
 invariant ProtocolInvs := KeysUnique
     & CommittedImpliesOwn

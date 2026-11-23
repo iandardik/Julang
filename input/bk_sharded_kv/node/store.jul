@@ -16,7 +16,10 @@ export fun reshardEntries(store : Map<Key, Value>, excludeKey : Key) : List<KvPa
     let (candidates : List<Key> := store.keys.filter(x -> x ~= excludeKey).toList())
     let (limit : Int := length(candidates) / 4)
     let (taken : List<Key> := splice(candidates, 1, limit)) {
-        taken.map(key -> KvPair { k := key, v := store[key] })
+        taken.map(key -> KvPair {
+            k := key,
+            v := if (key in store) { store[key] } else { "" }
+        })
     }
 
 /*
@@ -66,7 +69,9 @@ export static proc Store {
 
     /* Client binds getKey; hub replies with getVal. */
     service transition getValue(getKey : Key, getVal : Value) {
-        guard: getVal = store[getKey]
+        guard:
+            & getKey in store
+            & getVal = store[getKey]
     }
 
     /* Bound by Shard clients; named apart from PerfectNet/Shard wire `keyCount`. */
@@ -110,7 +115,13 @@ export static proc Store {
             let ownerKeys : Set<Key> := owners.keys.filter(x -> x ~in takenSet) + takenSet
             store := store.keys.filter(x -> x ~in takenSet).associateWith(x -> store[x])
             owners := ownerKeys.associateWith(k ->
-                if (k in takenSet) { newOwner } else { owners[k] })
+                if (k in takenSet) {
+                    newOwner
+                } else if (k in owners) {
+                    owners[k]
+                } else {
+                    newOwner
+                })
     }
 
     /* Client binds moveKey, moveVal, moveOwner. */

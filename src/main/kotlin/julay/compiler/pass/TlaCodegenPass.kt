@@ -530,7 +530,7 @@ private fun emitProjectedTla(
 
     // cfg Int/Nat may be finite \E bounds; TypeOK uses TypeOKInt (Int \cup Nat \cup extras).
     val typeOkIntRange = "TypeOKInt"
-    // Opaque sentinel pins `*_id[sent] = -1` (matches Go emptyNode); ensure TypeOKInt covers it.
+    // Opaque sentinel pins `*_id[sent] = -1`; ensure TypeOKInt covers it.
     if (TlaOpaqueIndexSort.sorts().values.any { ty -> ty.fields.any { it.type is IntType } }) {
         intModelValues += -1
     }
@@ -2735,25 +2735,7 @@ private fun emitConjoined(
         if (tlaArg in indexBinderNames) {
             parts += "/\\ $tlaArg = ${emitBound(expr)}"
         } else if (collectMapIndexesInValue(expr).isNotEmpty()) {
-            // Inject DOMAIN guards so TLC short-circuits before bare `store[k]` when the client
-            // binds `k` by equality and the hub determines `v = store[k]`. Skip indexes already
-            // under `if (k in store) { store[k] } else …` — an action-level DOMAIN conjunct
-            // would disable the ELSE (empty-map ownerOf) and is redundant with the emitted IF.
-            // Only indexes whose key is an outer action/plan binder — skip HOF/lambda
-            // binders like `owners.keys.map(k -> owners[k])` (emitting free `k` breaks TLC).
-            val outerIndexKeys = buildSet {
-                offers.forEach { o -> o.decl.action.args.forEach { add(it.name) } }
-                addAll(indexBinderNames)
-                addAll(bindNames)
-            }
-            for (idx in collectUnguardedMapIndexesInValue(expr).distinctBy { it.toString() }) {
-                var indexExpr = idx.index
-                while (indexExpr is ParenExprNode) indexExpr = indexExpr.innerExpr()
-                val idxSym = (indexExpr as? SymbolValueExprNode)?.symbol ?: continue
-                if (idxSym !in outerIndexKeys) continue
-                val guard = "/\\ ${emitBound(idx.index)} \\in DOMAIN ${emitBound(idx.base)}"
-                if (guard !in parts) parts += guard
-            }
+            // Map indexes must be membership-guarded in Julay; still emit as LET for nesting.
             mapIndexLets += tlaArg to emitBound(expr, "      $tlaArg == ")
         } else {
             letBindings += tlaArg to emitBound(expr, "      $tlaArg == ")
@@ -3322,6 +3304,7 @@ internal fun globalVarsByLeaf(leaves: List<SpecLeaf>): Map<String, Set<String>> 
 
 internal fun tlaVar(leaf: String, varName: String): String = "${varName}_$leaf"
 
+/** Empty/zero default for Init holes and TypeOK (opaque sorts use sentinel atoms). */
 internal fun defaultTlaValue(
     type: Type,
     leafClass: String? = null,
@@ -6262,7 +6245,9 @@ internal fun exprToTla(
         }
         is IndexExprNode -> {
             val idx = rec(expr.index, linePrefix, PREC_BOTTOM)
-            "${rec(expr.base, linePrefix, PREC_ATOM)}[$idx]"
+            val baseTla = rec(expr.base, linePrefix, PREC_ATOM)
+            // Map reads require explicit membership at the Julay source; emit bare apply.
+            "$baseTla[$idx]"
         }
         is UnaryOpExprNode -> {
             when (expr.op()) {

@@ -4,7 +4,7 @@ Executable programs target **Go**: the compiler emits Go sources, runs `go build
 
 ## Compile-time channel direction
 
-For each ordinary or `service`/`client` sync group, `julayc` runs **compile-time direction analysis** (guard/body binding) to decide sender vs receiver, which args travel on the forward message, and which are **reply args**. Illegal or ambiguous shapes fail at compile time. Details: [Composition and actions — Sender / receiver deduction](composition-and-actions.md#sender--receiver-deduction).
+For each ordinary or `service`/`client` sync group, `julayc` runs **compile-time direction analysis** (guard/body binding) to decide sender vs receiver, which args travel on the forward message, and which are **reply args** (including **reply commit filters** on pure-query replies). Illegal or ambiguous shapes fail at compile time. Details: [Composition and actions — Sender / receiver deduction](composition-and-actions.md#sender--receiver-deduction).
 
 `internal` and `timer` actions stay occurrence-local and do not use directed sync channels.
 

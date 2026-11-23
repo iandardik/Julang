@@ -1,0 +1,27 @@
+/*
+ * Unguarded map read is a compile error (no soft-default / auto membership).
+ */
+import julay.funlib.mapOf
+
+type Key := String
+
+static proc Store {
+    var owners : Map<Key, String> := mapOf()
+
+    constructor initially(args : List<String>) {}
+
+    internal transition claim(key : Key) {
+        guard:
+            owners[key] = ""
+        transit:
+            owners[key] := "taken"
+    }
+}
+
+invariant Inv := true
+
+spec SoftDefaultMapIndex := Store |= Inv {
+    Key := {"k1"}
+}
+
+compile SoftDefaultMapIndex

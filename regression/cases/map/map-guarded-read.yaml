@@ -1,0 +1,5 @@
+source: regression/input/map/map-guarded-read.jul
+programs:
+  - name: MapGuardedReadTest
+    run:
+      timeoutMs: 60000

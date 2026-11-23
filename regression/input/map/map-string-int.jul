@@ -47,7 +47,7 @@ static proc MapStringIntDemo {
 
     internal transition exitSystem() {
         guard:
-            print & n = 3 & mp["c"] = 3
+            print & n = 3 & "c" in mp & mp["c"] = 3
         after:
             exitProgram(0)
     }

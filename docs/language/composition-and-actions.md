@@ -123,14 +123,42 @@ Illegal (except parent↔child): dynamic↔dynamic only, three or more statics, 
 
 ## Sender / receiver deduction
 
-At compile time the compiler analyzes guards and bodies to deduce **channel direction** (who sends, who receives) for each sync group:
+At compile time the compiler analyzes guards and bodies to deduce **channel direction** (who sends, who receives) for each sync group. Checklist:
 
-- Bindings from `=` / `<=>` and membership `in` decide which peer owns which args.
-- For a hub, direction must be uniform; ties break toward **dynamic sends, hub receives**.
-- **Reply args:** arguments bound only on the receiver that the **sender’s body** still reads travel on a reply channel.
-- Receiver guards must not residual-filter on sender-owned args; sender guards must not reference reply args.
+1. **Bindings.** `=` / `<=>` and membership `in` decide which peer owns which args. Equality wins over membership when both are present. A binder’s RHS may use already-bound args or args received from the other side.
+2. **Direction.** Pairwise syncs try both orientations; hubs must be uniformly sender or receiver for every peer. Ties break toward **dynamic sends, hub receives**.
+3. **Forward vs reply.** Sender-owned args travel on the forward message. Receiver-only args that the sender’s **body or residual guard** reads travel on a **reply** channel.
+4. **No receiver filters on forward args.** The receiver must not residual-filter on sender-owned args. That shape would always-offer receives and nack/retry (message storms). Prefer a client-side check, **query then unconditional write**, or an explicit `ok <=> predicate` reply with a client branch on `ok` (see below).
+5. **Reply commit filters.** The sender **may** residual-filter on reply args **only when the receiver is a pure query** (no `transit:`, `before:`, or `after:`). Example: Client sends `key`, Store replies `owner = if (key in owners) …`, Client guards `owner ~in setOf(me, emptyNode())` and only then takes transit. Go checks that residual **after** `<-reply`; if it fails, the sender skips fire (receiver had no effects). Fixture: [`regression/input/spec/reply-commit-filter.jul`](../../regression/input/spec/reply-commit-filter.jul).
+6. **Go vs TLA.** Enablement may offer the send before reply filters are known; a failing filter skips sender effects (extra failed attempts vs TLC, where the joint guard never enables). Same fairness class as [sync starvation](#fairness) below.
+7. **Unbound / relational-only.** Guards that never bind args fail compilation (they cannot lower to directed Go sends/receives).
 
-Relational-only guards that never bind args fail compilation (they cannot lower to directed Go sends/receives).
+Sender reply-filters when the receiver has effects remain illegal (would need two-phase commit before receiver transit).
+
+### Conditional writes (not forward commit filters)
+
+Do **not** write a mutating service that residual-filters on received args:
+
+```jul
+// Illegal direction: receiver filters on sender-owned key/owner
+service transition putKVIfOwner(key : Key, val : Value, owner : Node) {
+    guard: owners[key] in setOf(owner, emptyNode())
+    transit: store[key] := val
+}
+```
+
+Use a result reply instead (always sync; client leaves the retry step on failure):
+
+```jul
+service transition putKVIfOwner(key : Key, val : Value, owner : Node, ok : Boolean) {
+    guard: ok <=> (owners[key] in setOf(owner, emptyNode()))
+    transit: store := if (ok) { /* put key */ store } else { store }
+}
+client transition putKVIfOwner(...) {
+    guard: step = "putKV" & key = putKey & ...
+    transit: step := if (ok) { "broadcast" } else { "redirect" }
+}
+```
 
 ### `arg in S` (random choice)
 

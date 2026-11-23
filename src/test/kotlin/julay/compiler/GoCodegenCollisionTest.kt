@@ -179,6 +179,66 @@ class GoCodegenCollisionTest {
         }
     }
 
+    @Test
+    fun replyCommitFilterGoBuild() {
+        val dir = Files.createTempDirectory("go-reply-commit")
+        val buildDir = File("ReplyCommitGo-jul-build")
+        try {
+            val src = dir.resolve("reply_commit.jul")
+            src.writeText(
+                """
+                import julay.funlib.mapOf
+                import julay.funlib.setOf
+                import julay.funlib.exitProgram
+
+                static proc Store {
+                    var owners : Map<String, String> := mapOf()
+                    constructor initially(args : List<String>) {}
+                    service transition ownerOf(key : String, owner : String) {
+                        guard:
+                            owner = if (key in owners) { owners[key] } else { "" }
+                    }
+                }
+                static proc Client {
+                    var step : String := "lookup"
+                    var putKey : String := "k1"
+                    constructor initially(args : List<String>) {}
+                    client transition ownerOf(key : String, owner : String) {
+                        guard:
+                            & step = "lookup"
+                            & key = putKey
+                            & owner ~in setOf("")
+                        transit:
+                            step := "done"
+                    }
+                    internal transition exitSystem() {
+                        guard: step = "done"
+                        after: exitProgram(0)
+                    }
+                }
+                proc ReplyCommitGo := Store || Client
+                compile ReplyCommitGo
+                """.trimIndent(),
+            )
+            compileJulFile(src, keepBuild = true)
+            assertTrue(File("ReplyCommitGo").exists(), "expected ReplyCommitGo binary")
+            val goText = readGo(buildDir)
+            assertTrue(
+                goText.contains("replyMsg_"),
+                "expected reply channel receive for ownerOf;\n$goText",
+            )
+            assertTrue(
+                goText.contains("replyMsg_") && goText.contains("if ("),
+                "expected reply-commit filter after <-reply;\n$goText",
+            )
+        } finally {
+            dir.toFile().deleteRecursively()
+            buildDir.deleteRecursively()
+            File("ReplyCommitGo").delete()
+            File("ReplyCommitGo.jar").delete()
+        }
+    }
+
     private fun readGo(buildDir: File): String {
         if (!buildDir.exists()) fail("missing $buildDir")
         return buildDir.listFiles()?.filter { it.extension == "go" }

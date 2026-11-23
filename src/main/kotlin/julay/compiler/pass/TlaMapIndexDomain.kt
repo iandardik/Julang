@@ -1,184 +1,41 @@
 package julay.compiler.pass
 
+import julay.compiler.OneLocCompileError
+import julay.compiler.CompileError
 import julay.compiler.ProgramLoc
 import julay.compiler.ast.*
 import julay.program.type.MapType
 import julay.program.type.boolType
 
 /**
- * Invariant desugar for TLA+: unguarded map reads in comparisons need a domain
- * guard so function application is only evaluated when the key is in `DOMAIN`.
+ * Map-index membership: unguarded `m[k]` is a compile error.
+ * Guarding forms: `if (k in m)`, inverted `if`, `when` guards, `&` / `=>` local
+ * membership, and keys-iteration HOFs (`m.keys…map/filter/associateWith`).
  *
- * `mp[k] = v` → `k in mp & mp[k] = v` (likewise `~=` / `#` and other comparisons;
- * for `in` / `~in`, only the element side is scanned).
- *
- * Membership is paired only with **unguarded** reads: under `if (k in mp) { mp[k] = v }`
- * the then-arm does not gain a redundant outer `k in mp` (the `if` already guards).
- * (List indexes are not included: Julay `x in xs` is element membership, not index-in-DOMAIN.)
+ * [withMapIndexDomainGuards] remains an identity (no auto DOMAIN inject).
  */
-internal fun withMapIndexDomainGuards(expr: ExprNode): ExprNode =
-    rewriteMapIndexDomain(expr, emptySet())
+internal fun withMapIndexDomainGuards(expr: ExprNode): ExprNode = expr
 
 private val mapIndexComparisonOps = setOf("=", "#", "<", "<=", ">", ">=")
-private val mapIndexMembershipOps = setOf("in", "~in")
 
-private fun rewriteMapIndexDomain(expr: ExprNode, assumedIn: Set<String>): ExprNode = when (expr) {
-    is BinaryOpExprNode -> {
-        val unguarded = when (expr.op()) {
-            in mapIndexComparisonOps ->
-                collectUnguardedMapIndexesInValue(expr.lhsOperand(), assumedIn) +
-                    collectUnguardedMapIndexesInValue(expr.rhsOperand(), assumedIn)
-            in mapIndexMembershipOps ->
-                collectUnguardedMapIndexesInValue(expr.lhsOperand(), assumedIn)
-            else -> emptyList()
-        }
-        val lhs = rewriteMapIndexDomain(expr.lhsOperand(), assumedIn)
-        val rhs = rewriteMapIndexDomain(expr.rhsOperand(), assumedIn)
-        val rebuilt =
-            if (lhs === expr.lhsOperand() && rhs === expr.rhsOperand()) expr
-            else typedBoolBinary(expr.op(), lhs, rhs, expr.programLocation())
-        if (expr.op() in mapIndexComparisonOps || expr.op() in mapIndexMembershipOps) {
-            conjoinMapDomainGuards(rebuilt, unguarded)
-        } else {
-            rebuilt
-        }
-    }
-    is UnaryOpExprNode -> {
-        val inner = rewriteMapIndexDomain(expr.operand(), assumedIn)
-        if (inner === expr.operand()) expr
-        else UnaryOpExprNode(expr.op(), inner, expr.programLocation()).also {
-            it.setInferredType(TypePassType.Inferred(boolType))
-        }
-    }
-    is ParenExprNode -> {
-        val inner = rewriteMapIndexDomain(expr.innerExpr(), assumedIn)
-        if (inner === expr.innerExpr()) expr
-        else ParenExprNode(inner, expr.programLocation()).also {
-            it.setInferredType(TypePassType.Inferred(inner.getType()))
-        }
-    }
-    is QuantifiedExprNode -> {
-        val body = rewriteMapIndexDomain(expr.quantifiedBody(), assumedIn)
-        if (body === expr.quantifiedBody()) expr
-        else QuantifiedExprNode(
-            universal = expr.isUniversal(),
-            binder = expr.binderName(),
-            binderType = expr.binderTypeExpr(),
-            body = body,
-            loc = expr.programLocation(),
-        ).also { it.setInferredType(TypePassType.Inferred(boolType)) }
-    }
-    is IfElseExprNode -> {
-        val cond = rewriteMapIndexDomain(expr.condExpr(), assumedIn)
-        val thenAssumed = assumedIn + membershipInShapes(expr.condExpr())
-        val elseAssumed = assumedIn + membershipNotInShapes(expr.condExpr())
-        val thenE = rewriteMapIndexDomain(expr.thenExpr(), thenAssumed)
-        val elseE = rewriteMapIndexDomain(expr.elseExpr(), elseAssumed)
-        if (cond === expr.condExpr() && thenE === expr.thenExpr() && elseE === expr.elseExpr()) expr
-        else IfElseExprNode(cond, thenE, elseE, expr.programLocation()).also {
-            it.setInferredType(TypePassType.Inferred(thenE.getType()))
-        }
-    }
-    is LetExprNode -> {
-        val init = rewriteMapIndexDomain(expr.letInitExpr(), assumedIn)
-        val body = rewriteMapIndexDomain(expr.bodyExpr(), assumedIn)
-        if (init === expr.letInitExpr() && body === expr.bodyExpr()) expr
-        else LetExprNode(
-            expr.letName(),
-            expr.letTypeExpr(),
-            init,
-            body,
-            expr.programLocation(),
-            expr.resolvedLetTypeOrNull(),
-        ).also { it.setInferredType(TypePassType.Inferred(body.getType())) }
-    }
-    is WhenExprNode -> {
-        val subject = expr.subjectExpr()?.let { rewriteMapIndexDomain(it, assumedIn) }
-        var changed = subject !== expr.subjectExpr()
-        val arms = expr.arms().map { arm ->
-            when (arm) {
-                is WhenArm.Subject -> {
-                    val e = rewriteMapIndexDomain(arm.expr, assumedIn)
-                    if (e !== arm.expr) changed = true
-                    WhenArm.Subject(arm.pattern, e)
-                }
-                is WhenArm.Guard -> {
-                    val c = rewriteMapIndexDomain(arm.cond, assumedIn)
-                    val armAssumed = assumedIn + membershipInShapes(arm.cond)
-                    val e = rewriteMapIndexDomain(arm.expr, armAssumed)
-                    if (c !== arm.cond || e !== arm.expr) changed = true
-                    WhenArm.Guard(c, e)
-                }
-                is WhenArm.Else -> {
-                    val e = rewriteMapIndexDomain(arm.expr, assumedIn)
-                    if (e !== arm.expr) changed = true
-                    WhenArm.Else(e)
-                }
-            }
-        }
-        if (!changed) expr
-        else WhenExprNode(subject, arms, expr.programLocation()).also {
-            val ty = arms.first().let { a ->
-                when (a) {
-                    is WhenArm.Subject -> a.expr.getType()
-                    is WhenArm.Guard -> a.expr.getType()
-                    is WhenArm.Else -> a.expr.getType()
-                }
-            }
-            it.setInferredType(TypePassType.Inferred(ty))
-        }
-    }
-    else -> expr
-}
-
-private fun conjoinMapDomainGuards(comparison: ExprNode, indexes: List<IndexExprNode>): ExprNode {
-    if (indexes.isEmpty()) return comparison
-    // Stable order: left-to-right appearance; guards precede the comparison.
-    val unique = indexes.distinctBy { it.toString() }
-    return unique.foldRight(comparison) { idx, acc ->
-        typedBoolBinary(
-            "&",
-            typedBoolBinary("in", idx.index, idx.base, idx.programLocation()),
-            acc,
-            comparison.programLocation(),
+/**
+ * Report every map read whose key is not locally proven present.
+ * Call after type inference so [IndexExprNode] bases have [MapType].
+ */
+internal fun mapIndexMembershipErrors(
+    expr: ExprNode,
+    assumedIn: Set<String> = emptySet(),
+): List<CompileError> =
+    collectUnguardedMapIndexesInValue(expr, assumedIn).map { idx ->
+        OneLocCompileError(
+            idx.programLocation(),
+            "map read requires explicit membership: use \"k in m\" before m[k]",
         )
     }
-}
 
 /**
- * Map indexes that appear in a *value* position (not under boolean connectives —
- * those are handled when their enclosing comparison is rewritten).
- */
-internal fun collectMapIndexesInValue(expr: ExprNode): List<IndexExprNode> = when (expr) {
-    is IndexExprNode -> {
-        val nested = collectMapIndexesInValue(expr.base) + collectMapIndexesInValue(expr.index)
-        val self = try {
-            if (expr.base.getType() is MapType) listOf(expr) else emptyList()
-        } catch (_: RuntimeException) {
-            emptyList()
-        }
-        nested + self
-    }
-    is BinaryOpExprNode -> when (expr.op()) {
-        "&", "|", "=>", "<=>", "in", "~in" -> emptyList()
-        else -> collectMapIndexesInValue(expr.lhsOperand()) + collectMapIndexesInValue(expr.rhsOperand())
-    }
-    is UnaryOpExprNode -> when (expr.op()) {
-        "~" -> emptyList()
-        else -> collectMapIndexesInValue(expr.operand())
-    }
-    is QuantifiedExprNode -> emptyList()
-    is ParenExprNode -> collectMapIndexesInValue(expr.innerExpr())
-    is IfElseExprNode ->
-        collectMapIndexesInValue(expr.thenExpr()) + collectMapIndexesInValue(expr.elseExpr())
-    is LetExprNode -> collectMapIndexesInValue(expr.bodyExpr())
-    else -> expr.children.filterIsInstance<ExprNode>().flatMap { collectMapIndexesInValue(it) }
-}
-
-/**
- * Like [collectMapIndexesInValue], but omits indexes already guarded by enclosing
- * `key in map` (positive `if` then-arm, inverted `if` else-arm, `when` guard arms).
- * Used for determined-arg action DOMAIN guards and invariant desugar.
+ * Like collecting all map indexes in a value position, but omits indexes already
+ * guarded by enclosing membership assumptions.
  */
 internal fun collectUnguardedMapIndexesInValue(expr: ExprNode): List<IndexExprNode> =
     collectUnguardedMapIndexesInValue(expr, emptySet())
@@ -204,31 +61,64 @@ internal fun collectUnguardedMapIndexesInValue(
         nested + self
     }
     is BinaryOpExprNode -> when (expr.op()) {
-        "&", "|", "=>", "<=>", "in", "~in" -> emptyList()
+        "&" -> {
+            val left = collectUnguardedMapIndexesInValue(expr.lhsOperand(), assumedIn)
+            val right = collectUnguardedMapIndexesInValue(
+                expr.rhsOperand(),
+                assumedIn + membershipInShapes(expr.lhsOperand()),
+            )
+            left + right
+        }
+        "|" ->
+            collectUnguardedMapIndexesInValue(expr.lhsOperand(), assumedIn) +
+                collectUnguardedMapIndexesInValue(expr.rhsOperand(), assumedIn)
+        "=>" -> {
+            val ant = collectUnguardedMapIndexesInValue(expr.lhsOperand(), assumedIn)
+            val cons = collectUnguardedMapIndexesInValue(
+                expr.rhsOperand(),
+                assumedIn + membershipInShapes(expr.lhsOperand()),
+            )
+            ant + cons
+        }
+        "<=>" ->
+            collectUnguardedMapIndexesInValue(expr.lhsOperand(), assumedIn) +
+                collectUnguardedMapIndexesInValue(expr.rhsOperand(), assumedIn)
+        "in", "~in" ->
+            // Membership itself is not a map value-read; still scan the key expr.
+            collectUnguardedMapIndexesInValue(expr.lhsOperand(), assumedIn) +
+                collectUnguardedMapIndexesInValue(expr.rhsOperand(), assumedIn)
+        in mapIndexComparisonOps ->
+            collectUnguardedMapIndexesInValue(expr.lhsOperand(), assumedIn) +
+                collectUnguardedMapIndexesInValue(expr.rhsOperand(), assumedIn)
         else ->
             collectUnguardedMapIndexesInValue(expr.lhsOperand(), assumedIn) +
                 collectUnguardedMapIndexesInValue(expr.rhsOperand(), assumedIn)
     }
-    is UnaryOpExprNode -> when (expr.op()) {
-        "~" -> emptyList()
-        else -> collectUnguardedMapIndexesInValue(expr.operand(), assumedIn)
-    }
-    is QuantifiedExprNode -> emptyList()
-    is ParenExprNode -> collectUnguardedMapIndexesInValue(expr.innerExpr(), assumedIn)
+    is UnaryOpExprNode ->
+        collectUnguardedMapIndexesInValue(expr.operand(), assumedIn)
+    is QuantifiedExprNode ->
+        collectUnguardedMapIndexesInValue(expr.quantifiedBody(), assumedIn)
+    is ParenExprNode ->
+        collectUnguardedMapIndexesInValue(expr.innerExpr(), assumedIn)
     is IfElseExprNode -> {
+        val condHits = collectUnguardedMapIndexesInValue(expr.condExpr(), assumedIn)
         val thenAssumed = assumedIn + membershipInShapes(expr.condExpr())
         val elseAssumed = assumedIn + membershipNotInShapes(expr.condExpr())
-        collectUnguardedMapIndexesInValue(expr.thenExpr(), thenAssumed) +
+        condHits +
+            collectUnguardedMapIndexesInValue(expr.thenExpr(), thenAssumed) +
             collectUnguardedMapIndexesInValue(expr.elseExpr(), elseAssumed)
     }
     is WhenExprNode -> {
-        expr.arms().flatMap { arm ->
+        val subjectHits = expr.subjectExpr()?.let {
+            collectUnguardedMapIndexesInValue(it, assumedIn)
+        }.orEmpty()
+        subjectHits + expr.arms().flatMap { arm ->
             when (arm) {
-                is WhenArm.Guard ->
-                    collectUnguardedMapIndexesInValue(
-                        arm.expr,
-                        assumedIn + membershipInShapes(arm.cond),
-                    )
+                is WhenArm.Guard -> {
+                    val condHits = collectUnguardedMapIndexesInValue(arm.cond, assumedIn)
+                    val armAssumed = assumedIn + membershipInShapes(arm.cond)
+                    condHits + collectUnguardedMapIndexesInValue(arm.expr, armAssumed)
+                }
                 is WhenArm.Subject ->
                     collectUnguardedMapIndexesInValue(arm.expr, assumedIn)
                 is WhenArm.Else ->
@@ -236,14 +126,111 @@ internal fun collectUnguardedMapIndexesInValue(
             }
         }
     }
-    is LetExprNode -> collectUnguardedMapIndexesInValue(expr.bodyExpr(), assumedIn)
+    is LetExprNode ->
+        collectUnguardedMapIndexesInValue(expr.letInitExpr(), assumedIn) +
+            collectUnguardedMapIndexesInValue(expr.bodyExpr(), assumedIn)
+    is MethodCallExprNode -> {
+        val baseHits = collectUnguardedMapIndexesInValue(expr.baseExpr, assumedIn)
+        val argHits = expr.args.flatMap { arg ->
+            if (arg is LambdaExprNode) emptyList()
+            else collectUnguardedMapIndexesInValue(arg, assumedIn)
+        }
+        val hofBody = expr.hofBodyOrNull()
+        val hofParams = expr.hofParamNamesOrNull()
+        val hofHits = if (hofBody != null && hofParams != null) {
+            val keysAssumed = keysIterationAssumptions(expr.baseExpr, hofParams)
+            collectUnguardedMapIndexesInValue(hofBody, assumedIn + keysAssumed)
+        } else {
+            emptyList()
+        }
+        baseHits + argHits + hofHits
+    }
+    is LambdaExprNode ->
+        // Standalone lambda should not appear; HOF path handles bodies.
+        collectUnguardedMapIndexesInValue(expr.body, assumedIn)
+    is ObjClassLiteralExprNode ->
+        expr.fieldEntries.flatMap { (_, v) ->
+            collectUnguardedMapIndexesInValue(v, assumedIn)
+        }
+    is MemberAccessExprNode ->
+        collectUnguardedMapIndexesInValue(expr.baseExpr, assumedIn)
     else -> expr.children.filterIsInstance<ExprNode>().flatMap {
         collectUnguardedMapIndexesInValue(it, assumedIn)
     }
 }
 
+/**
+ * Map indexes that appear in a *value* position (legacy helper for TLA emit paths).
+ */
+internal fun collectMapIndexesInValue(expr: ExprNode): List<IndexExprNode> = when (expr) {
+    is IndexExprNode -> {
+        val nested = collectMapIndexesInValue(expr.base) + collectMapIndexesInValue(expr.index)
+        val self = try {
+            if (expr.base.getType() is MapType) listOf(expr) else emptyList()
+        } catch (_: RuntimeException) {
+            emptyList()
+        }
+        nested + self
+    }
+    is BinaryOpExprNode -> when (expr.op()) {
+        "&", "|", "=>", "<=>", "in", "~in" ->
+            collectMapIndexesInValue(expr.lhsOperand()) + collectMapIndexesInValue(expr.rhsOperand())
+        else -> collectMapIndexesInValue(expr.lhsOperand()) + collectMapIndexesInValue(expr.rhsOperand())
+    }
+    is UnaryOpExprNode -> collectMapIndexesInValue(expr.operand())
+    is QuantifiedExprNode -> collectMapIndexesInValue(expr.quantifiedBody())
+    is ParenExprNode -> collectMapIndexesInValue(expr.innerExpr())
+    is IfElseExprNode ->
+        collectMapIndexesInValue(expr.condExpr()) +
+            collectMapIndexesInValue(expr.thenExpr()) +
+            collectMapIndexesInValue(expr.elseExpr())
+    is LetExprNode ->
+        collectMapIndexesInValue(expr.letInitExpr()) + collectMapIndexesInValue(expr.bodyExpr())
+    is MethodCallExprNode -> {
+        val hof = expr.hofBodyOrNull()
+        collectMapIndexesInValue(expr.baseExpr) +
+            expr.args.filter { it !is LambdaExprNode }.flatMap { collectMapIndexesInValue(it) } +
+            (hof?.let { collectMapIndexesInValue(it) } ?: emptyList())
+    }
+    else -> expr.children.filterIsInstance<ExprNode>().flatMap { collectMapIndexesInValue(it) }
+}
+
+/**
+ * If [base] is `m.keys` (optionally `.toList()` / `.toSet()` / `.filter`), and the HOF
+ * binds [params] as the element key, assume `m[param]` is present.
+ */
+private fun keysIterationAssumptions(base: ExprNode, params: List<String>): Set<String> {
+    val mapShape = keysSourceMapShape(base) ?: return emptySet()
+    // map/filter/associateWith use the element param; fold uses (acc, elem) — last is elem.
+    val keyParam = when (params.size) {
+        1 -> params[0]
+        else -> params.lastOrNull() ?: return emptySet()
+    }
+    return setOf("$mapShape[$keyParam]")
+}
+
+/** Unwrap `m.keys`, `m.keys.toList()`, `m.keys.filter(...)`, etc. → shape of `m`. */
+private fun keysSourceMapShape(expr: ExprNode): String? {
+    val e = unwrapParensForDomain(expr)
+    return when (e) {
+        is MemberAccessExprNode ->
+            if (e.fieldName == "keys") exprShape(e.baseExpr) else null
+        is FieldAccessExprNode ->
+            if (e.fieldPath.lastOrNull() == "keys") {
+                e.baseSymbol + e.fieldPath.dropLast(1).joinToString("") { ".$it" }
+            } else {
+                null
+            }
+        is MethodCallExprNode -> when (e.methodName) {
+            "toList", "toSet", "filter" -> keysSourceMapShape(e.baseExpr)
+            else -> null
+        }
+        else -> null
+    }
+}
+
 /** `key in map` conjuncts as map-index shapes (`map[key]` string form). */
-private fun membershipInShapes(cond: ExprNode): Set<String> {
+internal fun membershipInShapes(cond: ExprNode): Set<String> {
     val e = unwrapParensForDomain(cond)
     return when {
         e is BinaryOpExprNode && e.op() == "&" ->
@@ -258,7 +245,7 @@ private fun membershipInShapes(cond: ExprNode): Set<String> {
  * Shapes for which [cond] entails `~(key in map)` (so the **else** of `if (cond)` may
  * assume `key in map`). Recognizes `~(k in m)` and `&` of such conjuncts.
  */
-private fun membershipNotInShapes(cond: ExprNode): Set<String> {
+internal fun membershipNotInShapes(cond: ExprNode): Set<String> {
     val e = unwrapParensForDomain(cond)
     return when {
         e is UnaryOpExprNode && e.op() == "~" -> membershipInShapes(e.operand())
@@ -272,13 +259,17 @@ private fun mapIndexShape(idx: IndexExprNode): String =
     "${exprShape(idx.base)}[${exprShape(idx.index)}]"
 
 /** Stable shape for matching `key in map` against `map[key]` (not AST toString). */
-private fun exprShape(expr: ExprNode): String {
+internal fun exprShape(expr: ExprNode): String {
     val e = unwrapParensForDomain(expr)
     return when (e) {
         is SymbolValueExprNode -> e.symbol
         is IndexExprNode -> "${exprShape(e.base)}[${exprShape(e.index)}]"
         is FieldAccessExprNode ->
             e.baseSymbol + e.fieldPath.joinToString("") { ".$it" }
+        is ThisAccessExprNode ->
+            "this." + e.fieldPath.joinToString(".")
+        is MemberAccessExprNode ->
+            "${exprShape(e.baseExpr)}.${e.fieldName}"
         else -> e.toString()
     }
 }
@@ -289,6 +280,8 @@ private fun unwrapParensForDomain(expr: ExprNode): ExprNode {
     return e
 }
 
+// Keep typedBoolBinary available if any residual tooling rebuilds guards.
+@Suppress("unused")
 private fun typedBoolBinary(op: String, lhs: ExprNode, rhs: ExprNode, loc: ProgramLoc): BinaryOpExprNode =
     BinaryOpExprNode(op, lhs, rhs, loc).also {
         it.setInferredType(TypePassType.Inferred(boolType))

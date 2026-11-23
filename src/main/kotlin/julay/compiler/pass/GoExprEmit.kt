@@ -388,8 +388,10 @@ private fun MapLiteralExprNode.mapLiteralToGo(ctx: GoEmitCtx): String {
 private fun IndexExprNode.indexToGo(ctx: GoEmitCtx): String {
     val baseStr = base.toGoString(ctx)
     val indexStr = index.toGoString(ctx)
-    return when (base.getType()) {
-        is MapType, is ListType -> "($baseStr).Get($indexStr)"
+    return when (val baseTy = base.getType()) {
+        // Map reads require explicit membership in Julay; Get panics if missing.
+        is MapType -> "($baseStr).Get($indexStr)"
+        is ListType -> "($baseStr).Get($indexStr)"
         else -> "($baseStr).Get($indexStr)"
     }
 }
@@ -591,7 +593,7 @@ fun CallStmtNode.toGoStmtString(ctx: GoEmitCtx): String {
     throw RuntimeException("Call \"${callName()}\" not resolved at ${programLocation()}")
 }
 
-/** Zero value literal for a Go type (for uninitialized state). */
+/** Zero value literal for a Go type (uninitialized state). */
 fun Type.goZeroLiteral(): String = when (this) {
     is BoolType -> "false"
     is IntType -> "0"

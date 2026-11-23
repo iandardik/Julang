@@ -1,6 +1,9 @@
 import julay.funlib.exitProgram
 import julay.funlib.mapOf
 
+/*
+ * Unguarded map read must fail at compile time (explicit membership required).
+ */
 static proc MapMissingKey {
     var mp : Map<String, Int>
     var n : Int

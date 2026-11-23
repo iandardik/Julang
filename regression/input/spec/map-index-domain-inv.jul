@@ -18,8 +18,13 @@ static proc Box {
     }
 }
 
+/*
+ * Soft-read: absent keys equal "" so uniqueness of present bindings must
+ * require membership explicitly (same meaning as the old DOMAIN desugar).
+ */
 invariant Unique := forall n1, n2 : N, forall k : String, forall v1, v2 : String,
-    (Box[n1].store[k] = v1 & Box[n2].store[k] = v2) => (n1 = n2 & v1 = v2)
+    (k in Box[n1].store & Box[n1].store[k] = v1 &
+     k in Box[n2].store & Box[n2].store[k] = v2) => (n1 = n2 & v1 = v2)
 
 spec MapIndexDomainInv := Box[n : N] {
     N := {"a", "b"}

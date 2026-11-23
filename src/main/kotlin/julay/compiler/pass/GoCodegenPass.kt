@@ -491,13 +491,30 @@ private fun emitRunLoop(
                         sb.appendLine("\t\t\t$local := replyMsg_$safe.${arg.toGoExportedIdent()}")
                         argBindings[arg] = local
                     }
-                }
-                sb.append(
-                    emitFireBody(
+                    // Reply commit filters: residual guard mentioning reply args (skipped at
+                    // enablement). Pure-query receivers have no effects; failing the filter
+                    // skips sender fire so the rendezvous does not commit on this side.
+                    val bound = computeBoundArgs(decl)
+                    val fireCtx = GoEmitCtx(stateVars = stateVars, argBindings = argBindings)
+                    val replyCommit = residualGuardGo(decl, bound, fireCtx)
+                    sb.appendLine("\t\t\tif ($replyCommit) {")
+                    val fire = emitFireBody(
                         pc, decl, dir, CaseRole.Sender, stateVars, argBindings,
                         dynamicCtorNames, procClassByName, linkage,
-                    ),
-                )
+                    )
+                    fire.lineSequence().forEach { line ->
+                        if (line.isEmpty()) sb.appendLine()
+                        else sb.appendLine("\t$line")
+                    }
+                    sb.appendLine("\t\t\t}")
+                } else {
+                    sb.append(
+                        emitFireBody(
+                            pc, decl, dir, CaseRole.Sender, stateVars, argBindings,
+                            dynamicCtorNames, procClassByName, linkage,
+                        ),
+                    )
+                }
             }
             CaseRole.Receiver -> {
                 val dir = c.dir!!
@@ -520,16 +537,18 @@ private fun emitRunLoop(
                     stateVars = stateVars,
                     argBindings = argBindings.toMap(),
                 )
+                // Membership before equality so `getKey in store & getVal = store[getKey]`
+                // binds getKey before evaluating the map read.
                 val receiverOwned = (bound.boundArgs - dir.senderBoundArgs.toSet()).toList()
-                for (arg in receiverOwned) {
+                val receiverOrdered =
+                    receiverOwned.filter { it in bound.membershipBound } +
+                        receiverOwned.filter { it in bound.equalityBound && it !in bound.membershipBound } +
+                        receiverOwned.filter {
+                            it !in bound.membershipBound && it !in bound.equalityBound
+                        }
+                for (arg in receiverOrdered) {
                     val local = actionScopedGoIdent(arg, safe)
                     when {
-                        arg in bound.equalityBound -> {
-                            val rhs = findEqualityRhs(decl, arg) ?: continue
-                            sb.appendLine("\t\t\t$local := ${rhs.toGoString(recvCtx)}")
-                            sb.appendLine("\t\t\t_ = $local")
-                            argBindings[arg] = local
-                        }
                         arg in bound.membershipBound -> {
                             val setExpr = findMembershipSet(decl, arg) ?: continue
                             val elemTy = try {
@@ -544,12 +563,21 @@ private fun emitRunLoop(
                             } catch (_: RuntimeException) {
                                 "any"
                             }
-                            val setGo = setExpr.toGoString(recvCtx)
+                            val setGo = setExpr.toGoString(
+                                recvCtx.copy(argBindings = argBindings.toMap()),
+                            )
                             sb.appendLine(
                                 "\t\t\t$local, _ := julay.ChooseUniformFiltered(" +
                                     "${collectionElementsGo(setExpr, setGo)}, " +
                                     "func(__cand $elemTy) bool { return true })",
                             )
+                            argBindings[arg] = local
+                        }
+                        arg in bound.equalityBound -> {
+                            val rhs = findEqualityRhs(decl, arg) ?: continue
+                            val eqCtx = recvCtx.copy(argBindings = argBindings.toMap())
+                            sb.appendLine("\t\t\t$local := ${rhs.toGoString(eqCtx)}")
+                            sb.appendLine("\t\t\t_ = $local")
                             argBindings[arg] = local
                         }
                     }
@@ -763,7 +791,8 @@ private fun emitSenderEnablement(
         sb.appendLine("\t\t_ = $local")
         bindCtx = bindCtx.withArgBindings(mapOf(arg to local))
     }
-    val guard = residualGuardGo(decl, bound, bindCtx)
+    // Reply-arg residual conjuncts are checked after <-reply (reply commit filters).
+    val guard = residualGuardGo(decl, bound, bindCtx, skipArgs = dir.replyArgs.toSet())
     val memOk = dir.senderBoundArgs.filter { it in bound.membershipBound }
         .joinToString(" && ") { "ok_${safe}_$it" }
         .ifEmpty { "true" }

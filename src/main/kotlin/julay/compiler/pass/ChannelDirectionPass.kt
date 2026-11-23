@@ -22,7 +22,8 @@ import java.util.IdentityHashMap
  * Deduced Go channel direction for one action offer pair (or a local single-side action).
  *
  * [senderBoundArgs] are arguments the sender computes and places in the message.
- * [replyArgs] are arguments the receiver computes that the sender's body reads (reply channel).
+ * [replyArgs] are arguments the receiver computes that the sender's body or residual
+ * guard reads (reply channel; residual uses are reply commit filters on pure queries).
  */
 data class ActionChannelDirection(
     val actionName: String,
@@ -252,7 +253,9 @@ private fun deduceHub(
         senderOk -> ChannelDirectionResult(hubAsSender.map { (it as DirectionOk).direction }, emptyList())
         receiverOk -> ChannelDirectionResult(hubAsReceiver.map { (it as DirectionOk).direction }, emptyList())
         else -> {
-            val sample = (hubAsSender + hubAsReceiver).filterIsInstance<DirectionFail>().firstOrNull()
+            // Prefer peer→hub failures (reply-filter / unbound on the client) over hub→peer
+            // “unbound” mis-reports when the hub cannot bind request args alone.
+            val sample = (hubAsReceiver + hubAsSender).filterIsInstance<DirectionFail>().firstOrNull()
             ChannelDirectionResult(
                 emptyList(),
                 listOf(
@@ -368,22 +371,28 @@ fun tryDirection(
     }
 
     val receiverOnly = rBound.boundArgs - sBound.boundArgs
-    val senderGuardBad = guardRefsArgs(
+    val senderReplyFilter = guardRefsArgs(
         sender.decl,
         skip = sBound.bindingConjuncts,
         args = receiverOnly,
     )
-    if (senderGuardBad != null) {
+    if (senderReplyFilter != null && !isPureQueryAction(receiver.decl)) {
         return DirectionFail(
             OneLocCompileError(
                 sender.loc,
                 "Cannot determine channel direction for action \"$actionName\": " +
-                    "sender \"${sender.className}\" guard references reply argument \"$senderGuardBad\"",
+                    "sender \"${sender.className}\" guard references reply argument \"$senderReplyFilter\", " +
+                    "but receiver \"${receiver.className}\" is not a pure query " +
+                    "(has transit, before, or after)",
             ),
         )
     }
 
-    val replyArgs = receiverOnly.filter { actionBodyReferencesArg(sender.decl, it) }.sorted()
+    // Reply channel carries receiver-only args the sender body or residual guard reads.
+    val replyArgs = receiverOnly.filter { arg ->
+        actionBodyReferencesArg(sender.decl, arg) ||
+            actionGuardReferencesArg(sender.decl, arg, skip = sBound.bindingConjuncts)
+    }.sorted()
     return DirectionOk(
         ActionChannelDirection(
             actionName = actionName,
@@ -396,6 +405,10 @@ fun tryDirection(
         ),
     )
 }
+
+/** True when the action has no fire-path effects (guard-only reply computation). */
+fun isPureQueryAction(decl: ActionDecl): Boolean =
+    decl.transits.isEmpty() && decl.befores.isEmpty() && decl.afters.isEmpty()
 
 /** Lightweight view used by [tryDirection]. */
 data class ParticipantView(
@@ -593,6 +606,14 @@ fun actionBodyReferencesArg(decl: ActionDecl, argName: String): Boolean {
         }
     }
 }
+
+/** Residual (non-binding) guard conjuncts that mention [argName]. */
+fun actionGuardReferencesArg(
+    decl: ActionDecl,
+    argName: String,
+    skip: IdentityHashMap<ExprNode, Boolean> = IdentityHashMap(),
+): Boolean =
+    guardRefsArgs(decl, skip = skip, args = setOf(argName)) != null
 
 private fun errorArmRefsArg(arm: ErrorArmNode, argName: String): Boolean =
     exprReferencesSymbol(arm.condExpr(), argName)

@@ -21,6 +21,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -1092,7 +1093,7 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
-    fun mapIndexInInvariantEmitsDomainGuards() {
+    fun mapIndexInInvariantRequiresExplicitMembership() {
         val source = File("regression/input/spec/map-index-domain-inv.jul")
         val (tlaText, _) = compileSpecTla(source, "MapIndexDomainInv")
         val inv = tlaText.substringAfter("Unique ==").substringBefore("\n====")
@@ -1101,7 +1102,11 @@ class SpecTlaTlcSmokeTest {
                 inv.contains("store[n1][k] = v1") &&
                 inv.contains("k \\in DOMAIN store[n2]") &&
                 inv.contains("store[n2][k] = v2"),
-            "map index equality in invariants should desugar with DOMAIN guards;\n$inv",
+            "Unique should keep explicit membership and bare map apply;\n$inv",
+        )
+        assertFalse(
+            inv.contains("IF k \\in DOMAIN store[n1] THEN store[n1][k] ELSE"),
+            "invariants must not soft-default map reads;\n$inv",
         )
     }
 
@@ -2232,7 +2237,7 @@ class SpecTlaTlcSmokeTest {
     }
 
     @Test
-    fun bareMapIndexDeterminedStillEmitsDomainGuard() {
+    fun bareMapIndexDeterminedRequiresMembershipInGuard() {
         assumeTlcPresent()
         val work = Files.createTempDirectory("julay-bare-map-index").toFile()
         try {
@@ -2246,9 +2251,17 @@ class SpecTlaTlcSmokeTest {
             ).find(tlaText)?.groupValues?.get(1)
                 ?: error("missing getValue action;\n$tlaText")
             assertTrue(
-                Regex("""/\\ getKey_? \\in DOMAIN store""").containsMatchIn(getValue) ||
-                    Regex("""/\\ getKey \\in DOMAIN store""").containsMatchIn(getValue),
-                "bare getVal = store[getKey] must emit an action-level DOMAIN guard;\n$getValue",
+                Regex("""getKey_? \\in DOMAIN store""").containsMatchIn(getValue) ||
+                    Regex("""getKey \\in DOMAIN store""").containsMatchIn(getValue),
+                "explicit getKey in store must appear in the action;\n$getValue",
+            )
+            assertTrue(
+                getValue.contains("store[getKey]") || getValue.contains("store[getKey_"),
+                "map apply should be bare (no soft-default IF);\n$getValue",
+            )
+            assertFalse(
+                Regex("""IF getKey_? \\in DOMAIN store THEN store\[getKey""").containsMatchIn(getValue),
+                "must not soft-default map reads;\n$getValue",
             )
             File(work, "BareMapIndex.tla").writeText(tlaText)
             File(work, "BareMapIndex.cfg").writeText(emit.cfgText)
@@ -2256,6 +2269,14 @@ class SpecTlaTlcSmokeTest {
         } finally {
             work.deleteRecursively()
         }
+    }
+
+    @Test
+    fun unguardedMapIndexIsCompileError() {
+        val source = File("regression/input/spec/map-index-soft-default.jul")
+        assertTrue(source.exists(), "missing ${source.path}")
+        val checked = prepareCheckedCompilation(source.toPath())
+        assertNull(checked, "unguarded owners[key] must fail type checking")
     }
 
     @Test
@@ -2328,9 +2349,33 @@ class SpecTlaTlcSmokeTest {
             "if (k in store) then store[k]=v must not re-conjoin k in store on the then arm;\n$inv",
         )
         assertTrue(
-            inv.contains("store[n][k] = v") || inv.contains("store[n][k]=v"),
+            inv.contains("store[n][k]") && inv.contains("= v"),
             "expected store read in GuardedRead;\n$inv",
         )
+        assertFalse(
+            inv.contains("IF k \\in DOMAIN store[n] THEN store[n][k] ELSE"),
+            "guarded invariant must not soft-default map reads;\n$inv",
+        )
+    }
+
+    @Test
+    fun replyCommitFilterCompiles() {
+        assumeTlcPresent()
+        val work = Files.createTempDirectory("julay-reply-commit").toFile()
+        try {
+            val source = File("regression/input/spec/reply-commit-filter.jul")
+            assertTrue(source.exists(), "missing ${source.path}")
+            val emit = compileSpecEmit(source, "ReplyCommit")
+            assertTrue(
+                emit.tlaText.contains("ownerOf"),
+                "expected ownerOf in TLA;\n${emit.tlaText}",
+            )
+            File(work, "ReplyCommit.tla").writeText(emit.tlaText)
+            File(work, "ReplyCommit.cfg").writeText(emit.cfgText)
+            assertTlcHealthyStart(work, "ReplyCommit")
+        } finally {
+            work.deleteRecursively()
+        }
     }
 
     @Test

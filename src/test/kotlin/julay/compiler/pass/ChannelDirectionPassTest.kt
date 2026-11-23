@@ -136,4 +136,90 @@ class ChannelDirectionPassTest {
         val decl = action("t", listOf("flag"), iff(sym("flag"), sym("ready")))
         assertEquals(setOf("flag"), computeBoundArgs(decl).equalityBound)
     }
+
+    @Test
+    fun replyCommitFilterOnPureQueryAllowed() {
+        // Client: key = 1 & owner > 0 (residual on reply); body reads owner
+        val client = ActionDecl(
+            action = SymbolicAction(
+                "lookup",
+                listOf(Variable("key", intType), Variable("owner", intType)),
+            ),
+            guards = listOf(
+                and(eq(sym("key"), litInt(1)), BinaryOpExprNode(">", sym("owner"), litInt(0), loc)),
+            ),
+            transits = listOf(TransitUpdate.Assign("sink", sym("owner"))),
+            modifier = TSAction.SyncRole.Default,
+            loc = loc,
+        )
+        // Store: owner = table + key (pure query)
+        val store = action(
+            "lookup",
+            listOf("key", "owner"),
+            eq(sym("owner"), BinaryOpExprNode("+", sym("table"), sym("key"), loc)),
+        )
+        val ok = tryDirection("lookup", view("Client", client), view("Store", store, static = true))
+        assertIs<DirectionOk>(ok)
+        assertEquals("Client", ok.direction.senderClass)
+        assertEquals("Store", ok.direction.receiverClass)
+        assertEquals(listOf("key"), ok.direction.senderBoundArgs)
+        assertEquals(listOf("owner"), ok.direction.replyArgs)
+    }
+
+    @Test
+    fun replyCommitFilterGuardOnlyStillReplyArg() {
+        // Client residual-filters on owner but does not read it in the body
+        val client = ActionDecl(
+            action = SymbolicAction(
+                "lookup",
+                listOf(Variable("key", intType), Variable("owner", intType)),
+            ),
+            guards = listOf(
+                and(eq(sym("key"), litInt(1)), BinaryOpExprNode(">", sym("owner"), litInt(0), loc)),
+            ),
+            transits = listOf(TransitUpdate.Assign("step", litInt(2))),
+            modifier = TSAction.SyncRole.Default,
+            loc = loc,
+        )
+        val store = action(
+            "lookup",
+            listOf("key", "owner"),
+            eq(sym("owner"), BinaryOpExprNode("+", sym("table"), sym("key"), loc)),
+        )
+        val ok = tryDirection("lookup", view("Client", client), view("Store", store, static = true))
+        assertIs<DirectionOk>(ok)
+        assertEquals(listOf("owner"), ok.direction.replyArgs)
+    }
+
+    @Test
+    fun replyCommitFilterOnEffectfulReceiverRejected() {
+        val client = ActionDecl(
+            action = SymbolicAction(
+                "lookup",
+                listOf(Variable("key", intType), Variable("owner", intType)),
+            ),
+            guards = listOf(
+                and(eq(sym("key"), litInt(1)), BinaryOpExprNode(">", sym("owner"), litInt(0), loc)),
+            ),
+            transits = emptyList(),
+            modifier = TSAction.SyncRole.Default,
+            loc = loc,
+        )
+        val store = ActionDecl(
+            action = SymbolicAction(
+                "lookup",
+                listOf(Variable("key", intType), Variable("owner", intType)),
+            ),
+            guards = listOf(eq(sym("owner"), BinaryOpExprNode("+", sym("table"), sym("key"), loc))),
+            transits = listOf(TransitUpdate.Assign("log", litInt(1))),
+            modifier = TSAction.SyncRole.Default,
+            loc = loc,
+        )
+        val fail = tryDirection("lookup", view("Client", client), view("Store", store, static = true))
+        assertIs<DirectionFail>(fail)
+        assertTrue(
+            fail.error.toString().contains("pure query"),
+            "expected pure-query message; got ${fail.error}",
+        )
+    }
 }

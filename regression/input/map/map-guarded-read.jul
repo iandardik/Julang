@@ -1,0 +1,41 @@
+import julay.funlib.exitProgram
+import julay.funlib.mapOf
+
+static proc MapGuardedRead {
+    var mp : Map<String, Int>
+    var n : Int
+    var done : Boolean
+
+    constructor initially(args : List<String>) {
+        transit:
+            mp := mapOf("a" to 1)
+            n := -1
+            done := false
+    }
+
+    internal transition readA() {
+        guard:
+            & "a" in mp
+            & n = -1
+        transit:
+            n := mp["a"]
+    }
+
+    internal transition check() {
+        guard:
+            n = 1
+        transit:
+            done := true
+    }
+
+    internal transition exitSystem() {
+        guard:
+            done
+        after:
+            exitProgram(0)
+    }
+}
+
+proc MapGuardedReadTest := MapGuardedRead
+
+compile MapGuardedReadTest

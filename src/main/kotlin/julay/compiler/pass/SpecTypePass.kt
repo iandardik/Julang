@@ -547,6 +547,9 @@ private fun typePassInvariantFormula(
         } catch (_: RuntimeException) {
         }
     }
+    if (errors.isEmpty()) {
+        errors += mapIndexMembershipErrors(formula)
+    }
     return errors
 }
 
